@@ -83,9 +83,13 @@ describe('Creative Studio route visibility', () => {
     '#/studio/project_1/board',
     '#/studio/project_1/cut',
     '#/studio/project_1/brief',
-  ])('renders the native Studio page for desktop route %s', async (hash) => {
-    renderAt(hash);
+  ])(
+    'renders the native Studio page for desktop route %s',
+    async (hash) => {
+      renderAt(hash);
 
-    expect(await screen.findByRole('main')).toHaveTextContent('native Studio page');
-  });
+      expect(await screen.findByRole('main')).toHaveTextContent('native Studio page');
+    },
+    20_000
+  );
 });

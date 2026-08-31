@@ -12,7 +12,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
 import {
   assertPresentationSourceDraftManifest,
+  assertPresentationSourceDraftTombstone,
   assertPresentationSourceGrantManifest,
+  assertPresentationSourceOwnerManifest,
   PresentationRunFiles,
   PresentationRunJournal,
   PresentationRunSimulatedProcessCrashError,
@@ -25,6 +27,8 @@ import {
 
 const PRINCIPAL_ID = 'principal-a';
 const CONVERSATION_ID = '745b7d43-a0aa-4bb7-b0cc-283f2db4873d';
+const LEGACY_UPPERCASE_CONVERSATION_ID = CONVERSATION_ID.toUpperCase();
+const SHORT_CONVERSATION_ID = 'd0921953';
 const DRAFT_ID = 'a6290e3f-fb6d-49c3-bdce-bc613c04c101';
 const GRANT_ID = 'dc3ea0c5-f54d-447d-bd93-a3329b08c531';
 const GRANT_B = '5bac9a15-bb41-4fe2-b782-d06922788c1c';
@@ -123,6 +127,64 @@ describe('PresentationRunStore source grants', () => {
         preparedSnapshot: snapshot,
       })),
     });
+  };
+
+  const seedLegacyConversationGrant = async () => {
+    const owner = {
+      owner_type: 'conversation' as const,
+      conversation_id: LEGACY_UPPERCASE_CONVERSATION_ID,
+    };
+    const ownerId = presentationSourceOwnerId(owner);
+    const sourcePath = path.join(fixtureRoot, 'legacy-uppercase.txt');
+    await writeFile(sourcePath, 'Legacy uppercase owner\n', { mode: 0o600 });
+    const [prepared] = await files.prepareSourceSnapshots([{ grantId: GRANT_ID, sourcePath, format: 'txt' }]);
+    const now = clock.toISOString();
+    const expiresAt = new Date(clock.getTime() + PRESENTATION_RUN_LIMITS.GRANT_TTL_MS).toISOString();
+    const ownerManifest = {
+      version: 2 as const,
+      recordType: 'presentation-source-owner' as const,
+      ownerId,
+      owner,
+      principalId: PRINCIPAL_ID,
+      revision: 1,
+      createdAt: now,
+      updatedAt: now,
+      grantIds: [GRANT_ID],
+      unboundBytes: prepared.byteLength,
+      draftClientRequestId: null,
+      draftLifecycle: null,
+    };
+    const grantManifest = {
+      version: 2 as const,
+      recordType: 'presentation-source-grant' as const,
+      grantId: GRANT_ID,
+      owner,
+      revision: 0,
+      displayName: 'legacy-uppercase.txt',
+      format: 'txt' as const,
+      sourceKind: 'native-picker' as const,
+      snapshotRelativePath: prepared.finalRelativePath,
+      sha256: prepared.sha256,
+      byteLength: prepared.byteLength,
+      createdAt: now,
+      updatedAt: now,
+      expiresAt,
+      stateEnteredAt: now,
+      state: 'active' as const,
+      queueExtendedAt: null,
+      queueItemId: null,
+      claimedRunId: null,
+    };
+    assertPresentationSourceOwnerManifest(ownerManifest);
+    assertPresentationSourceGrantManifest(grantManifest);
+    await journal.transaction({
+      sourceSnapshotPromotions: [prepared],
+      mutations: [
+        { entityKind: 'owner', entityId: ownerId, expectedRevision: null, nextManifest: ownerManifest },
+        { entityKind: 'grant', entityId: GRANT_ID, expectedRevision: null, nextManifest: grantManifest },
+      ],
+    });
+    return { owner, ownerId, ownerManifest, grantManifest };
   };
 
   const createAccountedGrantBatch = async (input: {
@@ -392,6 +454,213 @@ describe('PresentationRunStore source grants', () => {
     ).rejects.toMatchObject({ code: 'DRAFT_NOT_FOUND' satisfies PresentationSourceStoreError['code'] });
   });
 
+  it('restores a short conversation owner and bound draft tombstone after restart', async () => {
+    const created = await store.createPresentationSourceDraft(PRINCIPAL_ID, 'short-conversation-bind');
+
+    await expect(
+      store.bindPresentationSourceDraft({
+        draftId: created.draft.draftId,
+        conversationId: SHORT_CONVERSATION_ID,
+        principalId: PRINCIPAL_ID,
+        expectedRevision: 0,
+      })
+    ).resolves.toMatchObject({
+      status: 'bound',
+      conversationId: SHORT_CONVERSATION_ID,
+    });
+
+    const restarted = createStore();
+    await expect(
+      restarted.getPresentationSourceOwner(
+        { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+        PRINCIPAL_ID
+      )
+    ).resolves.toMatchObject({
+      owner: { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+      grants: [],
+    });
+    await expect(journal.readCanonical('draft-tombstone', created.draft.draftId)).resolves.toMatchObject({
+      terminalState: 'bound',
+      boundConversationId: SHORT_CONVERSATION_ID,
+    });
+  });
+
+  it('aliases an uppercase legacy owner without changing its physical id or filename', async () => {
+    const legacyOwner = {
+      owner_type: 'conversation' as const,
+      conversation_id: LEGACY_UPPERCASE_CONVERSATION_ID,
+    };
+    const canonicalOwner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    const legacyOwnerId = presentationSourceOwnerId(legacyOwner);
+    const canonicalOwnerId = presentationSourceOwnerId(canonicalOwner);
+
+    expect(legacyOwnerId).not.toBe(canonicalOwnerId);
+    await seedLegacyConversationGrant();
+    await expect(journal.readCanonical('owner', legacyOwnerId)).resolves.toMatchObject({
+      ownerId: legacyOwnerId,
+      owner: legacyOwner,
+      grantIds: [GRANT_ID],
+    });
+    await expect(journal.readCanonical('grant', GRANT_ID)).resolves.toMatchObject({ owner: legacyOwner });
+    await expect(journal.readCanonical('owner', canonicalOwnerId)).resolves.toBeNull();
+
+    const restarted = createStore();
+    await expect(restarted.getPresentationSourceOwner(canonicalOwner, PRINCIPAL_ID)).resolves.toMatchObject({
+      owner: canonicalOwner,
+      ownerRevision: 1,
+      grants: [{ grantId: GRANT_ID, owner: legacyOwner }],
+    });
+    await expect(
+      restarted.revokePresentationSourceGrant({
+        owner: canonicalOwner,
+        principalId: PRINCIPAL_ID,
+        grantId: GRANT_ID,
+        expectedOwnerRevision: 1,
+      })
+    ).resolves.toMatchObject({ status: 'revoked', ownerRevision: 2 });
+
+    await expect(journal.readCanonical('owner', legacyOwnerId)).resolves.toMatchObject({
+      ownerId: legacyOwnerId,
+      owner: legacyOwner,
+      revision: 2,
+      grantIds: [],
+    });
+    await expect(journal.readCanonical('grant-tombstone', GRANT_ID)).resolves.toMatchObject({ owner: legacyOwner });
+    await expect(journal.readCanonical('owner', canonicalOwnerId)).resolves.toBeNull();
+    await expect(readdir(files.roots.ownerRoot)).resolves.toContain(legacyOwnerId);
+  });
+
+  it('replays an uppercase legacy draft binding through the lowercase conversation alias', async () => {
+    const legacyOwner = {
+      owner_type: 'conversation' as const,
+      conversation_id: LEGACY_UPPERCASE_CONVERSATION_ID,
+    };
+    const canonicalOwner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    const legacyOwnerId = presentationSourceOwnerId(legacyOwner);
+    const canonicalOwnerId = presentationSourceOwnerId(canonicalOwner);
+    const created = await store.createPresentationSourceDraft(PRINCIPAL_ID, 'legacy-uppercase-bind');
+    const draftOwner = { owner_type: 'draft' as const, draft_id: created.draft.draftId };
+    const draftOwnerId = presentationSourceOwnerId(draftOwner);
+    const storedDraftOwner = await journal.readCanonical<Record<string, unknown>>('owner', draftOwnerId);
+    if (storedDraftOwner === null) throw new Error('draft owner fixture was not persisted');
+    const boundAt = clock.toISOString();
+    const boundDraft = {
+      ...created.draft,
+      revision: 1,
+      state: 'bound' as const,
+      updatedAt: boundAt,
+      boundConversationId: LEGACY_UPPERCASE_CONVERSATION_ID,
+      boundAt,
+    };
+    const draftTombstone = {
+      version: 2 as const,
+      recordType: 'presentation-source-draft-tombstone' as const,
+      revision: 0,
+      draftId: created.draft.draftId,
+      clientRequestId: created.draft.clientRequestId,
+      principalId: PRINCIPAL_ID,
+      terminalState: 'bound' as const,
+      terminalAt: boundAt,
+      tombstonedAt: boundAt,
+      deleteAfter: new Date(clock.getTime() + PRESENTATION_RUN_LIMITS.TOMBSTONE_RETENTION_MS).toISOString(),
+      lastRevision: 1,
+      boundConversationId: LEGACY_UPPERCASE_CONVERSATION_ID,
+    };
+    const nextDraftOwner = {
+      ...storedDraftOwner,
+      revision: 1,
+      updatedAt: boundAt,
+      draftLifecycle: 'bound',
+    };
+    const legacyDestination = {
+      version: 2 as const,
+      recordType: 'presentation-source-owner' as const,
+      ownerId: legacyOwnerId,
+      owner: legacyOwner,
+      principalId: PRINCIPAL_ID,
+      revision: 1,
+      createdAt: boundAt,
+      updatedAt: boundAt,
+      grantIds: [],
+      unboundBytes: 0,
+      draftClientRequestId: null,
+      draftLifecycle: null,
+    };
+    assertPresentationSourceDraftManifest(boundDraft);
+    assertPresentationSourceDraftTombstone(draftTombstone);
+    assertPresentationSourceOwnerManifest(legacyDestination);
+    await journal.transaction({
+      mutations: [
+        {
+          entityKind: 'draft',
+          entityId: created.draft.draftId,
+          expectedRevision: 0,
+          nextManifest: boundDraft,
+        },
+        {
+          entityKind: 'draft-tombstone',
+          entityId: created.draft.draftId,
+          expectedRevision: null,
+          nextManifest: draftTombstone,
+        },
+        { entityKind: 'owner', entityId: draftOwnerId, expectedRevision: 0, nextManifest: nextDraftOwner },
+        { entityKind: 'owner', entityId: legacyOwnerId, expectedRevision: null, nextManifest: legacyDestination },
+      ],
+    });
+    await expect(journal.readCanonical('draft-tombstone', created.draft.draftId)).resolves.toMatchObject({
+      terminalState: 'bound',
+      boundConversationId: LEGACY_UPPERCASE_CONVERSATION_ID,
+    });
+
+    const restarted = createStore();
+    await expect(
+      restarted.bindPresentationSourceDraft({
+        draftId: created.draft.draftId,
+        conversationId: CONVERSATION_ID,
+        principalId: PRINCIPAL_ID,
+        expectedRevision: 0,
+      })
+    ).resolves.toMatchObject({ status: 'already_bound', conversationId: CONVERSATION_ID });
+    await expect(restarted.getPresentationSourceOwner(canonicalOwner, PRINCIPAL_ID)).resolves.toMatchObject({
+      owner: canonicalOwner,
+      ownerRevision: 1,
+    });
+    await expect(journal.readCanonical('owner', legacyOwnerId)).resolves.toMatchObject({
+      ownerId: legacyOwnerId,
+      owner: legacyOwner,
+    });
+    await expect(journal.readCanonical('owner', canonicalOwnerId)).resolves.toBeNull();
+  });
+
+  it('fails closed when uppercase and lowercase owner files collide on one logical conversation', async () => {
+    const legacyOwner = {
+      owner_type: 'conversation' as const,
+      conversation_id: LEGACY_UPPERCASE_CONVERSATION_ID,
+    };
+    const canonicalOwner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    const legacyOwnerId = presentationSourceOwnerId(legacyOwner);
+    const canonicalOwnerId = presentationSourceOwnerId(canonicalOwner);
+
+    await seedLegacyConversationGrant();
+    const legacyManifest = await journal.readCanonical<Record<string, unknown>>('owner', legacyOwnerId);
+    if (legacyManifest === null) throw new Error('legacy owner fixture was not persisted');
+    await journal.transaction({
+      mutations: [
+        {
+          entityKind: 'owner',
+          entityId: canonicalOwnerId,
+          expectedRevision: null,
+          nextManifest: { ...legacyManifest, ownerId: canonicalOwnerId, owner: canonicalOwner },
+        },
+      ],
+    });
+
+    const restarted = createStore();
+    await expect(restarted.initialize()).rejects.toThrow('Duplicate presentation source owner');
+    await expect(journal.readCanonical('owner', legacyOwnerId)).resolves.toMatchObject({ owner: legacyOwner });
+    await expect(journal.readCanonical('owner', canonicalOwnerId)).resolves.toMatchObject({ owner: canonicalOwner });
+  });
+
   it('claims a Task 3 grant atomically with its owner accounting and restores the claim after restart', async () => {
     store = createStore(() => RUN_ID);
     await store.getPresentationSourceOwner(
@@ -527,12 +796,12 @@ describe('PresentationRunStore source grants', () => {
     await expect(journal.readCanonical('grant', GRANT_ID)).resolves.toMatchObject({ state: 'consumed' });
   });
 
-  it('returns already_revoked for an exact revoke retry before applying owner revision CAS', async () => {
+  it('recovers durable queue-unbound revoke proof after the first reply is lost and the app restarts', async () => {
     await store.getPresentationSourceOwner(
       { owner_type: 'conversation', conversation_id: CONVERSATION_ID },
       PRINCIPAL_ID
     );
-    await createGrant();
+    const { prepared } = await createGrant();
     const request = {
       owner: { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID },
       principalId: PRINCIPAL_ID,
@@ -541,15 +810,137 @@ describe('PresentationRunStore source grants', () => {
     };
 
     const first = await store.revokePresentationSourceGrant(request);
+    await expect(journal.readCanonical('grant-tombstone', GRANT_ID)).resolves.toMatchObject({
+      version: 3,
+      terminalState: 'revoked',
+      queueUnboundAtRevoke: true,
+    });
     const restarted = createStore();
+    await expect(
+      restarted.extendPresentationSourceGrantsForQueue({
+        owner: request.owner,
+        principalId: PRINCIPAL_ID,
+        sources: [
+          {
+            grantId: GRANT_ID,
+            expectedByteLength: prepared.byteLength,
+            expectedSha256: prepared.sha256,
+          },
+        ],
+        queueItemId: '00000000-0000-4000-8000-000000000108',
+        expectedOwnerRevision: 1,
+      })
+    ).rejects.toMatchObject({
+      code: 'SOURCE_GRANT_REPLAYED',
+      details: { grantId: GRANT_ID, queueUnboundAtRevoke: true },
+    });
     const replay = await restarted.revokePresentationSourceGrant(request);
 
-    expect(first).toMatchObject({ status: 'revoked', ownerRevision: 2 });
+    expect(first).toMatchObject({ status: 'revoked', ownerRevision: 2, queueUnboundAtRevoke: true });
     expect(replay).toEqual({
       status: 'already_revoked',
       grantId: GRANT_ID,
       ownerRevision: 2,
       revokedAt: first.revokedAt,
+      queueUnboundAtRevoke: true,
+    });
+  });
+
+  it('keeps an exact legacy v2 revoked tombstone unproven after restart', async () => {
+    await store.getPresentationSourceOwner(
+      { owner_type: 'conversation', conversation_id: CONVERSATION_ID },
+      PRINCIPAL_ID
+    );
+    const { prepared } = await createGrant();
+    const request = {
+      owner: { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID },
+      principalId: PRINCIPAL_ID,
+      grantId: GRANT_ID,
+      expectedOwnerRevision: 1,
+    };
+    await store.revokePresentationSourceGrant(request);
+    const persisted = await journal.readCanonical<Record<string, unknown>>('grant-tombstone', GRANT_ID);
+    if (persisted === null) throw new Error('Expected the durable revoke tombstone');
+    const legacy = structuredClone(persisted);
+    legacy.version = 2;
+    delete legacy.queueUnboundAtRevoke;
+    await writeFile(files.getEntityManifestPath('grant-tombstone', GRANT_ID), `${JSON.stringify(legacy)}\n`, {
+      mode: 0o600,
+    });
+
+    const restarted = createStore();
+    const legacyConfirmationFailure = await restarted
+      .extendPresentationSourceGrantsForQueue({
+        owner: request.owner,
+        principalId: PRINCIPAL_ID,
+        sources: [
+          {
+            grantId: GRANT_ID,
+            expectedByteLength: prepared.byteLength,
+            expectedSha256: prepared.sha256,
+          },
+        ],
+        queueItemId: '00000000-0000-4000-8000-000000000109',
+        expectedOwnerRevision: 1,
+      })
+      .then(
+        () => null,
+        (error: PresentationSourceStoreError) => error
+      );
+    expect(legacyConfirmationFailure).toMatchObject({
+      code: 'SOURCE_GRANT_REPLAYED',
+      details: { grantId: GRANT_ID },
+    });
+    expect(legacyConfirmationFailure?.details).toEqual({ grantId: GRANT_ID });
+    await expect(restarted.revokePresentationSourceGrant(request)).resolves.toMatchObject({
+      status: 'already_revoked',
+      grantId: GRANT_ID,
+      queueUnboundAtRevoke: false,
+    });
+  });
+
+  it('prefers a later durable queue-unbound proof over an earlier legacy tombstone', async () => {
+    const owner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    await store.getPresentationSourceOwner(owner, PRINCIPAL_ID);
+    const created = await createGrantBatch({
+      owner,
+      expectedOwnerRevision: 0,
+      grantIds: [GRANT_ID, GRANT_B],
+    });
+    await store.revokePresentationSourceGrant({
+      owner,
+      principalId: PRINCIPAL_ID,
+      grantId: GRANT_B,
+      expectedOwnerRevision: created.ownerRevision,
+    });
+    clock = new Date(NOW.getTime() + PRESENTATION_RUN_LIMITS.GRANT_TTL_MS);
+    await expect(store.sweepExpiredPresentationSources()).resolves.toMatchObject({ expiredGrants: [GRANT_ID] });
+    await expect(journal.readCanonical('grant-tombstone', GRANT_ID)).resolves.toMatchObject({
+      version: 2,
+      terminalState: 'expired',
+    });
+    await expect(journal.readCanonical('grant-tombstone', GRANT_B)).resolves.toMatchObject({
+      version: 3,
+      terminalState: 'revoked',
+      queueUnboundAtRevoke: true,
+    });
+
+    const restarted = createStore();
+    await expect(
+      restarted.extendPresentationSourceGrantsForQueue({
+        owner,
+        principalId: PRINCIPAL_ID,
+        sources: created.grants.map((grant) => ({
+          grantId: grant.grantId,
+          expectedByteLength: grant.byteLength,
+          expectedSha256: grant.sha256,
+        })),
+        queueItemId: '00000000-0000-4000-8000-000000000110',
+        expectedOwnerRevision: created.ownerRevision,
+      })
+    ).rejects.toMatchObject({
+      code: 'SOURCE_GRANT_REPLAYED',
+      details: { grantId: GRANT_B, queueUnboundAtRevoke: true },
     });
   });
 
@@ -908,6 +1299,58 @@ describe('PresentationRunStore source grants', () => {
       })
     ).rejects.toMatchObject({ code: 'SOURCE_GRANT_REPLAYED', details: { grantId: GRANT_ID } });
     await expect(journal.readCanonical('grant', GRANT_ID)).resolves.toEqual(first);
+  });
+
+  it('keeps every grant in a confirmed multi-source queue immutable when one grant is revoked', async () => {
+    const owner = { owner_type: 'conversation' as const, conversation_id: CONVERSATION_ID };
+    await store.getPresentationSourceOwner(owner, PRINCIPAL_ID);
+    const created = await createGrantBatch({
+      owner,
+      expectedOwnerRevision: 0,
+      grantIds: [GRANT_ID, GRANT_B],
+    });
+    const sources = created.grants.map((grant) => ({
+      grantId: grant.grantId,
+      expectedByteLength: grant.byteLength,
+      expectedSha256: grant.sha256,
+    }));
+    const queueItemId = '00000000-0000-4000-8000-000000000107';
+    const confirmed = await store.extendPresentationSourceGrantsForQueue({
+      owner,
+      principalId: PRINCIPAL_ID,
+      sources,
+      queueItemId,
+      expectedOwnerRevision: created.ownerRevision,
+    });
+    const ownerBeforeRevoke = await store.getPresentationSourceOwner(owner, PRINCIPAL_ID);
+    const grantsBeforeRevoke = await Promise.all([
+      journal.readCanonical('grant', GRANT_ID),
+      journal.readCanonical('grant', GRANT_B),
+    ]);
+
+    await expect(
+      store.revokePresentationSourceGrant({
+        owner,
+        principalId: PRINCIPAL_ID,
+        grantId: GRANT_ID,
+        expectedOwnerRevision: confirmed.ownerRevision,
+      })
+    ).rejects.toMatchObject({ code: 'SOURCE_GRANT_REPLAYED', details: { grantId: GRANT_ID } });
+
+    await expect(store.getPresentationSourceOwner(owner, PRINCIPAL_ID)).resolves.toEqual(ownerBeforeRevoke);
+    await expect(journal.readCanonical('grant-tombstone', GRANT_ID)).resolves.toBeNull();
+    await expect(
+      Promise.all([journal.readCanonical('grant', GRANT_ID), journal.readCanonical('grant', GRANT_B)])
+    ).resolves.toEqual(grantsBeforeRevoke);
+    await expect(
+      store.extendPresentationSourceGrantsForQueue({
+        owner,
+        principalId: PRINCIPAL_ID,
+        sources,
+        queueItemId,
+        expectedOwnerRevision: created.ownerRevision,
+      })
+    ).resolves.toMatchObject({ status: 'already_confirmed', ownerRevision: confirmed.ownerRevision });
   });
 
   it('replays an exact queued ref after an unrelated owner mutation and restart', async () => {

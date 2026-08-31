@@ -4,62 +4,42 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
-import sharp from 'sharp';
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import type { IProvider, TProviderWithModel } from '@/common/config/storage';
-import type {
-  CreateStudioProjectInput,
-  StudioConnectionBinding,
-  StudioJob,
-  StudioRenderProgressEvent,
-  StudioScene,
-} from '@/common/types/project/creativeStudioTypes';
+import type { IProvider } from '@/common/config/storage';
+import { STUDIO_EXPORT_SCHEMA_VERSION_V2, type StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 import {
   createCreativeStudioRuntime,
-  shouldEnableStudioE2EFakeAdapter,
   resumeCreativeStudioAfterBackendReady,
+  shouldEnableStudioE2EFakeAdapter,
   type CreativeStudioRuntimeFactories,
 } from '@process/services/creative-studio/runtime';
 import type { CreativeStudioProtocolInstallation } from '@process/services/creative-studio/mediaProtocol';
+import { createCreativeStudioServiceV2, type CreativeStudioServiceV2 } from '@process/services/creative-studio/service';
+import { createEmptyStudioProjectV2 } from '@process/services/creative-studio/service/schema2';
+import type { CreativeStudioStore, StudioProjectInventoryV2 } from '@process/services/creative-studio/store';
+import type { StudioMediaStore } from '@process/services/creative-studio/mediaStore';
+import type { GenerationProviderAdapterRegistry } from '@process/services/creative-studio/adapters';
 import {
-  createStudioE2EFakeBundle,
-  STUDIO_E2E_BOUNDARY_SENTINELS,
-  STUDIO_E2E_FAKE_FIXTURE_DIRECTORY,
-  STUDIO_E2E_FAKE_PROVIDER_ID,
-  STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
-} from '@process/services/creative-studio/adapters/e2eFakeAdapter';
+  createStudioMediaChoiceId,
+  type StudioGenerationRouteCatalog,
+  type StudioProviderResolver,
+} from '@process/services/creative-studio/providerResolver';
+import type { StudioJobManagerV2 } from '@process/services/creative-studio/jobManager';
+import {
+  StudioExportCatalogErrorV2,
+  type StudioExportCatalogStoreV2,
+} from '@process/services/creative-studio/service/schema2/exports';
+import type { StudioDirectorCommandMailboxV2 } from '@process/services/creative-studio/service/directorCommandMailbox';
+import type { StudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
 import type {
-  GenerationProviderAdapter,
-  GenerationProviderAdapterRegistry,
-  ProviderJobSnapshot,
-} from '@process/services/creative-studio/adapters';
-import { createStudioJobManager, type StudioJobManager } from '@process/services/creative-studio/jobManager';
-import { createStudioMediaStore, type StudioMediaStore } from '@process/services/creative-studio/mediaStore';
-import type { StudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import { createCreativeStudioService, type CreativeStudioService } from '@process/services/creative-studio/service';
-import type { CreativeStudioStore } from '@process/services/creative-studio/store';
-import { createCreativeStudioStore } from '@process/services/creative-studio/store';
-import type { StudioStoryboardPlanner } from '@process/services/creative-studio/planning/storyboardPlanner';
-import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import type { StudioDirectorCommandMailbox } from '@process/services/creative-studio/service/directorCommandMailbox';
-import type { StudioDirectorCommandService } from '@process/services/creative-studio/service/directorCommandService';
-import type {
-  StudioDirectorCommandProcessor,
-  StudioDirectorCommitTracker,
+  StudioDirectorCommandProcessorV2,
+  StudioDirectorCommandProcessorDepsV2,
+  StudioDirectorCommitTrackerV2,
 } from '@process/services/creative-studio/service/directorCommandProcessor';
+import { describe, expect, it, vi } from 'vitest';
 
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-  const { rm } = await import('node:fs/promises');
-  await Promise.all(temporaryDirectories.splice(0).map((directory) => rm(directory, { force: true, recursive: true })));
-});
-
-const provider = (id = 'provider_1'): IProvider => ({
-  id,
+const provider = (): IProvider => ({
+  id: 'provider_1',
   platform: 'openai',
   name: 'Provider',
   base_url: 'https://provider.example.test/v1',
@@ -67,727 +47,1220 @@ const provider = (id = 'provider_1'): IProvider => ({
   models: ['model_1'],
 });
 
-type RuntimeHarness = {
-  runtime: ReturnType<typeof createCreativeStudioRuntime>;
-  calls: string[];
-  captures: {
-    storeInput?: Parameters<CreativeStudioRuntimeFactories['createStore']>[0];
-    mediaStoreInput?: { store: CreativeStudioStore };
-    resolverInput?: {
-      listProviders: () => Promise<IProvider[]>;
-      listConnections: () => Promise<StudioConnectionBinding[]>;
-    };
-    plannerInput?: {
-      listProviders: () => Promise<IProvider[]>;
-    };
-    managerInput?: {
-      store: CreativeStudioStore;
-      mediaStore: StudioMediaStore;
-      providerResolver: StudioProviderResolver;
-      adapters: GenerationProviderAdapterRegistry;
-      listProviders: () => Promise<IProvider[]>;
-    };
-    serviceInput?: {
-      store: CreativeStudioStore;
-      mediaStore: StudioMediaStore;
-      providerResolver: StudioProviderResolver;
-      adapterRegistry: GenerationProviderAdapterRegistry;
-      jobManager: StudioJobManager;
-      storyboardPlanner: StudioStoryboardPlanner;
-      ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
-    };
-    mailboxInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandMailbox']>>[0];
-    directorServiceInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandService']>>[0];
-    processorInput?: Parameters<NonNullable<CreativeStudioRuntimeFactories['createDirectorCommandProcessor']>>[0];
-  };
-  resumePendingJobs: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  disposeJobs: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  disposePlanner: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  startDirector: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  stopDirector: ReturnType<typeof vi.fn<() => Promise<void>>>;
-  ensureMailbox: ReturnType<typeof vi.fn<(projectId: string) => Promise<void>>>;
-  uninstallProtocol: ReturnType<
-    typeof vi.fn<(installation: CreativeStudioProtocolInstallation | null) => Promise<void>>
-  >;
-};
+const inventory = (supportedProjectIds: string[] = []): StudioProjectInventoryV2 => ({
+  supportedProjectIds,
+  unsupportedProjectIds: [],
+  quarantinedProjectIds: [],
+});
+
+type RuntimeHarness = ReturnType<typeof createHarness>;
 
 const createHarness = (
-  environment: Record<string, string | undefined> = {},
-  overrides: {
-    resumePendingJobs?: () => Promise<void>;
-    disposeJobs?: () => Promise<void>;
-    disposePlanner?: () => Promise<void>;
-    startDirector?: () => Promise<void>;
-    stopDirector?: () => Promise<void>;
-    installProtocol?: (
-      resolver: StudioMediaStore
-    ) => Promise<CreativeStudioProtocolInstallation> | CreativeStudioProtocolInstallation;
-    uninstallProtocol?: (installation: CreativeStudioProtocolInstallation | null) => Promise<void>;
-    rootDir?: string;
-    isPackaged?: boolean;
-    createE2EFakeBundle?: CreativeStudioRuntimeFactories['createE2EFakeBundle'];
-    store?: CreativeStudioStore;
-    onProposalUpdated?: (projectId: string, proposalId: string) => void;
-    onRenderProgress?: (event: StudioRenderProgressEvent) => void;
+  input: {
+    initialInventory?: StudioProjectInventoryV2;
     enabled?: boolean;
+    failProcessorStarts?: number;
+    failRecoveryResumes?: number;
+    assertMediaStoreActiveOnResume?: boolean;
+    holdFirstInventory?: boolean;
+    holdCleanup?: boolean;
+    service?: Partial<CreativeStudioServiceV2>;
+    realService?: { project: StudioProjectV2; generationCatalog: StudioGenerationRouteCatalog };
+    environment?: Record<string, string | undefined>;
+    useRuntimeTimers?: boolean;
+    disposeFailures?: readonly string[];
+    holdActivationAt?:
+      | 'reap-proposals'
+      | 'reap-references'
+      | 'watch-proposals'
+      | 'watch-references'
+      | 'processor'
+      | 'protocol';
   } = {}
-): RuntimeHarness => {
+) => {
+  let currentInventory = structuredClone(input.initialInventory ?? inventory());
+  let commitObserver: ((facts: StudioProjectCommitFacts) => void) | undefined;
+  let releaseCleanup: (() => void) | undefined;
+  let markCleanupStarted: (() => void) | undefined;
+  const cleanupStarted = new Promise<void>((resolve) => {
+    markCleanupStarted = resolve;
+  });
+  let releaseActivation: (() => void) | undefined;
+  let markActivationHeld: (() => void) | undefined;
+  const activationHeld = new Promise<void>((resolve) => {
+    markActivationHeld = resolve;
+  });
+  let remainingProcessorFailures = input.failProcessorStarts ?? 0;
+  let remainingRecoveryFailures = input.failRecoveryResumes ?? 0;
+  let holdNextRecovery = false;
+  let releaseRecovery: (() => void) | undefined;
+  let markRecoveryHeld: (() => void) | undefined;
+  const recoveryHeld = new Promise<void>((resolve) => {
+    markRecoveryHeld = resolve;
+  });
+  let releaseInventory: (() => void) | undefined;
+  let markInventoryCaptured: (() => void) | undefined;
+  let holdNextInventory = input.holdFirstInventory ?? false;
+  let resolverDependencies: Parameters<CreativeStudioRuntimeFactories['createProviderResolver']>[0] | undefined;
+  let mediaStoreAssertActive: (() => void) | undefined;
+  let directorProcessorDependencies: StudioDirectorCommandProcessorDepsV2 | undefined;
+  const mediaStoreAssertActives: Array<() => void> = [];
+  const inventoryCaptured = new Promise<void>((resolve) => {
+    markInventoryCaptured = resolve;
+  });
   const calls: string[] = [];
-  const captures: RuntimeHarness['captures'] = {};
-  const store =
-    overrides.store ??
-    ({
-      listConnections: async () => [],
-      reapAbandonedProposals: async () => {},
-      watchProposals: async () => async () => {},
-    } as unknown as CreativeStudioStore);
+  const logError = vi.fn();
+  const failDispose = (boundary: string): void => {
+    if (input.disposeFailures?.includes(boundary) === true) throw new Error(`dispose-${boundary}-failed`);
+  };
+  const holdActivation = async (boundary: NonNullable<typeof input.holdActivationAt>): Promise<void> => {
+    if (input.holdActivationAt !== boundary) return;
+    markActivationHeld?.();
+    await new Promise<void>((resolve) => (releaseActivation = resolve));
+  };
+  const inspectProjectsV2 = vi.fn(async () => {
+    const snapshot = structuredClone(currentInventory);
+    if (holdNextInventory) {
+      holdNextInventory = false;
+      markInventoryCaptured?.();
+      await new Promise<void>((resolve) => (releaseInventory = resolve));
+    }
+    return snapshot;
+  });
+  const proposalDisposer = vi.fn(async () => {
+    calls.push('dispose-proposal-watch');
+    failDispose('proposal');
+  });
+  const referenceDisposer = vi.fn(async () => {
+    calls.push('dispose-reference-watch');
+    failDispose('reference');
+  });
+  const watchBriefsV2 = vi.fn(async () => async () => undefined);
+  const store = {
+    inspectProjectsV2,
+    getProjectV2: vi.fn(async (projectId: string) =>
+      input.realService?.project.id === projectId
+        ? { status: 'supported' as const, project: structuredClone(input.realService.project) }
+        : { status: 'not_found' as const, projectId }
+    ),
+    withProjectAuthorityV2: vi.fn(async (projectId: string, operation: (authority: never) => Promise<unknown>) => {
+      const project =
+        input.realService?.project.id === projectId
+          ? structuredClone(input.realService.project)
+          : createEmptyStudioProjectV2(
+              {
+                name: 'Runtime recovery',
+                brief: '',
+                aspectRatio: '16:9',
+                targetDurationSeconds: 5,
+                resolution: '720p',
+              },
+              projectId,
+              '2026-08-19T00:00:00.000Z'
+            );
+      return operation({ project, projectDir: `/tmp/creative-studio-runtime-test/${projectId}` } as never);
+    }),
+    listConnections: vi.fn(async () => [{ id: 'fake_connection' }, { id: 'persisted_connection' }]),
+    reapAbandonedProposalsV2: vi.fn(async () => {
+      calls.push('reap-proposals');
+      await holdActivation('reap-proposals');
+    }),
+    reapAbandonedReferenceRequestsV2: vi.fn(async () => {
+      calls.push('reap-references');
+      await holdActivation('reap-references');
+    }),
+    watchBriefsV2,
+    watchProposalsV2: vi.fn(async () => {
+      calls.push('watch-proposals');
+      await holdActivation('watch-proposals');
+      return proposalDisposer;
+    }),
+    watchReferenceRequestsV2: vi.fn(async () => {
+      calls.push('watch-references');
+      await holdActivation('watch-references');
+      return referenceDisposer;
+    }),
+  } as unknown as CreativeStudioStore;
   const mediaStore = {
-    cleanupOrphanParts: async () => {
+    cleanupOrphanPartsV2: vi.fn(async () => {
       calls.push('cleanup-parts');
-    },
+      markCleanupStarted?.();
+      if (input.holdCleanup) await new Promise<void>((resolve) => (releaseCleanup = resolve));
+    }),
+    resumeConditioningFramesV2: vi.fn(async (projectIds: readonly string[]) => {
+      calls.push(`resume-frames:${projectIds.join(',')}`);
+      if (input.assertMediaStoreActiveOnResume) {
+        if (mediaStoreAssertActive === undefined) throw new Error('Expected media store runtime authority');
+        mediaStoreAssertActive();
+      }
+    }),
   } as unknown as StudioMediaStore;
   const adapters = new Map() as GenerationProviderAdapterRegistry;
-  const providerResolver = {} as StudioProviderResolver;
-  const disposePlanner = vi.fn(overrides.disposePlanner ?? (async () => calls.push('dispose-planner')));
-  const storyboardPlanner = {
-    dispose: disposePlanner,
-  } as unknown as StudioStoryboardPlanner;
-  const resumePendingJobs = vi.fn(overrides.resumePendingJobs ?? (async () => calls.push('resume-jobs')));
-  const disposeJobs = vi.fn(overrides.disposeJobs ?? (async () => calls.push('dispose-jobs')));
+  const providerResolver = {
+    listGenerationRoutes: vi.fn(async () =>
+      structuredClone(
+        input.realService?.generationCatalog ?? {
+          routes: [],
+          diagnostics: [],
+          generationCatalogVersion: 'runtime_test_catalog',
+        }
+      )
+    ),
+  } as unknown as StudioProviderResolver;
   const jobManager = {
-    resumePendingJobs,
-    dispose: disposeJobs,
-  } as unknown as StudioJobManager;
+    terminalizeRefusedJobV2: vi.fn(async () => undefined as never),
+    resumePendingJobsV2: vi.fn(async (projectIds: readonly string[]) => {
+      calls.push(`resume-jobs:${projectIds.join(',')}`);
+      if (remainingRecoveryFailures > 0) {
+        remainingRecoveryFailures -= 1;
+        throw new Error('job-recovery-failed');
+      }
+      if (holdNextRecovery) {
+        holdNextRecovery = false;
+        markRecoveryHeld?.();
+        await new Promise<void>((resolve) => (releaseRecovery = resolve));
+      }
+    }),
+    dispose: vi.fn(async () => {
+      calls.push('dispose-jobs');
+      failDispose('jobs');
+    }),
+  } as unknown as StudioJobManagerV2;
+  const exportCatalogStore = {
+    list: vi.fn(),
+    create: vi.fn(),
+    copy: vi.fn(),
+    resolveRevealPath: vi.fn(),
+    repair: vi.fn(async () => ({
+      schemaVersion: 5 as const,
+      projectId: 'runtime_recovery',
+      revision: 1,
+      artifacts: [],
+    })),
+  } as unknown as StudioExportCatalogStoreV2;
+  const service = {
+    createProject: vi.fn(async () => {
+      throw new Error('create-not-configured');
+    }),
+    listExports: vi.fn(async () => ({ revision: 1, artifacts: [] })),
+    dispose: vi.fn(),
+    ...input.service,
+  } as CreativeStudioServiceV2;
   const tracker = {
     expect: vi.fn(),
     observe: vi.fn(),
     materialize: vi.fn(),
     pendingReceipt: vi.fn(() => null),
     clear: vi.fn(),
-  } as unknown as StudioDirectorCommitTracker;
-  const ensureMailbox = vi.fn<(projectId: string) => Promise<void>>(async () => undefined);
-  const mailbox = {
-    ensure: ensureMailbox,
-  } as unknown as StudioDirectorCommandMailbox;
-  const directorService = {} as StudioDirectorCommandService;
-  const startDirector = vi.fn(overrides.startDirector ?? (async () => calls.push('start-director')));
-  const stopDirector = vi.fn(overrides.stopDirector ?? (async () => calls.push('stop-director')));
-  const directorProcessor = {
-    start: startDirector,
+  } as unknown as StudioDirectorCommitTrackerV2;
+  const mailbox = { dispose: vi.fn(async () => {}) } as unknown as StudioDirectorCommandMailboxV2;
+  const directorService = {} as StudioDirectorCommandServiceV2;
+  const processor = {
+    start: vi.fn(async () => {
+      calls.push('start-director');
+      await holdActivation('processor');
+      if (remainingProcessorFailures > 0) {
+        remainingProcessorFailures -= 1;
+        throw new Error('processor-start-failed');
+      }
+    }),
     trigger: vi.fn(),
-    stop: stopDirector,
-  } as StudioDirectorCommandProcessor;
-  const service = {} as CreativeStudioService;
-  const protocolInstallation: CreativeStudioProtocolInstallation = {
-    dispose: vi.fn(async () => {}),
+    stop: vi.fn(async () => {
+      calls.push('stop-director');
+      failDispose('processor');
+    }),
+  } as StudioDirectorCommandProcessorV2;
+  const protocolInstallation = { dispose: vi.fn(async () => {}) } satisfies CreativeStudioProtocolInstallation;
+  const factoryCalls = {
+    mediaStore: 0,
+    adapters: 0,
+    providerResolver: 0,
+    jobManager: 0,
+    tracker: 0,
+    mailbox: 0,
+    directorService: 0,
+    processor: 0,
+    fakeBundle: 0,
   };
-  const uninstallProtocol = vi.fn(
-    overrides.uninstallProtocol ??
-      (async (installation: CreativeStudioProtocolInstallation | null) => {
-        calls.push('uninstall-protocol');
-        await installation?.dispose();
-      })
-  );
 
   const factories: CreativeStudioRuntimeFactories = {
-    createStore: (input) => {
-      captures.storeInput = input;
+    createStore: ({ onProjectCommitted }) => {
+      commitObserver = onProjectCommitted;
       return store;
     },
-    createMediaStore: (input) => {
-      captures.mediaStoreInput = input;
+    createMediaStore: (dependencies) => {
+      factoryCalls.mediaStore += 1;
+      mediaStoreAssertActive = dependencies.assertActive;
+      mediaStoreAssertActives.push(dependencies.assertActive);
       return mediaStore;
     },
-    createAdapters: () => adapters,
-    createPlanner: (input) => {
-      captures.plannerInput = input;
-      return storyboardPlanner;
+    createAdapters: () => {
+      factoryCalls.adapters += 1;
+      return adapters;
     },
-    createProviderResolver: (input) => {
-      captures.resolverInput = input;
+    createProviderResolver: (dependencies) => {
+      factoryCalls.providerResolver += 1;
+      resolverDependencies = dependencies;
       return providerResolver;
     },
-    createJobManager: (input) => {
-      captures.managerInput = input;
+    createJobManager: () => {
+      factoryCalls.jobManager += 1;
       return jobManager;
     },
-    createService: (input) => {
-      captures.serviceInput = input;
-      return service;
+    createExportCatalogStore: () => exportCatalogStore,
+    createService: (deps) => (input.realService === undefined ? service : createCreativeStudioServiceV2(deps)),
+    createE2EFakeBundle: () => {
+      factoryCalls.fakeBundle += 1;
+      return {
+        provider: { ...provider(), name: 'Fake provider' },
+        connections: [{ id: 'fake_connection' }],
+        adapters: new Map(),
+        catalogProfile: 'lifecycle',
+        dispose: vi.fn(async () => {
+          calls.push('dispose-fake');
+          failDispose('fake');
+        }),
+      };
     },
-    createDirectorCommitTracker: () => tracker,
-    createDirectorCommandMailbox: (input) => {
-      captures.mailboxInput = input;
+    createDirectorCommitTracker: () => {
+      factoryCalls.tracker += 1;
+      return tracker;
+    },
+    createDirectorCommandMailbox: () => {
+      factoryCalls.mailbox += 1;
       return mailbox;
     },
-    createDirectorCommandService: (input) => {
-      captures.directorServiceInput = input;
+    createDirectorCommandService: () => {
+      factoryCalls.directorService += 1;
       return directorService;
     },
-    createDirectorCommandProcessor: (input) => {
-      captures.processorInput = input;
-      return directorProcessor;
+    createDirectorCommandProcessor: (dependencies) => {
+      factoryCalls.processor += 1;
+      directorProcessorDependencies = dependencies;
+      return processor;
     },
-    createE2EFakeBundle:
-      overrides.createE2EFakeBundle ??
-      (() => {
-        throw new Error('fake bundle was not expected');
-      }),
   };
 
   const runtime = createCreativeStudioRuntime({
-    rootDir: overrides.rootDir ?? '/tmp/creative-studio-runtime-test',
-    enabled: overrides.enabled ?? true,
-    environment,
-    isPackaged: overrides.isPackaged ?? false,
+    rootDir: '/tmp/creative-studio-runtime-test',
+    enabled: input.enabled ?? true,
+    environment: input.environment ?? {},
+    isPackaged: false,
     factories,
-    listProviders: async () => [provider()],
+    listProviders: async () => [provider(), { ...provider(), id: 'provider_2', name: 'Second provider' }],
     onProjectUpdated: vi.fn(),
-    onProposalUpdated: overrides.onProposalUpdated ?? vi.fn(),
-    onRenderProgress: overrides.onRenderProgress,
+    onProposalUpdated: vi.fn(),
+    onReferenceUpdated: vi.fn(),
+    logError,
     protocol: {
-      install:
-        overrides.installProtocol ??
-        ((resolver) => {
-          expect(resolver).toBe(mediaStore);
-          calls.push('install-protocol');
-          return protocolInstallation;
-        }),
-      uninstall: uninstallProtocol,
+      install: vi.fn(async () => {
+        calls.push('install-protocol');
+        await holdActivation('protocol');
+        return protocolInstallation;
+      }),
+      uninstall: vi.fn(async (installation) => {
+        calls.push('uninstall-protocol');
+        await installation?.dispose();
+        failDispose('protocol');
+      }),
     },
+    ...(input.useRuntimeTimers === true
+      ? {}
+      : {
+          runLoopSleep: (_delayMs: number, signal: AbortSignal) =>
+            new Promise<void>((resolve) => {
+              if (signal.aborted) {
+                resolve();
+                return;
+              }
+              signal.addEventListener('abort', () => resolve(), { once: true });
+            }),
+        }),
   });
 
   return {
     runtime,
+    store,
+    mediaStore,
+    providerResolver,
+    jobManager,
+    exportCatalogStore,
+    processor,
+    service,
     calls,
-    captures,
-    resumePendingJobs,
-    disposeJobs,
-    disposePlanner,
-    startDirector,
-    stopDirector,
-    ensureMailbox,
-    uninstallProtocol,
+    logError,
+    factoryCalls,
+    inspectProjectsV2,
+    watchBriefsV2,
+    proposalDisposer,
+    referenceDisposer,
+    getResolverDependencies: () => resolverDependencies,
+    getMediaStoreAssertActives: () => [...mediaStoreAssertActives],
+    getDirectorProcessorDependencies: () => directorProcessorDependencies,
+    inventoryCaptured,
+    cleanupStarted,
+    activationHeld,
+    recoveryHeld,
+    releaseInventory: () => releaseInventory?.(),
+    releaseCleanup: () => releaseCleanup?.(),
+    releaseActivation: () => releaseActivation?.(),
+    releaseRecovery: () => releaseRecovery?.(),
+    setInventory: (next: StudioProjectInventoryV2) => {
+      currentInventory = structuredClone(next);
+    },
+    failNextRecovery: () => {
+      remainingRecoveryFailures += 1;
+    },
+    holdNextRecovery: () => {
+      holdNextRecovery = true;
+    },
+    commit: (overrides: Partial<StudioProjectCommitFacts> = {}) =>
+      commitObserver?.({
+        projectId: 'project_v2',
+        previousRevision: 0,
+        committedRevision: 1,
+        committedAt: '2026-08-19T00:00:00.000Z',
+        commitTag: null,
+        ...overrides,
+      }),
   };
 };
 
-const interruptedScene: StudioScene = {
-  id: 'scene_interrupted',
-  title: 'Interrupted render',
-  purpose: 'Prove disabled recovery stays dormant',
-  visualPrompt: 'A paid video render still running at shutdown',
-  narration: '',
-  onScreenText: '',
-  mediaKind: 'video',
-  durationSeconds: 5,
-  referenceAssetId: null,
-  selectedAssetId: null,
-  assetIds: [],
-  jobIds: ['job_interrupted'],
-  reviewState: 'generating',
-};
+const activatedFactoryCounts = (harness: RuntimeHarness) => ({
+  mediaStore: harness.factoryCalls.mediaStore,
+  adapters: harness.factoryCalls.adapters,
+  providerResolver: harness.factoryCalls.providerResolver,
+  jobManager: harness.factoryCalls.jobManager,
+  tracker: harness.factoryCalls.tracker,
+  mailbox: harness.factoryCalls.mailbox,
+  directorService: harness.factoryCalls.directorService,
+  processor: harness.factoryCalls.processor,
+});
 
-const createPersistedRecoveryHarness = async (enabled: boolean) => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-runtime-recovery-'));
-  temporaryDirectories.push(rootDir);
-  const store = createCreativeStudioStore({ rootDir });
-  const created = await store.createProject({
-    name: 'Interrupted film',
-    brief: 'Recover a paid render only while Studio is enabled',
-    aspectRatio: '16:9',
-    targetDurationSeconds: 5,
-    resolution: '720p',
+describe('Creative Studio schema-2 runtime activation', () => {
+  it('defers Director reads until the exact graph is active and routes them through the live service', async () => {
+    const getProjectStatus = vi.fn(async (input: { projectId: string; detail?: boolean }) => ({
+      projectId: input.projectId,
+      detail: input.detail === true,
+    })) as unknown as CreativeStudioServiceV2['getProjectStatus'];
+    const listRoutes = vi.fn(async (input: { projectId: string }) => ({
+      projectId: input.projectId,
+    })) as unknown as CreativeStudioServiceV2['listRoutes'];
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      holdActivationAt: 'processor',
+      service: { getProjectStatus, listRoutes },
+    });
+
+    const starting = harness.runtime.start();
+    await harness.activationHeld;
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+    harness.releaseActivation();
+    await starting;
+    expect(dependencies!.queryAuthorityActive?.()).toBe(true);
+
+    await dependencies!.service.getProjectStatus({ projectId: 'project_v2', detail: true });
+    await dependencies!.service.listRoutes({ projectId: 'project_v2' });
+    expect(getProjectStatus).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_v2', detail: true });
+    expect(listRoutes).toHaveBeenCalledExactlyOnceWith({ projectId: 'project_v2' });
+    expect(harness.store.getProjectV2).not.toHaveBeenCalled();
+
+    const disposing = harness.runtime.dispose();
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+    await disposing;
   });
-  const project = await store.updateProject(created.id, (current) => {
-    const next = structuredClone(current);
-    const timestamp = current.createdAt;
-    const job: StudioJob = {
-      id: 'job_interrupted',
-      projectId: current.id,
-      sceneId: interruptedScene.id,
-      status: 'running',
-      provider: {
-        providerId: 'provider_1',
-        adapterId: 'weprompt-media-gateway-v1',
-        model: 'model_1',
+
+  it('wires Director free recoveries to the live service and job manager with exact commit attribution', async () => {
+    const retryConditioningFrame = vi.fn(async () => undefined as never);
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      service: {
+        retryConditioningFrame: retryConditioningFrame as CreativeStudioServiceV2['retryConditioningFrame'],
       },
-      idempotencyKey: 'key_interrupted',
-      providerJobId: 'remote_interrupted',
-      remoteStartedAt: timestamp,
-      cancellationPolicy: 'queued_and_running',
-      outputAssetIds: [],
-      error: null,
-      retryOfJobId: null,
-      retryReason: null,
-      duplicateChargeAcknowledged: false,
-      duplicateChargeAcknowledgedAt: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
-    next.sceneOrder = [interruptedScene.id];
-    next.scenes = { [interruptedScene.id]: interruptedScene };
-    next.jobs = { [job.id]: job };
-    next.routing.video = job.provider;
-    return next;
+    });
+    await harness.runtime.start();
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+
+    await dependencies!.service.retryConditioningFrame(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 7,
+        dependentShotId: 'shot_waiting',
+      },
+      'command_conditioning'
+    );
+    await dependencies!.service.terminalizeRefusedJob(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 8,
+        jobId: 'job_refused',
+      },
+      'command_refused'
+    );
+
+    expect(retryConditioningFrame).toHaveBeenCalledExactlyOnceWith(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 7,
+        dependentShotId: 'shot_waiting',
+      },
+      'command_conditioning'
+    );
+    expect(harness.jobManager.terminalizeRefusedJobV2).toHaveBeenCalledExactlyOnceWith(
+      {
+        projectId: 'project_v2',
+        expectedRevision: 8,
+        jobId: 'job_refused',
+      },
+      'command_refused'
+    );
+    await harness.runtime.dispose();
   });
-  const runtimeStore: CreativeStudioStore = {
-    ...store,
-    watchProposals: async () => async () => {},
-  };
-  const mediaStore = createStudioMediaStore({ store: runtimeStore });
-  const listProviders = vi.fn<() => Promise<IProvider[]>>(async () => [provider()]);
-  const resolveProvider = vi.fn(async () => true);
-  const poll = vi.fn<NonNullable<GenerationProviderAdapter['poll']>>(
-    async (): Promise<ProviderJobSnapshot> => ({ status: 'failed', error: { code: 'unknown' } })
-  );
-  const adapter: GenerationProviderAdapter = {
-    id: 'weprompt-media-gateway-v1',
-    validateConnection: async () => ({ ok: true }),
-    validateRequest: () => ({ ok: false, issues: [{ code: 'invalid_request' }] }),
-    submit: async () => ({ kind: 'remote', providerJobId: 'remote_unexpected' }),
-    poll,
-  };
-  const factories: CreativeStudioRuntimeFactories = {
-    createStore: () => runtimeStore,
-    createMediaStore: () => mediaStore,
-    createAdapters: () => new Map([[adapter.id, adapter]]),
-    createPlanner: () => ({ dispose: async () => {} }) as StudioStoryboardPlanner,
-    createProviderResolver: () => ({
-      listConnectionCandidates: async () => [],
-      listGenerationRoutes: async () => ({ routes: [], generationCatalogVersion: 'unused' }),
-      isGenerationRouteAvailable: resolveProvider,
-    }),
-    createJobManager: (input) => createStudioJobManager({ ...input, sleep: async () => undefined }),
-    createService: () => ({}) as CreativeStudioService,
-    createE2EFakeBundle: () => {
-      throw new Error('fake bundle was not expected');
-    },
-  };
-  const runtime = createCreativeStudioRuntime({
-    rootDir,
-    enabled,
-    isPackaged: false,
-    factories,
-    listProviders,
-    onProjectUpdated: vi.fn(),
-    onProposalUpdated: vi.fn(),
-    protocol: {
-      install: () => ({ dispose: async () => {} }),
-      uninstall: async (installation) => installation?.dispose(),
-    },
+
+  it('routes commits from the Director startup sweep to the graph-under-construction tracker', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      holdActivationAt: 'protocol',
+    });
+
+    const starting = harness.runtime.start();
+    await harness.activationHeld;
+    const dependencies = harness.getDirectorProcessorDependencies();
+    expect(dependencies).toBeDefined();
+    expect(harness.runtime.activationState).toBe('activating');
+    expect(dependencies!.queryAuthorityActive?.()).toBe(false);
+
+    harness.commit({ commitTag: 'command_startup_recovery' });
+
+    expect(dependencies!.tracker.observe).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_v2',
+      previousRevision: 0,
+      committedRevision: 1,
+      committedAt: '2026-08-19T00:00:00.000Z',
+      commitTag: 'command_startup_recovery',
+    });
+
+    harness.releaseActivation();
+    await starting;
+    harness.commit();
+    expect(dependencies!.tracker.observe).toHaveBeenCalledTimes(2);
+    await harness.runtime.dispose();
   });
-  return { runtime, store, project, listProviders, resolveProvider, poll };
-};
 
-describe('Creative Studio runtime identity and lifecycle', () => {
-  it('relays local render progress and terminal state through the runtime boundary', async () => {
-    const events: StudioRenderProgressEvent[] = [];
-    const { runtime } = createHarness({}, { onRenderProgress: (event) => events.push(event) });
+  it('classifies a V1-only root and stays inactive without constructing a lifecycle boundary', async () => {
+    const harness = createHarness({
+      initialInventory: {
+        supportedProjectIds: [],
+        unsupportedProjectIds: ['legacy_project'],
+        quarantinedProjectIds: [],
+      },
+    });
 
-    await expect(runtime.renderRunner.renderCut('project_1')).rejects.toMatchObject({ code: 'render_failed' });
+    await harness.runtime.start();
 
-    expect(events).toEqual([
-      { projectId: 'project_1', status: 'running', progress: 0 },
-      { projectId: 'project_1', status: 'failed', progress: 0, errorCode: 'render_failed' },
+    expect(harness.runtime.activationState).toBe('inactive');
+    expect(harness.runtime.supportedProjectIds).toEqual([]);
+    expect(activatedFactoryCounts(harness)).toEqual({
+      mediaStore: 0,
+      adapters: 0,
+      providerResolver: 0,
+      jobManager: 0,
+      tracker: 0,
+      mailbox: 0,
+      directorService: 0,
+      processor: 0,
+    });
+    expect(harness.calls).toEqual([]);
+  });
+
+  it('reports the deterministic quarantined project instead of blaming a provider', async () => {
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Broken project',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      },
+      'broken_project',
+      '2026-08-26T00:00:00.000Z'
+    );
+    const harness = createHarness({
+      initialInventory: {
+        supportedProjectIds: [],
+        unsupportedProjectIds: [],
+        quarantinedProjectIds: ['later_broken_project', project.id],
+      },
+      realService: {
+        project,
+        generationCatalog: { routes: [], diagnostics: [], generationCatalogVersion: 'unused' },
+      },
+    });
+
+    await harness.runtime.start();
+
+    await expect(harness.runtime.service.listConnectionCandidates()).rejects.toMatchObject({
+      code: 'project_quarantined',
+      projectId: 'broken_project',
+    });
+    expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
+  });
+
+  it('activates a mixed root for supported IDs only and resumes local/provider work after backend ready', async () => {
+    const harness = createHarness({
+      initialInventory: {
+        supportedProjectIds: ['project_b', 'project_a'],
+        unsupportedProjectIds: ['legacy_project'],
+        quarantinedProjectIds: ['broken_project'],
+      },
+    });
+
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.runtime.supportedProjectIds).toEqual(['project_a', 'project_b']);
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
+    expect(harness.exportCatalogStore.repair.mock.calls.map(([authority]) => authority.project.id)).toEqual([
+      'project_a',
+      'project_b',
+    ]);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith(['project_a', 'project_b']);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_a', 'project_b']);
+    expect(harness.watchBriefsV2).toHaveBeenCalledOnce();
+    expect(harness.calls).toEqual([
+      'cleanup-parts',
+      'reap-proposals',
+      'reap-references',
+      'watch-proposals',
+      'watch-references',
+      'start-director',
+      'install-protocol',
+      'resume-frames:project_a,project_b',
+      'resume-jobs:project_a,project_b',
     ]);
   });
 
-  it('observes an externally recorded proposal without a manual refresh and reloads it after restart', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-proposal-runtime-'));
-    temporaryDirectories.push(rootDir);
-    const now = () => '2026-08-06T00:00:00.000Z';
-    const projectInput: CreateStudioProjectInput = {
-      name: 'Observed film',
-      brief: 'Watch the durable proposal inbox',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 15,
-      resolution: '1080p',
-    };
-    let emitProposalFile: ((relativeFile: string) => void) | undefined;
-    const logError = vi.fn();
-    const runtimeStore = createCreativeStudioStore({
-      rootDir,
-      now,
-      createId: () => 'project_observed',
-      logError,
-      watchProposalTree: ({ onChange }) => {
-        emitProposalFile = onChange;
-        return { close: () => {} };
-      },
+  it('keeps every project runtime active when one project export catalog cannot be recovered', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
+    let rejectBadCatalog = true;
+    vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
+      if (authority.project.id === 'project_bad_catalog' && rejectBadCatalog) {
+        throw new StudioExportCatalogErrorV2('unsupported_catalog_schema');
+      }
+      return {
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: authority.project.id,
+        revision: 1,
+        artifacts: [],
+      };
     });
-    const project = await runtimeStore.createProject(projectInput);
-    const onProposalUpdated = vi.fn();
-    const { runtime } = createHarness({}, { rootDir, store: runtimeStore, onProposalUpdated });
-    await runtime.start();
-    const subprocessWriter = createCreativeStudioStore({ rootDir, now });
 
-    await subprocessWriter.recordProposal({
+    await harness.runtime.start();
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith([
+      'project_bad_catalog',
+      'project_healthy',
+    ]);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_bad_catalog', 'project_healthy']);
+    expect(harness.logError).toHaveBeenCalledWith(
+      '[CreativeStudio] Export-catalog recovery failed for project project_bad_catalog:',
+      'StudioExportCatalogErrorV2'
+    );
+
+    rejectBadCatalog = false;
+    await harness.runtime.refreshInventory();
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledTimes(2);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+    await harness.runtime.refreshInventory();
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps scanning for paid jobs that miss the startup dispatch', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledOnce();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.jobManager.resumePendingJobsV2.mock.calls.length).toBeGreaterThan(1);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('stops the paid-job scan when the runtime is disposed', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      await vi.advanceTimersByTimeAsync(60_000);
+      const scansBeforeDispose = harness.jobManager.resumePendingJobsV2.mock.calls.length;
+
+      await harness.runtime.dispose();
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(scansBeforeDispose);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not overlap paid-job scans when one scan is still running', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      harness.holdNextRecovery();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      await harness.recoveryHeld;
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+
+      harness.releaseRecovery();
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(3);
+    } finally {
+      harness.releaseRecovery();
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('keeps the active runtime and retries after one paid-job scan fails', async () => {
+    vi.useFakeTimers();
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), useRuntimeTimers: true });
+    try {
+      await harness.runtime.onBackendReady();
+      harness.failNextRecovery();
+
+      await vi.advanceTimersByTimeAsync(5_000);
+
+      expect(harness.runtime.activationState).toBe('active');
+      expect(harness.logError).toHaveBeenCalledWith('[CreativeStudio] Paid-job run loop scan failed:', 'Error');
+
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(3);
+    } finally {
+      await harness.runtime.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('authorizes the installed graph while backend-ready startup recovery is still activating', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      assertMediaStoreActiveOnResume: true,
+    });
+
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith(['project_v2']);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_v2']);
+  });
+
+  it('rejects media authority from degraded, replaced, and disposed activation graphs', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      failRecoveryResumes: 1,
+    });
+
+    await harness.runtime.start();
+    const [firstAssertActive] = harness.getMediaStoreAssertActives();
+    expect(firstAssertActive).toBeDefined();
+    expect(() => firstAssertActive?.()).not.toThrow();
+
+    await harness.runtime.onBackendReady();
+    expect(harness.runtime.activationState).toBe('degraded');
+    expect(() => firstAssertActive?.()).toThrow('Creative Studio runtime is not active');
+
+    await harness.runtime.refreshInventory();
+    const [, replacementAssertActive] = harness.getMediaStoreAssertActives();
+    expect(harness.runtime.activationState).toBe('active');
+    expect(replacementAssertActive).toBeDefined();
+    expect(() => firstAssertActive?.()).toThrow('Creative Studio runtime is not active');
+    expect(() => replacementAssertActive?.()).not.toThrow();
+
+    await harness.runtime.dispose();
+    expect(() => replacementAssertActive?.()).toThrow('Creative Studio runtime is not active');
+  });
+
+  it('prepares through the real runtime service with the main config rate card and an unavailable video sibling', async () => {
+    const imageChoiceId = createStudioMediaChoiceId({
+      providerId: 'provider_1',
+      adapterId: 'weprompt-image-v1',
+      model: 'image-model',
+      kind: 'image',
+    });
+    const imageRoute = {
+      choiceId: imageChoiceId,
+      providerId: 'provider_1',
+      providerName: 'Image provider',
+      adapterId: 'weprompt-image-v1' as const,
+      model: 'image-model',
+      health: 'available' as const,
+      kind: 'image' as const,
+      cancellationPolicy: 'none' as const,
+      constraints: {
+        aspectRatios: ['16:9' as const],
+        resolutions: ['1080p' as const],
+        minDurationSeconds: 1,
+        maxDurationSeconds: 60,
+        supportsFirstFrame: true,
+        maxConditioningImages: 1,
+        silentOutput: true,
+      },
+    };
+    const project = createEmptyStudioProjectV2(
+      {
+        name: 'Runtime quote',
+        brief: 'A quiet product reveal.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '1080p',
+      },
+      'project_runtime_quote',
+      '2026-08-19T00:00:00.000Z'
+    );
+    project.revision = 2;
+    project.imageRouteId = imageChoiceId;
+    project.videoRouteId = null;
+    project.referencePlanStatus = 'planned';
+    project.beatOrder = ['beat_1'];
+    project.beats.beat_1 = {
+      id: 'beat_1',
+      title: 'Opening',
+      story: 'Reveal the product in soft daylight.',
+      targetSeconds: null,
+      shotOrder: ['shot_1'],
+    };
+    project.shots.shot_1 = {
+      id: 'shot_1',
+      shootingScript: 'A clean hero frame.',
+      durationSeconds: 5,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: 'none',
+      referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
+      seedStillId: null,
+      dismissedSeedStillIds: [],
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    };
+    const generationCatalog: StudioGenerationRouteCatalog = {
+      routes: [imageRoute],
+      diagnostics: [{ status: 'available', route: imageRoute }],
+      generationCatalogVersion: 'runtime_quote_catalog',
+    };
+    const harness = createHarness({
+      initialInventory: inventory([project.id]),
+      realService: { project, generationCatalog },
+    });
+
+    await harness.runtime.start();
+    const prepared = await harness.runtime.service.prepareSubmission({
       projectId: project.id,
-      proposalId: 'proposal_external',
-      baseRevision: project.revision,
-      payload: {
-        kind: 'replace_storyboard',
-        sceneOrder: ['scene_external'],
-        scenes: {
-          scene_external: {
-            title: 'External scene',
-            purpose: 'Prove filesystem observation',
-            visualPrompt: 'A proposal appears without turn completion',
-            narration: '',
-            onScreenText: '',
-            mediaKind: 'image',
-            durationSeconds: 5,
-            referenceAssetId: null,
-          },
-        },
-      },
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
     });
-    emitProposalFile?.(path.join(project.id, 'proposals', 'pending', 'proposal_external.json'));
 
-    await vi.waitFor(() => {
-      expect(onProposalUpdated).toHaveBeenCalledWith(project.id, 'proposal_external');
+    expect(prepared.baseOnly).toMatchObject({
+      currency: 'USD',
+      lowerMinorUnits: 3,
+      upperMinorUnits: 3,
+      baseItems: [{ purpose: 'seed_still', oneGenerationMinorUnits: 3 }],
     });
-    onProposalUpdated.mockClear();
-    await writeFile(
-      path.join(rootDir, project.id, 'proposals', 'pending', 'proposal_invalid.json'),
-      JSON.stringify({ status: 'pending' })
-    );
-    emitProposalFile?.(path.join(project.id, 'proposals', 'pending', 'proposal_invalid.json'));
-    await vi.waitFor(() => expect(logError).toHaveBeenCalled());
-    expect(onProposalUpdated).not.toHaveBeenCalled();
-    await runtime.dispose();
+    expect(prepared.withCascade).toBeNull();
+    expect(harness.providerResolver.listGenerationRoutes).toHaveBeenCalledTimes(1);
+    await harness.runtime.dispose();
+  });
 
-    const restartedStore = createCreativeStudioStore({ rootDir, now });
-    await expect(restartedStore.listProposals(project.id)).resolves.toMatchObject([
-      { id: 'proposal_external', status: 'pending' },
+  it('joins concurrent first-commit inventory events into one activation attempt', async () => {
+    const harness = createHarness({ holdCleanup: true });
+    await harness.runtime.start();
+    harness.setInventory(inventory(['project_v2']));
+
+    harness.commit();
+    const first = harness.runtime.refreshInventory();
+    const second = harness.runtime.refreshInventory();
+    await harness.cleanupStarted;
+
+    expect(harness.runtime.activationState).toBe('activating');
+    expect(harness.factoryCalls.mediaStore).toBe(1);
+    harness.releaseCleanup();
+    await Promise.all([first, second]);
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(activatedFactoryCounts(harness)).toEqual({
+      mediaStore: 1,
+      adapters: 1,
+      providerResolver: 1,
+      jobManager: 1,
+      tracker: 1,
+      mailbox: 1,
+      directorService: 1,
+      processor: 1,
+    });
+  });
+
+  it('drains a commit-triggered refresh after an older inventory scan captured an empty root', async () => {
+    const harness = createHarness({ holdFirstInventory: true });
+    const start = harness.runtime.start();
+    await harness.inventoryCaptured;
+
+    harness.setInventory(inventory(['project_v2']));
+    harness.commit();
+    harness.releaseInventory();
+    await start;
+
+    expect(harness.inspectProjectsV2).toHaveBeenCalledTimes(2);
+    expect(harness.runtime.supportedProjectIds).toEqual(['project_v2']);
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.factoryCalls.mediaStore).toBe(1);
+  });
+
+  it('rolls a partial activation back in reverse order, enters degraded, and retries on the next inventory event', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), failProcessorStarts: 1 });
+
+    await harness.runtime.start();
+
+    expect(harness.runtime.activationState).toBe('degraded');
+    expect(harness.proposalDisposer).toHaveBeenCalledOnce();
+    expect(harness.referenceDisposer).toHaveBeenCalledOnce();
+    expect(harness.jobManager.dispose).toHaveBeenCalledOnce();
+    expect(harness.calls).toEqual([
+      'cleanup-parts',
+      'reap-proposals',
+      'reap-references',
+      'watch-proposals',
+      'watch-references',
+      'start-director',
+      'stop-director',
+      'dispose-reference-watch',
+      'dispose-proposal-watch',
+      'dispose-jobs',
+    ]);
+
+    await harness.runtime.refreshInventory();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.factoryCalls.processor).toBe(2);
+    expect(harness.calls.slice(-7)).toEqual([
+      'cleanup-parts',
+      'reap-proposals',
+      'reap-references',
+      'watch-proposals',
+      'watch-references',
+      'start-director',
+      'install-protocol',
     ]);
   });
 
-  it('assembles one shared store, media store, resolver, adapter registry, manager, and service graph', async () => {
-    const { runtime, captures, ensureMailbox } = createHarness();
+  it('rolls back an installed graph when backend-ready recovery fails and builds a fresh graph on retry', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      failRecoveryResumes: 1,
+    });
 
-    expect(captures.storeInput?.onProjectCommitted).toBe(runtime.directorCommitTracker.observe);
-    expect(captures.mediaStoreInput?.store).toBe(runtime.store);
-    expect(captures.managerInput).toMatchObject({
-      store: runtime.store,
-      mediaStore: runtime.mediaStore,
-      providerResolver: runtime.providerResolver,
-      adapters: runtime.adapterRegistry,
+    await harness.runtime.start();
+    expect(harness.runtime.activationState).toBe('active');
+
+    await harness.runtime.onBackendReady();
+
+    expect(harness.runtime.activationState).toBe('degraded');
+    expect(harness.calls).toEqual([
+      'cleanup-parts',
+      'reap-proposals',
+      'reap-references',
+      'watch-proposals',
+      'watch-references',
+      'start-director',
+      'install-protocol',
+      'resume-frames:project_v2',
+      'resume-jobs:project_v2',
+      'uninstall-protocol',
+      'stop-director',
+      'dispose-reference-watch',
+      'dispose-proposal-watch',
+      'dispose-jobs',
+    ]);
+
+    await harness.runtime.refreshInventory();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(activatedFactoryCounts(harness)).toEqual({
+      mediaStore: 2,
+      adapters: 2,
+      providerResolver: 2,
+      jobManager: 2,
+      tracker: 2,
+      mailbox: 2,
+      directorService: 2,
+      processor: 2,
     });
-    expect(captures.serviceInput).toMatchObject({
-      store: runtime.store,
-      mediaStore: runtime.mediaStore,
-      providerResolver: runtime.providerResolver,
-      adapterRegistry: runtime.adapterRegistry,
-      jobManager: runtime.jobManager,
-      storyboardPlanner: runtime.storyboardPlanner,
-      ensureDirectorCommandMailbox: expect.any(Function),
-    });
-    expect(captures.mailboxInput).toMatchObject({ rootDir: '/tmp/creative-studio-runtime-test', store: runtime.store });
-    expect(captures.directorServiceInput).toEqual({ store: runtime.store });
-    expect(captures.directorServiceInput).not.toHaveProperty('jobManager');
-    expect(captures.directorServiceInput).not.toHaveProperty('providerResolver');
-    expect(captures.directorServiceInput).not.toHaveProperty('adapterRegistry');
-    expect(captures.processorInput).toMatchObject({
-      store: runtime.store,
-      mailbox: runtime.directorCommandMailbox,
-      service: runtime.directorCommandService,
-      tracker: runtime.directorCommitTracker,
-    });
-    expect(captures.processorInput).not.toHaveProperty('jobManager');
-    expect(captures.processorInput).not.toHaveProperty('providerResolver');
-    expect(captures.processorInput).not.toHaveProperty('adapterRegistry');
-    const ensureResult = captures.serviceInput?.ensureDirectorCommandMailbox?.('project_opened');
-    expect(ensureMailbox).toHaveBeenCalledWith('project_opened');
-    await ensureResult;
-    await expect(captures.managerInput?.listProviders()).resolves.toEqual([provider()]);
-    await expect(captures.plannerInput?.listProviders()).resolves.toEqual([provider()]);
+    expect(harness.calls.slice(-9)).toEqual([
+      'cleanup-parts',
+      'reap-proposals',
+      'reap-references',
+      'watch-proposals',
+      'watch-references',
+      'start-director',
+      'install-protocol',
+      'resume-frames:project_v2',
+      'resume-jobs:project_v2',
+    ]);
   });
 
-  it('awaits mailbox ensure before returning a newly opened project MCP descriptor', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-runtime-mailbox-ensure-'));
-    temporaryDirectories.push(rootDir);
-    const store = createCreativeStudioStore({ rootDir, createId: () => 'project_opened' });
-    const project = await store.createProject({
-      name: 'Opened project',
-      brief: '',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 10,
-      resolution: '1080p',
+  it('retries the same inventory after recovery fails on an already-active graph', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_a']) });
+    await harness.runtime.onBackendReady();
+    const factoryCounts = activatedFactoryCounts(harness);
+
+    harness.setInventory(inventory(['project_a', 'project_b']));
+    harness.failNextRecovery();
+    await expect(harness.runtime.refreshInventory()).rejects.toThrow('job-recovery-failed');
+
+    expect(harness.runtime.activationState).toBe('active');
+    await harness.runtime.refreshInventory();
+
+    expect(harness.runtime.activationState).toBe('active');
+    expect(activatedFactoryCounts(harness)).toEqual(factoryCounts);
+    expect(harness.calls.slice(-4)).toEqual([
+      'resume-frames:project_a,project_b',
+      'resume-jobs:project_a,project_b',
+      'resume-frames:project_a,project_b',
+      'resume-jobs:project_a,project_b',
+    ]);
+  });
+
+  it('keeps global infrastructure ready when the last V2 project is deleted and reuses it on recreation', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']) });
+    await harness.runtime.start();
+    const firstCounts = activatedFactoryCounts(harness);
+
+    harness.setInventory(inventory());
+    await harness.runtime.refreshInventory();
+    expect(harness.runtime.activationState).toBe('active');
+    expect(harness.runtime.supportedProjectIds).toEqual([]);
+
+    harness.setInventory(inventory(['project_recreated']));
+    await harness.runtime.refreshInventory();
+    expect(harness.runtime.supportedProjectIds).toEqual(['project_recreated']);
+    expect(activatedFactoryCounts(harness)).toEqual(firstCounts);
+  });
+
+  it('disposes installed boundaries once when shutdown races an activation', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), holdCleanup: true });
+    const start = harness.runtime.start();
+    await harness.cleanupStarted;
+
+    const firstDispose = harness.runtime.dispose();
+    const secondDispose = harness.runtime.dispose();
+    expect(harness.runtime.activationState).toBe('disposed');
+    harness.releaseCleanup();
+    await Promise.all([start, firstDispose, secondDispose]);
+
+    expect(harness.calls).not.toContain('install-protocol');
+    expect(harness.jobManager.dispose).toHaveBeenCalledOnce();
+    expect(harness.runtime.activationState).toBe('disposed');
+  });
+
+  it('joins backend-ready degradation teardown after the failed graph revokes active authority', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), failRecoveryResumes: 1 });
+    await harness.runtime.start();
+    let releaseProcessorStop: (() => void) | undefined;
+    let markProcessorStopStarted: (() => void) | undefined;
+    const processorStopStarted = new Promise<void>((resolve) => {
+      markProcessorStopStarted = resolve;
     });
-    let releaseEnsure!: () => void;
-    const ensureBlocked = new Promise<void>((resolve) => {
-      releaseEnsure = resolve;
-    });
-    const ensureDirectorCommandMailbox = vi.fn(async () => ensureBlocked);
-    const resolveProposalPaths = vi.spyOn(store, 'resolveProposalPaths');
-    const service = createCreativeStudioService({
-      store,
-      onProjectUpdated: vi.fn(),
-      storyboardPlanner: {
-        listModels: async () => [],
-        dispose: async () => undefined,
-      } as unknown as StudioStoryboardPlanner,
-      providerResolver: {
-        listGenerationRoutes: async () => ({ routes: [], diagnostics: [], generationCatalogVersion: 'empty' }),
-      } as unknown as StudioProviderResolver,
-      getStudioServerScriptPath: () => '/tmp/studio-server.cjs',
-      ensureDirectorCommandMailbox,
+    vi.mocked(harness.processor.stop).mockImplementationOnce(async () => {
+      harness.calls.push('stop-director');
+      markProcessorStopStarted?.();
+      await new Promise<void>((resolve) => {
+        releaseProcessorStop = resolve;
+      });
     });
 
-    const descriptor = service.getBriefSessionServer({ projectId: project.id });
-    await vi.waitFor(() => expect(ensureDirectorCommandMailbox).toHaveBeenCalledWith(project.id));
-    expect(resolveProposalPaths).not.toHaveBeenCalled();
-    releaseEnsure();
-
-    await expect(descriptor).resolves.toMatchObject({ id: `studio-brief-${project.id}` });
-    expect(resolveProposalPaths).toHaveBeenCalledOnce();
-  });
-
-  it('cleans stale parts, starts the command processor before protocol availability, and starts only once', async () => {
-    const { runtime, calls } = createHarness();
-
-    await Promise.all([runtime.start(), runtime.start()]);
-
-    expect(calls).toEqual(['cleanup-parts', 'start-director', 'install-protocol']);
-  });
-
-  it('rolls back the command processor and proposal watcher when a later protocol start fails', async () => {
-    const disposeProposalWatcher = vi.fn(async () => undefined);
-    const store = {
-      listConnections: async () => [],
-      reapAbandonedProposals: async () => undefined,
-      watchProposals: async () => disposeProposalWatcher,
-    } as unknown as CreativeStudioStore;
-    const { runtime, startDirector, stopDirector } = createHarness(
-      {},
-      {
-        store,
-        installProtocol: async () => {
-          throw new Error('protocol start failed');
-        },
-      }
-    );
-
-    await expect(runtime.start()).rejects.toThrow('protocol start failed');
-
-    expect(startDirector).toHaveBeenCalledOnce();
-    expect(stopDirector).toHaveBeenCalledOnce();
-    expect(disposeProposalWatcher).toHaveBeenCalledOnce();
-    await runtime.dispose().catch((): undefined => undefined);
-  });
-
-  it('does no startup or pending-job recovery work while the release gate is disabled', async () => {
-    const { runtime, calls, resumePendingJobs } = createHarness({}, { enabled: false });
-
-    await Promise.all([runtime.start(), runtime.onBackendReady(), runtime.onBackendReady()]);
-
-    expect(calls).toEqual([]);
-    expect(resumePendingJobs).not.toHaveBeenCalled();
-  });
-
-  it('leaves a persisted remote job dormant without resolving or polling its provider while disabled', async () => {
-    const { runtime, store, project, listProviders, resolveProvider, poll } =
-      await createPersistedRecoveryHarness(false);
-
-    await runtime.onBackendReady();
-
-    expect(resolveProvider).not.toHaveBeenCalled();
-    expect(listProviders).not.toHaveBeenCalled();
-    expect(poll).not.toHaveBeenCalled();
-    await expect(store.getProject(project.id)).resolves.toMatchObject({
-      jobs: { job_interrupted: { status: 'running', providerJobId: 'remote_interrupted' } },
+    const backendReady = harness.runtime.onBackendReady();
+    await processorStopStarted;
+    let disposalSettled = false;
+    const disposal = harness.runtime.dispose().finally(() => {
+      disposalSettled = true;
     });
-    await runtime.dispose();
-  });
-
-  it('still resolves and polls a persisted remote job while the release gate is enabled', async () => {
-    const { runtime, listProviders, resolveProvider, poll } = await createPersistedRecoveryHarness(true);
-
-    await runtime.onBackendReady();
-    await vi.waitFor(() => expect(poll).toHaveBeenCalledTimes(1));
-
-    expect(resolveProvider).toHaveBeenCalledTimes(1);
-    expect(listProviders).toHaveBeenCalledTimes(1);
-    await runtime.dispose();
-  });
-
-  it('shares normal and late backend-ready calls and resumes jobs exactly once', async () => {
-    let releaseResume: (() => void) | undefined;
-    let markResumeStarted: (() => void) | undefined;
-    const resumeStarted = new Promise<void>((resolve) => {
-      markResumeStarted = resolve;
-    });
-    const { runtime, calls, resumePendingJobs } = createHarness(
-      {},
-      {
-        resumePendingJobs: () =>
-          new Promise<void>((resolve) => {
-            calls.push('resume-jobs-start');
-            markResumeStarted?.();
-            releaseResume = resolve;
-          }),
-      }
-    );
-
-    const normalReady = runtime.onBackendReady();
-    const lateReady = runtime.onBackendReady();
-    await resumeStarted;
-
-    expect(calls).toEqual(['cleanup-parts', 'start-director', 'install-protocol', 'resume-jobs-start']);
-    expect(resumePendingJobs).toHaveBeenCalledTimes(1);
-
-    releaseResume?.();
-    await Promise.all([normalReady, lateReady]);
-    await runtime.onBackendReady();
-    expect(resumePendingJobs).toHaveBeenCalledTimes(1);
-  });
-
-  it('disposes planner, jobs, and protocol references once even when cleanup rejects', async () => {
-    const jobFailure = new Error('job-dispose-failed');
-    const plannerFailure = new Error('planner-dispose-failed');
-    const protocolFailure = new Error('protocol-uninstall-failed');
-    const { runtime, disposeJobs, disposePlanner, uninstallProtocol } = createHarness(
-      {},
-      {
-        disposeJobs: async () => {
-          throw jobFailure;
-        },
-        disposePlanner: async () => {
-          throw plannerFailure;
-        },
-        uninstallProtocol: async () => {
-          throw protocolFailure;
-        },
-      }
-    );
-
-    await runtime.start();
-    const first = runtime.dispose();
-    const second = runtime.dispose();
-
-    await expect(first).rejects.toBeInstanceOf(AggregateError);
-    await expect(second).rejects.toBeInstanceOf(AggregateError);
-    expect(disposeJobs).toHaveBeenCalledTimes(1);
-    expect(disposePlanner).toHaveBeenCalledTimes(1);
-    expect(uninstallProtocol).toHaveBeenCalledTimes(1);
-  });
-
-  it('cancels and awaits active renders before runtime disposal completes', async () => {
-    let releaseRenders: (() => void) | undefined;
-    const rendersDisposed = new Promise<void>((resolve) => {
-      releaseRenders = resolve;
-    });
-    const { runtime } = createHarness();
-    const disposeRenders = vi.fn(() => rendersDisposed);
-    Object.assign(runtime.renderRunner, { dispose: disposeRenders });
-
-    let disposalFinished = false;
-    const disposal = runtime.dispose().then(() => {
-      disposalFinished = true;
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(disposeRenders).toHaveBeenCalledOnce();
-    expect(disposalFinished).toBe(false);
-    releaseRenders?.();
-    await disposal;
-  });
-
-  it('waits for an in-flight protocol install and removes the handler before disposal completes', async () => {
-    let releaseInstall: (() => void) | undefined;
-    let markInstallStarted: (() => void) | undefined;
-    const installStarted = new Promise<void>((resolve) => {
-      markInstallStarted = resolve;
-    });
-    const calls: string[] = [];
-    const { runtime, uninstallProtocol } = createHarness(
-      {},
-      {
-        installProtocol: () =>
-          new Promise<CreativeStudioProtocolInstallation>((resolve) => {
-            calls.push('install-protocol-start');
-            markInstallStarted?.();
-            releaseInstall = () => resolve({ dispose: async () => {} });
-          }),
-      }
-    );
-
-    const start = runtime.start();
-    await installStarted;
-    const dispose = runtime.dispose();
+    await Promise.resolve();
     await Promise.resolve();
 
-    expect(uninstallProtocol).not.toHaveBeenCalled();
-    releaseInstall?.();
-    await Promise.all([start, dispose]);
-    expect(uninstallProtocol).toHaveBeenCalledTimes(1);
-  });
-
-  it('passes the installed protocol controller to uninstall and awaits its disposal', async () => {
-    const calls: string[] = [];
-    const installation: CreativeStudioProtocolInstallation = {
-      dispose: vi.fn(async () => {
-        calls.push('dispose-protocol-controller');
-      }),
-    };
-    const { runtime } = createHarness(
-      {},
-      {
-        installProtocol: () => installation,
-        uninstallProtocol: async (received) => {
-          calls.push('unhandle-protocol');
-          expect(received).toBe(installation);
-          await received?.dispose();
-        },
-      }
-    );
-
-    await runtime.start();
-    await runtime.dispose();
-
-    expect(calls).toEqual(['unhandle-protocol', 'dispose-protocol-controller']);
-  });
-
-  it('does not finish disposal while backend-ready recovery is still in flight', async () => {
-    let releaseRecovery: (() => void) | undefined;
-    let markRecoveryStarted: (() => void) | undefined;
-    const recoveryStarted = new Promise<void>((resolve) => {
-      markRecoveryStarted = resolve;
-    });
-    const { runtime } = createHarness(
-      {},
-      {
-        resumePendingJobs: () =>
-          new Promise<void>((resolve) => {
-            markRecoveryStarted?.();
-            releaseRecovery = resolve;
-          }),
-      }
-    );
-    const backendReady = runtime.onBackendReady();
-    await recoveryStarted;
-
-    let disposalFinished = false;
-    const disposal = runtime.dispose().then(() => {
-      disposalFinished = true;
-    });
-    await new Promise<void>((resolve) => setImmediate(resolve));
-
-    expect(disposalFinished).toBe(false);
-    releaseRecovery?.();
+    expect(disposalSettled).toBe(false);
+    releaseProcessorStop?.();
     await Promise.all([backendReady, disposal]);
+    expect(disposalSettled).toBe(true);
+    expect(harness.runtime.activationState).toBe('disposed');
+  });
+
+  it.each([
+    'reap-proposals',
+    'reap-references',
+    'watch-proposals',
+    'watch-references',
+    'processor',
+    'protocol',
+  ] as const)('rolls back safely when shutdown lands at the %s activation boundary', async (holdActivationAt) => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']), holdActivationAt });
+    const start = harness.runtime.start();
+    await harness.activationHeld;
+
+    const dispose = harness.runtime.dispose();
+    harness.releaseActivation();
+    await Promise.all([start, dispose]);
+
+    expect(harness.runtime.activationState).toBe('disposed');
+    expect(harness.jobManager.dispose).toHaveBeenCalledOnce();
+  });
+
+  it('does not activate when a project creation rejects before its durable commit', async () => {
+    const harness = createHarness({
+      service: {
+        createProject: vi.fn(async () => {
+          throw new Error('commit-failed');
+        }),
+      },
+    });
+    await harness.runtime.start();
+
+    await expect(
+      harness.runtime.service.createProject({
+        name: 'Failed project',
+        brief: '',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      })
+    ).rejects.toThrow('commit-failed');
+
+    expect(harness.runtime.activationState).toBe('inactive');
+    expect(activatedFactoryCounts(harness).mediaStore).toBe(0);
+  });
+
+  it('does no inventory or lifecycle work while the feature is disabled', async () => {
+    const harness = createHarness({ enabled: false, initialInventory: inventory(['project_v2']) });
+
+    await Promise.all([harness.runtime.start(), harness.runtime.onBackendReady(), harness.runtime.refreshInventory()]);
+
+    expect(harness.inspectProjectsV2).not.toHaveBeenCalled();
+    expect(harness.runtime.activationState).toBe('inactive');
+    expect(activatedFactoryCounts(harness).mediaStore).toBe(0);
+  });
+});
+
+describe('Creative Studio runtime support boundaries', () => {
+  it.each([
+    [{}, false],
+    [{ AIONUI_E2E_TEST: '1' }, false],
+    [{ AIONUI_E2E_STUDIO_FAKE: '1' }, false],
+    [{ AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' }, true],
+  ] as const)('requires both explicit fake-adapter flags for %o', (environment, expected) => {
+    expect(shouldEnableStudioE2EFakeAdapter(environment, { isPackaged: false })).toBe(expected);
+  });
+
+  it('cannot enable the fake adapter in a packaged runtime', () => {
+    expect(
+      shouldEnableStudioE2EFakeAdapter({ AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' }, { isPackaged: true })
+    ).toBe(false);
+  });
+
+  it('constructs the fake bundle only after a supported project activates the runtime', async () => {
+    const harness = createHarness({
+      environment: { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+    });
+    await harness.runtime.start();
+    expect(harness.factoryCalls.fakeBundle).toBe(0);
+
+    harness.setInventory(inventory(['project_v2']));
+    await harness.runtime.refreshInventory();
+    expect(harness.factoryCalls.fakeBundle).toBe(1);
+  });
+
+  it('replaces colliding fake providers and connections only inside the explicit E2E resolver graph', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      environment: { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+    });
+
+    await harness.runtime.start();
+    const resolverDependencies = harness.getResolverDependencies();
+    if (resolverDependencies === undefined) throw new Error('Expected an active resolver graph');
+
+    await expect(resolverDependencies.listProviders()).resolves.toMatchObject([
+      { id: 'provider_2', name: 'Second provider' },
+      { id: 'provider_1', name: 'Fake provider' },
+    ]);
+    await expect(resolverDependencies.listConnections()).resolves.toEqual([
+      { id: 'persisted_connection' },
+      { id: 'fake_connection' },
+    ]);
+    await harness.runtime.dispose();
+  });
+
+  it('keeps start, inventory, and backend-ready hooks inert after disposal', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_v2']) });
+    await harness.runtime.start();
+    await harness.runtime.dispose();
+    const inspections = harness.inspectProjectsV2.mock.calls.length;
+
+    await Promise.all([harness.runtime.start(), harness.runtime.refreshInventory(), harness.runtime.onBackendReady()]);
+
+    expect(harness.runtime.activationState).toBe('disposed');
+    expect(harness.inspectProjectsV2).toHaveBeenCalledTimes(inspections);
+  });
+
+  it('attempts every installed cleanup boundary before reporting aggregate disposal failures', async () => {
+    const harness = createHarness({
+      initialInventory: inventory(['project_v2']),
+      environment: { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+      disposeFailures: ['protocol', 'processor', 'reference', 'proposal', 'jobs', 'fake'],
+    });
+    await harness.runtime.start();
+
+    await expect(harness.runtime.dispose()).rejects.toBeInstanceOf(AggregateError);
+
+    expect(harness.calls.slice(-6)).toEqual([
+      'uninstall-protocol',
+      'stop-director',
+      'dispose-reference-watch',
+      'dispose-proposal-watch',
+      'dispose-jobs',
+      'dispose-fake',
+    ]);
+    expect(harness.runtime.activationState).toBe('disposed');
   });
 
   it('logs only a stable error name when backend-ready recovery rejects', async () => {
     const logError = vi.fn();
-    const rawFailure = new Error(Object.values(STUDIO_E2E_BOUNDARY_SENTINELS).join(' | '));
-    Object.assign(rawFailure, STUDIO_E2E_BOUNDARY_SENTINELS);
-
     resumeCreativeStudioAfterBackendReady(
       {
         onBackendReady: async () => {
-          throw rawFailure;
+          throw new Error('provider secret must not cross');
         },
       },
       logError
@@ -796,327 +1269,19 @@ describe('Creative Studio runtime identity and lifecycle', () => {
     await Promise.resolve();
 
     expect(logError).toHaveBeenCalledWith('[CreativeStudio] Failed to resume pending jobs:', 'Error');
-    const serializedLog = JSON.stringify(logError.mock.calls);
-    for (const sentinel of Object.values(STUDIO_E2E_BOUNDARY_SENTINELS)) {
-      expect(serializedLog).not.toContain(sentinel);
-    }
-  });
-});
-
-describe('Creative Studio E2E fake gate', () => {
-  it.each([
-    [{}, false],
-    [{ AIONUI_E2E_TEST: '1' }, false],
-    [{ AIONUI_E2E_STUDIO_FAKE: '1' }, false],
-    [{ AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' }, true],
-  ] as const)('requires both explicit flags for %o', (environment, expected) => {
-    expect(shouldEnableStudioE2EFakeAdapter(environment, { isPackaged: false })).toBe(expected);
+    expect(JSON.stringify(logError.mock.calls)).not.toContain('provider secret');
   });
 
-  it('cannot enable the fake adapter in a packaged production runtime', () => {
-    expect(
-      shouldEnableStudioE2EFakeAdapter({ AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' }, { isPackaged: true })
-    ).toBe(false);
-  });
-
-  it.each([{ AIONUI_E2E_TEST: '1' }, { AIONUI_E2E_STUDIO_FAKE: '1' }] as const)(
-    'does not install the fake bundle when only one gate flag is present: %o',
-    async (environment) => {
-      const { runtime, captures } = createHarness(environment);
-
-      expect(runtime.adapterRegistry.size).toBe(0);
-      await expect(captures.resolverInput?.listProviders()).resolves.toEqual([provider()]);
-      await expect(captures.resolverInput?.listConnections()).resolves.toEqual([]);
-    }
-  );
-
-  it('does not construct or expose the fake provider in a packaged runtime even with both flags', async () => {
-    const { captures } = createHarness({ AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' }, { isPackaged: true });
-
-    await expect(captures.resolverInput?.listProviders()).resolves.toEqual([provider()]);
-    await expect(captures.resolverInput?.listConnections()).resolves.toEqual([]);
-  });
-
-  it('constructs the fake bundle only when both flags are present', async () => {
-    const calls: Array<{ rootDir: string; catalogProfile?: string }> = [];
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-runtime-'));
-    temporaryDirectories.push(rootDir);
-    const fakeBundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
-    const { captures } = createHarness(
-      { AIONUI_E2E_TEST: '1', AIONUI_E2E_STUDIO_FAKE: '1' },
+  it('redacts non-Error backend-ready rejections as UnknownError', async () => {
+    const logError = vi.fn();
+    resumeCreativeStudioAfterBackendReady(
       {
-        rootDir,
-        createE2EFakeBundle: (input) => {
-          calls.push(input);
-          return fakeBundle;
-        },
-      }
-    );
-
-    const providers = await captures.resolverInput?.listProviders();
-    const plannerProviders = await captures.plannerInput?.listProviders();
-    const connections = await captures.resolverInput?.listConnections();
-
-    expect(calls).toEqual([{ rootDir, catalogProfile: 'explicit-selection' }]);
-    expect(providers?.map((item) => item.id)).toEqual(['provider_1', STUDIO_E2E_FAKE_PROVIDER_ID]);
-    expect(plannerProviders?.map((item) => item.id)).toEqual(['provider_1', STUDIO_E2E_FAKE_PROVIDER_ID]);
-    expect(connections).toEqual(fakeBundle.connections);
-    expect(connections?.[0]?.capabilities).toMatchObject({ cancellationPolicy: 'queued_only' });
-    expect(connections?.[0]?.capabilities).not.toHaveProperty('cancellation');
-  });
-});
-
-describe('Creative Studio E2E fake adapter', () => {
-  it('provides an explicit-selection catalog with one image and two runnable video integrations', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-explicit-selection-'));
-    temporaryDirectories.push(rootDir);
-    const bundle = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'explicit-selection' });
-    const lifecycleBundle = createStudioE2EFakeBundle({ rootDir });
-    const imageConnections = bundle.connections.filter(
-      (connection) => connection.capabilities.mediaKinds[0] === 'image'
-    );
-    const videoConnections = bundle.connections.filter(
-      (connection) => connection.capabilities.mediaKinds[0] === 'video'
-    );
-
-    expect(imageConnections).toHaveLength(1);
-    expect(videoConnections).toHaveLength(2);
-    expect(imageConnections[0]?.capabilities).toHaveProperty('maxConditioningImages', 6);
-    expect(videoConnections.map((connection) => connection.capabilities.maxConditioningImages)).toEqual([0, 0]);
-    expect(new Set(videoConnections.map((connection) => connection.model))).toEqual(
-      new Set(['dreamina-seedance-2-0-260128'])
-    );
-    expect(new Set(videoConnections.map((connection) => connection.adapterId))).toEqual(
-      new Set(['byteplus-seedance-v1', 'weprompt-media-gateway-v1'])
-    );
-
-    const imageConnection = imageConnections[0];
-    if (!imageConnection) throw new Error('expected the explicit fake image binding');
-    const imageAdapter = bundle.adapters.get(imageConnection.adapterId);
-    if (!imageAdapter) throw new Error('expected the explicitly injected fake image adapter');
-    const imageProvider = { ...bundle.provider, use_model: imageConnection.model } satisfies TProviderWithModel;
-    const imageValidation = await imageAdapter.validateConnection(
-      { model: imageConnection.model },
-      imageProvider,
-      new AbortController().signal
-    );
-    expect(imageValidation).toMatchObject({ ok: true });
-    if (!imageValidation.ok) throw new Error('expected the exact fake image binding to validate');
-    expect(imageValidation.capabilities).toHaveProperty('maxConditioningImages', 6);
-    await expect(
-      imageAdapter.validateConnection(
-        { model: imageConnection.model },
-        { ...imageProvider, id: 'wrong_fake_provider' },
-        new AbortController().signal
-      )
-    ).resolves.toEqual({ ok: false, error: { code: 'unsupported' } });
-    await expect(
-      imageAdapter.validateConnection({ model: 'wrong-fake-model' }, imageProvider, new AbortController().signal)
-    ).resolves.toEqual({ ok: false, error: { code: 'unsupported' } });
-
-    const fakeProvider = {
-      ...bundle.provider,
-      use_model: 'dreamina-seedance-2-0-260128',
-    } satisfies TProviderWithModel;
-    for (const adapterId of ['byteplus-seedance-v1', 'weprompt-media-gateway-v1'] as const) {
-      const adapter = bundle.adapters.get(adapterId);
-      if (adapter === undefined) throw new Error(`expected ${adapterId} adapter`);
-      await expect(
-        adapter.validateConnection({ model: fakeProvider.use_model }, fakeProvider, new AbortController().signal)
-      ).resolves.toMatchObject({ ok: true, capabilities: { maxConditioningImages: 0 } });
-      const submitted = await adapter.submit(
-        {
-          prompt: `Run ${adapterId} through the explicit-selection lifecycle`,
-          mediaKind: 'video',
-          aspectRatio: '16:9',
-          resolution: '720p',
-          durationSeconds: 4,
-          idempotencyKey: `e2e_explicit_selection_${adapterId}`,
-        },
-        fakeProvider,
-        new AbortController().signal
-      );
-      if (submitted.kind !== 'remote') throw new Error(`expected ${adapterId} remote fake task`);
-      await expect(adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual({
-        status: 'queued',
-      });
-      await expect(adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual({
-        status: 'running',
-        progress: 50,
-      });
-      await expect(
-        adapter.poll(submitted.providerJobId, fakeProvider, new AbortController().signal)
-      ).resolves.toMatchObject({
-        status: 'succeeded',
-        outputs: [{ mediaKind: 'video', role: 'primary', mimeType: 'video/mp4' }],
-      });
-    }
-
-    const store = createCreativeStudioStore({ rootDir });
-    const providerResolver = createStudioProviderResolver({
-      listProviders: async () => [bundle.provider],
-      listConnections: () => Promise.resolve(bundle.connections),
-    });
-    const service = createCreativeStudioService({
-      store,
-      onProjectUpdated: vi.fn(),
-      providerResolver,
-      storyboardPlanner: {
-        listModels: async () => [],
-        draft: async () => {
-          throw new Error('not used by catalog projection');
-        },
-        dispose: async () => {},
+        onBackendReady: async () => Promise.reject('provider secret must not cross'),
       },
-    });
-    const project = await service.createProject({
-      name: 'Explicit selection',
-      brief: 'Choose each engine before the paid review.',
-      aspectRatio: '16:9',
-      targetDurationSeconds: 5,
-      resolution: '720p',
-    });
-    const catalog = await service.listRoutes({ projectId: project.id });
-
-    expect(catalog.image.options).toHaveLength(1);
-    expect(
-      catalog.video.options.map(({ choiceId, model, integrationLabelKey }) => ({
-        choiceId,
-        model,
-        integrationLabelKey,
-      }))
-    ).toEqual([
-      {
-        choiceId: expect.stringMatching(/^choice_[A-Za-z0-9_-]+$/),
-        model: 'dreamina-seedance-2-0-260128',
-        integrationLabelKey: 'bytePlusSeedance',
-      },
-      {
-        choiceId: expect.stringMatching(/^choice_[A-Za-z0-9_-]+$/),
-        model: 'dreamina-seedance-2-0-260128',
-        integrationLabelKey: 'selfHostedVideoGateway',
-      },
-    ]);
-    expect(new Set(catalog.video.options.map(({ choiceId }) => choiceId)).size).toBe(2);
-    expect(lifecycleBundle.catalogProfile).toBe('lifecycle');
-    expect(lifecycleBundle.connections).toHaveLength(3);
-  });
-
-  it('emits a decodable non-zero-dimension PNG for image generation', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-image-'));
-    temporaryDirectories.push(rootDir);
-    const bundle = createStudioE2EFakeBundle({ rootDir });
-    const adapter = bundle.adapters.get('weprompt-image-v1');
-    const fakeProvider = { ...bundle.provider, use_model: 'weprompt-e2e-image' } satisfies TProviderWithModel;
-    const request = {
-      prompt: 'A renderable E2E image',
-      mediaKind: 'image' as const,
-      aspectRatio: '16:9' as const,
-      resolution: '720p' as const,
-      durationSeconds: 4,
-      idempotencyKey: 'e2e_image_key_1',
-    };
-    const submitted = await adapter?.submit(request, fakeProvider, new AbortController().signal);
-    if (!submitted || submitted.kind !== 'remote') throw new Error('expected remote fake task');
-    await adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal);
-    await adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal);
-    const completed = await adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal);
-    if (!completed || completed.status !== 'succeeded') throw new Error('expected successful fake task');
-    const output = completed.outputs[0];
-    if (!output || output.source.kind !== 'file') throw new Error('expected file-backed fake output');
-
-    await expect(sharp(output.source.path).metadata()).resolves.toMatchObject({
-      format: 'png',
-      width: 1,
-      height: 1,
-    });
-  });
-
-  it('reports queued and running before returning a tiny managed-output fixture', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-'));
-    temporaryDirectories.push(rootDir);
-    const bundle = createStudioE2EFakeBundle({ rootDir });
-    const adapter = bundle.adapters.get('weprompt-media-gateway-v1');
-    const fakeProvider = {
-      ...bundle.provider,
-      use_model: 'weprompt-e2e-video',
-    } satisfies TProviderWithModel;
-    const request = {
-      prompt: 'A safe E2E video',
-      mediaKind: 'video' as const,
-      aspectRatio: '16:9' as const,
-      resolution: '720p' as const,
-      durationSeconds: 4,
-      idempotencyKey: 'e2e_key_1',
-    };
-
-    const submitted = await adapter?.submit(request, fakeProvider, new AbortController().signal);
-    expect(submitted?.kind).toBe('remote');
-    if (!submitted || submitted.kind !== 'remote') throw new Error('expected remote fake task');
-
-    await expect(adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual(
-      {
-        status: 'queued',
-      }
+      logError
     );
-    await expect(adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual(
-      {
-        status: 'running',
-        progress: 50,
-      }
+    await vi.waitFor(() =>
+      expect(logError).toHaveBeenCalledWith('[CreativeStudio] Failed to resume pending jobs:', 'UnknownError')
     );
-    const completed = await adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal);
-    expect(completed).toMatchObject({
-      status: 'succeeded',
-      outputs: [{ mediaKind: 'video', role: 'primary', mimeType: 'video/mp4' }],
-    });
-    if (!completed || completed.status !== 'succeeded') throw new Error('expected successful fake task');
-    const output = completed.outputs[0];
-    if (!output || output.source.kind !== 'file') throw new Error('expected file-backed fake output');
-    await expect(stat(output.source.path)).resolves.toMatchObject({
-      size: 24 + Buffer.byteLength(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL),
-    });
-    const outputBytes = await readFile(output.source.path);
-    expect(outputBytes.subarray(0, 24)).toEqual(Buffer.from('000000186674797069736f6d0000000069736f6d69736f32', 'hex'));
-    expect(outputBytes.toString()).toContain(STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL);
-  });
-
-  it('confirms queued cancellation without creating an output fixture', async () => {
-    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'weprompt-studio-fake-cancel-'));
-    temporaryDirectories.push(rootDir);
-    const bundle = createStudioE2EFakeBundle({ rootDir });
-    const adapter = bundle.adapters.get('weprompt-media-gateway-v1');
-    const fakeProvider = {
-      ...bundle.provider,
-      use_model: 'weprompt-e2e-video',
-    } satisfies TProviderWithModel;
-    const submitted = await adapter?.submit(
-      {
-        prompt: 'Cancel this E2E video',
-        mediaKind: 'video',
-        aspectRatio: '16:9',
-        resolution: '720p',
-        durationSeconds: 4,
-        idempotencyKey: 'e2e_key_2',
-      },
-      fakeProvider,
-      new AbortController().signal
-    );
-    if (!submitted || submitted.kind !== 'remote') throw new Error('expected remote fake task');
-
-    await expect(
-      adapter?.cancel?.(submitted.providerJobId, fakeProvider, new AbortController().signal)
-    ).resolves.toEqual({
-      kind: 'cancelled',
-    });
-    await expect(adapter?.poll?.(submitted.providerJobId, fakeProvider, new AbortController().signal)).resolves.toEqual(
-      {
-        status: 'cancelled',
-        error: { code: 'unknown' },
-      }
-    );
-    await expect(stat(path.join(rootDir, STUDIO_E2E_FAKE_FIXTURE_DIRECTORY))).rejects.toMatchObject({
-      code: 'ENOENT',
-    });
   });
 });

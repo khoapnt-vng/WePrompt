@@ -14,6 +14,7 @@ import type {
   PresentationReadinessBlocker,
   PresentationReadinessEvidence,
 } from '@/common/types/office/artifactReadiness';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   PresentationGrantOwner,
   PresentationSourceDescriptor,
@@ -184,6 +185,15 @@ const ARTIFACT_PHASES: readonly Exclude<PresentationRunArtifactPhase, null>[] = 
 ];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+/** Durable records may retain pre-normalization uppercase UUID conversation ids. */
+const isPersistedPresentationConversationId = (value: unknown): value is string =>
+  normalizePresentationConversationId(value) !== null;
+
+const isSamePersistedPresentationConversation = (left: unknown, right: unknown): boolean => {
+  const normalizedLeft = normalizePresentationConversationId(left);
+  return normalizedLeft !== null && normalizedLeft === normalizePresentationConversationId(right);
+};
+
 function isIsoTimestamp(value: unknown): value is string {
   if (typeof value !== 'string') return false;
   const parsed = Date.parse(value);
@@ -195,7 +205,11 @@ function isIdentifier(value: unknown): value is string {
 }
 
 function isSameBinding(left: PresentationRunBinding, right: BindPresentationRunTurnInput): boolean {
-  return left.conversationId === right.conversationId && left.turnId === right.turnId && left.runtime === right.runtime;
+  return (
+    isSamePersistedPresentationConversation(left.conversationId, right.conversationId) &&
+    left.turnId === right.turnId &&
+    left.runtime === right.runtime
+  );
 }
 
 function assertArtifactTransition(current: PresentationRunArtifactPhase, next: PresentationRunArtifactPhase): void {
@@ -255,7 +269,7 @@ export function hasExactPresentationTerminalEvidence(run: PresentationRunManifes
   ];
   return (
     hasExactManifestKeys(runtime, runtimeKeys) &&
-    terminal.conversationId === run.conversationId &&
+    isSamePersistedPresentationConversation(terminal.conversationId, run.conversationId) &&
     typeof terminal.turnId === 'string' &&
     UUID_RE.test(terminal.turnId) &&
     isIsoTimestamp(terminal.eventObservedAt) &&
@@ -270,7 +284,7 @@ export function hasExactPresentationTerminalEvidence(run: PresentationRunManifes
     (!Object.hasOwn(runtime, 'task_status') || runtime.task_status === 'finished') &&
     run.binding !== null &&
     (run.binding.runtime === 'aionrs' || run.binding.runtime === 'acp') &&
-    terminal.conversationId === run.binding.conversationId &&
+    isSamePersistedPresentationConversation(terminal.conversationId, run.binding.conversationId) &&
     terminal.turnId === run.binding.turnId
   );
 }
@@ -727,7 +741,7 @@ export function assertPresentationRunManifestState(run: PresentationRunManifest)
     run.version !== 2 ||
     !UUID_RE.test(run.runId) ||
     !isIdentifier(run.clientRequestId) ||
-    !isIdentifier(run.conversationId) ||
+    !isPersistedPresentationConversationId(run.conversationId) ||
     !isIdentifier(run.selectedTemplateId) ||
     !Number.isSafeInteger(run.revision) ||
     run.revision < 0 ||
@@ -780,8 +794,7 @@ export function assertPresentationRunManifestState(run: PresentationRunManifest)
   }
   if (
     run.binding !== null &&
-    (!isIdentifier(run.binding.conversationId) ||
-      run.binding.conversationId !== run.conversationId ||
+    (!isSamePersistedPresentationConversation(run.binding.conversationId, run.conversationId) ||
       !isIdentifier(run.binding.turnId) ||
       !['aionrs', 'acp', null].includes(run.binding.runtime) ||
       !isIsoTimestamp(run.binding.boundAt) ||
@@ -973,7 +986,7 @@ export function bindPresentationRunTurn(
     }
     throw new Error('Presentation run is already bound to another turn');
   }
-  if (current.conversationId !== input.conversationId) {
+  if (!isSamePersistedPresentationConversation(current.conversationId, input.conversationId)) {
     throw new Error('Presentation run conversation does not match binding');
   }
   const manifest = transitionPresentationRunState(current, {
@@ -1045,18 +1058,27 @@ export type PresentationSourceDraftManifest = {
   boundAt: string | null;
 };
 
-export type PresentationSourceGrantTombstone = {
-  version: 2;
+type PresentationSourceGrantTombstoneBase = {
   recordType: 'presentation-source-grant-tombstone';
   revision: 0;
   grantId: string;
   owner: PresentationGrantOwner;
-  terminalState: 'consumed' | 'revoked' | 'expired';
   terminalAt: string;
   tombstonedAt: string;
   deleteAfter: string;
   lastRevision: number;
 };
+
+export type PresentationSourceGrantTombstone =
+  | (PresentationSourceGrantTombstoneBase & {
+      version: 2;
+      terminalState: 'consumed' | 'revoked' | 'expired';
+    })
+  | (PresentationSourceGrantTombstoneBase & {
+      version: 3;
+      terminalState: 'revoked';
+      queueUnboundAtRevoke: true;
+    });
 
 export type PresentationSourceDraftTombstone = {
   version: 2;
@@ -1112,8 +1134,7 @@ function isGrantOwner(value: unknown): value is PresentationGrantOwner {
     value.owner_type === 'conversation' &&
     hasExactManifestKeys(value, ['owner_type', 'conversation_id']) &&
     'conversation_id' in value &&
-    typeof value.conversation_id === 'string' &&
-    UUID_RE.test(value.conversation_id)
+    isPersistedPresentationConversationId(value.conversation_id)
   );
 }
 
@@ -1261,7 +1282,7 @@ export function assertPresentationSourceDraftManifest(value: PresentationSourceD
     !['active', 'bound'].includes(value.state) ||
     (value.state === 'active' && (value.boundConversationId !== null || value.boundAt !== null)) ||
     (value.state === 'bound' && (value.boundConversationId === null || value.boundAt === null)) ||
-    (value.boundConversationId !== null && !UUID_RE.test(value.boundConversationId))
+    (value.boundConversationId !== null && !isPersistedPresentationConversationId(value.boundConversationId))
   ) {
     throw new Error('Invalid presentation source draft manifest');
   }
@@ -1275,20 +1296,23 @@ export function assertPresentationSourceDraftManifest(value: PresentationSourceD
 }
 
 export function assertPresentationSourceGrantTombstone(value: PresentationSourceGrantTombstone): void {
+  const commonKeys = [
+    'version',
+    'recordType',
+    'revision',
+    'grantId',
+    'owner',
+    'terminalState',
+    'terminalAt',
+    'tombstonedAt',
+    'deleteAfter',
+    'lastRevision',
+  ];
+  const hasVersionedKeys =
+    (value.version === 2 && hasExactManifestKeys(value, commonKeys)) ||
+    (value.version === 3 && hasExactManifestKeys(value, [...commonKeys, 'queueUnboundAtRevoke']));
   if (
-    !hasExactManifestKeys(value, [
-      'version',
-      'recordType',
-      'revision',
-      'grantId',
-      'owner',
-      'terminalState',
-      'terminalAt',
-      'tombstonedAt',
-      'deleteAfter',
-      'lastRevision',
-    ]) ||
-    value.version !== 2 ||
+    !hasVersionedKeys ||
     value.recordType !== 'presentation-source-grant-tombstone' ||
     value.revision !== 0 ||
     !UUID_RE.test(value.grantId) ||
@@ -1297,6 +1321,9 @@ export function assertPresentationSourceGrantTombstone(value: PresentationSource
     !Number.isSafeInteger(value.lastRevision) ||
     value.lastRevision < 0
   ) {
+    throw new Error('Invalid presentation source grant tombstone');
+  }
+  if (value.version === 3 && (value.terminalState !== 'revoked' || value.queueUnboundAtRevoke !== true)) {
     throw new Error('Invalid presentation source grant tombstone');
   }
   assertOrderedTimestamps(value.terminalAt, value.tombstonedAt, value.deleteAfter);
@@ -1328,7 +1355,7 @@ export function assertPresentationSourceDraftTombstone(value: PresentationSource
     !Number.isSafeInteger(value.lastRevision) ||
     value.lastRevision < 0 ||
     (value.terminalState === 'bound') !== (value.boundConversationId !== null) ||
-    (value.boundConversationId !== null && !UUID_RE.test(value.boundConversationId))
+    (value.boundConversationId !== null && !isPersistedPresentationConversationId(value.boundConversationId))
   ) {
     throw new Error('Invalid presentation source draft tombstone');
   }

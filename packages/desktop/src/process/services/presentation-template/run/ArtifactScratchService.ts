@@ -7,6 +7,7 @@
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type { ArtifactScratchAllocation, ArtifactScratchResult } from '@/common/types/office/presentationTemplate';
 
 const MANIFEST_FILE = 'manifest.json';
@@ -36,6 +37,8 @@ export class ArtifactScratchService {
   }
 
   async allocate(input: { conversationId: string; templateId: string }): Promise<ArtifactScratchAllocation> {
+    const conversationId = normalizePresentationConversationId(input.conversationId);
+    if (conversationId === null) throw new Error('Invalid artifact scratch conversation id');
     await this.ensureRoot();
     const runId = randomUUID();
     const directory = this.resolveRunDirectory(runId);
@@ -44,7 +47,7 @@ export class ArtifactScratchService {
     await this.writeManifest(directory, {
       version: 1,
       runId,
-      conversationId: input.conversationId,
+      conversationId,
       templateId: input.templateId,
       createdAt: now,
       updatedAt: now,
@@ -109,10 +112,11 @@ export class ArtifactScratchService {
     const value = JSON.parse(
       await readFile(path.join(directory, MANIFEST_FILE), 'utf8')
     ) as Partial<ArtifactScratchManifest>;
-    if (value.version !== 1 || value.runId !== runId) {
+    const conversationId = normalizePresentationConversationId(value.conversationId);
+    if (value.version !== 1 || value.runId !== runId || conversationId === null) {
       throw new Error('Artifact scratch manifest does not match the requested run');
     }
-    return value as ArtifactScratchManifest;
+    return { ...(value as ArtifactScratchManifest), conversationId };
   }
 
   private async writeManifest(directory: string, manifest: ArtifactScratchManifest): Promise<void> {

@@ -19,15 +19,23 @@ import {
 import {
   INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE,
   INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE,
+  getNativeBridgePayloadDiagnostic,
   nativeBridgePayloadSchemas,
   parseNativeBridgePayload,
   parseRendererBridgeQueryRequest,
   parseRendererBridgeQueryResponse,
   rendererBridgeQuerySchemas,
 } from '@/common/adapter/native/payloadSchemas';
+import {
+  STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+} from '@/common/types/project/creativeStudioTypes';
 
 const VALID_PAYLOADS = {
   'restart-app': undefined,
+  'quit-app': undefined,
   'open-dev-tools': undefined,
   'is-dev-tools-opened': undefined,
   'app.get-path': { name: 'downloads' },
@@ -99,7 +107,7 @@ const VALID_PAYLOADS = {
   },
   'presentation-templates.remove': { id: 'template-1' },
   'presentation-templates.scratch.allocate': {
-    conversation_id: 'conversation-1',
+    conversation_id: 'd0921953',
     template_id: 'business-review',
   },
   'presentation-templates.scratch.complete': { run_id: '5a68fccc-7b90-49b4-88f9-d78bb88255ed' },
@@ -224,23 +232,110 @@ const VALID_PAYLOADS = {
   },
   'creative-studio.get-project': { projectId: 'project_1' },
   'creative-studio.get-brief-session-server': { projectId: 'project_1' },
-  'creative-studio.list-proposals': { projectId: 'project_1' },
-  'creative-studio.list-pending-reference-requests': { projectId: 'project_1' },
-  'creative-studio.dismiss-reference-requests': {
+  'creative-studio.get-director-session-authority': { projectId: 'project_1' },
+  'creative-studio.bind-director-conversation': {
     projectId: 'project_1',
-    requestIds: ['reference_request_1'],
+    expectedRevision: 1,
+    conversationId: 'conversation_1',
   },
+  'creative-studio.list-proposals': { projectId: 'project_1' },
   'creative-studio.accept-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
   'creative-studio.reject-proposal': { projectId: 'project_1', proposalId: 'proposal_1' },
-  'creative-studio.propose-storyboard': { projectId: 'project_1', expectedRevision: 1, replaceExisting: false },
-  'creative-studio.update-model-selection': {
+  'creative-studio.prepare-paid-recovery-proposal': {
     projectId: 'project_1',
-    expectedRevision: 2,
-    role: 'video',
-    selection: { choiceId: 'binding_1' },
+    proposalId: 'proposal_paid_recovery_1',
   },
-  'creative-studio.update-project': { projectId: 'project_1', expectedRevision: 1, name: 'Changed launch film' },
-  'creative-studio.set-brief-rules': {
+  'creative-studio.confirm-paid-recovery-proposal': {
+    projectId: 'project_1',
+    proposalId: 'proposal_paid_recovery_1',
+    quoteId: 'quote_paid_recovery_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.list-reference-requests': { projectId: 'project_1' },
+  'creative-studio.decide-reference-request': {
+    projectId: 'project_1',
+    requestId: 'reference_request_1',
+    expectedRevision: 1,
+    outcome: { kind: 'generation_gate' },
+  },
+  'creative-studio.list-reference-generation-handoffs': { projectId: 'project_1' },
+  'creative-studio.get-generation-capability': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+  },
+  'creative-studio.prepare-project-references': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    referenceIds: ['reference_character'],
+  },
+  'creative-studio.prepare-submission': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    originReferenceHandoffId: null,
+    baseChoices: [
+      {
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'video_take',
+      },
+    ],
+    cascadeChoices: [],
+  },
+  'creative-studio.confirm-submission': {
+    projectId: 'project_1',
+    quoteId: 'quote_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.cancel-job': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.retry-job': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+    acknowledgePossibleDuplicateCharge: false,
+  },
+  'creative-studio.retry-job-download': {
+    projectId: 'project_1',
+    jobId: 'job_1',
+    expectedRevision: 1,
+  },
+  'creative-studio.dismiss-reference-generation-handoff': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    handoffId: 'handoff_1',
+  },
+  'creative-studio.apply-authoring-batch': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    operations: [{ kind: 'set_brief', brief: 'A more precise launch story' }],
+  },
+  'creative-studio.undo-last': { projectId: 'project_1', expectedRevision: 1, entryId: 'undo_1' },
+  'creative-studio.get-project-workspace': { projectId: 'project_1' },
+  'creative-studio.get-project-status': { projectId: 'project_1', detail: true },
+  'creative-studio.analyze-shot-audio': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    shots: [{ shotId: 'shot_1', assetId: 'take_1' }],
+  },
+  'creative-studio.retry-conditioning-frame': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    dependentShotId: 'shot_2',
+  },
+  'creative-studio.cancel-waiting-cascade': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    dependentShotId: 'shot_2',
+  },
+  'creative-studio.edit-project': {
+    projectId: 'project_1',
+    expectedRevision: 1,
+    changes: { name: 'Changed launch film', targetDurationSeconds: 18 },
+  },
+  'creative-studio.set-rules': {
     projectId: 'project_1',
     expectedRevision: 1,
     rules: [
@@ -251,108 +346,60 @@ const VALID_PAYLOADS = {
       },
     ],
   },
-  'creative-studio.undo-brief-rules': { projectId: 'project_1' },
-  'creative-studio.bind-brief-conversation': {
+  'creative-studio.park-beat': { projectId: 'project_1', expectedRevision: 1, beatId: 'beat_1' },
+  'creative-studio.restore-beat': {
     projectId: 'project_1',
     expectedRevision: 1,
-    conversationId: 'conversation_brief',
+    beatId: 'beat_1',
+    beforeBeatId: null,
   },
-  'creative-studio.update-cut': {
+  'creative-studio.park-shot': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+  'creative-studio.restore-shot': {
     projectId: 'project_1',
     expectedRevision: 1,
-    cutId: 'cut_1',
-    cut: {
-      orderMode: 'storyboard',
-      clipOrder: ['clip_1'],
-      clips: {
-        clip_1: {
-          sourceInSeconds: 0.5,
-          sourceOutSeconds: 4.5,
-          crop: { x: 0.1, y: 0.1, width: 0.8, height: 0.8 },
-          filters: [{ id: 'contrast', amount: 0.25 }],
-        },
-      },
-    },
+    shotId: 'shot_1',
+    beforeShotId: null,
   },
-  'creative-studio.place-cut-scenes': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    cutId: 'cut_1',
-    sceneIds: ['scene_1'],
-    beforeClipId: null,
-  },
+  'creative-studio.reorder-bin': { projectId: 'project_1', expectedRevision: 1, bin: [] },
   'creative-studio.delete-project': { projectId: 'project_1', expectedRevision: 1 },
-  'creative-studio.update-scene': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    sceneId: 'scene_1',
-    scene: {
-      title: 'Opening',
-      purpose: 'Introduce the product',
-      visualPrompt: 'A cinematic product reveal',
-      narration: 'Meet the future.',
-      onScreenText: 'Meet the future',
-      mediaKind: 'video',
-      durationSeconds: 4,
-      referenceAssetId: null,
-    },
-  },
-  'creative-studio.reorder-scenes': { projectId: 'project_1', expectedRevision: 1, sceneOrder: ['scene_1'] },
-  'creative-studio.select-asset': {
-    projectId: 'project_1',
-    expectedRevision: 1,
-    sceneId: 'scene_1',
-    assetId: 'asset_1',
-  },
   'creative-studio.persist-captured-poster': {
     projectId: 'project_1',
-    sceneId: 'scene_1',
+    shotId: 'shot_1',
     videoAssetId: 'asset_1',
     dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
     width: 1280,
     height: 720,
   },
-  'creative-studio.choose-and-import-reference': {
-    projectId: 'project_1',
-    briefReferenceRole: 'cast',
-    expectedRevision: 1,
-  },
-  'creative-studio.detach-brief-reference': {
-    projectId: 'project_1',
-    assetId: 'asset_1',
-    expectedRevision: 1,
-  },
-  'creative-studio.choose-and-export-assets': { projectId: 'project_1', includeReferences: true },
-  'creative-studio.get-latest-render': { projectId: 'project_1' },
-  'creative-studio.render-cut': { projectId: 'project_1' },
-  'creative-studio.cancel-render': { projectId: 'project_1' },
-  'creative-studio.fit-storyboard': {
+  'creative-studio.import-seed-still': { projectId: 'project_1', expectedRevision: 1, shotId: 'shot_1' },
+  'creative-studio.import-reference-image': {
     projectId: 'project_1',
     expectedRevision: 1,
-    catalogVersion: '0123456789abcdef',
+    referenceId: 'reference_1',
   },
-  'creative-studio.submit-scenes': {
+  'creative-studio.import-bed-audio': { projectId: 'project_1', expectedRevision: 1 },
+  'creative-studio.detach-bed-audio': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
+  'creative-studio.set-bed': { projectId: 'project_1', expectedRevision: 1, assetId: 'asset_1' },
+  'creative-studio.create-export': {
     projectId: 'project_1',
     expectedRevision: 1,
-    mode: 'single',
-    sceneIds: ['scene_1'],
-    catalogVersion: '0123456789abcdef',
-    routes: [
-      {
-        sceneId: 'scene_1',
-        choiceId: 'binding_1',
-        kind: 'video',
-      },
-    ],
+    expectedCatalogRevision: 1,
+    shape: 'editor_folder',
   },
-  'creative-studio.cancel-job': { projectId: 'project_1', jobId: 'job_1', expectedRevision: 1 },
-  'creative-studio.retry-job': {
+  'creative-studio.get-film-export-capability': { projectId: 'project_1' },
+  'creative-studio.get-film-export-status': { projectId: 'project_1' },
+  'creative-studio.cancel-film-export': { projectId: 'project_1', renderId: 'film_1' },
+  'creative-studio.acknowledge-film-export': { projectId: 'project_1', renderId: 'film_1' },
+  'creative-studio.list-exports': { projectId: 'project_1' },
+  'creative-studio.copy-export': {
     projectId: 'project_1',
-    jobId: 'job_1',
-    expectedRevision: 1,
-    acknowledgePossibleDuplicateCharge: true,
+    expectedCatalogRevision: 1,
+    artifactId: 'export_1',
   },
-  'creative-studio.retry-download': { projectId: 'project_1', jobId: 'job_1', expectedRevision: 1 },
+  'creative-studio.reveal-export': {
+    projectId: 'project_1',
+    expectedCatalogRevision: 1,
+    artifactId: 'export_1',
+  },
   'creative-studio.list-connection-candidates': undefined,
   'creative-studio.list-connections': undefined,
   'creative-studio.validate-connection': {
@@ -450,6 +497,7 @@ const VALID_PAYLOADS = {
 
 const VOID_PROVIDER_KEYS = [
   'restart-app',
+  'quit-app',
   'open-dev-tools',
   'is-dev-tools-opened',
   'app.get-zoom-factor',
@@ -479,7 +527,7 @@ const VOID_PROVIDER_KEYS = [
   'webui.stop',
 ] as const satisfies ReadonlyArray<NativeBridgeProviderKey>;
 
-type InvalidPayloadCase = readonly [NativeBridgeProviderKey, string, unknown];
+type InvalidPayloadCase = readonly [string, string, unknown];
 
 const IPC_BRIDGE_PATH = resolve(process.cwd(), 'packages/desktop/src/common/adapter/ipcBridge.ts');
 const NATIVE_PAYLOAD_SCHEMAS_PATH = resolve(
@@ -974,80 +1022,267 @@ const INVALID_PAYLOADS = [
   ],
   [
     'creative-studio.create-project',
-    'overlong project name',
-    { ...VALID_PAYLOADS['creative-studio.create-project'], name: 'x'.repeat(257) },
+    'blank project name',
+    { ...VALID_PAYLOADS['creative-studio.create-project'], name: '   ' },
   ],
   [
     'creative-studio.create-project',
-    'overlong brief',
-    { ...VALID_PAYLOADS['creative-studio.create-project'], brief: 'x'.repeat(16 * 1024 + 1) },
+    'overlong project name',
+    { ...VALID_PAYLOADS['creative-studio.create-project'], name: 'x'.repeat(257) },
   ],
   [
     'creative-studio.create-project',
     'fractional project target',
     { ...VALID_PAYLOADS['creative-studio.create-project'], targetDurationSeconds: 12.5 },
   ],
-  [
-    'creative-studio.create-project',
-    'non-finite project target',
-    { ...VALID_PAYLOADS['creative-studio.create-project'], targetDurationSeconds: Number.POSITIVE_INFINITY },
-  ],
   ['creative-studio.get-project', 'project id traversal', { projectId: '../project_1' }],
-  ['creative-studio.choose-and-import-reference', 'missing expected revision', { projectId: 'project_1' }],
   [
-    'creative-studio.choose-and-import-reference',
-    'invalid Brief reference role',
-    { projectId: 'project_1', briefReferenceRole: 'subject', expectedRevision: 1 },
+    'creative-studio.bind-director-conversation',
+    'null Director conversation id',
+    { projectId: 'project_1', expectedRevision: 1, conversationId: null },
   ],
   [
-    'creative-studio.choose-and-import-reference',
-    'Brief role combined with a scene',
-    { projectId: 'project_1', sceneId: 'scene_1', briefReferenceRole: 'look', expectedRevision: 1 },
+    'creative-studio.bind-director-conversation',
+    'legacy Director binding field',
+    { projectId: 'project_1', expectedRevision: 1, briefConversationId: 'conversation_1' },
   ],
   [
-    'creative-studio.choose-and-import-reference',
-    'attempted source path',
-    { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
-  ],
-  [
-    'creative-studio.choose-and-import-reference',
-    'scene traversal',
-    { projectId: 'project_1', sceneId: '../scene_1', expectedRevision: 1 },
-  ],
-  [
-    'creative-studio.detach-brief-reference',
-    'missing expected revision',
-    { projectId: 'project_1', assetId: 'asset_1' },
-  ],
-  [
-    'creative-studio.detach-brief-reference',
-    'asset traversal',
-    { projectId: 'project_1', assetId: '../asset_1', expectedRevision: 1 },
-  ],
-  [
-    'creative-studio.detach-brief-reference',
-    'project traversal',
-    { projectId: '../project_1', assetId: 'asset_1', expectedRevision: 1 },
-  ],
-  [
-    'creative-studio.choose-and-export-assets',
-    'wrong include references boolean',
-    { projectId: 'project_1', includeReferences: 'yes' },
-  ],
-  [
-    'creative-studio.validate-connection',
-    'provider id traversal',
-    { providerId: '../provider', integrationId: 'integration_g7Q2mB4p', model: 'image' },
-  ],
-  [
-    'creative-studio.validate-connection',
-    'renderer supplied adapter identity',
+    'creative-studio.prepare-paid-recovery-proposal',
+    'renderer supplied quote authority during paid recovery preparation',
     {
-      providerId: 'provider_1',
-      integrationId: 'integration_g7Q2mB4p',
-      adapterId: 'weprompt-image-v1',
-      model: 'image',
+      ...VALID_PAYLOADS['creative-studio.prepare-paid-recovery-proposal'],
+      quoteId: 'quote_paid_recovery_1',
     },
+  ],
+  [
+    'creative-studio.confirm-paid-recovery-proposal',
+    'renderer supplied authorization authority during paid recovery confirmation',
+    {
+      ...VALID_PAYLOADS['creative-studio.confirm-paid-recovery-proposal'],
+      authorizationId: 'authorization_private',
+    },
+  ],
+  [
+    'creative-studio.confirm-paid-recovery-proposal',
+    'missing paid recovery proposal correlation',
+    {
+      projectId: 'project_1',
+      quoteId: 'quote_paid_recovery_1',
+      expectedRevision: 1,
+    },
+  ],
+  [
+    'creative-studio.prepare-project-references',
+    'empty project-reference scope',
+    { ...VALID_PAYLOADS['creative-studio.prepare-project-references'], referenceIds: [] },
+  ],
+  [
+    'creative-studio.prepare-project-references',
+    'duplicate project-reference scope',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      referenceIds: ['reference_character', 'reference_character'],
+    },
+  ],
+  [
+    'creative-studio.prepare-project-references',
+    'renderer supplied handoff correlation',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      originReferenceHandoffId: 'handoff_private',
+    },
+  ],
+  [
+    'creative-studio.prepare-submission',
+    'empty base choices',
+    { ...VALID_PAYLOADS['creative-studio.prepare-submission'], baseChoices: [] },
+  ],
+  [
+    'creative-studio.prepare-submission',
+    'renderer supplied request authority',
+    {
+      ...VALID_PAYLOADS['creative-studio.prepare-submission'],
+      baseChoices: [
+        {
+          ...VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0],
+          requestPlan: { kind: 'resolved', snapshot: { prompt: 'private' } },
+        },
+      ],
+    },
+  ],
+  [
+    'creative-studio.confirm-submission',
+    'renderer supplied authorization authority',
+    { ...VALID_PAYLOADS['creative-studio.confirm-submission'], authorizationId: 'authorization_1' },
+  ],
+  [
+    'creative-studio.dismiss-reference-generation-handoff',
+    'renderer supplied durable receipt',
+    { ...VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'], receipt: { kind: 'dismissed' } },
+  ],
+  [
+    'creative-studio.apply-authoring-batch',
+    'empty operation batch',
+    { projectId: 'project_1', expectedRevision: 1, operations: [] },
+  ],
+  [
+    'creative-studio.apply-authoring-batch',
+    'renderer supplied reducer envelope',
+    {
+      schemaVersion: 3,
+      projectId: 'project_1',
+      expectedRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'x' }],
+    },
+  ],
+  [
+    'creative-studio.apply-authoring-batch',
+    'renderer supplied reducer context',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'x' }],
+      mutationId: 'renderer_owned',
+      capturedAt: '2026-08-19T00:00:00.000Z',
+    },
+  ],
+  [
+    'creative-studio.edit-project',
+    'empty project changes',
+    { projectId: 'project_1', expectedRevision: 1, changes: {} },
+  ],
+  [
+    'creative-studio.set-rules',
+    'renderer supplied canonical rule fields',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: [{ id: 'rule_1', text: 'x', predicate: null, scope: 'project', createdAt: 'now' }],
+    },
+  ],
+  [
+    'creative-studio.set-rules',
+    'duplicate rule ids',
+    {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      rules: [
+        { id: 'rule_1', text: 'x', predicate: null },
+        { id: 'rule_1', text: 'y', predicate: null },
+      ],
+    },
+  ],
+  [
+    'creative-studio.decide-reference-request',
+    'renderer supplied authorization id',
+    {
+      projectId: 'project_1',
+      requestId: 'request_1',
+      expectedRevision: 1,
+      outcome: { kind: 'generation_gate', authorizationId: 'secret' },
+    },
+  ],
+  [
+    'creative-studio.import-seed-still',
+    'renderer supplied source path',
+    { projectId: 'project_1', shotId: 'shot_1', expectedRevision: 1, sourcePath: '/tmp/reference.png' },
+  ],
+  [
+    'creative-studio.import-seed-still',
+    'renderer supplied asset id',
+    { projectId: 'project_1', shotId: 'shot_1', expectedRevision: 1, assetId: 'asset_1' },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'renderer supplied source path',
+    {
+      projectId: 'project_1',
+      referenceId: 'reference_1',
+      expectedRevision: 1,
+      sourcePath: '/tmp/reference.png',
+    },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'renderer supplied asset id',
+    { projectId: 'project_1', referenceId: 'reference_1', expectedRevision: 1, assetId: 'asset_1' },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'missing semantic reference id',
+    { projectId: 'project_1', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.import-reference-image',
+    'unsafe semantic reference id',
+    { projectId: 'project_1', referenceId: '../reference', expectedRevision: 1 },
+  ],
+  [
+    'creative-studio.import-bed-audio',
+    'renderer supplied source path',
+    { projectId: 'project_1', expectedRevision: 1, sourcePath: '/tmp/bed.wav' },
+  ],
+  [
+    'creative-studio.import-bed-audio',
+    'renderer supplied media facts',
+    { projectId: 'project_1', expectedRevision: 1, durationSeconds: 12, mimeType: 'audio/wav' },
+  ],
+  ['creative-studio.detach-bed-audio', 'missing asset id', { projectId: 'project_1', expectedRevision: 1 }],
+  [
+    'creative-studio.detach-bed-audio',
+    'unsafe asset id',
+    { projectId: 'project_1', expectedRevision: 1, assetId: '../bed' },
+  ],
+  ['creative-studio.set-bed', 'missing asset identity', { projectId: 'project_1', expectedRevision: 1 }],
+  [
+    'creative-studio.create-export',
+    'missing catalog revision',
+    { projectId: 'project_1', expectedRevision: 1, shape: 'editor_folder' },
+  ],
+  [
+    'creative-studio.create-export',
+    'still without an active shot identity',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'still' },
+  ],
+  [
+    'creative-studio.create-export',
+    'stitched export shape',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'stitched' },
+  ],
+  [
+    'creative-studio.create-export',
+    'film without renderer-owned render identity and exact options',
+    { projectId: 'project_1', expectedRevision: 1, expectedCatalogRevision: 1, shape: 'film' },
+  ],
+  [
+    'creative-studio.copy-export',
+    'renderer supplied destination path',
+    {
+      projectId: 'project_1',
+      expectedCatalogRevision: 1,
+      artifactId: 'export_1',
+      destinationPath: '/tmp/export',
+    },
+  ],
+  [
+    'creative-studio.reveal-export',
+    'renderer supplied managed name',
+    {
+      projectId: 'project_1',
+      expectedCatalogRevision: 1,
+      artifactId: 'export_1',
+      fileName: 'managed-export',
+    },
+  ],
+  [
+    'creative-studio.persist-captured-poster',
+    'legacy scene identity',
+    { ...VALID_PAYLOADS['creative-studio.persist-captured-poster'], shotId: undefined, sceneId: 'scene_1' },
+  ],
+  [
+    'creative-studio.persist-captured-poster',
+    'non-PNG data URL',
+    { ...VALID_PAYLOADS['creative-studio.persist-captured-poster'], dataUrl: 'data:image/jpeg;base64,/9j/' },
   ],
   [
     'creative-studio.validate-connection',
@@ -1066,422 +1301,6 @@ const INVALID_PAYLOADS = [
   ],
   ['creative-studio.remove-connection', 'connection traversal', { bindingId: '../binding_1' }],
   ['creative-studio.list-routes', 'project traversal', { projectId: '../project_1' }],
-  [
-    'creative-studio.propose-storyboard',
-    'project id traversal',
-    { projectId: '../project_1', expectedRevision: 1, replaceExisting: false },
-  ],
-  [
-    'creative-studio.propose-storyboard',
-    'zero expected revision',
-    { projectId: 'project_1', expectedRevision: 0, replaceExisting: false },
-  ],
-  [
-    'creative-studio.propose-storyboard',
-    'fractional expected revision',
-    { projectId: 'project_1', expectedRevision: 1.5, replaceExisting: false },
-  ],
-  [
-    'creative-studio.propose-storyboard',
-    'infinite expected revision',
-    { projectId: 'project_1', expectedRevision: Number.POSITIVE_INFINITY, replaceExisting: false },
-  ],
-  ['creative-studio.propose-storyboard', 'missing replace option', { projectId: 'project_1', expectedRevision: 1 }],
-  [
-    'creative-studio.propose-storyboard',
-    'renderer supplied provider choice',
-    { projectId: 'project_1', expectedRevision: 1, replaceExisting: false, providerId: 'provider_1' },
-  ],
-  [
-    'creative-studio.propose-storyboard',
-    'renderer supplied model choice',
-    { projectId: 'project_1', expectedRevision: 1, replaceExisting: false, model: 'model_1' },
-  ],
-  [
-    'creative-studio.propose-storyboard',
-    'renderer supplied prompt',
-    { projectId: 'project_1', expectedRevision: 1, replaceExisting: false, prompt: 'override' },
-  ],
-  [
-    'creative-studio.update-project',
-    'missing expected revision',
-    { projectId: 'project_1', name: 'Changed launch film' },
-  ],
-  ['creative-studio.set-brief-rules', 'missing expected revision', { projectId: 'project_1', rules: [] }],
-  [
-    'creative-studio.set-brief-rules',
-    'unknown predicate kind',
-    {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      rules: [{ id: 'rule_1', text: 'x', predicate: { kind: 'regex', terms: ['x'] } }],
-    },
-  ],
-  [
-    'creative-studio.set-brief-rules',
-    'too many rules',
-    {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      rules: Array.from({ length: 25 }, (_, index) => ({ id: `rule_${index}`, text: 'x', predicate: null })),
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'project id traversal',
-    { ...VALID_PAYLOADS['creative-studio.update-model-selection'], projectId: '../project_1' },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'choice id traversal',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-model-selection'],
-      selection: { choiceId: '../binding_1' },
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'missing expected revision',
-    { ...VALID_PAYLOADS['creative-studio.update-model-selection'], expectedRevision: undefined },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'zero expected revision',
-    { ...VALID_PAYLOADS['creative-studio.update-model-selection'], expectedRevision: 0 },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'fractional expected revision',
-    { ...VALID_PAYLOADS['creative-studio.update-model-selection'], expectedRevision: 1.5 },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'storyboard adapter',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'storyboard',
-      selection: {
-        providerId: 'provider_1',
-        adapterId: 'weprompt-media-gateway-v1',
-        model: 'gpt-4o',
-      },
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'media selection without opaque choice',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'video',
-      selection: {},
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'media selection with adapter identity',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'image',
-      selection: {
-        choiceId: 'binding_1',
-        adapterId: 'weprompt-media-gateway-v1',
-      },
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'media selection with provider and model override',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'video',
-      selection: {
-        choiceId: 'binding_1',
-        providerId: 'provider_1',
-        model: 'video-model',
-      },
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'overlong model',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'storyboard',
-      selection: { providerId: 'provider_1', model: 'x'.repeat(257) },
-    },
-  ],
-  [
-    'creative-studio.update-model-selection',
-    'control character in model',
-    {
-      projectId: 'project_1',
-      expectedRevision: 2,
-      role: 'storyboard',
-      selection: { providerId: 'provider_1', model: 'open\u0000sora' },
-    },
-  ],
-  [
-    'creative-studio.update-project',
-    'non-positive expected revision',
-    { projectId: 'project_1', expectedRevision: 0, name: 'Changed launch film' },
-  ],
-  ['creative-studio.delete-project', 'missing expected revision', { projectId: 'project_1' }],
-  ['creative-studio.delete-project', 'traversal project id', { projectId: '../../project_1', expectedRevision: 1 }],
-  [
-    'creative-studio.update-scene',
-    'overlong scene title',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-scene'],
-      scene: { ...VALID_PAYLOADS['creative-studio.update-scene'].scene, title: 'x'.repeat(257) },
-    },
-  ],
-  [
-    'creative-studio.update-scene',
-    'overlong visual prompt',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-scene'],
-      scene: { ...VALID_PAYLOADS['creative-studio.update-scene'].scene, visualPrompt: 'x'.repeat(8 * 1024 + 1) },
-    },
-  ],
-  [
-    'creative-studio.update-scene',
-    'overlong narration',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-scene'],
-      scene: { ...VALID_PAYLOADS['creative-studio.update-scene'].scene, narration: 'x'.repeat(4 * 1024 + 1) },
-    },
-  ],
-  [
-    'creative-studio.update-scene',
-    'overlong on-screen text',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-scene'],
-      scene: { ...VALID_PAYLOADS['creative-studio.update-scene'].scene, onScreenText: 'x'.repeat(1024 + 1) },
-    },
-  ],
-  [
-    'creative-studio.update-scene',
-    'fractional scene duration',
-    {
-      ...VALID_PAYLOADS['creative-studio.update-scene'],
-      scene: { ...VALID_PAYLOADS['creative-studio.update-scene'].scene, durationSeconds: 1.5 },
-    },
-  ],
-  [
-    'creative-studio.update-scene',
-    'scene id traversal',
-    { ...VALID_PAYLOADS['creative-studio.update-scene'], sceneId: '../scene_1' },
-  ],
-  ...(['id', 'selectedAssetId', 'assetIds', 'jobIds', 'reviewState'] as const).map(
-    (field) =>
-      [
-        'creative-studio.update-scene',
-        `renderer supplied operational scene field ${field}`,
-        {
-          ...VALID_PAYLOADS['creative-studio.update-scene'],
-          scene: {
-            ...VALID_PAYLOADS['creative-studio.update-scene'].scene,
-            [field]:
-              field === 'id'
-                ? 'scene_1'
-                : field === 'selectedAssetId'
-                  ? null
-                  : field === 'reviewState'
-                    ? 'complete'
-                    : [],
-          },
-        },
-      ] as const
-  ),
-  [
-    'creative-studio.reorder-scenes',
-    'duplicate scene ids',
-    { projectId: 'project_1', expectedRevision: 1, sceneOrder: ['scene_1', 'scene_1'] },
-  ],
-  [
-    'creative-studio.reorder-scenes',
-    'empty scene ids',
-    { projectId: 'project_1', expectedRevision: 1, sceneOrder: [] },
-  ],
-  [
-    'creative-studio.reorder-scenes',
-    'too many scene ids',
-    {
-      projectId: 'project_1',
-      expectedRevision: 1,
-      sceneOrder: Array.from({ length: 25 }, (_, index) => `scene_${index}`),
-    },
-  ],
-  [
-    'creative-studio.select-asset',
-    'missing expected revision',
-    { projectId: 'project_1', sceneId: 'scene_1', assetId: 'asset_1' },
-  ],
-  [
-    'creative-studio.select-asset',
-    'asset id traversal',
-    { projectId: 'project_1', expectedRevision: 1, sceneId: 'scene_1', assetId: '../../asset_1' },
-  ],
-  [
-    'creative-studio.persist-captured-poster',
-    'non-PNG data URL',
-    { ...VALID_PAYLOADS['creative-studio.persist-captured-poster'], dataUrl: 'data:image/jpeg;base64,/9j/' },
-  ],
-  [
-    'creative-studio.persist-captured-poster',
-    'video asset traversal',
-    { ...VALID_PAYLOADS['creative-studio.persist-captured-poster'], videoAssetId: '../../asset_1' },
-  ],
-  [
-    'creative-studio.persist-captured-poster',
-    'zero width',
-    { ...VALID_PAYLOADS['creative-studio.persist-captured-poster'], width: 0 },
-  ],
-  [
-    'creative-studio.fit-storyboard',
-    'uppercase catalog version',
-    { projectId: 'project_1', expectedRevision: 1, catalogVersion: 'ABCDEF0123456789' },
-  ],
-  [
-    'creative-studio.fit-storyboard',
-    'wrong-length catalog version',
-    { projectId: 'project_1', expectedRevision: 1, catalogVersion: 'abcdef012345678' },
-  ],
-  [
-    'creative-studio.fit-storyboard',
-    'non-hex catalog version',
-    { projectId: 'project_1', expectedRevision: 1, catalogVersion: 'gggggggggggggggg' },
-  ],
-  [
-    'creative-studio.fit-storyboard',
-    'non-positive expected revision',
-    { projectId: 'project_1', expectedRevision: 0, catalogVersion: '0123456789abcdef' },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'missing catalog version',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      catalogVersion: undefined,
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'missing required generation mode',
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], mode: undefined },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'unknown generation mode',
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], mode: 'all' },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'single mode with multiple scene and route selections',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      sceneIds: ['scene_1', 'scene_2'],
-      routes: [
-        ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
-        { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
-      ],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'duplicate scene ids',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      sceneIds: ['scene_1', 'scene_1'],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'route set does not match selected scenes',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      routes: [
-        {
-          ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes[0],
-          sceneId: 'scene_2',
-        },
-      ],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'renderer supplied adapter identity',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      routes: [
-        {
-          ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes[0],
-          adapterId: 'weprompt-media-gateway-v1',
-        },
-      ],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'renderer supplied provider URL',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      routes: [
-        {
-          ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes[0],
-          baseUrl: 'https://signed.invalid/output',
-        },
-      ],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'reference prompt without a reference output role',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'reference output role with no prompt to paint',
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'reference' },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'reference prompt naming a scene outside the submission',
-    {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      outputRole: 'reference',
-      referencePrompts: [{ sceneId: 'scene_2', prompt: 'A close-up of the product label' }],
-    },
-  ],
-  [
-    'creative-studio.submit-scenes',
-    'unknown output role',
-    { ...VALID_PAYLOADS['creative-studio.submit-scenes'], outputRole: 'poster' },
-  ],
-  ['creative-studio.cancel-job', 'missing expected revision', { projectId: 'project_1', jobId: 'job_1' }],
-  [
-    'creative-studio.retry-job',
-    'non-boolean duplicate charge acknowledgement',
-    {
-      projectId: 'project_1',
-      jobId: 'job_1',
-      expectedRevision: 1,
-      acknowledgePossibleDuplicateCharge: 'yes',
-    },
-  ],
-  [
-    'creative-studio.retry-download',
-    'non-positive expected revision',
-    { projectId: 'project_1', jobId: 'job_1', expectedRevision: 0 },
-  ],
   ['app-operations.cancel', 'omitted operation identifier', {}],
   ['office-artifact.get-state', 'omitted workspace', { filePath: '/tmp/work/report.docx' }],
   ['office-artifact.prepare-preview', 'omitted file path', { workspace: '/tmp/work' }],
@@ -1593,215 +1412,719 @@ const INVALID_PAYLOADS = [
 ] satisfies ReadonlyArray<InvalidPayloadCase>;
 
 describe('native bridge payload schemas', () => {
-  it.each(['creative-studio.render-cut', 'creative-studio.cancel-render'])(
-    'defines a strict project request schema for %s',
-    (providerKey) => {
-      const schema = (
-        nativeBridgePayloadSchemas as Record<string, { safeParse(value: unknown): { success: boolean } }>
-      )[providerKey];
+  const authoringOperations = [
+    { kind: 'set_brief', brief: 'A launch story' },
+    {
+      kind: 'set_reference_plan',
+      references: [
+        { kind: 'character', label: 'Ming', prompt: 'Ming in a navy jacket.' },
+        { kind: 'background', label: 'Dai pai dong', prompt: 'A neon food stall.' },
+      ],
+    },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ kind: 'background', label: 'Night market', prompt: 'A recurring neon night market.' }],
+    },
+    { kind: 'set_reference_prompt', referenceId: 'ming', prompt: 'Ming in a navy jacket, neutral turnaround.' },
+    { kind: 'select_reference_image', referenceId: 'ming', assetId: 'asset_ming_previous' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: 'asset_ming_current' },
+    {
+      kind: 'set_shot_reference_binding',
+      shotId: 'shot_1',
+      characterReferenceIds: ['ming'],
+      backgroundReferenceId: 'dai_pai_dong',
+    },
+    {
+      kind: 'add_beat',
+      beatId: 'beat_1',
+      beat: { title: 'Opening', story: 'Ming sees Mei across the dai-pai-dong.', targetSeconds: 6 },
+      beforeBeatId: null,
+    },
+    { kind: 'edit_beat', beatId: 'beat_1', changes: { title: 'New opening' } },
+    { kind: 'reorder_beats', beatOrder: ['beat_1'] },
+    {
+      kind: 'add_binned_beat',
+      beatId: 'beat_2',
+      beat: { title: 'Alternate', story: '', targetSeconds: null },
+    },
+    {
+      kind: 'add_shot',
+      beatId: 'beat_1',
+      shotId: 'shot_1',
+      shot: { shootingScript: 'Wide reveal of Ming at the food stall.', durationSeconds: 4 },
+      beforeShotId: null,
+    },
+    { kind: 'edit_shot', shotId: 'shot_1', changes: { shootingScript: 'Updated reveal' } },
+    { kind: 'delete_shot', shotId: 'shot_1' },
+    { kind: 'reorder_shots', beatId: 'beat_1', shotOrder: ['shot_1'] },
+    { kind: 'set_hard_cut', shotId: 'shot_1', hardCut: true },
+    { kind: 'set_seed_still', shotId: 'shot_1', assetId: null },
+    { kind: 'promote_board_panel', shotId: 'shot_1', boardAssetId: 'board_1' },
+    { kind: 'trim_shot', shotId: 'shot_1', trimInSeconds: null, trimOutSeconds: null },
+    { kind: 'set_routes', imageRouteId: null, videoRouteId: null },
+    { kind: 'set_spend_policy', policy: null },
+  ] as const;
 
-      expect(schema).toBeDefined();
-      expect(schema?.safeParse({ projectId: 'project_1' }).success).toBe(true);
-      expect(schema?.safeParse({ projectId: 'project_1', injected: true }).success).toBe(false);
-    }
-  );
+  const forbiddenAuthoringOperations = [
+    { kind: 'edit_project', changes: { name: 'x' } },
+    { kind: 'set_rules', rules: [] },
+    { kind: 'park_beat', beatId: 'beat_1' },
+    { kind: 'restore_beat', beatId: 'beat_1', beforeBeatId: null },
+    { kind: 'park_shot', shotId: 'shot_1' },
+    { kind: 'restore_shot', shotId: 'shot_1', beforeShotId: null },
+    { kind: 'apply_coverage', beatId: 'beat_1', shots: [], fixedShots: [] },
+    { kind: 'set_shot_background_reference', shotId: 'shot_1', referenceId: 'reference_background' },
+    { kind: 'redetach_line', shotId: 'shot_1', line: 'x' },
+    { kind: 'restore_line', shotId: 'shot_1', historyEntryId: 'history_1' },
+    { kind: 'rederive_line', shotId: 'shot_1', line: 'x' },
+    { kind: 'park_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'add_alternate_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'restore_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'select_video_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'remove_video_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'reorder_bin', bin: [] },
+    { kind: 'select_take', shotId: 'shot_1', assetId: 'asset_1' },
+    { kind: 'set_match_to', shotId: null },
+    { kind: 'set_bed', assetId: null },
+    { kind: 'undo_last', entryId: 'undo_1' },
+  ] as const;
+
+  it.each(authoringOperations)('accepts renderer authoring operation $kind', (operation) => {
+    const payload = { projectId: 'project_1', expectedRevision: 1, operations: [operation] };
+    expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', payload)).toEqual(payload);
+  });
 
   it.each([
-    ['creative-studio.list-proposals', { projectId: 'project_1' }],
-    ['creative-studio.accept-proposal', { projectId: 'project_1', proposalId: 'proposal_1' }],
-    ['creative-studio.reject-proposal', { projectId: 'project_1', proposalId: 'proposal_1' }],
-  ])('defines a strict native schema for %s', (providerKey, payload) => {
+    { kind: 'remove_reference_image', referenceId: '', assetId: 'asset_ming_current' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: '' },
+    { kind: 'remove_reference_image', referenceId: 'ming', assetId: 'asset_ming_current', deleteFile: true },
+  ])('rejects an unsafe reference-image removal envelope %#', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('rejects a Director-supplied semantic reference id', () => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [
+          {
+            kind: 'set_reference_plan',
+            references: [
+              { id: 'director_owned_id', kind: 'character', label: 'Ming', prompt: 'Ming in a navy jacket.' },
+            ],
+          },
+        ],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    { kind: 'amend_reference_plan', additions: [] },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ kind: 'character', label: 'Mei', prompt: 'Mei character sheet.' }],
+    },
+    {
+      kind: 'amend_reference_plan',
+      additions: [{ id: 'caller_owned', kind: 'background', label: 'Market', prompt: 'A market.' }],
+    },
+    {
+      kind: 'amend_reference_plan',
+      additions: [
+        { kind: 'background', label: 'Market', prompt: 'A market.' },
+        { kind: 'background', label: 'Market', prompt: 'A duplicate market.' },
+      ],
+    },
+  ])('rejects invalid reference-plan amendment %#', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('preserves the reviewed order of mixed Beat and Shot Bin entries', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      bin: [
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'alternate' as const },
+        { kind: 'shot' as const, beatId: 'beat_1', shotId: 'shot_1', reason: 'lifted' as const },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.reorder-bin', payload)).toEqual(payload);
+  });
+
+  it('rejects duplicate bin identities even when their disposition differs', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      bin: [
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'lifted' as const },
+        { kind: 'beat' as const, beatId: 'beat_1', reason: 'alternate' as const },
+      ],
+    };
+
+    expect(() => parseNativeBridgePayload('creative-studio.reorder-bin', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('distinguishes an ordinary zero trim from negative zero at the IPC boundary', () => {
+    const zeroTrimPayload = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'trim_shot' as const, shotId: 'shot_1', trimInSeconds: 0, trimOutSeconds: null }],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.apply-authoring-batch', zeroTrimPayload)).toEqual(zeroTrimPayload);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        ...zeroTrimPayload,
+        operations: [{ ...zeroTrimPayload.operations[0], trimInSeconds: -0 }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each(forbiddenAuthoringOperations)('rejects catalog-only authoring operation $kind', (operation) => {
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: [operation],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('enforces 1/N/N+1 authoring counts and rejects sparse arrays', () => {
+    const operation = { kind: 'set_brief' as const, brief: 'x' };
+    for (const count of [1, 32]) {
+      expect(() =>
+        parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+          projectId: 'project_1',
+          expectedRevision: 1,
+          operations: Array.from({ length: count }, () => operation),
+        })
+      ).not.toThrow();
+    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: Array.from({ length: 33 }, () => operation),
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+
+    const sparse: unknown[] = [];
+    sparse.length = 1;
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        operations: sparse,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    ['creative-studio.get-project-workspace', { projectId: 'project_1' }],
+    ['creative-studio.get-project-status', { projectId: 'project_1', detail: true }],
+    [
+      'creative-studio.analyze-shot-audio',
+      { projectId: 'project_1', expectedRevision: 1, shots: [{ shotId: 'shot_1', assetId: 'take_1' }] },
+    ],
+    [
+      'creative-studio.retry-conditioning-frame',
+      { projectId: 'project_1', expectedRevision: 1, dependentShotId: 'shot_2' },
+    ],
+    [
+      'creative-studio.cancel-waiting-cascade',
+      { projectId: 'project_1', expectedRevision: 1, dependentShotId: 'shot_2' },
+    ],
+  ] as const)('defines exact keys for %s', (providerKey, payload) => {
     const schema = (nativeBridgePayloadSchemas as Record<string, { safeParse(value: unknown): { success: boolean } }>)[
       providerKey
     ];
-
-    expect(schema).toBeDefined();
     expect(schema?.safeParse(payload).success).toBe(true);
-    expect(schema?.safeParse({ ...payload, injected: true }).success).toBe(false);
+    expect(schema?.safeParse({ ...payload, jobId: 'internal_job' }).success).toBe(false);
   });
 
-  it('guards the dedicated Brief conversation binding command', () => {
-    const schema = nativeBridgePayloadSchemas['creative-studio.bind-brief-conversation'];
-
-    expect(
-      schema.safeParse({
-        projectId: 'studio_1',
-        expectedRevision: 2,
-        conversationId: 'conversation_brief',
-      }).success
-    ).toBe(true);
-    expect(
-      schema.safeParse({
-        projectId: 'studio_1',
-        expectedRevision: 0,
-        conversationId: '../conversation',
-      }).success
-    ).toBe(false);
-  });
-
-  it('accepts only paired exact authority for checked reference-request consumption', () => {
-    const checked = {
+  it('requires a non-empty, unique, exact Shot audio analysis batch', () => {
+    const base = {
       projectId: 'project_1',
-      requestIds: ['reference_request_1'],
-      expectedRevision: 2,
-      expectedRequests: [{ id: 'reference_request_1', sceneId: 'scene_1' }],
+      expectedRevision: 1,
+      shots: [{ shotId: 'shot_1', assetId: 'take_1' }],
     };
+    expect(parseNativeBridgePayload('creative-studio.analyze-shot-audio', base)).toEqual(base);
 
-    expect(parseNativeBridgePayload('creative-studio.dismiss-reference-requests', checked)).toEqual(checked);
-    expect(() =>
-      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
-        projectId: checked.projectId,
-        requestIds: checked.requestIds,
-        expectedRevision: checked.expectedRevision,
-      })
-    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
-    expect(() =>
-      parseNativeBridgePayload('creative-studio.dismiss-reference-requests', {
-        ...checked,
-        expectedRequests: [{ id: 'reference_request_other', sceneId: 'scene_1' }],
-      })
-    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    for (const payload of [
+      { ...base, shots: [] },
+      { ...base, shots: [...base.shots, { shotId: 'shot_1', assetId: 'take_2' }] },
+      { ...base, shots: [{ ...base.shots[0], internal: true }] },
+      { ...base, shots: [{ shotId: '', assetId: 'take_1' }] },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.analyze-shot-audio', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
   });
 
-  it('accepts a single-mode reference output submission with a reference prompt', () => {
-    const payload = {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      outputRole: 'reference',
-      referencePrompts: [{ sceneId: 'scene_1', prompt: 'A close-up of the product label' }],
-    };
-
-    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
+  it('rejects an inherited Creative Studio project-status detail option', () => {
+    const payload = Object.assign(Object.create({ detail: true }) as object, { projectId: 'project_1' });
+    expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
   });
 
-  it('accepts a batch reference submission across multiple scenes', () => {
-    const payload = {
-      ...VALID_PAYLOADS['creative-studio.submit-scenes'],
-      mode: 'batch',
-      sceneIds: ['scene_1', 'scene_2'],
-      outputRole: 'reference',
-      routes: [
-        ...VALID_PAYLOADS['creative-studio.submit-scenes'].routes,
-        { sceneId: 'scene_2', choiceId: 'binding_2', kind: 'video' },
-      ],
-      referencePrompts: [
-        { sceneId: 'scene_1', prompt: 'A close-up of the product label' },
-        { sceneId: 'scene_2', prompt: 'A wide shot of the empty workshop' },
-      ],
-    };
-
-    expect(parseNativeBridgePayload('creative-studio.submit-scenes', payload)).toEqual(payload);
+  it('rejects an inherited Creative Studio project-status project id', () => {
+    const payload = Object.assign(Object.create({ projectId: 'project_1' }) as object, { detail: true });
+    expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
   });
 
-  it('accepts an empty Studio scene title for display-only seeded placeholders', () => {
-    const payload = VALID_PAYLOADS['creative-studio.update-scene'];
-
+  it('accepts only the bounded Creative Studio project-status detail variants', () => {
+    expect(parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1' })).toEqual({
+      projectId: 'project_1',
+    });
     expect(
-      parseNativeBridgePayload('creative-studio.update-scene', {
-        ...payload,
-        scene: { ...payload.scene, title: '' },
-      })
-    ).toMatchObject({ scene: { title: '' } });
-  });
-
-  it('accepts the exact revisioned Studio video model-selection payload', () => {
+      parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1', detail: false })
+    ).toEqual({ projectId: 'project_1', detail: false });
     expect(
-      parseNativeBridgePayload(
-        'creative-studio.update-model-selection',
-        VALID_PAYLOADS['creative-studio.update-model-selection']
-      )
-    ).toEqual(VALID_PAYLOADS['creative-studio.update-model-selection']);
-  });
-
-  it('accepts only renderer-owned edit decisions in a cut mutation payload', () => {
-    const schema = nativeBridgePayloadSchemas['creative-studio.update-cut' as NativeBridgeProviderKey];
-    const payload = VALID_PAYLOADS['creative-studio.update-cut'];
-
-    expect(schema?.safeParse(payload).success).toBe(true);
-    expect(
-      schema?.safeParse({
-        ...payload,
-        cut: {
-          ...payload.cut,
-          clips: {
-            clip_1: {
-              ...payload.cut.clips.clip_1,
-              assetId: 'renderer_must_not_supply_this',
-            },
-          },
-        },
-      }).success
-    ).toBe(false);
+      parseNativeBridgePayload('creative-studio.get-project-status', { projectId: 'project_1', detail: true })
+    ).toEqual({ projectId: 'project_1', detail: true });
+    for (const payload of [
+      { projectId: 'project_1', detail: 'true' },
+      { projectId: '../project_1' },
+      { projectId: '' },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.get-project-status', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
   });
 
   it.each([
+    ['empty project id', { projectId: '', expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['traversing project id', { projectId: '../project_1', expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['overlong project id', { projectId: 'p'.repeat(257), expectedRevision: 1, conversationId: 'conversation_1' }],
+    ['empty conversation id', { projectId: 'project_1', expectedRevision: 1, conversationId: '' }],
     [
-      'unknown filter',
-      {
-        ...VALID_PAYLOADS['creative-studio.update-cut'],
-        cut: {
-          ...VALID_PAYLOADS['creative-studio.update-cut'].cut,
-          clips: {
-            clip_1: {
-              ...VALID_PAYLOADS['creative-studio.update-cut'].cut.clips.clip_1,
-              filters: [{ id: 'blur', amount: 0.25 }],
-            },
-          },
-        },
-      },
+      'traversing conversation id',
+      { projectId: 'project_1', expectedRevision: 1, conversationId: '../conversation_1' },
     ],
+    ['overlong conversation id', { projectId: 'project_1', expectedRevision: 1, conversationId: 'c'.repeat(257) }],
+    ['zero revision', { projectId: 'project_1', expectedRevision: 0, conversationId: 'conversation_1' }],
+    ['negative revision', { projectId: 'project_1', expectedRevision: -1, conversationId: 'conversation_1' }],
+    ['fractional revision', { projectId: 'project_1', expectedRevision: 1.5, conversationId: 'conversation_1' }],
     [
-      'duplicate filter',
-      {
-        ...VALID_PAYLOADS['creative-studio.update-cut'],
-        cut: {
-          ...VALID_PAYLOADS['creative-studio.update-cut'].cut,
-          clips: {
-            clip_1: {
-              ...VALID_PAYLOADS['creative-studio.update-cut'].cut.clips.clip_1,
-              filters: [
-                { id: 'contrast', amount: 0.1 },
-                { id: 'contrast', amount: 0.2 },
-              ],
-            },
-          },
-        },
-      },
+      'unsafe integer revision',
+      { projectId: 'project_1', expectedRevision: Number.MAX_SAFE_INTEGER + 1, conversationId: 'conversation_1' },
     ],
-    [
-      'out-of-frame crop',
-      {
-        ...VALID_PAYLOADS['creative-studio.update-cut'],
-        cut: {
-          ...VALID_PAYLOADS['creative-studio.update-cut'].cut,
-          clips: {
-            clip_1: {
-              ...VALID_PAYLOADS['creative-studio.update-cut'].cut.clips.clip_1,
-              crop: { x: 0.5, y: 0, width: 0.75, height: 1 },
-            },
-          },
-        },
-      },
-    ],
-    [
-      'non-increasing trim',
-      {
-        ...VALID_PAYLOADS['creative-studio.update-cut'],
-        cut: {
-          ...VALID_PAYLOADS['creative-studio.update-cut'].cut,
-          clips: {
-            clip_1: {
-              ...VALID_PAYLOADS['creative-studio.update-cut'].cut.clips.clip_1,
-              sourceInSeconds: 4.5,
-              sourceOutSeconds: 4.5,
-            },
-          },
-        },
-      },
-    ],
-  ] as const)('rejects a cut mutation with %s', (_case, payload) => {
-    const schema = nativeBridgePayloadSchemas['creative-studio.update-cut' as NativeBridgeProviderKey];
+    ['infinite revision', { projectId: 'project_1', expectedRevision: Infinity, conversationId: 'conversation_1' }],
+    ['string revision', { projectId: 'project_1', expectedRevision: '1', conversationId: 'conversation_1' }],
+  ])('rejects a Director conversation bind with %s', (_label, payload) => {
+    expect(() => parseNativeBridgePayload('creative-studio.bind-director-conversation', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
 
-    expect(schema?.safeParse(payload).success).toBe(false);
+  it('does not let symbol or magic-key baggage cross the Director conversation payload boundary', () => {
+    const symbolKeyed = {
+      ...VALID_PAYLOADS['creative-studio.bind-director-conversation'],
+      [Symbol('private-authority')]: 'secret',
+    };
+    const parsed = parseNativeBridgePayload('creative-studio.bind-director-conversation', symbolKeyed);
+
+    expect(parsed).toEqual(VALID_PAYLOADS['creative-studio.bind-director-conversation']);
+    expect(Reflect.ownKeys(parsed as object)).toEqual(['projectId', 'expectedRevision', 'conversationId']);
+
+    const magicKeyed = JSON.parse(
+      '{"projectId":"project_1","expectedRevision":1,"conversationId":"conversation_1","__proto__":{"paidAuthority":true}}'
+    ) as unknown;
+    expect(() => parseNativeBridgePayload('creative-studio.bind-director-conversation', magicKeyed)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+    expect(({} as { paidAuthority?: boolean }).paidAuthority).toBeUndefined();
+  });
+
+  it('accepts only the exact continuity review envelope with empty caller-authored choices', () => {
+    const continuity = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'shot_2', hardCut: true, requiresSeedGeneration: true },
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', continuity)).toEqual(continuity);
+    for (const hostile of [
+      { ...continuity, baseChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...continuity, cascadeChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...continuity, originReferenceHandoffId: 'handoff_1' },
+      { ...continuity, continuityChange: { ...continuity.continuityChange, requiresSeedGeneration: 'yes' } },
+      { ...continuity, continuityChange: { ...continuity.continuityChange, provider: 'private' } },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts only the exact Board-promotion review envelope with empty caller-authored choices', () => {
+    const promotion = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [],
+      cascadeChoices: [],
+      boardPromotion: { shotId: 'shot_1', boardAssetId: 'board_1' },
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', promotion)).toEqual(promotion);
+    for (const hostile of [
+      { ...promotion, baseChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...promotion, cascadeChoices: [VALID_PAYLOADS['creative-studio.prepare-submission'].baseChoices[0]!] },
+      { ...promotion, originReferenceHandoffId: 'handoff_1' },
+      { ...promotion, boardPromotion: { ...promotion.boardPromotion, boardAssetId: '../board_1' } },
+      { ...promotion, boardPromotion: { ...promotion.boardPromotion, provider: 'private' } },
+      { ...promotion, continuityChange: { shotId: 'shot_1', hardCut: true, requiresSeedGeneration: false } },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts only bounded dense prepare choices with exact renderer-owned keys', () => {
+    const makeChoice = (index: number, purpose: 'seed_still' | 'video_take') => ({
+      target: { kind: 'shot' as const, shotId: `shot_${index}` },
+      purpose,
+    });
+    const maximum = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) =>
+        makeChoice(index, 'seed_still')
+      ),
+      cascadeChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) =>
+        makeChoice(index, 'video_take')
+      ),
+    };
+
+    expect(maximum.baseChoices.length + maximum.cascadeChoices.length).toBe(STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST);
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', maximum)).toEqual(maximum);
+
+    const tooManyShots = {
+      ...maximum,
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST + 1 }, (_, index) =>
+        makeChoice(index, 'seed_still')
+      ),
+      cascadeChoices: [],
+    };
+    expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', tooManyShots)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+
+    const sparseChoices: unknown[] = [];
+    sparseChoices.length = 1;
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', { ...maximum, baseChoices: sparseChoices })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('admits only an isolated bounded Board batch with no renderer reference authority', () => {
+    const boardChoice = (index: number) => ({
+      target: { kind: 'shot' as const, shotId: `shot_${index}` },
+      purpose: 'board_still' as const,
+    });
+    const boardBatch = {
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: Array.from({ length: STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST }, (_, index) => boardChoice(index)),
+      cascadeChoices: [],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.prepare-submission', boardBatch)).toEqual(boardBatch);
+    for (const hostile of [
+      { ...boardBatch, baseChoices: [...boardBatch.baseChoices, boardChoice(boardBatch.baseChoices.length)] },
+      {
+        ...boardBatch,
+        baseChoices: [
+          boardChoice(0),
+          { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+        ],
+      },
+      { ...boardBatch, baseChoices: [boardChoice(0)], cascadeChoices: [boardChoice(1)] },
+      { ...boardBatch, originReferenceHandoffId: 'handoff_1' },
+      { ...boardBatch, baseChoices: [{ ...boardChoice(0), referenceAssetId: 'reference_1' }] },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.prepare-submission', hostile)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts only the persisted Board style catalog through project edits', () => {
+    for (const boardStyle of ['grey_tone', 'line_art', 'colour_key', null] as const) {
+      const payload = {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        changes: { boardStyle },
+      };
+      expect(parseNativeBridgePayload('creative-studio.edit-project', payload)).toEqual(payload);
+    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.edit-project', {
+        projectId: 'project_1',
+        expectedRevision: 1,
+        changes: { boardStyle: 'photoreal' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('rejects legacy prepare counts, duplicates, and nested authority', () => {
+    const valid = VALID_PAYLOADS['creative-studio.prepare-submission'];
+    const choice = valid.baseChoices[0];
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, generationCount: 1 }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        cascadeChoices: [{ ...choice }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, routeId: 'route_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-submission', {
+        ...valid,
+        baseChoices: [{ ...choice, purpose: 'video_take', referenceAssetId: 'asset_1' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
+    ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
+    [
+      'creative-studio.dismiss-reference-generation-handoff',
+      VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
+    ],
+  ] as const)('keeps %s exact and free of paid authority', (providerKey, payload) => {
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual(payload);
+    for (const forbiddenKey of ['authorizationId', 'itemId', 'provider', 'requestPlan', 'receipt']) {
+      expect(() => parseNativeBridgePayload(providerKey, { ...payload, [forbiddenKey]: 'private' })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it.each([
+    ['creative-studio.prepare-project-references', VALID_PAYLOADS['creative-studio.prepare-project-references']],
+    ['creative-studio.prepare-submission', VALID_PAYLOADS['creative-studio.prepare-submission']],
+    ['creative-studio.confirm-submission', VALID_PAYLOADS['creative-studio.confirm-submission']],
+    ['creative-studio.retry-job-download', VALID_PAYLOADS['creative-studio.retry-job-download']],
+    [
+      'creative-studio.dismiss-reference-generation-handoff',
+      VALID_PAYLOADS['creative-studio.dismiss-reference-generation-handoff'],
+    ],
+  ] as const)('rejects unsafe expected revisions for %s', (providerKey, payload) => {
+    for (const expectedRevision of [Number.MAX_SAFE_INTEGER + 1, 1e100]) {
+      expect(() => parseNativeBridgePayload(providerKey, { ...payload, expectedRevision })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+  });
+
+  it('accepts the exact bounded generation-capability item union, including every Shot purpose and a reference image', () => {
+    const payload = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      items: [
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const },
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'board_still' as const },
+        { target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'video_take' as const },
+        {
+          target: { kind: 'reference' as const, referenceId: 'reference_1' },
+          purpose: 'reference_image' as const,
+        },
+      ],
+    };
+
+    expect(parseNativeBridgePayload('creative-studio.get-generation-capability', payload)).toEqual(payload);
+    expect(
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [],
+      })
+    ).toEqual({ projectId: 'project_1', expectedRevision: 7, items: [] });
+  });
+
+  it('enforces the generation-capability maximum at three purposes per possible Shot plus every project reference', () => {
+    const purposes = ['seed_still', 'board_still', 'video_take'] as const;
+    const maximum = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      items: [
+        ...Array.from({ length: STUDIO_MAX_SHOTS_PER_PROJECT }, (_, shotIndex) =>
+          purposes.map((purpose) => ({
+            target: { kind: 'shot' as const, shotId: `shot_${shotIndex}` },
+            purpose,
+          }))
+        ).flat(),
+        ...Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, referenceIndex) => ({
+          target: { kind: 'reference' as const, referenceId: `reference_${referenceIndex}` },
+          purpose: 'reference_image' as const,
+        })),
+      ],
+    };
+
+    expect(maximum.items).toHaveLength(STUDIO_MAX_SHOTS_PER_PROJECT * 3 + STUDIO_MAX_PROJECT_REFERENCES);
+    expect(parseNativeBridgePayload('creative-studio.get-generation-capability', maximum)).toEqual(maximum);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        ...maximum,
+        items: [...maximum.items, { target: { kind: 'shot', shotId: 'shot_over_limit' }, purpose: 'seed_still' }],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    ['missing items', { projectId: 'project_1', expectedRevision: 7 }],
+    ['non-array items', { projectId: 'project_1', expectedRevision: 7, items: 'shot_1' }],
+    [
+      'duplicate Shot-purpose pair',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+          { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+        ],
+      },
+    ],
+    [
+      'unsafe Shot id',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: '../shot_1' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'unknown purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'reference_still' }],
+      },
+    ],
+    [
+      'reference target paired with a Shot purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'reference', referenceId: 'reference_1' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'Shot target paired with the reference purpose',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'reference_image' }],
+      },
+    ],
+    [
+      'unknown item authority',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still', routeId: 'route_private' }],
+      },
+    ],
+    [
+      'missing Shot id',
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items: [{ target: { kind: 'shot' }, purpose: 'seed_still' }],
+      },
+    ],
+    [
+      'missing purpose',
+      { projectId: 'project_1', expectedRevision: 7, items: [{ target: { kind: 'shot', shotId: 'shot_1' } }] },
+    ],
+  ] as const)('rejects a generation-capability request with %s', (_label, payload) => {
+    expect(() => parseNativeBridgePayload('creative-studio.get-generation-capability', payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
+  });
+
+  it('rejects a sparse generation-capability item array', () => {
+    const items = [{ target: { kind: 'shot' as const, shotId: 'shot_1' }, purpose: 'seed_still' as const }];
+    items.length = 2;
+
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.get-generation-capability', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        items,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('accepts every reviewed reference-decision intent and no receipt authority', () => {
+    for (const outcome of [{ kind: 'rejected' as const }, { kind: 'generation_gate' as const }]) {
+      const payload = { projectId: 'project_1', requestId: 'request_1', expectedRevision: 2, outcome };
+      expect(parseNativeBridgePayload('creative-studio.decide-reference-request', payload)).toEqual(payload);
+    }
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.decide-reference-request', {
+        projectId: 'project_1',
+        requestId: 'request_1',
+        expectedRevision: 2,
+        outcome: { kind: 'imported_reference', assetId: 'asset_1' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('bounds project-reference preparation at the shared project limit', () => {
+    const maximum = {
+      ...VALID_PAYLOADS['creative-studio.prepare-project-references'],
+      referenceIds: Array.from({ length: STUDIO_MAX_PROJECT_REFERENCES }, (_, index) => `reference_${index}`),
+    };
+    expect(parseNativeBridgePayload('creative-studio.prepare-project-references', maximum)).toEqual(maximum);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio.prepare-project-references', {
+        ...maximum,
+        referenceIds: [...maximum.referenceIds, 'reference_overflow'],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('loads presentation limits through the side-effect-free common policy boundary', () => {
@@ -1832,6 +2155,127 @@ describe('native bridge payload schemas', () => {
     const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
 
     expect(providerKeys).toEqual(NATIVE_BRIDGE_PROVIDER_KEYS);
+  });
+
+  it('registers the exact Task 13 native boundary while keeping legacy providers absent', () => {
+    const required = [
+      'creative-studio.get-director-session-authority',
+      'creative-studio.bind-director-conversation',
+      'creative-studio.apply-authoring-batch',
+      'creative-studio.undo-last',
+      'creative-studio.get-project-workspace',
+      'creative-studio.get-project-status',
+      'creative-studio.analyze-shot-audio',
+      'creative-studio.retry-conditioning-frame',
+      'creative-studio.cancel-waiting-cascade',
+      'creative-studio.edit-project',
+      'creative-studio.set-rules',
+      'creative-studio.park-beat',
+      'creative-studio.restore-beat',
+      'creative-studio.park-shot',
+      'creative-studio.restore-shot',
+      'creative-studio.reorder-bin',
+      'creative-studio.import-seed-still',
+      'creative-studio.import-reference-image',
+      'creative-studio.import-bed-audio',
+      'creative-studio.detach-bed-audio',
+      'creative-studio.set-bed',
+      'creative-studio.create-export',
+      'creative-studio.get-film-export-capability',
+      'creative-studio.get-film-export-status',
+      'creative-studio.cancel-film-export',
+      'creative-studio.acknowledge-film-export',
+      'creative-studio.list-exports',
+      'creative-studio.copy-export',
+      'creative-studio.reveal-export',
+      'creative-studio.list-reference-requests',
+      'creative-studio.decide-reference-request',
+      'creative-studio.list-reference-generation-handoffs',
+      'creative-studio.get-generation-capability',
+      'creative-studio.get-project-status',
+      'creative-studio.prepare-project-references',
+      'creative-studio.prepare-submission',
+      'creative-studio.confirm-submission',
+      'creative-studio.prepare-paid-recovery-proposal',
+      'creative-studio.confirm-paid-recovery-proposal',
+      'creative-studio.cancel-job',
+      'creative-studio.retry-job',
+      'creative-studio.retry-job-download',
+      'creative-studio.dismiss-reference-generation-handoff',
+    ] as const;
+    const absent = [
+      'creative-studio.propose-storyboard',
+      'creative-studio.update-model-selection',
+      'creative-studio.update-project',
+      'creative-studio.set-brief-rules',
+      'creative-studio.undo-brief-rules',
+      'creative-studio.bind-brief-conversation',
+      'creative-studio.update-cut',
+      'creative-studio.place-cut-scenes',
+      'creative-studio.update-scene',
+      'creative-studio.reorder-scenes',
+      'creative-studio.select-asset',
+      'creative-studio.choose-and-export-assets',
+      'creative-studio.get-latest-render',
+      'creative-studio.render-cut',
+      'creative-studio.cancel-render',
+      'creative-studio.fit-storyboard',
+      'creative-studio.submit-scenes',
+      'creative-studio.retry-download',
+      'creative-studio.park-take',
+      'creative-studio.add-alternate-take',
+      'creative-studio.restore-take',
+      'creative-studio.select-take',
+      'creative-studio.set-match-to',
+    ] as const;
+    const providerKeys = collectBridgeBuildProviderKeys(readFileSync(IPC_BRIDGE_PATH, 'utf8'));
+    const schemaKeys = Object.keys(nativeBridgePayloadSchemas);
+    const exactOnceProviderKeys = [
+      'creative-studio.get-director-session-authority',
+      'creative-studio.bind-director-conversation',
+      'creative-studio.get-project-status',
+      'creative-studio.analyze-shot-audio',
+      'creative-studio.get-generation-capability',
+      'creative-studio.prepare-project-references',
+      'creative-studio.prepare-submission',
+      'creative-studio.confirm-submission',
+      'creative-studio.prepare-paid-recovery-proposal',
+      'creative-studio.confirm-paid-recovery-proposal',
+      'creative-studio.cancel-job',
+      'creative-studio.retry-job',
+      'creative-studio.retry-job-download',
+      'creative-studio.dismiss-reference-generation-handoff',
+      'creative-studio.import-reference-image',
+      'creative-studio.import-bed-audio',
+      'creative-studio.detach-bed-audio',
+      'creative-studio.set-bed',
+      'creative-studio.create-export',
+      'creative-studio.get-film-export-capability',
+      'creative-studio.get-film-export-status',
+      'creative-studio.cancel-film-export',
+      'creative-studio.list-exports',
+      'creative-studio.copy-export',
+      'creative-studio.reveal-export',
+    ] as const;
+
+    for (const providerKey of required) {
+      expect(NATIVE_BRIDGE_PROVIDER_KEYS).toContain(providerKey);
+      expect(providerKeys).toContain(providerKey);
+      expect(schemaKeys).toContain(providerKey);
+    }
+    for (const providerKey of absent) {
+      expect(NATIVE_BRIDGE_PROVIDER_KEYS).not.toContain(providerKey);
+      expect(providerKeys).not.toContain(providerKey);
+      expect(schemaKeys).not.toContain(providerKey);
+    }
+    expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
+    expect(providerKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
+    expect(schemaKeys.filter((key) => key.startsWith('creative-studio.'))).toHaveLength(57);
+    for (const providerKey of exactOnceProviderKeys) {
+      expect(NATIVE_BRIDGE_PROVIDER_KEYS.filter((key) => key === providerKey)).toHaveLength(1);
+      expect(providerKeys.filter((key) => key === providerKey)).toHaveLength(1);
+      expect(schemaKeys.filter((key) => key === providerKey)).toHaveLength(1);
+    }
   });
 
   it('keeps renderer-owned query declarations equal to their separate manifest', () => {
@@ -1867,6 +2311,142 @@ describe('native bridge payload schemas', () => {
     }
   );
 
+  it.each([
+    'presentation-templates.describe-spec',
+    'presentation-templates.import-spec-bound',
+    'presentation-templates.scratch.allocate',
+    'presentation-sources.bind-draft',
+    'presentation-sources.grant-workspace-source',
+    'presentation-runs.start',
+    'presentation-runs.get',
+    'presentation-runs.list-recoverable',
+    'presentation-runs.open-recovery',
+    'presentation-runs.discard',
+    'presentation-runs.claim-initial-dispatch',
+    'presentation-runs.renew-initial-dispatch',
+    'presentation-runs.dispatch',
+  ] as const)('accepts and canonicalizes a backend conversation id for %s', (providerKey) => {
+    const payload = { ...VALID_PAYLOADS[providerKey], conversation_id: 'D0921953' };
+
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual({ ...payload, conversation_id: 'd0921953' });
+  });
+
+  it.each([
+    'presentation-sources.get-source-owner',
+    'presentation-sources.pick-sources',
+    'presentation-sources.revoke',
+    'presentation-sources.confirm-queued',
+  ] as const)('accepts and canonicalizes a backend conversation owner for %s', (providerKey) => {
+    const payload = {
+      ...VALID_PAYLOADS[providerKey],
+      owner: { owner_type: 'conversation' as const, conversation_id: 'D0921953' },
+    };
+
+    expect(parseNativeBridgePayload(providerKey, payload)).toEqual({
+      ...payload,
+      owner: { owner_type: 'conversation', conversation_id: 'd0921953' },
+    });
+  });
+
+  it('keeps legacy conversation UUIDs compatible while canonicalizing their case', () => {
+    const payload = {
+      ...VALID_PAYLOADS['presentation-runs.list-recoverable'],
+      conversation_id: '2BE7B8FC-6AF5-42B8-AED5-03644735C730',
+    };
+
+    expect(parseNativeBridgePayload('presentation-runs.list-recoverable', payload)).toEqual({
+      ...payload,
+      conversation_id: '2be7b8fc-6af5-42b8-aed5-03644735c730',
+    });
+  });
+
+  it.each([
+    'presentation-templates.describe-spec',
+    'presentation-templates.import-spec-bound',
+    'presentation-templates.scratch.allocate',
+    'presentation-sources.bind-draft',
+    'presentation-sources.grant-workspace-source',
+    'presentation-runs.start',
+    'presentation-runs.get',
+    'presentation-runs.list-recoverable',
+    'presentation-runs.open-recovery',
+    'presentation-runs.discard',
+    'presentation-runs.claim-initial-dispatch',
+    'presentation-runs.renew-initial-dispatch',
+    'presentation-runs.dispatch',
+  ] as const)('rejects an unsafe presentation conversation id for %s', (providerKey) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        conversation_id: '../private',
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    'presentation-sources.get-source-owner',
+    'presentation-sources.pick-sources',
+    'presentation-sources.revoke',
+    'presentation-sources.confirm-queued',
+  ] as const)('rejects an unsafe presentation conversation owner for %s', (providerKey) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        owner: { owner_type: 'conversation', conversation_id: '../private' },
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it.each([
+    [
+      'presentation-templates.scratch.complete',
+      { ...VALID_PAYLOADS['presentation-templates.scratch.complete'], run_id: 'd0921953' },
+    ],
+    [
+      'presentation-sources.create-draft',
+      { ...VALID_PAYLOADS['presentation-sources.create-draft'], client_request_id: 'd0921953' },
+    ],
+    ['presentation-sources.bind-draft', { ...VALID_PAYLOADS['presentation-sources.bind-draft'], draft_id: 'd0921953' }],
+    ['presentation-sources.revoke', { ...VALID_PAYLOADS['presentation-sources.revoke'], grant_id: 'd0921953' }],
+    [
+      'presentation-sources.confirm-queued',
+      { ...VALID_PAYLOADS['presentation-sources.confirm-queued'], queue_item_id: 'd0921953' },
+    ],
+    ['presentation-runs.get', { ...VALID_PAYLOADS['presentation-runs.get'], run_id: 'd0921953' }],
+    [
+      'presentation-runs.claim-initial-dispatch',
+      { ...VALID_PAYLOADS['presentation-runs.claim-initial-dispatch'], holder_id: 'd0921953' },
+    ],
+  ] as const satisfies ReadonlyArray<readonly [NativeBridgeProviderKey, unknown]>)(
+    'does not widen a non-conversation presentation id for %s',
+    (providerKey, payload) => {
+      expect(() => parseNativeBridgePayload(providerKey, payload)).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    }
+  );
+
+  it.each(
+    (
+      [
+        'presentation-templates.scratch.complete',
+        'presentation-templates.scratch.retain',
+        'presentation-templates.scratch.discard',
+      ] as const
+    ).flatMap((providerKey) =>
+      [
+        ['nil', '00000000-0000-0000-0000-000000000000'],
+        ['v6', '5a68fccc-7b90-69b4-88f9-d78bb88255ed'],
+        ['bad variant', '5a68fccc-7b90-49b4-78f9-d78bb88255ed'],
+      ].map(([kind, runId]) => [providerKey, kind, runId] as const)
+    )
+  )('rejects a %s scratch run id classified as %s', (providerKey, _kind, runId) => {
+    expect(() =>
+      parseNativeBridgePayload(providerKey, {
+        ...VALID_PAYLOADS[providerKey],
+        run_id: runId,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
   it('has exactly one request and response schema for every renderer-owned query', () => {
     expect(Object.keys(rendererBridgeQuerySchemas)).toEqual(RENDERER_BRIDGE_QUERY_KEYS);
     expect(
@@ -1882,8 +2462,8 @@ describe('native bridge payload schemas', () => {
   });
 
   it.each([
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: 0 }],
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: 24 }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: 0 }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: 24 }],
     ['creative-studio.flush-unsaved-work', { saved: true }],
     ['creative-studio.flush-unsaved-work', { saved: false }],
   ] as const satisfies ReadonlyArray<readonly [RendererBridgeQueryKey, unknown]>)(
@@ -1894,10 +2474,10 @@ describe('native bridge payload schemas', () => {
   );
 
   it.each([
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: -1 }],
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: 25 }],
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: 1.5 }],
-    ['creative-studio.has-unsaved-work', { dirtySceneCount: 1, unexpected: true }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: -1 }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: 25 }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: 1.5 }],
+    ['creative-studio.has-unsaved-work', { dirtyDraftCount: 1, unexpected: true }],
     ['creative-studio.flush-unsaved-work', { saved: 'yes' }],
     ['creative-studio.flush-unsaved-work', { saved: false, unexpected: true }],
   ] as const satisfies ReadonlyArray<readonly [RendererBridgeQueryKey, unknown]>)(
@@ -1913,46 +2493,24 @@ describe('native bridge payload schemas', () => {
     expect(() => parseNativeBridgePayload(providerKey, VALID_PAYLOADS[providerKey])).not.toThrow();
   });
 
-  it('reads reorder, generation, cut, and dirty bounds from their shared independently named authorities', async () => {
+  it('reads authoring and dirty bounds from shared authorities', async () => {
     vi.resetModules();
     vi.doMock('@/common/types/project/creativeStudioTypes', async (importOriginal) => ({
       ...(await importOriginal<Record<string, unknown>>()),
-      STUDIO_MAX_SCENES: 2,
-      STUDIO_MAX_GENERATION_SCENES_PER_REQUEST: 2,
-      STUDIO_MAX_CUT_PLACEMENT_SCENES: 2,
-      STUDIO_MAX_DIRTY_SCENES_REPORTED: 2,
+      STUDIO_MAX_MUTATION_OPERATIONS: 2,
+      STUDIO_MAX_DIRTY_DRAFTS_REPORTED: 2,
     }));
     try {
       const schemas = await import('@/common/adapter/native/payloadSchemas');
-      const sceneIds = ['scene_1', 'scene_2', 'scene_3'];
       expect(() =>
-        schemas.parseNativeBridgePayload('creative-studio.reorder-scenes', {
+        schemas.parseNativeBridgePayload('creative-studio.apply-authoring-batch', {
           projectId: 'project_1',
           expectedRevision: 1,
-          sceneOrder: sceneIds,
+          operations: Array.from({ length: 3 }, () => ({ kind: 'set_brief', brief: 'x' })),
         })
       ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
       expect(() =>
-        schemas.parseNativeBridgePayload('creative-studio.submit-scenes', {
-          projectId: 'project_1',
-          expectedRevision: 1,
-          mode: 'batch',
-          sceneIds,
-          catalogVersion: '0123456789abcdef',
-          routes: sceneIds.map((sceneId) => ({ sceneId, choiceId: `route_${sceneId}`, kind: 'video' })),
-        })
-      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
-      expect(() =>
-        schemas.parseNativeBridgePayload('creative-studio.place-cut-scenes', {
-          projectId: 'project_1',
-          expectedRevision: 1,
-          cutId: 'cut_1',
-          sceneIds,
-          beforeClipId: null,
-        })
-      ).toThrow(schemas.INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
-      expect(() =>
-        schemas.parseRendererBridgeQueryResponse('creative-studio.has-unsaved-work', { dirtySceneCount: 3 })
+        schemas.parseRendererBridgeQueryResponse('creative-studio.has-unsaved-work', { dirtyDraftCount: 3 })
       ).toThrow(schemas.INVALID_RENDERER_BRIDGE_QUERY_PAYLOAD_MESSAGE);
     } finally {
       vi.doUnmock('@/common/types/project/creativeStudioTypes');
@@ -1960,22 +2518,52 @@ describe('native bridge payload schemas', () => {
     }
   });
 
-  it.each(['cast', 'look'] as const)('accepts %s as a classified Brief-reference import role', (role) => {
+  it('accepts only the four exact export shapes and keeps main-owned names absent', () => {
+    const common = { projectId: 'project_1', expectedRevision: 7, expectedCatalogRevision: 2 };
+    expect(parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'editor_folder' })).toEqual({
+      ...common,
+      shape: 'editor_folder',
+    });
+    expect(parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'script' })).toEqual({
+      ...common,
+      shape: 'script',
+    });
     expect(
-      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, {
-        projectId: 'project_1',
-        briefReferenceRole: role,
-        expectedRevision: 1,
-      })
-    ).toEqual({ projectId: 'project_1', briefReferenceRole: role, expectedRevision: 1 });
+      parseNativeBridgePayload('creative-studio.create-export', { ...common, shape: 'still', shotId: 'shot_1' })
+    ).toEqual({ ...common, shape: 'still', shotId: 'shot_1' });
+    const film = {
+      ...common,
+      shape: 'film' as const,
+      renderId: 'film_1',
+      transition: { kind: 'dissolve' as const, seconds: 0.35 },
+      trimTails: true,
+    };
+    expect(parseNativeBridgePayload('creative-studio.create-export', film)).toEqual(film);
+    for (const payload of [
+      { ...film, transition: { kind: 'dissolve', seconds: 0 } },
+      { ...film, transition: { kind: 'cut', seconds: 0.35 } },
+      { ...film, trimTails: 'yes' },
+      { ...film, outputPath: '/private/film.mp4' },
+    ]) {
+      expect(() => parseNativeBridgePayload('creative-studio.create-export', payload)).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
+    for (const shape of ['stitched', 'video', 'project'] as const) {
+      expect(() => parseNativeBridgePayload('creative-studio.create-export', { ...common, shape })).toThrow(
+        INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+      );
+    }
   });
 
-  it('preserves a valid scene reference import through strict payload parsing', () => {
-    const payload = { projectId: 'project_1', sceneId: 'scene_1', expectedRevision: 7 };
-
+  it('accepts an explicit clear intent for bed without accepting a missing field', () => {
     expect(
-      parseNativeBridgePayload('creative-studio.choose-and-import-reference' as NativeBridgeProviderKey, payload)
-    ).toEqual(payload);
+      parseNativeBridgePayload('creative-studio.set-bed', {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        assetId: null,
+      })
+    ).toEqual({ projectId: 'project_1', expectedRevision: 7, assetId: null });
   });
 
   it.each(VOID_PROVIDER_KEYS)('rejects a supplied payload for void provider %s', (providerKey) => {
@@ -1995,8 +2583,14 @@ describe('native bridge payload schemas', () => {
     }
   );
 
-  it.each(INVALID_PAYLOADS)('rejects %s payload with %s', (providerKey, _reason, payload) => {
-    expect(() => parseNativeBridgePayload(providerKey, payload)).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  it.each(
+    INVALID_PAYLOADS.filter(([providerKey]) =>
+      NATIVE_BRIDGE_PROVIDER_KEYS.includes(providerKey as NativeBridgeProviderKey)
+    )
+  )('rejects %s payload with %s', (providerKey, _reason, payload) => {
+    expect(() => parseNativeBridgePayload(providerKey as NativeBridgeProviderKey, payload)).toThrow(
+      INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE
+    );
   });
 
   it('allows the optional dialog payload to be omitted', () => {
@@ -2014,5 +2608,69 @@ describe('native bridge payload schemas', () => {
 
     expect(thrown).toEqual(new Error(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE));
     expect(String(thrown)).not.toContain(secret);
+  });
+
+  it('does not retain payload-controlled record keys in native rejection diagnostics', () => {
+    const secretKey = 'customer-secret-token-name';
+    let thrown: unknown;
+    try {
+      parseNativeBridgePayload('theme:set-active', {
+        ...VALID_PAYLOADS['theme:set-active'],
+        tokens: { [secretKey]: 42 },
+      });
+    } catch (error) {
+      thrown = error;
+    }
+
+    expect(getNativeBridgePayloadDiagnostic(thrown)).toEqual({
+      providerKey: 'theme:set-active',
+      issues: [{ code: 'invalid_type', path: ['tokens'] }],
+    });
+    expect(JSON.stringify(getNativeBridgePayloadDiagnostic(thrown))).not.toContain(secretKey);
+  });
+
+  it('returns no native rejection diagnostic for unrelated errors or non-errors', () => {
+    expect([
+      getNativeBridgePayloadDiagnostic(new Error('unrelated')),
+      getNativeBridgePayloadDiagnostic(undefined),
+    ]).toEqual([null, null]);
+  });
+
+  it('bounds native rejection diagnostics without retaining Zod messages or received data', () => {
+    const secret = 'secret-diagnostic-value';
+    const oversizedPath = Array.from({ length: 12 }, (_, index) => `${'field'.repeat(40)}-${index}`);
+    const safeParse = vi.spyOn(nativeBridgePayloadSchemas['webui.start'], 'safeParse').mockReturnValue({
+      success: false,
+      error: {
+        issues: Array.from({ length: 12 }, () => ({
+          code: 'custom',
+          path: oversizedPath,
+          message: secret,
+          received: secret,
+        })),
+      },
+    } as never);
+
+    let thrown: unknown;
+    try {
+      parseNativeBridgePayload('webui.start', { port: secret });
+    } catch (error) {
+      thrown = error;
+    } finally {
+      safeParse.mockRestore();
+    }
+
+    const diagnostic = getNativeBridgePayloadDiagnostic(thrown);
+    expect({
+      issueCount: diagnostic?.issues.length,
+      issueShapeIsSafe: diagnostic?.issues.every(
+        (issue) =>
+          Object.keys(issue).toSorted().join(',') === 'code,path' &&
+          issue.path.length <= 8 &&
+          JSON.stringify(issue.path).length <= 256
+      ),
+      topLevelShapeIsSafe: diagnostic && Object.keys(diagnostic).toSorted().join(',') === 'issues,providerKey',
+    }).toEqual({ issueCount: 8, issueShapeIsSafe: true, topLevelShapeIsSafe: true });
+    expect(JSON.stringify(diagnostic)).not.toContain(secret);
   });
 });

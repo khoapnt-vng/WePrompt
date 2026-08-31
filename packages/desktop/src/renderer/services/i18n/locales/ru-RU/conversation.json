@@ -878,33 +878,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Референсы проекта",
-      "inheritanceDescription": "Каждый новый референсный кадр использует все активные изображения актёров и стиля этого проекта.",
-      "castHeading": "Актёры",
-      "lookHeading": "Стиль",
-      "castEmpty": "Референсов актёров пока нет.",
-      "lookEmpty": "Референсов стиля пока нет.",
-      "addCast": "Добавить референс актёра",
-      "addLook": "Добавить референс стиля",
-      "activeCount": "Активных референсов: {{count}}",
-      "activeCount_one": "{{count}} активный референс",
-      "activeCount_few": "{{count}} активных референса",
-      "activeCount_many": "{{count}} активных референсов",
-      "activeCount_other": "{{count}} активного референса",
-      "limitReached": "В проекте уже 6 активных референсов. Удалите один перед добавлением нового.",
-      "removeFromBrief": "Убрать из брифа",
-      "removeAccessible": "Убрать {{label}} из брифа",
-      "previewAccessible": "Референс «{{role}}»: {{label}}",
-      "engineCapacityNone": "Этот движок изображений ещё не проверен для референсов. Откройте настройки моделей и выполните повторную проверку.",
-      "engineMenuCapacityNone": "Нет референсных изображений",
-      "engineCapacityMaximum": "Поддерживается до {{count}} референсов",
-      "engineCapacityMaximum_one": "Можно использовать не более {{count}} референса",
-      "engineCapacityMaximum_few": "Допустимо не более {{count}} референсов",
-      "engineCapacityMaximum_many": "Максимум — {{count}} референсов",
-      "engineCapacityMaximum_other": "Поддерживается до {{count}} референса",
-      "capacityMismatch": "Активных референсов: {{count}}, но этот движок изображений поддерживает {{maximum}}. Новые референсные кадры заблокированы, пока вы не уберёте референсы либо не смените или повторно не проверите движок.",
-      "importError": "Не удалось добавить референс. Повторите попытку."
+    "workspace": {
+      "views": {
+        "references": "Референсы"
+      },
+      "start": {
+        "title": "Начните с режиссёра",
+        "description": "Режиссёр подготовит первый план на основе вашего брифа. Когда он появится, проверьте его здесь."
+      },
+      "notReady": {
+        "references": "Проверять пока нечего — дождитесь, пока режиссёр спланирует референсы.",
+        "table": "Распределять пока нечего — дождитесь, пока режиссёр подготовит раскадровку.",
+        "board": "Производство станет доступно, когда Таблица будет готова.",
+        "cut": "Монтаж станет доступен после начала производства."
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Канонические изображения",
+          "intro": "Создайте по одному текущему изображению для каждого персонажа и повторяющегося места. Они останутся каноническими, пока вы не выберете другой дубль.",
+          "progress": "Текущих: {{current}} из {{total}}",
+          "bindShots": "Привязать шоты",
+          "characterRule": "Сначала персонажи",
+          "placeRule": "Затем повторяющиеся места",
+          "addCharacter": "Добавить персонажа",
+          "addCharacterUnavailable": "Образ персонажа определяется утверждённым планом референсов режиссёра.",
+          "places": "Места",
+          "addPlace": "Добавить место",
+          "kind": {
+            "character": "персонаж",
+            "background": "место"
+          },
+          "nameLabel": "Название: {{kind}}",
+          "meta": {
+            "character": "Персонаж · фото: {{count}}",
+            "background": "Место · фото: {{count}}"
+          },
+          "status": {
+            "noPhoto": "НЕТ ФОТО",
+            "current": "ТЕКУЩЕЕ ЗАДАНО",
+            "generating": "СОЗДАЁТСЯ"
+          },
+          "duplicateName": "Это название уже используется для референса такого типа.",
+          "emptyPhoto": "Создать первое фото",
+          "currentHandle": "{{handle}} · Текущее",
+          "currentReference": "Текущий канонический референс",
+          "download": "Скачать {{handle}}",
+          "choosePhoto": "Сделать {{handle}} текущим",
+          "addPhoto": "Создать ещё фото",
+          "photoCount": "Фото: {{count}}",
+          "promptLabel": "Промпт для {{label}}",
+          "promptPlaceholder": {
+            "character": "Опишите постоянную внешность, одежду и визуальные черты.",
+            "background": "Опишите повторяющееся место и его постоянные визуальные черты."
+          },
+          "action": {
+            "generate": "Создать",
+            "generateAnother": "Создать ещё",
+            "generateAgain": "Создать заново",
+            "cancelRun": "Отменить запуск"
+          },
+          "tag": {
+            "running": "Выполняется",
+            "edited": "Промпт изменён"
+          },
+          "importPhoto": "Импортировать фото",
+          "removePhoto": "Удалить {{handle}}",
+          "removePhotoLocked": "Фото заблокировано незавершённой работой. Перед удалением проверьте перечисленные ниже причины блокировки.",
+          "removalBlocker": {
+            "activeReferenceJob": "Задача «{{purpose}}» ({{jobId}}) для этого референса не разрешена. Текущее фото останется заблокированным, пока задача не перейдёт в конечное состояние.",
+            "activeAssetConsumer": "Задача «{{purpose}}» для Beat {{beatPosition}}, Shot {{shotPosition}} использует именно это фото. Оно останется заблокированным, пока задача не будет разрешена.",
+            "activeAssetConsumerRetained": "Задача «{{purpose}}» для сохранённого Shot {{shotId}} использует именно это фото. Оно останется заблокированным, пока задача не будет разрешена.",
+            "activeAssetConsumerOther": "Задача «{{purpose}}» ({{jobId}}) использует именно это фото. Оно останется заблокированным, пока задача не будет разрешена.",
+            "downloadRecovery": "Задача «{{purpose}}» для Beat {{beatPosition}}, Shot {{shotPosition}} завершилась у поставщика, но результат не загрузился. Повторите загрузку здесь; фото останется заблокированным до успешного восстановления.",
+            "downloadRecoveryRetainedShot": "Задача «{{purpose}}» для сохранённого Shot {{shotId}} завершилась у поставщика, но результат не загрузился. Восстановите Shot из корзины Board, чтобы проверить восстановление; фото останется заблокированным до успеха.",
+            "downloadRecoveryRetainedBeat": "Задача «{{purpose}}» для Shot {{shotId}} внутри сохранённого Beat {{beatId}} завершилась у поставщика, но результат не загрузился. Восстановите Beat из корзины Board, чтобы проверить восстановление; фото останется заблокированным до успеха.",
+            "downloadRecoveryOther": "Задача «{{purpose}}» ({{jobId}}) завершилась у поставщика, но результат не загрузился. Повторите загрузку здесь; фото останется заблокированным до успешного восстановления.",
+            "invalidAuthority": "Данные референса для текущего фото несогласованы. Перезагрузите проект и проверьте этот референс перед новой попыткой удаления.",
+            "reviewInBoard": "Проверить в Board"
+          }
+        },
+        "description": "Сначала создайте канонические изображения персонажей, затем изображения повторяющихся фонов. Привяжите текущие референсы к каждому кадру до генерации раскадровки или первого кадра.",
+        "generationScope": "Объём генерации",
+        "characters": {
+          "title": "Персонажи",
+          "description": "Создайте одно текущее каноническое изображение для каждого названного персонажа.",
+          "empty": "В этой истории нет названных персонажей. Теперь можно проверить фоны."
+        },
+        "backgrounds": {
+          "title": "Фоны",
+          "description": "Создайте повторяющиеся локации, которые сохраняют визуальную целостность фильма.",
+          "charactersRequired": "Создайте всех персонажей перед проверкой фонов.",
+          "empty": "Повторяющиеся фоны не требуются.",
+          "add": "Добавить фон",
+          "addTitle": "Добавить повторяющийся фон",
+          "nameLabel": "Название фона",
+          "promptLabel": "Промпт генерации",
+          "duplicate": "Фон с таким названием уже существует.",
+          "cancel": "Отмена",
+          "confirm": "Добавить фон"
+        },
+        "previewPending": "Изображение референса ещё не создано.",
+        "previewAlt": "Текущее изображение референса для {{label}}",
+        "status": {
+          "idle": "Не создан",
+          "queued": "В очереди",
+          "running": "Создаётся",
+          "succeeded": "Создан",
+          "failed": "Ошибка создания",
+          "current": "Текущий"
+        },
+        "regenerate": "Создать заново",
+        "chooseGenerated": "Выбрать созданное изображение",
+        "regeneratePromptLabel": "Промпт генерации",
+        "regenerateCancel": "Отмена",
+        "reviewGeneration": "Проверить стоимость генерации",
+        "generatedHistory": "Созданные изображения",
+        "historyClose": "Закрыть",
+        "historyPreviewAlt": "Созданное изображение референса {{label}}",
+        "historyCurrent": "Текущее изображение",
+        "historyChoose": "Выбрать это изображение",
+        "currentProgress": "Создано {{current}} из {{total}} референсов",
+        "bindings": {
+          "title": "Привязки шотов",
+          "description": "Выберите точные текущие изображения персонажей и фон, которые каждый шот использует для панели борда и первого кадра.",
+          "empty": "Нет активных шотов для привязки.",
+          "shot": "Шот {{position}}",
+          "unassigned": "Для этого шота ещё не принято решение по референсам.",
+          "invalid": "Сохранённая привязка больше недействительна. Выберите текущие референсы и сохраните снова.",
+          "capacity": "Для персонажей и фона выбрано {{count}} референсов, но их общий лимит маршрута изображения — {{limit}}.",
+          "capacityUsage": "Использовано {{count}} / {{limit}} общих слотов референсов (персонажи + фон)",
+          "characters": "Персонажи",
+          "background": "Фон",
+          "save": "Сохранить привязку",
+          "progress": "Привязано шотов: {{ready}} из {{total}}"
+        }
+      },
+      "references": {
+        "referenceCount": "Запрошены референсы для {{total}} элементов"
+      },
+      "handoffs": {
+        "referenceCount": "В этой передаче {{total}} референсов",
+        "progress": "В очереди {{queued}} · Выполняется {{running}} · Успешно {{succeeded}} · Ошибки {{failed}}",
+        "reviewReferences": "Проверить референсы",
+        "retryFailed": "Повторить неудачные референсы",
+        "awaiting_spend": "Ожидает проверки расходов",
+        "running": "Создание референсов выполняется.",
+        "succeeded": "Все запрошенные референсы созданы.",
+        "partially_failed": "Часть референсов создана; повторите только неудачные.",
+        "failed": "Не удалось создать референсы. Автоматических повторов нет.",
+        "dismissed": "Закрыто без расходов"
+      },
+      "table": {
+        "reorder": {
+          "label": "Действия для изменения порядка {{title}}",
+          "dragHandle": "Изменить порядок {{title}} на позиции {{position}}",
+          "moveEarlier": "Переместить {{title}} раньше",
+          "moveLater": "Переместить {{title}} позже",
+          "announcement": "{{title}} перемещён с позиции {{from}} на {{to}} из {{total}}.",
+          "failed": "Порядок битов не изменён."
+        },
+        "authoring": {
+          "label": "Создание и восстановление истории",
+          "coverageGap": "В {{count}} из {{total}} Beats нет Shots",
+          "coverageGap_one": "В {{count}} из {{total}} Beat нет Shots",
+          "coverageGap_other": "В {{count}} из {{total}} Beats нет Shots",
+          "unscriptedWarning": "У {{count}} Shots нет съёмочного сценария",
+          "unscriptedWarning_one": "У {{count}} Shot нет съёмочного сценария",
+          "unscriptedWarning_other": "У {{count}} Shots нет съёмочного сценария",
+          "askDirector": "Спросить Director",
+          "addBeat": "Добавить Beat",
+          "addShot": "Добавить Shot",
+          "addShotForBeat": "Добавить Shot в {{title}}",
+          "unassignedReferenceNote": "Созданный вручную Shot начинает с неназначенными референсами и требует проверки перед платной генерацией."
+        },
+        "columns": {
+          "length": "Сумма",
+          "panel": "Панель",
+          "story": "История"
+        },
+        "plannedPending": "Нет плановой суммы",
+        "panel": {
+          "openDetails": "Открыть панели раскадровки для {{title}}",
+          "closeDetails": "Закрыть панели раскадровки для {{title}}",
+          "cardLabel": "Шот {{position}}: {{status}}",
+          "shotDetails": "Сведения о шоте {{position}}",
+          "head": "Начало цепочки",
+          "status": {
+            "missing": "Не нарисовано",
+            "current": "Актуально",
+            "stale": "Устарело",
+            "statusPending": "Ожидание статуса",
+            "queued": "В очереди",
+            "drawing": "Рисуется",
+            "needsAttention": "Требует внимания",
+            "failed": "Ошибка",
+            "cancelled": "Отменено"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "Статус недоступен",
+        "blockers": "{{count}} блокирующих проблем",
+        "blockers_one": "{{count}} блокирующая проблема",
+        "blockers_other": "{{count}} блокирующих проблем"
+      },
+      "library": {
+        "subtitle": "Планируйте истории в битах и шотах, а затем проверяйте текущее изображение каждого шота.",
+        "pictureCount": "{{count}} изображений готово",
+        "pictureCount_one": "{{count}} изображение готово",
+        "pictureCount_other": "{{count}} изображений готово",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Статус проекта недоступен",
+          "stage": {
+            "brief": "Бриф",
+            "engines": "Движки",
+            "references": "Референсы",
+            "storyboard": "Раскадровка",
+            "bindings": "Привязки",
+            "production": "Производство",
+            "cut": "Монтаж"
+          },
+          "progress": {
+            "ready": "Готово",
+            "needsWork": "Требуется работа",
+            "references": "Одобрено референсов: {{current}} из {{total}}",
+            "shots": "{{current}} из {{total}} шотов"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "Управление режиссёрской раскадровкой",
+          "progress": "Нарисовано панелей: {{drawn}} из {{total}}",
+          "progressLabel": "Готовность раскадровки",
+          "staleCount": "Устаревших: {{count}}",
+          "busyCount": "В работе: {{count}}",
+          "stop": "Остановить рисование",
+          "stopNote": "При остановке запрашивается отмена там, где это возможно. Готовые панели и уже начисленные расходы сохраняются.",
+          "drawNext": "Нарисовать следующую партию ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Управление режиссёрской раскадровкой · {{title}}",
+          "drawMissing": "Нарисовать недостающие ({{count}})",
+          "redrawBeat": "Перерисовать бит · платно",
+          "cardLabel": "Шот {{position}}: {{status}}",
+          "redrawShot": "Перерисовать шот {{position}} · платно",
+          "useAsFirstFrame": "Использовать панель шота {{position}} как первый кадр",
+          "status": {
+            "missing": "Не нарисовано",
+            "current": "Актуально",
+            "stale": "Устарело",
+            "statusPending": "Ожидание статуса",
+            "queued": "В очереди",
+            "drawing": "Рисуется",
+            "needsAttention": "Требует внимания",
+            "failed": "Ошибка",
+            "cancelled": "Отменено"
+          }
+        },
+        "statusUnavailable": "Текущий порядок в Board неполон или неоднозначен. Обновите проект перед проверкой плиток Shot.",
+        "renderedCount": "Отрендерено {{count}} из {{total}}",
+        "staleCount": "{{count}} устаревших Shot",
+        "staleCount_one": "{{count}} устаревший Shot",
+        "staleCount_other": "{{count}} устаревших Shot",
+        "inFlightCount": "{{count}} Shot в очереди или рендеринге",
+        "inFlightCount_one": "{{count}} Shot в очереди или рендеринге",
+        "inFlightCount_other": "{{count}} Shot в очереди или рендеринге",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}, Shot {{shot}}",
+          "listLabel": "Shots в {{title}}",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "Текущее видео Shot",
+          "stale": "Устарело",
+          "chainHead": "Начало цепочки",
+          "chainAfter": "После {{beat}}.{{shot}}",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "Сведения о блокировках недоступны для этой редакции проекта.",
+          "blocker": {
+            "heading": "Причины блокировки",
+            "referenceBindingTable": "Привязку референсов нужно исправить в Table до генерации.",
+            "reviewOnTable": "Проверить референсы в Table",
+            "cause": {
+              "routeInventoryUnavailable": "Список движков недоступен.",
+              "routeNotSelected": "Движок генерации не выбран.",
+              "routeSetupRequired": "Выбранный движок нужно настроить.",
+              "routeUnavailable": "Выбранный движок недоступен.",
+              "routeRetired": "Выбранный движок выведен из эксплуатации.",
+              "routeIncompatibleFrame": "Движок несовместим с этим кадром.",
+              "routeFirstFrameUnsupported": "Движок не поддерживает этот первый кадр.",
+              "routeDurationUnsupported": "Движок не поддерживает такую длительность Shot.",
+              "referencePlanInvalid": "План референсов требует проверки.",
+              "referenceGenerationRequired": "Необходимо сгенерировать референсное изображение.",
+              "referenceApprovalRequired": "Референсное изображение требует подтверждения человеком.",
+              "referenceGenerationFailed": "Не удалось сгенерировать референс.",
+              "referenceBindingUnassigned": "Референсы не назначены.",
+              "referenceBindingUnknownReference": "В привязке указано неизвестное референсное изображение.",
+              "referenceBindingWrongKind": "В привязке используется неверный тип референса.",
+              "referenceBindingUnapprovedReference": "В привязке используется неподтверждённый референс.",
+              "referenceBindingMissingAsset": "Отсутствует привязанное референсное изображение.",
+              "referenceBindingCapacityExceeded": "Привязка превышает допустимое для движка число референсов.",
+              "seedSelectionRequired": "Необходимо выбрать первый кадр.",
+              "seedGenerationRequired": "Необходимо создать первый кадр.",
+              "conditioningFrameRequired": "Необходимо извлечь кадр из предыдущего Shot.",
+              "extractionFailed": "Не удалось извлечь предыдущий кадр.",
+              "dependencyFailed": "Не удалось выполнить предшествующий Shot.",
+              "generationInvalidRequest": "Запрос на генерацию недействителен.",
+              "generationContentRejected": "Поставщик отклонил контент.",
+              "generationAuth": "Поставщик отклонил аутентификацию.",
+              "generationQuota": "Квота поставщика исчерпана.",
+              "generationRateLimited": "Поставщик ограничивает частоту запросов.",
+              "generationProviderUnavailable": "Поставщик генерации недоступен.",
+              "generationTimeout": "Время ожидания генерации истекло.",
+              "generationPollDeadline": "Генерация не завершилась до окончания срока опроса.",
+              "generationNoOutput": "Генерация завершилась без пригодного результата.",
+              "generationVariationGrid": "Результат представляет собой сетку вариантов и требует проверки.",
+              "generationSubmissionUnknown": "Поставщик не подтвердил отправку.",
+              "generationDownloadFailed": "Не удалось загрузить сгенерированный медиаматериал.",
+              "generationUnsupported": "Этот запрос на генерацию не поддерживается.",
+              "generationUnknown": "Генерация завершилась с ошибкой по неизвестной причине.",
+              "cutInvalidMedia": "Текущее изображение недопустимо для Cut.",
+              "cutBedTooShort": "Аудиоподложка короче Cut."
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "Предпросмотр фильма",
+          "beatBadge": "Бит {{position}} · {{title}}",
+          "slate": "Заставка · Нет материала",
+          "slateHold": "Остаётся в монтаже на {{clock}}",
+          "videoLabel": "Бит {{beatPosition}} · {{beatTitle}} · Шот {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Бит {{beatPosition}} · {{beatTitle}} · Заставка · Нет материала",
+          "noMedia": "Предпросмотр фильма недоступен.",
+          "awaitingPictureOne": "У Бита {{beatPosition}}, шота {{shotPosition}} пока нет текущего изображения.",
+          "awaitingPictureMany": "У {{count}} шотов пока нет текущего изображения.",
+          "mediaError": "Не удалось загрузить этот предпросмотр.",
+          "play": "Воспроизвести фильм",
+          "pause": "Приостановить фильм",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Только изображение — аудиодорожка здесь отключена",
+          "shotAudioOnly": "Только звук кадра — музыкальная подложка не включена в этот предпросмотр",
+          "controlsLabel": "Управление воспроизведением фильма",
+          "seekLabel": "Шкала перемотки фильма",
+          "previousJoin": "Предыдущая склейка",
+          "nextJoin": "Следующая склейка",
+          "loopJoin": "Зациклить склейку",
+          "buffering": "Загрузка кадра предпросмотра"
+        },
+        "exports": {
+          "editorFolderDescription": "Текущие изображения шотов, целевые заглушки, данные таймлайна и необязательная аудиодорожка в порядке фильма."
+        },
+        "film": {
+          "under": "на {{clock}} меньше",
+          "over": "на {{clock}} больше"
+        },
+        "openBeat": "Открыть бит",
+        "bed": {
+          "silentPreview": "Без звука в предпросмотре · применяется при экспорте",
+          "extent": "С 0:00 · длительность {{seconds}} с"
+        },
+        "slate": {
+          "openBeat": "Открыть бит без материала"
+        }
+      },
+      "proposals": {
+        "proposalId": "ID предложения",
+        "mutationCount": "Предложено правок: {{count}}",
+        "mutationCount_one": "Предложена {{count}} правка",
+        "mutationCount_other": "Предложено правок: {{count}}",
+        "terminalCount": "Нельзя принять предложений режиссёра: {{count}}",
+        "terminalCount_one": "Нельзя принять {{count}} предложение режиссёра",
+        "terminalCount_other": "Нельзя принять предложений режиссёра: {{count}}",
+        "showTerminal": "Просмотреть прошлые предложения",
+        "hideTerminal": "Скрыть прошлые предложения",
+        "reviewDetails": "Просмотреть детали предложения",
+        "before": "До",
+        "after": "После",
+        "ownerBeat": "Родительский бит",
+        "reviewUnavailable": "Не удалось безопасно проверить это предложение, поэтому его нельзя принять.",
+        "refusal": {
+          "applyCoverage": "План покрытия не может заменить эти зафиксированные кадры. Отредактируйте их съёмочные сценарии напрямую.",
+          "applyCoverageFixedWork": "План покрытия не может заменить кадры, в которых уже есть работа. Проверьте причины фиксации и отредактируйте затронутые кадры напрямую.",
+          "editShotsDirectly": "Редактировать эти кадры напрямую",
+          "reason": {
+            "beat_capacity_reached": "Достигнут предел количества битов в проекте.",
+            "beat_shot_capacity_reached": "Достигнут предел количества кадров в этом бите.",
+            "project_shot_capacity_reached": "Достигнут предел количества кадров в проекте.",
+            "invalid_shot_duration": "Длительность предложенного кадра находится вне допустимого диапазона.",
+            "dependency_blocked": "Существующая работа блокирует это изменение.",
+            "identity_collision": "Предложенный идентификатор уже используется.",
+            "invalid_operation": "Это изменение недопустимо для текущего проекта.",
+            "undo_conflict": "Предложение конфликтует с более поздними правками.",
+            "validation_failed": "Получившийся проект не прошёл проверку."
+          },
+          "fixedReason": {
+            "owned_asset": "сохранённые материалы кадра",
+            "owned_job": "история генерации",
+            "video_asset": "текущее видео",
+            "seed_still": "выбранный первый кадр",
+            "conditioning_frame": "кадр непрерывности",
+            "conditioning_input": "вход для последующего обусловливания",
+            "shooting_script": "существующий съёмочный сценарий"
+          }
+        },
+        "refreshing": "Предложение сверяется с текущим проектом…",
+        "authorityUnavailable": "Не удалось проверить полномочия предложения. Оно остаётся ожидающим, а действия с ним недоступны.",
+        "requestUpdated": "Подготовить обновлённое предложение",
+        "saveAndRequestUpdated": "Сохранить и подготовить обновлённое предложение",
+        "reviewRuleDrafts": "Проверить черновики правил",
+        "reviewRuleDraftsFirst": "Проверьте или удалите локальный черновик правила, прежде чем принимать это предложение правила.",
+        "reproposalPrompt": "Проверьте предложение {{proposalId}} с помощью studio_get_proposal, затем вызовите read_storyboard и подготовьте новое предложение для текущей ревизии. Не применяйте и не перебазируйте исходное предложение незаметно.",
+        "chatDecisionBusy": "Другое проверяемое действие ещё выполняется.",
+        "chatDirty": "Сохраните или сбросьте черновики, конфликтующие с этим предложением, прежде чем принимать его.",
+        "chatNoPending": "Нет ожидающего предложения режиссёра.",
+        "chatMultiplePending": "Готово несколько текущих предложений режиссёра. Используйте /approve PROPOSAL_ID или /reject PROPOSAL_ID с полным ID.",
+        "chatProposalNotFound": "Именно это предложение больше не ожидает решения.",
+        "chatUnavailable": "Сейчас нет готового ожидающего предложения режиссёра. Проверьте его карточку или запросите обновлённое предложение.",
+        "chatStale": "Предложение больше не соответствует текущей ревизии проекта.",
+        "chatAccepted": "Предложение принято.",
+        "chatRejected": "Предложение отклонено.",
+        "reviewStale": "Этот обзор создан для редакции {{baseRevision}}, а текущая редакция проекта — {{currentRevision}}.",
+        "noChanges": "Это предложение не вносит смысловых изменений.",
+        "paidRecovery": {
+          "heading": "Платное восстановление",
+          "explanation": "Director обнаружил восстановление, требующее новой генерации. Перед оплатой проверьте затронутую работу и цену.",
+          "blockedBy": "Причина блокировки",
+          "affectedWork": "Затронутая работа",
+          "price": "Ориентировочная стоимость",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Объём генерации",
+          "generationCount": "Элементов генерации: {{count}}",
+          "includesCascade": "включая зависимую работу",
+          "expires": "Эта цена действует до {{expiresAt}}.",
+          "expired": "Сохранённая цена истекла. Обновите её перед подтверждением.",
+          "confirm": "Подтвердить и оплатить",
+          "refresh": "Обновить цену",
+          "refreshed": "Цена обновлена. Проверьте её и подтвердите ещё раз для оплаты.",
+          "cardOnly": "Платное восстановление можно подтвердить только в карточке предложения после проверки текущей цены.",
+          "location": {
+            "project": "Проект",
+            "cut": "Монтаж",
+            "route": "Маршрут {{route}}",
+            "reference": "Референс · {{reference}}",
+            "shot": "{{beat}} · Кадр {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "Проект",
+          "reference": "Референс",
+          "beat": "Бит",
+          "shot": "Шот"
+        },
+        "change": {
+          "added": "Добавлено",
+          "edited": "Изменено",
+          "removed": "Удалено",
+          "reordered": "Переставлено"
+        },
+        "placementValue": {
+          "active": "Активно",
+          "bin": "Корзина",
+          "removed": "Удалено"
+        },
+        "field": {
+          "name": "Название",
+          "brief": "Бриф",
+          "rules": "Правила",
+          "aspectRatio": "Соотношение сторон",
+          "resolution": "Разрешение",
+          "targetDurationSeconds": "Целевая длительность",
+          "boardStyle": "Стиль борда",
+          "prompt": "Промпт",
+          "title": "Заголовок",
+          "story": "История",
+          "targetSeconds": "Цель бита",
+          "shootingScript": "Съёмочный сценарий",
+          "durationSeconds": "Длительность",
+          "chainBreak": "Непрерывность",
+          "placement": "Положение",
+          "order": "Порядок"
+        }
+      },
+      "playbackAudio": {
+        "label": "Звук при воспроизведении",
+        "mute": "Выключить звук",
+        "unmute": "Включить звук",
+        "volume": "Громкость воспроизведения: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Анализ звука кадра…",
+          "audible": "Есть слышимый звук",
+          "effectivelySilent": "Практически без звука",
+          "noAudioStream": "Аудиопоток отсутствует",
+          "unavailable": "Анализ звука недоступен"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "Первый кадр {{stillIndex}} для шота {{shotIndex}}",
+          "previewAlt": "Предпросмотр · {{label}}",
+          "effective": "Текущий первый кадр",
+          "pinnedBadge": "Закреплено",
+          "authorizationLocked": "Авторизованная работа с видео заблокировала первый кадр этого шота. Импортированные варианты остаются сохранёнными, но не могут заменить исходный кадр в проверенной смете.",
+          "authorizationIncompatible": "Недоступно для авторизованной работы"
+        },
+        "firstFrames": {
+          "title": "Первые кадры",
+          "shotChip": "Кадр {{shot}}",
+          "on": "Активен",
+          "status": {
+            "notReady": "Не готов",
+            "ready": "Готов к рендеру",
+            "rendering": "Рендеринг",
+            "rendered": "Отрендерен"
+          },
+          "frameLabel": "Кадр {{index}}",
+          "origin": {
+            "generated": "Создан",
+            "imported": "Импортирован",
+            "board": "Раскадровка",
+            "inherited": "Из кадра {{shot}}"
+          },
+          "current": "Текущий",
+          "unavailable": "Недоступно",
+          "previewAlt": "Предпросмотр · {{label}}",
+          "openFrame": "Открыть {{label}} на весь экран",
+          "pinned": "Закреплён как первый кадр",
+          "pin": "Закрепить как первый кадр",
+          "firstFrameChanged": "Первый кадр изменён · Не перезапущено",
+          "promptChanged": "Изменено · Ещё не запущено",
+          "import": "Импортировать первый кадр",
+          "empty": "Нет подходящего первого кадра",
+          "currentPicture": "Текущее изображение",
+          "pictureEmpty": "Изображения пока нет",
+          "pictureAlt": "Текущее изображение для кадра {{shot}}",
+          "sendLastFrame": "Отправить последний кадр в кадр {{shot}}",
+          "cancelRun": "Отменить запуск",
+          "generateShot": "Создать кадр {{shot}}",
+          "generateAgain": "Создать заново",
+          "promptLabel": "Промпт кадра",
+          "regenerate": "Создать заново",
+          "menu": {
+            "download": "Скачать",
+            "copyPrompt": "Копировать промпт",
+            "remove": "Удалить"
+          },
+          "viewer": {
+            "currentFirstFrame": "Текущий первый кадр",
+            "counter": "{{current}} из {{total}}",
+            "previous": "Назад",
+            "next": "Далее"
+          }
+        },
+        "picture": {
+          "title": "Текущее изображение",
+          "label": "Текущее изображение для кадра {{index}}",
+          "empty": "Пока ничего не отрендерено",
+          "sourceDuration": "Исходник: {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} секунд",
+          "unavailable": "Текущее изображение недоступно",
+          "videoPreview": "Проигрыватель · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "Создать заново",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "Создать снова"
+        },
+        "lift": {
+          "shot": "Переместить в корзину",
+          "shotTitle": "Переместить шот {{index}} в корзину?",
+          "shotBodyNoStale": "Все созданные и оплаченные материалы останутся с этим шотом. Переместить его в корзину?",
+          "shotBodyStale": "Все созданные и оплаченные материалы останутся с этим шотом. После перемещения в корзину устареет следующее: {{shots}}.",
+          "confirmShot": "Переместить в корзину",
+          "beat": "Переместить в корзину",
+          "beatTitle": "Переместить этот бит в корзину?",
+          "beatBodyNoStale": "Все шоты и все созданные и оплаченные материалы останутся с этим битом. Переместить его в корзину?",
+          "beatBodyStale": "Все шоты и все созданные и оплаченные материалы останутся с этим битом. После перемещения в корзину устареет следующее: {{shots}}.",
+          "confirmBeat": "Переместить в корзину"
+        },
+        "beatFieldsLabel": "История бита",
+        "fieldGuidance": {
+          "story": "История · Сюжетная задача и развитие этого бита"
+        },
+        "fields": {
+          "story": "История",
+          "shootingScript": "Съёмочный сценарий",
+          "shootingScriptFor": "Съёмочный сценарий для шота {{index}}"
+        },
+        "chain": {
+          "hardCutState": "Жёсткая склейка · Начинается с первого кадра",
+          "hardCutUnavailable": "Изменение жёсткой склейки временно недоступно. Сначала необходимо проверить расчёт требуемой замены медиафайлов.",
+          "reviewSever": "Проверить жёсткую склейку…",
+          "reviewRejoin": "Проверить воссоединение…",
+          "reviewSeverDescription": "Жёсткая склейка начинает кадр {{shot}} с подходящего первого кадра и при необходимости создаёт новый. После подтверждения этот кадр и все непрерывные последующие кадры до следующей жёсткой склейки будут заменены.",
+          "reviewRejoinDescription": "При воссоединении кадра {{shot}} выбор первого кадра очищается и используется последний кадр сцены {{previous}} с учётом обрезки. После подтверждения бесплатное извлечение кадра может завершиться до отправки этого и последующих непрерывных кадров поставщику вплоть до следующей жёсткой склейки.",
+          "segmentHead": "Начало цепочки · Начинается с первого кадра",
+          "continuous": "Продолжается с последнего кадра шота {{position}}"
+        },
+        "coverage": {
+          "trimGuidance": "Край · Обрезка · Бесплатно",
+          "boundaryGuidance": "Граница · Требует повторного рендера",
+          "segmentState": {
+            "noPicture": "Нет изображения",
+            "queued": "В очереди",
+            "nextUp": "Следующий",
+            "waitingOnShot": "Ожидание шота {{position}}",
+            "waitingOnFrame": "Ожидание кадра для продолжения",
+            "rendering": "Рендеринг",
+            "renderingProgress": "Рендеринг · {{progress}} %",
+            "renderingStill": "Рендеринг · Показ первого кадра",
+            "rendered": "Готово",
+            "untouched": "Без изменений",
+            "needsRerender": "Нужен повторный рендер",
+            "staleStillPlays": "Устарело · Всё ещё воспроизводится",
+            "failedNotBilled": "Ошибка · Без списания",
+            "neverDispatched": "Не отправлено",
+            "shotKept": "Шот {{position}} · Сохранён",
+            "statusPending": "Статус недоступен",
+            "needsAttention": "Требует внимания"
+          },
+          "boundaryFrame": {
+            "empty": "Граница после шота {{position}} · Ожидание кадра для продолжения",
+            "ready": "Граница после шота {{position}} · Кадр для продолжения готов",
+            "gone": "Граница после шота {{position}} · Кадр для продолжения отсутствует",
+            "stale": "Граница после шота {{position}} · Кадр для продолжения устарел"
+          },
+          "seekGuidance": "Шкала · Перемотка · Бесплатно",
+          "seekLane": "Шкала перемотки бита",
+          "seekValue": "{{current}} из {{total}}"
+        },
+        "preview": {
+          "label": "Предпросмотр бита",
+          "noMedia": "Предпросмотр бита недоступен",
+          "mediaError": "Не удалось показать текущее изображение.",
+          "videoLabel": "Видео шота {{position}} · {{shootingScript}}",
+          "slateLabel": "Плановая заставка шота {{position}} · {{shootingScript}}",
+          "slate": "Плановая заставка",
+          "slateHold": "Показ {{clock}}",
+          "play": "Воспроизвести бит",
+          "pause": "Приостановить бит",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Только изображение",
+          "controlsLabel": "Управление воспроизведением бита",
+          "previousJoin": "Предыдущая склейка",
+          "nextJoin": "Следующая склейка",
+          "loopJoin": "Зациклить ближайшую склейку",
+          "keyboardGuidance": "Пробел — воспроизведение · Стрелки — перемотка · [ ] — склейки · L — цикл"
+        },
+        "directorRequestHint": "Попросите креативного директора предложить проверенное новое разбиение.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Отменить и проверить воссоединение",
+          "cancelAndReviewRejoinTitle": "Отменить авторизованную работу и проверить воссоединение?",
+          "cancelAndReviewRejoinBody": "Будет отменена только ещё не отправленная ожидающая работа с видео. Готовые медиафайлы и история авторизации сохранятся. Перед заменяющей генерацией нужно проверить новую смету воссоединения.",
+          "cancelAndReviewRejoinConfirm": "Отменить и проверить воссоединение",
+          "cancelAndReviewRejoinUnconfirmed": "Ожидающая работа отменена, но обновлённое рабочее пространство не удалось подтвердить. Обновите его перед проверкой воссоединения.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Результат отмены не удалось подтвердить. Обновите рабочее пространство перед проверкой воссоединения."
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "Настройка фильма",
+        "videoAudioCapability": {
+          "silentOnly": "Этот движок создаёт клипы без звука.",
+          "audioCapable": "Этот движок может создавать звук; аудиодорожка готового кадра анализируется отдельно."
+        },
+        "undoLabel": {
+          "promote_board_panel": "Использовать панель как первый кадр",
+          "set_reference_plan": "план референсов",
+          "amend_reference_plan": "добавить фон",
+          "set_reference_label": "название референса",
+          "set_reference_prompt": "промпт референса",
+          "select_reference_image": "текущее изображение референса",
+          "remove_reference_image": "удалить изображение референса",
+          "dismiss_seed_still": "отклонить первый кадр",
+          "select_video_take": "выбрать видеодубль",
+          "remove_video_take": "удалить дубль",
+          "set_shot_reference_binding": "привязка референсов шота"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "Панель раскадровки",
+          "reference_image": "Референсное изображение"
+        },
+        "promotion": {
+          "title": "Использовать панель как первый кадр",
+          "summary": "Сделать текущую панель раскадровки для шота {{shotId}} первым кадром. Это не меняет границу непрерывности шота.",
+          "impactNone": "От этого кадра не зависит ни одно текущее изображение.",
+          "impactIntro": "Текущие изображения, которые останутся доступными для просмотра, но устареют: {{count}}",
+          "impactItem": "Текущее изображение шота {{shotId}}",
+          "optionsLabel": "Выберите, что делать с текущими изображениями",
+          "promoteOnly": "Только назначить — сохранить доступные устаревшие изображения",
+          "freePrice": "$0",
+          "promoteAndRerender": "Назначить и проверить точный объём повторного рендеринга",
+          "priceAfterReview": "Цена будет показана далее",
+          "promoteOnlyAction": "Назначить за $0",
+          "reviewPaidAction": "Проверить цену повторного рендеринга",
+          "paidUnavailable": "В этом сегменте слишком много текущих изображений для одного платного подтверждения. Назначение без рендеринга остаётся доступным.",
+          "headline": "Назначить + повторный рендеринг дублей ({{count}}) · {{cost}}",
+          "requiredWork": "Перечисленные повторные рендеринги точно соответствуют текущим изображениям, которые устареют из-за этого назначения. Недостающее покрытие не включено.",
+          "confirm": "Подтвердить назначение + повторный рендеринг дублей ({{count}}) · {{cost}}",
+          "promoted": "Панель назначена. Существующие изображения остаются доступными для просмотра и помечены как устаревшие.",
+          "promoting": "Панель назначается…",
+          "confirmed": "Панель назначена, и повторный рендеринг подтверждённых изображений запущен.",
+          "close": "Закрыть"
+        },
+        "headline_one": "{{count}} генерация · {{cost}}",
+        "headline_other": "{{count}} генераций · {{cost}}",
+        "confirm_one": "Подтвердить {{count}} генерацию · {{cost}}",
+        "confirm_other": "Подтвердить {{count}} генераций · {{cost}}",
+        "hideBreakdown": "Скрыть каждую генерацию",
+        "showBreakdown": "Показать каждую генерацию",
+        "conditioningFrameAlt": "Кадр-условие для {{shot}}",
+        "routeShared": "Всё через {{model}}",
+        "group": {
+          "required": "Обязательно"
+        },
+        "continuity": {
+          "severTitle": "Проверить жёсткую склейку",
+          "rejoinTitle": "Проверить воссоединение",
+          "severSummary": "Этот расчёт делает данный кадр началом цепочки, повторно использует подходящий первый кадр или создаёт его при необходимости и заменяет все затронутые видео до следующей жёсткой склейки.",
+          "rejoinSummary": "Этот расчёт очищает выбор первого кадра данного шота и воссоединяет его с предыдущим кадром с учётом обрезки. После подтверждения бесплатное извлечение кадра может завершиться до отправки видео на замену вплоть до следующей жёсткой склейки.",
+          "severHeadline": "Жёсткая склейка · обязательных генераций: {{count}} · {{cost}}",
+          "severHeadline_one": "Жёсткая склейка · {{count}} обязательная генерация · {{cost}}",
+          "severHeadline_other": "Жёсткая склейка · обязательных генераций: {{count}} · {{cost}}",
+          "rejoinHeadline": "Воссоединение · обязательных генераций: {{count}} · {{cost}}",
+          "rejoinHeadline_one": "Воссоединение · {{count}} обязательная генерация · {{cost}}",
+          "rejoinHeadline_other": "Воссоединение · обязательных генераций: {{count}} · {{cost}}",
+          "requiredWork": "Для этого изменения цепочки обязательны все перечисленные работы по замене.",
+          "confirmSever": "Подтвердить жёсткую склейку + {{count}} генераций · {{cost}}",
+          "confirmSever_one": "Подтвердить жёсткую склейку + {{count}} генерацию · {{cost}}",
+          "confirmSever_other": "Подтвердить жёсткую склейку + {{count}} генераций · {{cost}}",
+          "confirmRejoin": "Подтвердить воссоединение + {{count}} генераций · {{cost}}",
+          "confirmRejoin_one": "Подтвердить воссоединение + {{count}} генерацию · {{cost}}",
+          "confirmRejoin_other": "Подтвердить воссоединение + {{count}} генераций · {{cost}}",
+          "close": "Закрыть — оставить цепочку без изменений",
+          "severConfirmed": "Жёсткая склейка подтверждена. Проверьте в шоте ход подготовки первого кадра и замены, а также необходимость восстановления.",
+          "rejoinConfirmed": "Воссоединение подтверждено. Проверьте в шоте ход извлечения кадра и замены, а также необходимость восстановления."
+        },
+        "errors": {
+          "routesUnavailable": "Перед подготовкой этого расчёта выберите готовые маршруты изображения и видео в разделе «Настройка фильма».",
+          "pricing": {
+            "invalidQuote": "Данные расчёта были внутренне несогласованны. Ничего не отправлено.",
+            "inactiveShot": "Один из выбранных кадров больше не активен. Обновите проект и подготовьте расчёт снова.",
+            "inFlight": "Одна из выбранных генераций уже выполняется. Дождитесь завершения или измените выбор.",
+            "duplicateShotPurpose": "Одна и та же генерация выбрана несколько раз. Проверьте выбор и подготовьте расчёт снова.",
+            "invalidDependency": "Зависимость продолжения больше недействительна. Обновите проект и подготовьте расчёт снова.",
+            "invalidPrepareRequest": "Не удалось безопасно подготовить выбранные генерации. Проверьте выбор и повторите попытку.",
+            "invalidReference": "Одна из выбранных ссылок больше не подходит для этой генерации. Выберите другую ссылку.",
+            "missingShootingScript": "Перед созданием медиа напишите съёмочный сценарий для этого Shot.",
+            "missingConditioning": "Для видеодубля нет подходящего первого кадра или предыдущего кадра. Добавьте или выберите нужное изображение.",
+            "unsafeTotal": "Не удалось безопасно представить итог расчёта. Уменьшите выбор; ничего не отправлено."
+          }
+        },
+        "reviewShotBinding": "Проверить привязку шота",
+        "readout": {
+          "prompt": "Точный промпт",
+          "rendersAs": "Параметры рендера",
+          "sourceRevision": "Редакция источника",
+          "source": "Источник",
+          "story": "История",
+          "shootingScript": "Съёмочный сценарий",
+          "referencePrompt": "Описание референса",
+          "references": "Разрешённые референсы",
+          "noReferences": "Нет прямых входных референсов",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        },
+        "referenceGridRetry": "Если модель вернёт сетку вариантов, для каждого референса будет выполнена одна автоматическая повторная попытка. Первые попытки стоят {{lower}}, максимум с повторами — {{upper}}."
+      },
+      "editorFolderExport": {
+        "action": "Экспортировать папку для монтажа…",
+        "actionWithSlates": "Экспортировать папку для монтажа · заглушек: {{count}}…",
+        "exporting": "Экспорт… Медиа не создаются, средства не расходуются.",
+        "reveal": "Показать в Finder",
+        "dismiss": "Закрыть",
+        "none": "нет",
+        "successFacts": "{{bytes}} байт · файлов: {{count}}",
+        "successSlates": "Номера Shot с заглушками: {{shots}}",
+        "successQuarantine": "Старых экспортов перемещено: {{count}}",
+        "disabled": {
+          "no_beats": "Добавьте Beat перед экспортом",
+          "duration_pending": "Задайте длительность каждого пустого Beat",
+          "invalid_media": "Исправьте устаревшие или недействительные выбранные медиа",
+          "bed_too_short": "Выберите звуковую дорожку достаточной длины",
+          "mutationActive": "Дождитесь завершения текущего изменения",
+          "exportRunning": "Папка для монтажа уже экспортируется",
+          "catalogUnavailable": "Хранилище экспорта папки недоступно"
+        },
+        "errors": {
+          "catalogUnavailable": "Каталог экспорта недоступен. Перезагрузите проект.",
+          "staleAuthority": "Проект изменился. Проверьте текущий проект перед повторным экспортом.",
+          "staleCatalog": "Каталог экспорта изменился. Перезагрузите историю экспорта перед повторной попыткой.",
+          "invalidMedia": "Выбранное медиа устарело, неканонично или недействительно. Проверьте Cut.",
+          "mediaUnavailable": "Не удалось проверить выбранный файл. Частичный экспорт не опубликован.",
+          "busy": "Creative Studio завершает другую операцию. Повторите попытку позже.",
+          "artifactUnavailable": "Этого экспорта больше нет в активном каталоге. Перезагрузите проект.",
+          "resultConflict": "До подтверждения результата получен новый каталог. Перезагрузите и проверьте его."
+        }
+      },
+      "filmExport": {
+        "action": "Экспортировать фильм…",
+        "actionWithSlates": "Экспортировать фильм · заглушек: {{count}}…",
+        "actionWithSlates_one": "Экспортировать фильм · {{count}} заглушка…",
+        "actionWithSlates_other": "Экспортировать фильм · заглушек: {{count}}…",
+        "cancel": "Отменить экспорт",
+        "cut": "Прямые склейки",
+        "description": "Создаёт готовый для монтажа MP4 из текущей сборки. Непокрытые кадры становятся чёрными плашками заданной длительности.",
+        "disabled": {
+          "no_beats": "Добавьте Beat перед экспортом",
+          "duration_pending": "Задайте длительность каждого пустого Beat",
+          "invalid_media": "Исправьте устаревшие или неверные медиа",
+          "bed_too_short": "Выберите достаточно длинную аудиодорожку",
+          "mutationActive": "Завершите текущее изменение",
+          "exportRunning": "Экспорт фильма уже выполняется",
+          "catalogUnavailable": "Хранилище экспорта недоступно"
+        },
+        "dismiss": "Закрыть",
+        "dissolve": "Наплывы",
+        "errors": {
+          "catalogUnavailable": "Каталог экспорта недоступен. Перезагрузите проект.",
+          "staleAuthority": "Проект изменился. Устаревший фильм не опубликован — проверьте текущий проект перед повторным экспортом.",
+          "staleCatalog": "Каталог экспорта изменился. Устаревший фильм не опубликован — перезагрузите историю экспорта перед повторной попыткой.",
+          "unavailable": "Для экспорта фильма нужен FFmpeg, но на этом устройстве он не найден. Установите его или укажите в FFMPEG_PATH путь к уже имеющейся копии, затем откройте проект заново.",
+          "renderFailed": "Локальный рендер не прошёл проверку. Частичный экспорт не опубликован.",
+          "cancelled": "Экспорт отменён. Медиа проекта не изменены.",
+          "invalidMedia": "Сборка содержит устаревшие, неканонические или неверные медиа.",
+          "busy": "Creative Studio завершает другую операцию.",
+          "artifactUnavailable": "Фильма больше нет в активном каталоге.",
+          "resultConflict": "Более новый каталог появился до подтверждения фильма."
+        },
+        "export": "Экспортировать фильм",
+        "noSpend": "Выполняется на вашем устройстве. Медиа не создаются, средства не расходуются.",
+        "phase": {
+          "preparing": "Подготовка точных исходников…",
+          "analyzing": "Анализ медиа и тихих хвостов…",
+          "rendering": "Локальный рендеринг фильма…",
+          "publishing": "Проверка и публикация фильма…"
+        },
+        "reveal": "Показать в Finder",
+        "successFacts": "Авторская длительность {{nominal}} с · экспорт {{rendered}} с · хвостов обрезано: {{count}}",
+        "successFacts_one": "Авторская длительность {{nominal}} с · экспорт {{rendered}} с · обрезан {{count}} хвост",
+        "successFacts_other": "Авторская длительность {{nominal}} с · экспорт {{rendered}} с · хвостов обрезано: {{count}}",
+        "successQuarantine": "Старых экспортов перемещено: {{count}}",
+        "successQuarantine_one": "Старых экспортов перемещено: {{count}}",
+        "successQuarantine_other": "Старых экспортов перемещено: {{count}}",
+        "title": "Экспорт фильма",
+        "transition": "Переход",
+        "trimTails": "Обрезать статичные хвосты в конце каждого шота",
+        "trimTailsHelp": "Влияет только на экспортируемый файл: проект не изменяется. Последний шот сохраняет полную длительность."
+      }
     },
     "rules": {
       "open": "Правила",
@@ -954,13 +1819,7 @@
     "close": {
       "saveAndClose": "Сохранить и закрыть",
       "discard": "Не сохранять и закрыть",
-      "cancel": "Отмена",
-      "unsavedMessage": "В {{count}} сценах есть несохранённые изменения. Сохранить их перед закрытием?",
-      "unsavedMessage_one": "{{count}} сцена содержит несохранённые изменения. Сохранить её перед закрытием?",
-      "unsavedMessage_few": "{{count}} сцены содержат несохранённые изменения. Сохранить их перед закрытием?",
-      "unsavedMessage_many": "{{count}} сцен содержат несохранённые изменения. Сохранить их перед закрытием?",
-      "unsavedMessage_other": "В {{count}} сцены есть несохранённые изменения. Сохранить их перед закрытием?",
-      "unavailableMessage": "Творческая студия не отвечает. При закрытии сейчас несохранённые изменения сцен могут быть потеряны."
+      "cancel": "Отмена"
     },
     "phase": {
       "nav": {
@@ -1285,113 +2144,6 @@
       "durationSeconds_other": "{{seconds}} секунды",
       "selected": "Выбранная сцена"
     },
-    "inspector": {
-      "title": "Режиссура сцены",
-      "sectionsLabel": "Разделы редактирования сцены",
-      "directionTab": "Визуал",
-      "scriptTab": "Сценарий",
-      "titleLabel": "Название сцены",
-      "purposeLabel": "Цель сцены",
-      "purposePlaceholder": "Какую задачу должна решить эта сцена?",
-      "visualPromptLabel": "Визуальный промпт",
-      "visualPromptPlaceholder": "Опишите кадр, объект, обстановку, освещение и движение.",
-      "narrationLabel": "Закадровый текст",
-      "onScreenTextLabel": "Текст на экране",
-      "mediaKindLabel": "Тип результата",
-      "durationLabel": "Длительность сцены в секундах",
-      "invalidDuration": "Введите целое число от 1 до 60 секунд.",
-      "saving": "Сохранение сцены...",
-      "saved": "Сцена сохранена",
-      "saveFailed": "Не удалось сохранить сцену.",
-      "unsavedChanges": "Несохранённые изменения не потеряны."
-    },
-    "draft": {
-      "title": "Создать черновик раскадровки",
-      "body": "WePrompt предложит сцены, закадровый и экранный текст, а также хронометраж для вашей проверки.",
-      "checking": "Проверка выбранной модели раскадровки...",
-      "ready": "Готово к созданию черновика",
-      "setupRequired": "Выберите и настройте модель раскадровки для создания черновика с ИИ.",
-      "unavailable": "Создание черновика раскадровки сейчас недоступно.",
-      "providerLabel": "Провайдер раскадровки",
-      "modelLabel": "Модель раскадровки",
-      "chargeNotice": "Черновик использует выбранную модель проекта; провайдер может взимать плату.",
-      "replaceTitle": "Заменить существующую раскадровку?",
-      "replaceBody": "Новый черновик заменит все текущие сцены только после получения корректного предложения.",
-      "confirm": "Создать черновик",
-      "cancel": "Отмена",
-      "configureModel": "Открыть настройки модели",
-      "manualFallback": "Продолжить редактирование вручную",
-      "failed": "Не удалось создать черновик раскадровки. Текущие сцены не изменены."
-    },
-    "conditioning": {
-      "inputsTitle": "Входные данные для этого кадра",
-      "role": { "cast": "Персонажи", "look": "Стиль" },
-      "maximum": "Этот движок принимает до {{count}} референсов брифа.",
-      "unsupported": "Этот графический движок не поддерживает активные референсы брифа. Выберите другой движок или удалите их из брифа.",
-      "overflow": "Этот графический движок принимает не более {{maximum}} референсов брифа, но активно {{count}}.",
-      "malformed": "Референсы брифа изменились или недействительны. Обновите проверку перед генерацией.",
-      "reviewChanged": "Референсы брифа или графический движок изменились. Проверьте обновлённые входные данные перед генерацией.",
-      "plateOutOfDate": "Выбранный первый кадр создан с другими референсами брифа, соотношением сторон или разрешением. Этот клип всё равно можно отрендерить."
-    },
-    "reference": {
-      "generate": "Создать референс",
-      "dialogTitle": "Создать референсное изображение",
-      "promptLabel": "Промпт референса",
-      "reviewTag": "Референс",
-      "excludedSummary": "Некоторые запрошенные сцены не включены в это подтверждение, поскольку они не готовы:",
-      "excludedNoneReady": "Ни одна из запрошенных сцен не готова к созданию референса:",
-      "discardExcludedRequests": "Отклонить эти запросы",
-      "excludedUnavailable": "Сцена больше недоступна",
-      "excludedPromptUnusable": "Визуальный промпт сцены не может описать референсное изображение",
-      "dismissFailed": "Не удалось обновить очередь запросов. Окно проверки закрыто; повторите попытку позже."
-    },
-    "review": {
-      "generateReadyScenes": "Сгенерировать готовые сцены: {{count}}",
-      "generateReadyScenes_one": "Сгенерировать {{count}} готовую сцену",
-      "generateReadyScenes_few": "Сгенерировать {{count}} готовые сцены",
-      "generateReadyScenes_many": "Сгенерировать {{count}} готовых сцен",
-      "generateReadyScenes_other": "Сгенерировать {{count}} готовой сцены",
-      "noReadyScenes": "Нет сцен, готовых к генерации.",
-      "generateScene": "Сгенерировать сцену",
-      "regenerateScene": "Сгенерировать другой вариант",
-      "title": "Проверка генерации",
-      "sceneCount": "Выбрано сцен: {{count}}",
-      "videoSeconds": "Запрошено секунд видео: {{seconds}}",
-      "selectedDurationFull": "Выбранная длительность: {{seconds}} секунд",
-      "selectedDurationFull_one": "Выбранная длительность: {{seconds}} секунда",
-      "selectedDurationFull_few": "Выбранная длительность: {{seconds}} секунды",
-      "selectedDurationFull_many": "Выбранная длительность: {{seconds}} секунд",
-      "selectedDurationFull_other": "Выбранная длительность: {{seconds}} секунды",
-      "targetDurationFull": "Целевая длительность: {{seconds}} секунд",
-      "targetDurationFull_one": "Целевая длительность: {{seconds}} секунда",
-      "targetDurationFull_few": "Целевая длительность: {{seconds}} секунды",
-      "targetDurationFull_many": "Целевая длительность: {{seconds}} секунд",
-      "targetDurationFull_other": "Целевая длительность: {{seconds}} секунды",
-      "providerLabel": "Провайдер",
-      "modelLabel": "Модель",
-      "aspectRatio": "Соотношение сторон",
-      "resolution": "Разрешение",
-      "watermarkOff": "Водяной знак отключён",
-      "audioOff": "Вывод без звука; генерация аудио отключена",
-      "missingRoute": "Хотя бы у одной сцены нет движка.",
-      "invalidRoute": "Хотя бы один выбранный движок недействителен.",
-      "durationMismatch": "Хронометраж раскадровки не соответствует цели проекта.",
-      "chargeNotice": "Генерация использует выбранную учётную запись провайдера и может привести к расходам.",
-      "confirm": "Подтвердить и запустить",
-      "cancel": "Отмена",
-      "disabledMissingRoutes": "У {{count}} кадров нет движка. Закройте окно, чтобы выбрать его.",
-      "disabledMissingRoutes_one": "У {{count}} кадра нет движка. Закройте окно, чтобы выбрать его.",
-      "disabledMissingRoutes_few": "У {{count}} кадров нет движка. Закройте окно, чтобы выбрать его.",
-      "disabledMissingRoutes_many": "Для {{count}} кадров не выбран движок. Закройте окно, чтобы выбрать его.",
-      "disabledMissingRoutes_other": "У {{count}} кадров нет движка. Закройте окно, чтобы выбрать его.",
-      "setEngines": "Закрыть и выбрать движки",
-      "excludedFirstFrame": "{{count}} кадров не входят в эту генерацию — движок не может начать с кадра.",
-      "excludedFirstFrame_one": "{{count}} кадр не входит в эту генерацию — движок не может начать с кадра.",
-      "excludedFirstFrame_few": "{{count}} кадра не входят в эту генерацию — движок не может начать с кадра.",
-      "excludedFirstFrame_many": "{{count}} кадров исключены из этой генерации — движок не может начать с кадра.",
-      "excludedFirstFrame_other": "{{count}} кадров не входят в эту генерацию — движок не может начать с кадра.",
-      "audioOn": "Этот рендер включает сгенерированное аудио; движки без звука, если они есть, останутся без звука."
-    },
     "jobs": {
       "progress": "Выполнено: {{percent}} %",
       "cancel": "Отменить задачу",
@@ -1401,8 +2153,8 @@
       "retryConfirmationConfirm": "Подтвердить и повторить",
       "retryDownload": "Повторить загрузку",
       "retryChargeTitle": "Повторить с риском двойного списания?",
-      "retryChargeBody": "Результат предыдущей отправки неизвестен. Повторная попытка может привести к дополнительному списанию у провайдера.",
-      "retryChargeConfirm": "Подтвердить и повторить",
+      "retryChargeBody": "Результат предыдущей отправки неизвестен. Замена может привести к дополнительному списанию у провайдера. Продолжение только откроет новую оценку стоимости; работа пока не отправляется.",
+      "retryChargeConfirm": "Подтвердить и проверить оценку",
       "status": {
         "queuedLocal": "Ожидает отправки",
         "submitting": "Отправка",
@@ -1415,6 +2167,7 @@
       },
       "errors": {
         "invalidRequest": "Запрос генерации недействителен.",
+        "contentRejected": "Провайдер отклонил начальное изображение. Измените кадрирование или создайте новый стоп-кадр перед повторной попыткой.",
         "auth": "Провайдер отклонил учётные данные.",
         "quota": "В учётной записи провайдера недостаточно квоты.",
         "rateLimited": "Достигнут лимит запросов провайдера. Повторите попытку позже.",
@@ -1425,7 +2178,9 @@
         "submissionUnknown": "Результат отправки неизвестен. Перед повторной попыткой ознакомьтесь с предупреждением о двойном списании.",
         "downloadFailed": "Генерация завершена, но результат не удалось загрузить.",
         "unsupported": "Этот провайдер не поддерживает запрошенную операцию.",
-        "unknown": "Задача генерации завершилась ошибкой по неизвестной причине."
+        "seedStillVariationGrid": "Созданное изображение содержит многопанельную сетку вариантов и не может использоваться как текущий первый кадр или референс.",
+        "unknown": "Задача генерации завершилась ошибкой по неизвестной причине.",
+        "referenceVariationGridRepeated": "Модель снова вернула многопанельную сетку вариантов. Надёжный способ задать этот референс — импортировать фото."
       }
     },
     "preview": {
@@ -1499,15 +2254,20 @@
     "errors": {
       "featureDisabled": "Creative Studio отключена в этой сборке.",
       "invalidPayload": "Запрос содержит недействительные или неполные данные.",
+      "mutationRefused": "Это изменение нельзя применить к проекту в его текущем состоянии. Проверьте проект и повторите попытку.",
+      "pricingRefused": "Расчёт отклонён до отправки. Ничего не отправлено.",
       "projectNotFound": "Проект Creative Studio больше не существует.",
       "storyboardExists": "В этом проекте уже есть раскадровка. Подтвердите замену перед созданием нового черновика.",
       "staleProject": "Проект был изменён в другом месте. Обновите его перед повторной попыткой.",
+      "staleExportCatalog": "Каталог экспорта изменился. Обновите историю экспорта перед повторной попыткой.",
       "planningUnavailable": "Создание черновика раскадровки недоступно. Можно продолжить редактирование вручную.",
       "invalidRoute": "Выбранный движок генерации недействителен или недоступен.",
       "cancellationRefused": "Провайдер больше не может отменить эту выполняемую задачу.",
       "duplicateChargeAcknowledgementRequired": "Подтвердите риск двойного списания у провайдера перед повторной попыткой.",
       "busy": "В этом проекте есть активные задачи генерации.",
       "provider": "Провайдер не смог выполнить запрос.",
+      "runtimeInactive": "Генерация Creative Studio не готова. Откройте или создайте поддерживаемый проект и повторите попытку.",
+      "projectQuarantined": "Creative Studio не запустилась, потому что проекту {{projectId}} требуется восстановление. Откройте библиотеку Studio, чтобы проверить его.",
       "storage": "Creative Studio не удалось обновить локальные данные.",
       "ruleBreach": "Правило заблокировало создание до списания средств. Откройте раздел «Правила», чтобы узнать, что нужно изменить."
     },
@@ -1580,43 +2340,13 @@
         "frame": "Этот движок не может создать формат {{ratio}}.",
         "resolution": "Этот движок не может создать разрешение {{resolution}}.",
         "duration": "Этот движок не может создать кадр длительностью {{seconds}} с.",
-        "firstFrame": "Этот движок не может начать с референсного изображения.",
+        "firstFrame": "Этот движок не может начать с проверенного первого кадра.",
         "catalogUnloaded": "Список движков ещё не загружен.",
         "aria": "Нельзя создать. {{reason}}",
         "actionSetEngines": "Выбрать движки",
         "actionRemoveReference": "Удалить референс",
-        "actionShorten": "Сократить этот кадр"
+        "actionShorten": "Настроить длительность кадра"
       }
-    },
-    "brief": {
-      "conversationTitle": "Обсуждение брифа",
-      "danglingNotice": "Обсуждение брифа для этого проекта больше недоступно.",
-      "danglingStartFresh": "Начать новое обсуждение",
-      "proposalTitle": "Предложенный сценарий",
-      "proposalMeta": "На основе ревизии {{revision}} · {{createdAt}}",
-      "proposalSummary": "Добавлено: {{added}} · удалено: {{removed}} · изменено: {{changed}}",
-      "proposalSceneChange": "Кадр {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "Без изменений в текущем сценарии",
-      "proposalDiffUnavailable": "Сводка изменений недоступна — после подготовки этого предложения сценарий изменился",
-      "proposalField": {
-        "title": "название",
-        "purpose": "цель",
-        "visualPrompt": "визуальный промпт",
-        "narration": "закадровый текст",
-        "onScreenText": "текст на экране",
-        "mediaKind": "тип результата",
-        "durationSeconds": "длительность",
-        "referenceAssetId": "референс"
-      },
-      "proposalAccept": "Принять сценарий",
-      "proposalReject": "Отклонить",
-      "proposalAccepted": "Сценарий применён",
-      "proposalRejected": "Отклонено",
-      "proposalExpired": "Срок истёк",
-      "proposalStale": "Пока предложение ожидало решения, сценарий изменился. Запросите новую версию.",
-      "proposalRepropose": "Запросить новую версию",
-      "proposalFlushRefused": "Не удалось сохранить несохранённые правки, поэтому предложение не применено. Исправьте правки и повторите попытку."
     },
     "shell": {
       "showDirector": "Показать креативного директора",

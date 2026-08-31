@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "بسته تشخیصی ذخیره نشد",
       "runtimeComponentDescription": "این نصب فاقد مؤلفه‌های زمان اجرای همراه مورد نیاز است، بنابراین {{resource}} نمی‌تواند شروع شود. آخرین بسته WePrompt را مجدداً نصب کنید. اگر پس از نصب مجدد همچنان رخ داد، بررسی کنید آیا نرم‌افزار امنیتی یا آنتی‌ویروس مؤلفه‌های WePrompt را قرنطینه کرده است."
     },
+    "genericFailure": {
+      "title": "بک‌اند محلی راه‌اندازی نشد",
+      "description": "WePrompt نتوانست راه‌اندازی محلی را کامل کند. WePrompt را دوباره راه‌اندازی کنید. اگر مشکل ادامه داشت، بسته تشخیصی را برای پشتیبانی ذخیره کنید.",
+      "sendDiagnostics": "ذخیره تشخیص‌ها",
+      "diagnosticsSent": "تشخیص‌ها ذخیره شدند",
+      "diagnosticsReportSuccess": "بسته تشخیصی ذخیره شد",
+      "diagnosticsReportFailed": "بسته تشخیصی ذخیره نشد"
+    },
     "packageArchitectureMismatch": {
       "title": "عدم تطابق معماری بسته WePrompt",
       "description": "این بسته WePrompt برای {{packageArch}} است، اما این مک از {{deviceArch}} استفاده می‌کند. نصب‌کننده {{expectedArch}} را از کانال توزیع داخلی تأییدشده دریافت کنید، WePrompt را ببندید و آن بسته را نصب کنید.",

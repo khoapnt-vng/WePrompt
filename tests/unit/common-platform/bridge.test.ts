@@ -72,6 +72,28 @@ describe('local bridge', () => {
     expect(outbound[1]?.name).toMatch(/^subscribe\.callback-test\.echo/);
   });
 
+  it('rejects an invoke and disposes its callback when the native transport rejects the request', async () => {
+    vi.resetModules();
+    const { bridge } = await import('@/common/platform/bridge');
+    let incoming: TransportEmitter | undefined;
+    let requestId = '';
+    const transportError = new Error('invalid operation payload');
+    bridge.adapter({
+      emit(name, data) {
+        requestId = (data as { id: string }).id;
+        expect(name).toBe('subscribe-test.invalid-native-payload');
+        return Promise.reject(transportError);
+      },
+      on(emitter) {
+        incoming = emitter;
+      },
+    });
+    const endpoint = bridge.buildProvider<string, { expectedRevision: number }>('test.invalid-native-payload');
+
+    await expect(endpoint.invoke({ expectedRevision: undefined as unknown as number })).rejects.toBe(transportError);
+    expect(incoming?.emit(`subscribe.callback-test.invalid-native-payload${requestId}`, 'too late')).toBe(false);
+  });
+
   it('replaces the previous provider for the same key', async () => {
     const { bridge } = await loadLoopbackBridge();
     const endpoint = bridge.buildProvider<string, void>('test.replace');
@@ -124,12 +146,12 @@ describe('local bridge', () => {
 
   it('routes renderer-owned queries through the subscribe protocol', async () => {
     const { bridge, outbound } = await loadLoopbackBridge();
-    const query = bridge.buildRendererQuery<{ dirtySceneCount: number }>('test.renderer-query', {
-      dirtySceneCount: 24,
+    const query = bridge.buildRendererQuery<{ dirtyDraftCount: number }>('test.renderer-query', {
+      dirtyDraftCount: 24,
     });
-    query.provider(() => ({ dirtySceneCount: 3 }));
+    query.provider(() => ({ dirtyDraftCount: 3 }));
 
-    await expect(query.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtySceneCount: 3 });
+    await expect(query.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtyDraftCount: 3 });
     expect(outbound[0]?.name).toBe('subscribe-test.renderer-query');
     expect(outbound[1]?.name).toMatch(/^subscribe\.callback-test\.renderer-querytest\.renderer-query[a-f0-9]{8}$/);
   });
@@ -148,21 +170,21 @@ describe('local bridge', () => {
     );
   });
 
-  it('uses the bounded Creative Studio dirty-scene fallback when the renderer query rejects', async () => {
+  it('uses the bounded Creative Studio dirty-draft fallback when the renderer query rejects', async () => {
     await loadLoopbackBridge();
-    const error = new Error('storyboard renderer unavailable');
+    const error = new Error('draft renderer unavailable');
     vi.spyOn(console, 'error').mockImplementation(() => {});
     const { creativeStudio } = await import('@/common/adapter/ipcBridge');
     creativeStudio.hasUnsavedWork.provider(() => Promise.reject(error));
 
-    await expect(creativeStudio.hasUnsavedWork.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtySceneCount: 24 });
+    await expect(creativeStudio.hasUnsavedWork.invoke({ timeoutMs: 100 })).resolves.toEqual({ dirtyDraftCount: 24 });
     expect(console.error).toHaveBeenCalledWith(
       '[bridge] Renderer query provider "creative-studio.has-unsaved-work" failed:',
       error
     );
   });
 
-  it('preserves a Studio scene-limit store rejection as invalid_payload across the bridge', async () => {
+  it('preserves a Studio store rejection as invalid_payload across the V2 bridge', async () => {
     await loadLoopbackBridge();
     vi.doMock('@process/services/creative-studio/runtime', () => ({
       getCreativeStudioRuntime: vi.fn(),
@@ -177,26 +199,108 @@ describe('local bridge', () => {
       isFeatureEnabled: () => true,
       getService: () =>
         ({
-          updateScene: async () => {
-            throw new CreativeStudioStoreError('invalid_payload', 'Studio scene limit exceeded');
+          getProject: async () => {
+            throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
           },
         }) as never,
     });
 
-    await expect(
-      creativeStudio.updateScene.invoke({
-        projectId: 'project_1',
-        expectedRevision: 1,
-        sceneId: 'scene_25',
-        scene: null,
-      })
-    ).resolves.toEqual({
+    await expect(creativeStudio.getProject.invoke({ projectId: 'project_1' })).resolves.toEqual({
       ok: false,
       error: {
         code: 'invalid_payload',
         messageKey: 'conversation.creativeStudio.errors.invalidPayload',
       },
     });
+    vi.doUnmock('@process/services/creative-studio/runtime');
+  });
+
+  it('preserves only an allowlisted Studio pricing reason across the V2 IPC transport', async () => {
+    await loadLoopbackBridge();
+    vi.doMock('@process/services/creative-studio/runtime', () => ({
+      getCreativeStudioRuntime: vi.fn(),
+      getCreativeStudioService: vi.fn(),
+    }));
+    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioPricingErrorV2 }] = await Promise.all([
+      import('@/common/adapter/ipcBridge'),
+      import('@process/bridge/creativeStudioBridge'),
+      import('@process/services/creative-studio/service/schema2/pricing/estimate'),
+    ]);
+    initCreativeStudioBridge({
+      isFeatureEnabled: () => true,
+      getService: () =>
+        ({
+          prepareSubmission: async () => {
+            throw Object.assign(new StudioPricingErrorV2('missing_conditioning'), {
+              body: 'private provider body',
+              routeId: 'private_route_123',
+              stack: 'private stack',
+            });
+          },
+        }) as never,
+    });
+
+    const result = await creativeStudio.prepareSubmission.invoke({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      originReferenceHandoffId: null,
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+      cascadeChoices: [],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        reason: 'missing_conditioning',
+        details: null,
+        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private provider body');
+    expect(JSON.stringify(result)).not.toContain('private_route_123');
+    expect(JSON.stringify(result)).not.toContain('private stack');
+    vi.doUnmock('@process/services/creative-studio/runtime');
+  });
+
+  it('preserves only a bounded Studio mutation reason across the V2 IPC transport', async () => {
+    await loadLoopbackBridge();
+    vi.doMock('@process/services/creative-studio/runtime', () => ({
+      getCreativeStudioRuntime: vi.fn(),
+      getCreativeStudioService: vi.fn(),
+    }));
+    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioMutationErrorV2 }] = await Promise.all([
+      import('@/common/adapter/ipcBridge'),
+      import('@process/bridge/creativeStudioBridge'),
+      import('@process/services/creative-studio/service/schema2/mutations'),
+    ]);
+    initCreativeStudioBridge({
+      isFeatureEnabled: () => true,
+      getService: () =>
+        ({
+          applyMutations: async () => {
+            throw Object.assign(new StudioMutationErrorV2('dependency_blocked'), {
+              internalState: 'private mutation details',
+            });
+          },
+        }) as never,
+    });
+
+    const result = await creativeStudio.applyAuthoringBatch.invoke({
+      projectId: 'project_1',
+      expectedRevision: 1,
+      operations: [{ kind: 'set_brief', brief: 'Revised' }],
+    });
+
+    expect(result).toEqual({
+      ok: false,
+      error: {
+        code: 'mutation_refused',
+        reason: 'dependency_blocked',
+        messageKey: 'conversation.creativeStudio.errors.mutationRefused',
+      },
+    });
+    expect(JSON.stringify(result)).not.toContain('private mutation details');
     vi.doUnmock('@process/services/creative-studio/runtime');
   });
 

@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "Tanı paketi kaydedilemedi",
       "runtimeComponentDescription": "Bu kurulumda gerekli yerleşik çalışma zamanı bileşenleri eksik olduğu için {{resource}} başlatılamıyor. En son WePrompt paketini yeniden yükleyin. Yeniden yükledikten sonra da devam ederse güvenlik veya antivirüs yazılımının WePrompt bileşenlerini karantinaya alıp almadığını kontrol edin."
     },
+    "genericFailure": {
+      "title": "Yerel backend başlatılamadı",
+      "description": "WePrompt yerel başlatmayı tamamlayamadı. WePrompt'yi yeniden başlatın. Sorun devam ederse destek için tanı paketini kaydedin.",
+      "sendDiagnostics": "Tanıları kaydet",
+      "diagnosticsSent": "Tanılar kaydedildi",
+      "diagnosticsReportSuccess": "Tanı paketi kaydedildi",
+      "diagnosticsReportFailed": "Tanı paketi kaydedilemedi"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt paket mimarisi uyuşmazlığı",
       "description": "Bu WePrompt paketi {{packageArch}} içindir, ancak bu Mac {{deviceArch}} kullanıyor. {{expectedArch}} yükleyicisini onaylı şirket içi dağıtım kanalından alın, WePrompt'u kapatın ve bu paketi yükleyin.",

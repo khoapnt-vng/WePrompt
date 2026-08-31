@@ -878,27 +878,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "プロジェクト参照画像",
-      "inheritanceDescription": "新しい参照スチルには、このプロジェクトで有効なキャスト画像とルック画像がすべて使用されます。",
-      "castHeading": "キャスト",
-      "lookHeading": "ルック",
-      "castEmpty": "キャスト参照はまだありません。",
-      "lookEmpty": "ルック参照はまだありません。",
-      "addCast": "キャスト参照を追加",
-      "addLook": "ルック参照を追加",
-      "activeCount": "有効な参照 {{count}} 件",
-      "activeCount_other": "有効な参照 {{count}} 件",
-      "limitReached": "このプロジェクトにはすでに 6 件の有効な参照があります。追加する前に 1 件削除してください。",
-      "removeFromBrief": "ブリーフから外す",
-      "removeAccessible": "{{label}} をブリーフから外す",
-      "previewAccessible": "{{role}}参照：{{label}}",
-      "engineCapacityNone": "この画像エンジンは参照画像について未検証です。モデル設定を開いて再検証してください。",
-      "engineMenuCapacityNone": "参照画像なし",
-      "engineCapacityMaximum": "参照画像は最大 {{count}} 件",
-      "engineCapacityMaximum_other": "参照画像は最大 {{count}} 件",
-      "capacityMismatch": "有効な参照は {{count}} 件ありますが、この画像エンジンが対応するのは {{maximum}} 件です。参照を外すか、エンジンを変更または再検証するまで、新しい参照スチルは生成できません。",
-      "importError": "参照を追加できませんでした。もう一度お試しください。"
+    "workspace": {
+      "views": {
+        "references": "リファレンス"
+      },
+      "start": {
+        "title": "まずはディレクターから",
+        "description": "ディレクターが概要をもとに最初のプランを作成します。届いたらここで確認してください。"
+      },
+      "notReady": {
+        "references": "ディレクターがリファレンスを計画するまで、確認するものはありません。",
+        "table": "ディレクターがストーリーボードを作成するまで、構成するものはありません。",
+        "board": "テーブルの準備が整うまで制作は始められません。",
+        "cut": "制作が始まるまで編集はできません。"
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "正規画像",
+          "intro": "各キャラクターと繰り返し登場する場所に、現在の画像を1枚ずつ用意します。別のテイクを選ぶまで、この画像が正規画像です。",
+          "progress": "{{total}}件中{{current}}件が現在",
+          "bindShots": "ショットに割り当て",
+          "characterRule": "キャラクターを先に",
+          "placeRule": "次に繰り返し登場する場所",
+          "addCharacter": "キャラクターを追加",
+          "addCharacterUnavailable": "キャラクターの識別情報は、承認済みのDirector参照プランから取得されます。",
+          "places": "場所",
+          "addPlace": "場所を追加",
+          "kind": {
+            "character": "キャラクター",
+            "background": "場所"
+          },
+          "nameLabel": "{{kind}}名",
+          "meta": {
+            "character": "キャラクター · {{count}}枚",
+            "background": "場所 · {{count}}枚"
+          },
+          "status": {
+            "noPhoto": "写真なし",
+            "current": "現在に設定",
+            "generating": "生成中"
+          },
+          "duplicateName": "この参照タイプでは、その名前はすでに使用されています。",
+          "emptyPhoto": "最初の写真を生成",
+          "currentHandle": "{{handle}} · 現在",
+          "currentReference": "現在の正規参照",
+          "download": "{{handle}}をダウンロード",
+          "choosePhoto": "{{handle}}を現在に設定",
+          "addPhoto": "別の写真を生成",
+          "photoCount": "{{count}}枚",
+          "promptLabel": "{{label}}のプロンプト",
+          "promptPlaceholder": {
+            "character": "変わらない人物像、衣装、視覚的特徴を記述します。",
+            "background": "繰り返し登場する場所と、変わらない視覚的特徴を記述します。"
+          },
+          "action": {
+            "generate": "生成",
+            "generateAnother": "別の画像を生成",
+            "generateAgain": "再生成",
+            "cancelRun": "実行をキャンセル"
+          },
+          "tag": {
+            "running": "実行中",
+            "edited": "プロンプト編集済み"
+          },
+          "importPhoto": "写真を読み込む",
+          "removePhoto": "{{handle}}を削除",
+          "removePhotoLocked": "未解決の処理があるため、この写真はロックされています。削除する前に、下のブロッカーを確認してください。",
+          "removalBlocker": {
+            "activeReferenceJob": "このリファレンスの{{purpose}}ジョブ（{{jobId}}）は未解決です。ジョブが終了状態になるまで、現在の写真はロックされたままです。",
+            "activeAssetConsumer": "Beat {{beatPosition}}、Shot {{shotPosition}}の{{purpose}}がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "activeAssetConsumerRetained": "保持されているShot {{shotId}}の{{purpose}}がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "activeAssetConsumerOther": "{{purpose}}ジョブ（{{jobId}}）がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
+            "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedShot": "保持されているShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからShotを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedBeat": "保持されているBeat {{beatId}}内のShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからBeatを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryOther": "{{purpose}}ジョブ（{{jobId}}）はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
+            "invalidAuthority": "現在の写真のリファレンスデータに不整合があります。プロジェクトを再読み込みし、このリファレンスを確認してから、もう一度削除してください。",
+            "reviewInBoard": "Boardで確認"
+          }
+        },
+        "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
+        "generationScope": "生成範囲",
+        "characters": {
+          "title": "キャラクター",
+          "description": "名前のある各キャラクターについて、現在の正規画像を 1 枚生成します。",
+          "empty": "このストーリーに名前のあるキャラクターはいません。背景を確認できます。"
+        },
+        "backgrounds": {
+          "title": "背景",
+          "description": "映像の一貫性を保つため、繰り返し登場する場所を生成します。",
+          "charactersRequired": "背景を確認する前に、すべてのキャラクターを生成してください。",
+          "empty": "繰り返し登場する背景は必要ありません。",
+          "add": "背景を追加",
+          "addTitle": "繰り返し登場する背景を追加",
+          "nameLabel": "背景名",
+          "promptLabel": "生成プロンプト",
+          "duplicate": "この名前の背景はすでに存在します。",
+          "cancel": "キャンセル",
+          "confirm": "背景を追加"
+        },
+        "previewPending": "リファレンス画像はまだ生成されていません。",
+        "previewAlt": "{{label}} の現在のリファレンス画像",
+        "status": {
+          "idle": "未生成",
+          "queued": "待機中",
+          "running": "生成中",
+          "succeeded": "生成済み",
+          "failed": "生成に失敗",
+          "current": "現在"
+        },
+        "regenerate": "再生成",
+        "chooseGenerated": "生成済み画像から選択",
+        "regeneratePromptLabel": "生成プロンプト",
+        "regenerateCancel": "キャンセル",
+        "reviewGeneration": "生成費用を確認",
+        "generatedHistory": "生成済み画像",
+        "historyClose": "閉じる",
+        "historyPreviewAlt": "{{label}} の生成済みリファレンス画像",
+        "historyCurrent": "現在の画像",
+        "historyChoose": "この画像を選択",
+        "currentProgress": "{{total}} 件中 {{current}} 件のリファレンスを生成済み",
+        "bindings": {
+          "title": "Shot のバインド",
+          "description": "各 Shot が Board パネルと最初のフレームで使う、現在のキャラクターと背景を正確に選択します。",
+          "empty": "バインドするアクティブな Shot はありません。",
+          "shot": "Shot {{position}}",
+          "unassigned": "この Shot のリファレンスはまだ決定されていません。",
+          "invalid": "保存済みのバインドは無効になりました。現在のリファレンスを選び、再保存してください。",
+          "capacity": "キャラクターと背景で合計 {{count}} 件を選択していますが、共有の画像ルート枠は {{limit}} 件です。",
+          "capacityUsage": "共有画像参照枠を {{count}} / {{limit}} 使用中（キャラクター + 背景）",
+          "characters": "キャラクター",
+          "background": "背景",
+          "save": "バインドを保存",
+          "progress": "{{total}} Shot 中 {{ready}} 件をバインド済み"
+        }
+      },
+      "references": {
+        "referenceCount": "{{total}} 件のリファレンスをリクエストしました"
+      },
+      "handoffs": {
+        "referenceCount": "この引き継ぎには {{total}} 件のリファレンスがあります",
+        "progress": "待機 {{queued}} · 実行中 {{running}} · 成功 {{succeeded}} · 失敗 {{failed}}",
+        "reviewReferences": "リファレンスを確認",
+        "retryFailed": "失敗したリファレンスを再試行",
+        "awaiting_spend": "費用レビュー待ち",
+        "running": "リファレンスを生成中です。",
+        "succeeded": "要求されたすべてのリファレンスを生成しました。",
+        "partially_failed": "一部を生成しました。失敗したリファレンスだけを再試行してください。",
+        "failed": "リファレンス生成に失敗しました。自動再試行は行いません。",
+        "dismissed": "費用を使わず破棄"
+      },
+      "table": {
+        "reorder": {
+          "label": "{{title}}の並べ替え操作",
+          "dragHandle": "{{title}}（位置{{position}}）を並べ替え",
+          "moveEarlier": "{{title}}を前へ移動",
+          "moveLater": "{{title}}を後ろへ移動",
+          "announcement": "{{title}}を位置{{from}}から{{to}}（全{{total}}件）へ移動しました。",
+          "failed": "Beatの順序は変更されませんでした。"
+        },
+        "authoring": {
+          "label": "ストーリーの作成と復旧",
+          "coverageGap": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "coverageGap_one": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "coverageGap_other": "{{total}} 個の Beat のうち {{count}} 個に Shot がありません",
+          "unscriptedWarning": "{{count}} 個の Shot に撮影台本がありません",
+          "unscriptedWarning_one": "{{count}} 個の Shot に撮影台本がありません",
+          "unscriptedWarning_other": "{{count}} 個の Shot に撮影台本がありません",
+          "askDirector": "Director に依頼",
+          "addBeat": "Beat を追加",
+          "addShot": "Shot を追加",
+          "addShotForBeat": "{{title}} に Shot を追加",
+          "unassignedReferenceNote": "手動で作成した Shot は参照が未割り当ての状態で始まり、有料生成の前に確認が必要です。"
+        },
+        "columns": {
+          "length": "合計",
+          "panel": "パネル",
+          "story": "ストーリー"
+        },
+        "plannedPending": "計画合計なし",
+        "panel": {
+          "openDetails": "{{title}}のボードパネルを開く",
+          "closeDetails": "{{title}}のボードパネルを閉じる",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "shotDetails": "ショット{{position}}の詳細",
+          "head": "チェーン先頭",
+          "status": {
+            "missing": "未作成",
+            "current": "最新",
+            "stale": "古い",
+            "statusPending": "ステータス待ち",
+            "queued": "待機中",
+            "drawing": "描画中",
+            "needsAttention": "要確認",
+            "failed": "失敗",
+            "cancelled": "キャンセル済み"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "状況を取得できません",
+        "blockers": "ブロッカー {{count}} 件",
+        "blockers_one": "ブロッカー {{count}} 件",
+        "blockers_other": "ブロッカー {{count}} 件"
+      },
+      "library": {
+        "subtitle": "ビートとショットで物語を組み立て、各ショットの現在の画像を確認します。",
+        "pictureCount": "準備完了の画像 {{count}} 件",
+        "pictureCount_one": "準備完了の画像 {{count}} 件",
+        "pictureCount_other": "準備完了の画像 {{count}} 件",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "プロジェクト状況を取得できません",
+          "stage": {
+            "brief": "ブリーフ",
+            "engines": "エンジン",
+            "references": "参照画像",
+            "storyboard": "ストーリーボード",
+            "bindings": "割り当て",
+            "production": "制作",
+            "cut": "編集"
+          },
+          "progress": {
+            "ready": "準備完了",
+            "needsWork": "作業が必要",
+            "references": "承認済み参照画像 {{current}} / {{total}}",
+            "shots": "ショット {{current}} / {{total}}"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "ディレクター・ボードの操作",
+          "progress": "{{total}}枚中{{drawn}}枚を作成済み",
+          "progressLabel": "ボードの完成度",
+          "staleCount": "古いパネル {{count}}件",
+          "busyCount": "進行中 {{count}}件",
+          "stop": "描画を停止",
+          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのパネルと発生済みの料金はそのまま残ります。",
+          "drawNext": "次のバッチを描画 ({{count}})"
+        },
+        "panel": {
+          "beatActions": "ディレクター・ボードの操作 · {{title}}",
+          "drawMissing": "未作成を描画 ({{count}})",
+          "redrawBeat": "Beatを再描画 · 有料",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "redrawShot": "Shot {{position}}を再描画 · 有料",
+          "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
+          "status": {
+            "missing": "未作成",
+            "current": "最新",
+            "stale": "古い",
+            "statusPending": "ステータス待ち",
+            "queued": "待機中",
+            "drawing": "描画中",
+            "needsAttention": "要確認",
+            "failed": "失敗",
+            "cancelled": "キャンセル済み"
+          }
+        },
+        "statusUnavailable": "現在のBoardの順序は不完全か不明確です。Shotタイルを確認する前にプロジェクトを更新してください。",
+        "renderedCount": "{{total}}個中{{count}}個をレンダリング済み",
+        "staleCount": "古くなったShot {{count}}個",
+        "staleCount_one": "古くなったShot {{count}}個",
+        "staleCount_other": "古くなったShot {{count}}個",
+        "inFlightCount": "待機中またはレンダリング中のShot {{count}}個",
+        "inFlightCount_one": "待機中またはレンダリング中のShot {{count}}個",
+        "inFlightCount_other": "待機中またはレンダリング中のShot {{count}}個",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}、Shot {{shot}}",
+          "listLabel": "{{title}}のShot",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "現在のShot動画",
+          "stale": "古い",
+          "chainHead": "チェーンの先頭",
+          "chainAfter": "{{beat}}.{{shot}}の後",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "このプロジェクトリビジョンではブロッカーの詳細を利用できません。",
+          "blocker": {
+            "heading": "次の理由でブロック",
+            "referenceBindingTable": "生成前にTableでリファレンスの割り当てを修正する必要があります。",
+            "reviewOnTable": "Tableでリファレンスを確認",
+            "cause": {
+              "routeInventoryUnavailable": "エンジン一覧を利用できません。",
+              "routeNotSelected": "生成エンジンが選択されていません。",
+              "routeSetupRequired": "選択したエンジンは設定が必要です。",
+              "routeUnavailable": "選択したエンジンは利用できません。",
+              "routeRetired": "選択したエンジンは廃止されました。",
+              "routeIncompatibleFrame": "エンジンはこのフレームと互換性がありません。",
+              "routeFirstFrameUnsupported": "エンジンはこの最初のフレームをサポートしていません。",
+              "routeDurationUnsupported": "エンジンはこのShotの長さをサポートしていません。",
+              "referencePlanInvalid": "リファレンスプランを確認する必要があります。",
+              "referenceGenerationRequired": "リファレンス画像を生成する必要があります。",
+              "referenceApprovalRequired": "リファレンス画像には人による承認が必要です。",
+              "referenceGenerationFailed": "リファレンスの生成に失敗しました。",
+              "referenceBindingUnassigned": "リファレンスが割り当てられていません。",
+              "referenceBindingUnknownReference": "割り当てに不明なリファレンスが指定されています。",
+              "referenceBindingWrongKind": "割り当てに誤った種類のリファレンスが使われています。",
+              "referenceBindingUnapprovedReference": "割り当てに未承認のリファレンスが使われています。",
+              "referenceBindingMissingAsset": "割り当てられたリファレンス画像が見つかりません。",
+              "referenceBindingCapacityExceeded": "割り当てがエンジンのリファレンス上限を超えています。",
+              "seedSelectionRequired": "最初のフレームを選択する必要があります。",
+              "seedGenerationRequired": "最初のフレームを作成する必要があります。",
+              "conditioningFrameRequired": "前のShotからフレームを抽出する必要があります。",
+              "extractionFailed": "前のフレームの抽出に失敗しました。",
+              "dependencyFailed": "上流のShotが失敗しました。",
+              "generationInvalidRequest": "生成リクエストが無効です。",
+              "generationContentRejected": "プロバイダーがコンテンツを拒否しました。",
+              "generationAuth": "プロバイダーが認証を拒否しました。",
+              "generationQuota": "プロバイダーの利用枠を使い切りました。",
+              "generationRateLimited": "プロバイダーがリクエストをレート制限しています。",
+              "generationProviderUnavailable": "生成プロバイダーを利用できません。",
+              "generationTimeout": "生成がタイムアウトしました。",
+              "generationPollDeadline": "ポーリング期限までに生成が完了しませんでした。",
+              "generationNoOutput": "生成は完了しましたが、使用可能な出力がありません。",
+              "generationVariationGrid": "出力はバリエーショングリッドのため、確認が必要です。",
+              "generationSubmissionUnknown": "プロバイダーが送信を確認していません。",
+              "generationDownloadFailed": "生成されたメディアをダウンロードできませんでした。",
+              "generationUnsupported": "この生成リクエストはサポートされていません。",
+              "generationUnknown": "不明な理由で生成に失敗しました。",
+              "cutInvalidMedia": "現在の画像はCutでは無効です。",
+              "cutBedTooShort": "オーディオベッドがCutより短くなっています。"
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "フィルムプレビュー",
+          "beatBadge": "ビート{{position}} · {{title}}",
+          "slate": "スレート · カバレッジなし",
+          "slateHold": "カット内で{{clock}}保持",
+          "videoLabel": "ビート{{beatPosition}} · {{beatTitle}} · ショット{{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "ビート{{beatPosition}} · {{beatTitle}} · スレート · カバレッジなし",
+          "noMedia": "フィルムプレビューはありません。",
+          "awaitingPictureOne": "ビート{{beatPosition}}、ショット{{shotPosition}}にはまだ現在の画像がありません。",
+          "awaitingPictureMany": "{{count}}件のショットにはまだ現在の画像がありません。",
+          "mediaError": "このプレビューを読み込めませんでした。",
+          "play": "フィルムを再生",
+          "pause": "フィルムを一時停止",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "映像のみ — ここではオーディオベッドはミュートされています",
+          "shotAudioOnly": "ショット音声のみ — このプレビューにはBGMトラックは含まれません",
+          "controlsLabel": "フィルム再生コントロール",
+          "seekLabel": "フィルムシークレール",
+          "previousJoin": "前のつなぎ目",
+          "nextJoin": "次のつなぎ目",
+          "loopJoin": "つなぎ目をループ",
+          "buffering": "プレビュー画面を読み込み中"
+        },
+        "exports": {
+          "editorFolderDescription": "各ショットの現在の画像、ターゲットスレート、タイムラインデータ、任意の音声ベッドをフィルム順に書き出します。"
+        },
+        "film": {
+          "under": "{{clock}} 短い",
+          "over": "{{clock}} 超過"
+        },
+        "openBeat": "ビートを開く",
+        "bed": {
+          "silentPreview": "プレビューでは無音 · 書き出し時に適用",
+          "extent": "0:00から · 長さ{{seconds}}秒"
+        },
+        "slate": {
+          "openBeat": "カバレッジのないビートを開く"
+        }
+      },
+      "proposals": {
+        "proposalId": "提案 ID",
+        "mutationCount": "{{count}} 件の編集案",
+        "mutationCount_one": "{{count}} 件の編集案",
+        "mutationCount_other": "{{count}} 件の編集案",
+        "terminalCount": "承認できないディレクター提案が {{count}} 件あります",
+        "terminalCount_one": "承認できないディレクター提案が {{count}} 件あります",
+        "terminalCount_other": "承認できないディレクター提案が {{count}} 件あります",
+        "showTerminal": "過去の提案を確認",
+        "hideTerminal": "過去の提案を非表示",
+        "reviewDetails": "提案の詳細を確認",
+        "before": "変更前",
+        "after": "変更後",
+        "ownerBeat": "所属ビート",
+        "reviewUnavailable": "この提案は安全にレビューできなかったため、承認できません。",
+        "refusal": {
+          "applyCoverage": "カバレッジでは、固定されたこれらのショットを置き換えられません。代わりに各ショットの撮影スクリプトを直接編集してください。",
+          "applyCoverageFixedWork": "カバレッジでは、すでに作業を保持しているショットを置き換えられません。固定理由を確認し、対象のショットを直接編集してください。",
+          "editShotsDirectly": "これらのショットを直接編集",
+          "reason": {
+            "beat_capacity_reached": "プロジェクトのビート数が上限に達しています。",
+            "beat_shot_capacity_reached": "このビートのショット数が上限に達しています。",
+            "project_shot_capacity_reached": "プロジェクトのショット数が上限に達しています。",
+            "invalid_shot_duration": "提案されたショットの長さが許容範囲外です。",
+            "dependency_blocked": "既存の作業により、この変更は適用できません。",
+            "identity_collision": "提案された識別子はすでに使用されています。",
+            "invalid_operation": "この変更は現在のプロジェクトには適用できません。",
+            "undo_conflict": "この提案は後続の編集と競合しています。",
+            "validation_failed": "変更後のプロジェクトが検証に失敗しました。"
+          },
+          "fixedReason": {
+            "owned_asset": "保存済みのショットメディア",
+            "owned_job": "生成履歴",
+            "video_asset": "現在の動画",
+            "seed_still": "選択済みの最初のフレーム",
+            "conditioning_frame": "連続性フレーム",
+            "conditioning_input": "後続の条件付け入力",
+            "shooting_script": "既存の撮影スクリプト"
+          }
+        },
+        "refreshing": "現在のプロジェクトに対してこの提案を確認しています…",
+        "authorityUnavailable": "提案の権限を確認できませんでした。提案は保留のままで、その操作は利用できません。",
+        "requestUpdated": "更新した提案を準備",
+        "saveAndRequestUpdated": "保存して更新した提案を準備",
+        "reviewRuleDrafts": "ルールの下書きを確認",
+        "reviewRuleDraftsFirst": "このルール提案を承認する前に、ローカルのルール下書きを確認または破棄してください。",
+        "reproposalPrompt": "studio_get_proposal で提案 {{proposalId}} を確認し、次に read_storyboard を呼び出して現在のリビジョンに対する新しい提案を作成してください。元の提案を適用したり、暗黙にリベースしたりしないでください。",
+        "chatDecisionBusy": "別のレビュー操作が進行中です。",
+        "chatDirty": "この提案と競合する下書きを保存またはリセットしてから承認してください。",
+        "chatNoPending": "操作できる保留中のディレクター提案はありません。",
+        "chatMultiplePending": "現在のディレクター提案が複数準備できています。完全な ID を指定して /approve PROPOSAL_ID または /reject PROPOSAL_ID を使用してください。",
+        "chatProposalNotFound": "指定した提案はもう保留中ではありません。",
+        "chatUnavailable": "現在、準備できている保留中のディレクター提案はありません。カードで確認するか、更新した提案を依頼してください。",
+        "chatStale": "この提案は現在のプロジェクトリビジョンと一致しません。",
+        "chatAccepted": "提案を承認しました。",
+        "chatRejected": "提案を却下しました。",
+        "reviewStale": "このレビューはリビジョン {{baseRevision}} から作成されましたが、現在のプロジェクトは {{currentRevision}} です。",
+        "noChanges": "この提案による意味上の変更はありません。",
+        "paidRecovery": {
+          "heading": "有料リカバリー",
+          "explanation": "Director が新しい生成を必要とするリカバリーを見つけました。支払い前に対象と価格を確認してください。",
+          "blockedBy": "停止理由",
+          "affectedWork": "対象作業",
+          "price": "推定費用",
+          "priceRange": "{{lower}}～{{upper}}",
+          "generations": "生成範囲",
+          "generationCount": "生成項目 {{count}} 件",
+          "includesCascade": "依存作業を含む",
+          "expires": "この価格は {{expiresAt}} に期限切れになります。",
+          "expired": "保存された価格は期限切れです。確認前に更新してください。",
+          "confirm": "確認して支払う",
+          "refresh": "価格を更新",
+          "refreshed": "価格を更新しました。確認し、支払うにはもう一度確定してください。",
+          "cardOnly": "有料リカバリーは、現在の価格を確認した後に提案カードからのみ確定できます。",
+          "location": {
+            "project": "プロジェクト",
+            "cut": "カット",
+            "route": "{{route}} ルート",
+            "reference": "リファレンス · {{reference}}",
+            "shot": "{{beat}} · ショット {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "プロジェクト",
+          "reference": "参照",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "追加",
+          "edited": "編集",
+          "removed": "削除",
+          "reordered": "並べ替え"
+        },
+        "placementValue": {
+          "active": "アクティブ",
+          "bin": "Bin",
+          "removed": "削除済み"
+        },
+        "field": {
+          "name": "名前",
+          "brief": "ブリーフ",
+          "rules": "ルール",
+          "aspectRatio": "アスペクト比",
+          "resolution": "解像度",
+          "targetDurationSeconds": "目標時間",
+          "boardStyle": "Board スタイル",
+          "prompt": "プロンプト",
+          "title": "タイトル",
+          "story": "ストーリー",
+          "targetSeconds": "Beat の目標",
+          "shootingScript": "撮影台本",
+          "durationSeconds": "時間",
+          "chainBreak": "連続性",
+          "placement": "配置",
+          "order": "順序"
+        }
+      },
+      "playbackAudio": {
+        "label": "再生音声",
+        "mute": "ミュート",
+        "unmute": "ミュート解除",
+        "volume": "再生音量：{{percent}}%",
+        "shotStatus": {
+          "analyzing": "ショットの音声を解析中…",
+          "audible": "聞き取れる音声あり",
+          "effectivelySilent": "実質無音",
+          "noAudioStream": "音声ストリームなし",
+          "unavailable": "音声解析を利用できません"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "ショット{{shotIndex}}の最初のフレーム{{stillIndex}}",
+          "previewAlt": "プレビュー · {{label}}",
+          "effective": "現在の最初のフレーム",
+          "pinnedBadge": "固定済み",
+          "authorizationLocked": "承認済みの動画作業により、このショットの最初のフレームはロックされています。読み込んだ候補は保存されますが、確認済み見積もりのシードを置き換えることはできません。",
+          "authorizationIncompatible": "承認済み作業には使用できません"
+        },
+        "firstFrames": {
+          "title": "ファーストフレーム",
+          "shotChip": "ショット {{shot}}",
+          "on": "選択中",
+          "status": {
+            "notReady": "未準備",
+            "ready": "レンダー可能",
+            "rendering": "レンダリング中",
+            "rendered": "レンダー済み"
+          },
+          "frameLabel": "フレーム {{index}}",
+          "origin": {
+            "generated": "生成",
+            "imported": "読み込み",
+            "board": "絵コンテ",
+            "inherited": "ショット {{shot}} から"
+          },
+          "current": "現在",
+          "unavailable": "利用不可",
+          "previewAlt": "プレビュー · {{label}}",
+          "openFrame": "{{label}}を全画面で開く",
+          "pinned": "ファーストフレームに固定済み",
+          "pin": "ファーストフレームに固定",
+          "firstFrameChanged": "ファーストフレーム変更済み · 未再実行",
+          "promptChanged": "編集済み · 未実行",
+          "import": "ファーストフレームを読み込む",
+          "empty": "使用可能なファーストフレームがありません",
+          "currentPicture": "現在の映像",
+          "pictureEmpty": "映像はまだありません",
+          "pictureAlt": "ショット {{shot}} の現在の映像",
+          "sendLastFrame": "最終フレームをショット {{shot}} に送る",
+          "cancelRun": "実行をキャンセル",
+          "generateShot": "ショット {{shot}} を生成",
+          "generateAgain": "もう一度生成",
+          "promptLabel": "ショットプロンプト",
+          "regenerate": "再生成",
+          "menu": {
+            "download": "ダウンロード",
+            "copyPrompt": "プロンプトをコピー",
+            "remove": "削除"
+          },
+          "viewer": {
+            "currentFirstFrame": "現在のファーストフレーム",
+            "counter": "{{total}}件中{{current}}件",
+            "previous": "前へ",
+            "next": "次へ"
+          }
+        },
+        "picture": {
+          "title": "現在の画像",
+          "label": "ショット{{index}}の現在の画像",
+          "empty": "まだレンダリングされていません",
+          "sourceDuration": "ソース {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} 秒",
+          "unavailable": "現在の画像を利用できません",
+          "videoPreview": "プレーヤー · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "もう一度生成",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "もう一度生成"
+        },
+        "lift": {
+          "shot": "ゴミ箱に移動",
+          "shotTitle": "ショット{{index}}をゴミ箱に移動しますか？",
+          "shotBodyNoStale": "作成済みの内容と有料生成した素材はこのショットに残ります。ゴミ箱に移動しますか？",
+          "shotBodyStale": "作成済みの内容と有料生成した素材はこのショットに残ります。ゴミ箱に移動すると、{{shots}}が古い状態になります。",
+          "confirmShot": "ゴミ箱に移動",
+          "beat": "ゴミ箱に移動",
+          "beatTitle": "このビートをゴミ箱に移動しますか？",
+          "beatBodyNoStale": "すべてのショットと、作成済みの内容および有料生成した素材はこのビートに残ります。ゴミ箱に移動しますか？",
+          "beatBodyStale": "すべてのショットと、作成済みの内容および有料生成した素材はこのビートに残ります。ゴミ箱に移動すると、{{shots}}が古い状態になります。",
+          "confirmBeat": "ゴミ箱に移動"
+        },
+        "beatFieldsLabel": "Beat のストーリー",
+        "fieldGuidance": {
+          "story": "ストーリー · この Beat の物語上の目的と展開"
+        },
+        "fields": {
+          "story": "ストーリー",
+          "shootingScript": "撮影台本",
+          "shootingScriptFor": "Shot {{index}} の撮影台本"
+        },
+        "chain": {
+          "hardCutState": "ハードカット · 最初のフレームから開始",
+          "hardCutUnavailable": "ハードカットは一時的に変更できません。必要な差し替えメディアの見積もりを先に確認する必要があります。",
+          "reviewSever": "ハードカットを確認…",
+          "reviewRejoin": "再接続を確認…",
+          "reviewSeverDescription": "ハードカットにするとショット {{shot}} は有効な最初のフレームから始まり、必要なら新しい最初のフレームが作成されます。確定すると、このショットから次のハードカットまでの連続する全ショットが差し替えられます。",
+          "reviewRejoinDescription": "ショット {{shot}} を再接続すると最初のフレームの選択が解除され、ショット {{previous}} のトリム後の最終フレームが使われます。確定後、無料のフレーム抽出が完了してから、このショットと次のハードカットまでの連続ショットがプロバイダーへ送信される場合があります。",
+          "segmentHead": "チェーンの先頭 · 最初のフレームから開始",
+          "continuous": "ショット{{position}}の最終フレームから続く"
+        },
+        "coverage": {
+          "trimGuidance": "エッジ · トリミング · 無料",
+          "boundaryGuidance": "境界 · 再レンダリングが必要",
+          "segmentState": {
+            "noPicture": "画像なし",
+            "queued": "キュー済み",
+            "nextUp": "次に実行",
+            "waitingOnShot": "ショット{{position}}を待機",
+            "waitingOnFrame": "連続性フレームを待機",
+            "rendering": "レンダリング中",
+            "renderingProgress": "レンダリング中 · {{progress}}%",
+            "renderingStill": "レンダリング中 · 最初のフレームを表示中",
+            "rendered": "レンダリング済み",
+            "untouched": "未変更",
+            "needsRerender": "再レンダリングが必要",
+            "staleStillPlays": "古い状態 · 引き続き再生可能",
+            "failedNotBilled": "失敗 · 課金なし",
+            "neverDispatched": "未送信",
+            "shotKept": "ショット{{position}} · 保持",
+            "statusPending": "ステータスを取得できません",
+            "needsAttention": "確認が必要"
+          },
+          "boundaryFrame": {
+            "empty": "ショット{{position}}の後の境界 · 連続性フレームを待機",
+            "ready": "ショット{{position}}の後の境界 · 連続性フレームの準備完了",
+            "gone": "ショット{{position}}の後の境界 · 連続性フレームがありません",
+            "stale": "ショット{{position}}の後の境界 · 連続性フレームが古くなっています"
+          },
+          "seekGuidance": "レール · シーク · 無料",
+          "seekLane": "ビートシークレール",
+          "seekValue": "{{total}} 中 {{current}}"
+        },
+        "preview": {
+          "label": "ビートプレビュー",
+          "noMedia": "ビートプレビューは利用できません",
+          "mediaError": "現在の画像をプレビューできませんでした。",
+          "videoLabel": "ショット{{position}}の映像 · {{shootingScript}}",
+          "slateLabel": "ショット{{position}}の計画スレート · {{shootingScript}}",
+          "slate": "計画スレート",
+          "slateHold": "{{clock}}保持",
+          "play": "ビートを再生",
+          "pause": "ビートを一時停止",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "映像のみ",
+          "controlsLabel": "ビート再生コントロール",
+          "previousJoin": "前のつなぎ目",
+          "nextJoin": "次のつなぎ目",
+          "loopJoin": "最寄りのつなぎ目をループ",
+          "keyboardGuidance": "スペースで再生 · 矢印でシーク · [ ] でつなぎ目 · L でループ"
+        },
+        "directorRequestHint": "Creative Director に、レビュー付きの再分割案を依頼してください。",
+        "recovery": {
+          "cancelAndReviewRejoin": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinTitle": "承認済み作業をキャンセルして再接続を確認しますか？",
+          "cancelAndReviewRejoinBody": "まだ送信されていない待機中の動画作業だけをキャンセルします。完了済みメディアと承認履歴は保持されます。代替生成の前に、新しい再接続見積もりの確認が必要です。",
+          "cancelAndReviewRejoinConfirm": "キャンセルして再接続を確認",
+          "cancelAndReviewRejoinUnconfirmed": "待機中の作業はキャンセルされましたが、更新後のワークスペースを確認できませんでした。再接続を確認する前に更新してください。",
+          "cancelAndReviewRejoinOutcomeUnknown": "キャンセル結果を確認できませんでした。再接続を確認する前にワークスペースを更新してください。"
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "映画設定",
+        "videoAudioCapability": {
+          "silentOnly": "このエンジンは無音のクリップを生成します。",
+          "audioCapable": "このエンジンは音声を生成できます。完成したショットの音声は別途解析されます。"
+        },
+        "undoLabel": {
+          "promote_board_panel": "パネルを最初のフレームに使用",
+          "set_reference_plan": "リファレンス計画",
+          "amend_reference_plan": "背景を追加",
+          "set_reference_label": "リファレンス名",
+          "set_reference_prompt": "リファレンスプロンプト",
+          "select_reference_image": "現在のリファレンス画像",
+          "remove_reference_image": "リファレンス画像を削除",
+          "dismiss_seed_still": "最初のフレームを却下",
+          "select_video_take": "動画テイクを選択",
+          "remove_video_take": "テイクを削除",
+          "set_shot_reference_binding": "Shot リファレンスのバインド"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "ボードパネル",
+          "reference_image": "リファレンス画像"
+        },
+        "promotion": {
+          "title": "パネルを最初のフレームに使用",
+          "summary": "Shot {{shotId}}の現在のボードパネルを最初のフレームに昇格します。Shotの連続性境界は変更されません。",
+          "impactNone": "このフレームに依存する現在の映像はありません。",
+          "impactIntro": "現在の映像 {{count}}件は再生可能なままですが、古い状態になります：",
+          "impactItem": "Shot {{shotId}}の現在の映像",
+          "optionsLabel": "現在の映像の処理方法を選択",
+          "promoteOnly": "昇格のみ — 再生可能な古い映像を保持",
+          "freePrice": "$0",
+          "promoteAndRerender": "昇格して正確な再生成作業を確認",
+          "priceAfterReview": "次に価格を表示",
+          "promoteOnlyAction": "$0で昇格",
+          "reviewPaidAction": "再生成の価格を確認",
+          "paidUnavailable": "このセグメントには現在の映像が多すぎるため、1回の有料確認では処理できません。昇格のみは引き続き利用できます。",
+          "headline": "昇格 + {{count}}件の再生成 · {{cost}}",
+          "requiredWork": "表示された再生成は、この昇格によって古くなる現在の映像と完全に一致します。不足しているカバレッジは含まれません。",
+          "confirm": "昇格 + {{count}}件の再生成を確認 · {{cost}}",
+          "promoted": "パネルを昇格しました。既存の映像は再生可能なまま、古い状態としてマークされます。",
+          "promoting": "パネルを昇格中…",
+          "confirmed": "パネルを昇格し、確認した映像の再生成を開始しました。",
+          "close": "閉じる"
+        },
+        "headline_one": "生成 {{count}} 件 · {{cost}}",
+        "headline_other": "生成 {{count}} 件 · {{cost}}",
+        "confirm_one": "{{count}} 件の生成を確定 · {{cost}}",
+        "confirm_other": "{{count}} 件の生成を確定 · {{cost}}",
+        "hideBreakdown": "各生成を非表示",
+        "showBreakdown": "各生成を表示",
+        "conditioningFrameAlt": "{{shot}} の条件フレーム",
+        "routeShared": "すべて {{model}} を使用",
+        "group": {
+          "required": "必須"
+        },
+        "continuity": {
+          "severTitle": "ハードカットを確認",
+          "rejoinTitle": "再接続を確認",
+          "severSummary": "この見積もりでは、このショットをチェーンの先頭にし、有効な最初のフレームを再利用するか必要に応じて作成し、次のハードカットまでの影響を受ける全動画を差し替えます。",
+          "rejoinSummary": "この見積もりでは、このショットの最初のフレームの選択を解除してトリム後の前ショットのフレームに再接続します。確定後、無料のフレーム抽出が完了してから、次のハードカットまでの差し替え動画が送信される場合があります。",
+          "severHeadline": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
+          "severHeadline_one": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
+          "severHeadline_other": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
+          "rejoinHeadline": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
+          "rejoinHeadline_one": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
+          "rejoinHeadline_other": "再接続 · 必須生成 {{count}} 件 · {{cost}}",
+          "requiredWork": "このチェーン変更には、表示された差し替え作業がすべて必要です。",
+          "confirmSever": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
+          "confirmSever_one": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
+          "confirmSever_other": "ハードカットと {{count}} 件の生成を確定 · {{cost}}",
+          "confirmRejoin": "再接続と {{count}} 件の生成を確定 · {{cost}}",
+          "confirmRejoin_one": "再接続と {{count}} 件の生成を確定 · {{cost}}",
+          "confirmRejoin_other": "再接続と {{count}} 件の生成を確定 · {{cost}}",
+          "close": "閉じる — チェーンを変更しない",
+          "severConfirmed": "ハードカットを確定しました。最初のフレームと差し替えの進行状況、または必要な復旧対応をショットで確認してください。",
+          "rejoinConfirmed": "再接続を確定しました。フレーム抽出と差し替えの進行状況、または必要な復旧対応をショットで確認してください。"
+        },
+        "errors": {
+          "routesUnavailable": "この見積もりを準備する前に、映画設定で利用可能な画像ルートと動画ルートを選択してください。",
+          "pricing": {
+            "invalidQuote": "見積もりデータに内部的な不整合がありました。何も送信されていません。",
+            "inactiveShot": "選択したショットの1つが無効になっています。プロジェクトを更新して、もう一度準備してください。",
+            "inFlight": "選択した生成の1つは既に進行中です。完了を待つか、選択を変更してください。",
+            "duplicateShotPurpose": "同じ生成が複数回選択されています。選択を確認して、もう一度準備してください。",
+            "invalidDependency": "続行の依存関係が無効になっています。プロジェクトを更新して、もう一度準備してください。",
+            "invalidPrepareRequest": "生成の選択を安全に準備できませんでした。選択を確認して、もう一度準備してください。",
+            "invalidReference": "選択した参照の1つは、この生成では無効になっています。別の参照を選択してください。",
+            "missingShootingScript": "メディアを生成する前に、この Shot の撮影台本を作成してください。",
+            "missingConditioning": "動画テイクに利用可能な最初のフレームまたは前のフレームがありません。必要な画像を追加または選択してください。",
+            "unsafeTotal": "見積もり合計を安全に表現できませんでした。選択を減らしてください。何も送信されていません。"
+          }
+        },
+        "reviewShotBinding": "Shot のバインドを確認",
+        "readout": {
+          "prompt": "正確なプロンプト",
+          "rendersAs": "レンダー設定",
+          "sourceRevision": "ソースのリビジョン",
+          "source": "ソース",
+          "story": "ストーリー",
+          "shootingScript": "撮影台本",
+          "referencePrompt": "リファレンスの説明",
+          "references": "解決済みリファレンス",
+          "noReferences": "直接のリファレンス入力なし",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        },
+        "referenceGridRetry": "モデルがバリエーショングリッドを返した場合、各参照画像は1回だけ自動的に再試行されます。最初の試行の合計は {{lower}}、再試行が必要な場合の上限は {{upper}} です。"
+      },
+      "editorFolderExport": {
+        "action": "編集用フォルダーを書き出す…",
+        "actionWithSlates": "編集用フォルダーを書き出す · スレート {{count}} 件…",
+        "exporting": "書き出し中… メディア生成や課金は行われません。",
+        "reveal": "Finder で表示",
+        "dismiss": "閉じる",
+        "none": "なし",
+        "successFacts": "{{bytes}} バイト · {{count}} ファイル",
+        "successSlates": "スレートの Shot 番号：{{shots}}",
+        "successQuarantine": "退避した古い書き出し：{{count}}",
+        "disabled": {
+          "no_beats": "書き出す前に Beat を追加してください",
+          "duration_pending": "空の Beat すべてに長さを設定してください",
+          "invalid_media": "古い、または無効な選択メディアを解決してください",
+          "bed_too_short": "タイムラインを満たす長さの音声ベッドを選択してください",
+          "mutationActive": "現在のワークスペース変更が完了するまでお待ちください",
+          "exportRunning": "編集用フォルダーを書き出し中です",
+          "catalogUnavailable": "編集用フォルダーの書き出しストレージを利用できません"
+        },
+        "errors": {
+          "catalogUnavailable": "書き出しカタログを利用できません。プロジェクトを再読み込みしてください。",
+          "staleAuthority": "プロジェクトが変更されました。現在のプロジェクトを確認してから再度書き出してください。",
+          "staleCatalog": "書き出しカタログが変更されました。書き出し履歴を再読み込みしてから再試行してください。",
+          "invalidMedia": "選択メディアが古い、非正規、または無効です。Cut を確認してください。",
+          "mediaUnavailable": "選択メディアを検証できませんでした。不完全な書き出しは公開されていません。",
+          "busy": "Creative Studio は別の操作を完了中です。完了後に再試行してください。",
+          "artifactUnavailable": "この書き出しは現在のカタログにありません。再読み込みしてください。",
+          "resultConflict": "結果の確認前に新しいカタログが届きました。再読み込みして確認してください。"
+        }
+      },
+      "filmExport": {
+        "action": "フィルムを書き出す…",
+        "actionWithSlates": "フィルムを書き出す · スレート {{count}} 件…",
+        "actionWithSlates_one": "フィルムを書き出す · スレート {{count}} 件…",
+        "actionWithSlates_other": "フィルムを書き出す · スレート {{count}} 件…",
+        "cancel": "書き出しをキャンセル",
+        "cut": "ストレートカット",
+        "description": "現在のカットから編集可能なMP4を作成します。未カバーのショットは時間指定の黒スレートになります。",
+        "disabled": {
+          "no_beats": "書き出す前にBeatを追加してください",
+          "duration_pending": "空のBeatごとに尺を設定してください",
+          "invalid_media": "古いまたは無効なメディアを解決してください",
+          "bed_too_short": "十分な長さの音声ベッドを選んでください",
+          "mutationActive": "現在の変更を完了してください",
+          "exportRunning": "フィルム書き出しは実行中です",
+          "catalogUnavailable": "書き出しストレージを利用できません"
+        },
+        "dismiss": "閉じる",
+        "dissolve": "クロスディゾルブ",
+        "errors": {
+          "catalogUnavailable": "書き出しカタログを利用できません。プロジェクトを再読み込みしてください。",
+          "staleAuthority": "プロジェクトが変更されました。古いフィルムは公開されていません。もう一度書き出す前に、現在のプロジェクトを確認してください。",
+          "staleCatalog": "書き出しカタログが変更されました。古いフィルムは公開されていません。書き出し履歴を再読み込みしてから再試行してください。",
+          "unavailable": "フィルムの書き出しには FFmpeg が必要ですが、この端末では見つかりませんでした。FFmpeg をインストールするか、既にあるコピーのパスを FFMPEG_PATH に設定してから、プロジェクトを開き直してください。",
+          "renderFailed": "ローカルレンダーを検証できませんでした。部分書き出しは公開されていません。",
+          "cancelled": "書き出しをキャンセルしました。プロジェクトメディアは変更されていません。",
+          "invalidMedia": "カットに古い、非正規、または無効なメディアがあります。",
+          "busy": "Creative Studioは別の処理を完了中です。",
+          "artifactUnavailable": "完成したフィルムは有効なカタログにありません。",
+          "resultConflict": "フィルム確認前に新しいカタログが届きました。"
+        },
+        "export": "フィルムを書き出す",
+        "noSpend": "この処理はお使いの端末で実行されます。メディア生成や課金は行われません。",
+        "phase": {
+          "preparing": "正確なソースメディアを準備中…",
+          "analyzing": "メディアと静かな末尾を解析中…",
+          "rendering": "ローカルでフィルムをレンダー中…",
+          "publishing": "完成したフィルムを検証して公開中…"
+        },
+        "reveal": "Finderで表示",
+        "successFacts": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successFacts_one": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successFacts_other": "編集尺 {{nominal}} 秒 · 書き出し {{rendered}} 秒 · 末尾トリム {{count}} 件",
+        "successQuarantine": "退避した古いフィルム書き出し：{{count}}",
+        "successQuarantine_one": "退避した古いフィルム書き出し：{{count}}",
+        "successQuarantine_other": "退避した古いフィルム書き出し：{{count}}",
+        "title": "フィルムを書き出す",
+        "transition": "トランジション",
+        "trimTails": "各ショットの静止した末尾をトリム",
+        "trimTailsHelp": "影響するのは書き出すファイルだけで、プロジェクトは変更されません。最後のショットは全長のまま書き出されます。"
+      }
     },
     "rules": {
       "open": "ルール",
@@ -948,10 +1819,7 @@
     "close": {
       "saveAndClose": "保存して閉じる",
       "discard": "変更を破棄して閉じる",
-      "cancel": "キャンセル",
-      "unsavedMessage": "{{count}} 件のシーンに未保存の編集があります。保存してから閉じますか？",
-      "unsavedMessage_other": "{{count}} 件のシーンに未保存の編集があります。保存してから閉じますか？",
-      "unavailableMessage": "クリエイティブスタジオが応答していません。今すぐ閉じると、未保存のシーン編集が失われる可能性があります。"
+      "cancel": "キャンセル"
     },
     "phase": {
       "nav": {
@@ -1243,98 +2111,6 @@
       "durationSeconds_other": "{{seconds}} 秒",
       "selected": "選択中のシーン"
     },
-    "inspector": {
-      "title": "シーンの演出",
-      "sectionsLabel": "シーン編集セクション",
-      "directionTab": "ビジュアル",
-      "scriptTab": "スクリプト",
-      "titleLabel": "シーンのタイトル",
-      "purposeLabel": "シーンの目的",
-      "purposePlaceholder": "このシーンで何を達成しますか？",
-      "visualPromptLabel": "ビジュアルプロンプト",
-      "visualPromptPlaceholder": "ショット、被写体、設定、照明、動きを説明してください。",
-      "narrationLabel": "ナレーション",
-      "onScreenTextLabel": "画面上のテキスト",
-      "mediaKindLabel": "出力形式",
-      "durationLabel": "シーンの長さ（秒）",
-      "invalidDuration": "1 秒から 60 秒までの整数を入力してください。",
-      "saving": "シーンを保存しています...",
-      "saved": "シーンを保存しました",
-      "saveFailed": "シーンを保存できませんでした。",
-      "unsavedChanges": "未保存の変更は保持されています。"
-    },
-    "draft": {
-      "title": "ストーリーボードの下書きを作成",
-      "body": "WePrompt が確認用にシーン、ナレーション、画面上のテキスト、時間配分を提案します。",
-      "checking": "選択したストーリーボードモデルを確認中...",
-      "ready": "下書きの準備完了",
-      "setupRequired": "AIで下書きするにはストーリーボードモデルを選択して設定してください。",
-      "unavailable": "現在ストーリーボードを作成できません。",
-      "providerLabel": "ストーリーボードプロバイダー",
-      "modelLabel": "ストーリーボードモデル",
-      "chargeNotice": "下書きにはプロジェクトで選択したモデルを使用し、プロバイダー料金が発生する場合があります。",
-      "replaceTitle": "既存のストーリーボードを置き換えますか？",
-      "replaceBody": "再作成では、有効な提案が返された後にのみ現在のすべてのシーンが置き換えられます。",
-      "confirm": "ストーリーボードを作成",
-      "cancel": "キャンセル",
-      "configureModel": "モデル設定を開く",
-      "manualFallback": "手動編集を続ける",
-      "failed": "ストーリーボードを作成できませんでした。現在のシーンは変更されていません。"
-    },
-    "conditioning": {
-      "inputsTitle": "この静止画の入力",
-      "role": { "cast": "キャスト", "look": "ルック" },
-      "maximum": "このエンジンは最大{{count}}件のブリーフ参照を受け付けます。",
-      "unsupported": "この画像エンジンでは有効なブリーフ参照を使用できません。別の画像エンジンを選ぶか、ブリーフから削除してください。",
-      "overflow": "この画像エンジンで使用できるブリーフ参照は最大{{maximum}}件ですが、{{count}}件が有効です。",
-      "malformed": "ブリーフ参照が変更されたか無効です。生成前にレビューを更新してください。",
-      "reviewChanged": "ブリーフ参照または画像エンジンが変更されました。生成前に更新された入力を確認してください。",
-      "plateOutOfDate": "選択した最初のフレームは、異なるブリーフ参照、アスペクト比、または解像度で作成されています。このクリップは引き続きレンダリングできます。"
-    },
-    "reference": {
-      "generate": "参照画像を生成",
-      "dialogTitle": "参照画像を生成",
-      "promptLabel": "参照プロンプト",
-      "reviewTag": "参照画像",
-      "excludedSummary": "準備が整っていないため、リクエストされた一部のシーンは今回の承認に含まれません：",
-      "excludedNoneReady": "リクエストされたシーンは、いずれも参照画像を生成できる状態ではありません：",
-      "discardExcludedRequests": "これらのリクエストを破棄",
-      "excludedUnavailable": "シーンは利用できなくなりました",
-      "excludedPromptUnusable": "シーンのビジュアルプロンプトでは参照画像を記述できません",
-      "dismissFailed": "リクエストキューを更新できませんでした。レビューは閉じられました。後でもう一度お試しください。"
-    },
-    "review": {
-      "generateReadyScenes": "準備済みの{{count}}シーンを生成",
-      "generateReadyScenes_other": "準備済みの{{count}}シーンを生成",
-      "noReadyScenes": "生成準備ができたシーンはありません。",
-      "generateScene": "シーンを生成",
-      "regenerateScene": "別のバリエーションを生成",
-      "title": "生成内容を確認",
-      "sceneCount": "選択中：{{count}} シーン",
-      "videoSeconds": "要求する動画時間：{{seconds}} 秒",
-      "selectedDurationFull": "選択した時間：{{seconds}} 秒",
-      "selectedDurationFull_other": "選択した時間：{{seconds}} 秒",
-      "targetDurationFull": "目標時間：{{seconds}} 秒",
-      "targetDurationFull_other": "目標時間：{{seconds}} 秒",
-      "providerLabel": "プロバイダー",
-      "modelLabel": "モデル",
-      "aspectRatio": "アスペクト比",
-      "resolution": "解像度",
-      "watermarkOff": "ウォーターマーク無効",
-      "audioOff": "無音出力：音声生成は無効",
-      "missingRoute": "エンジンがないシーンが少なくとも 1 つあります。",
-      "invalidRoute": "選択したエンジンの少なくとも 1 つが無効です。",
-      "durationMismatch": "ストーリーボードの時間がプロジェクトの目標と一致していません。",
-      "chargeNotice": "生成には選択したプロバイダーアカウントが使用され、料金が発生する場合があります。",
-      "confirm": "確認して生成",
-      "cancel": "キャンセル",
-      "disabledMissingRoutes": "{{count}}件のショットにエンジンがありません。閉じて設定してください。",
-      "disabledMissingRoutes_other": "{{count}}件のショットにエンジンがありません。閉じて設定してください。",
-      "setEngines": "閉じてエンジンを設定",
-      "excludedFirstFrame": "{{count}}件のショットはこのレンダリングに含まれません。このエンジンはフレームから開始できません。",
-      "excludedFirstFrame_other": "{{count}}件のショットはこのレンダリングに含まれません。このエンジンはフレームから開始できません。",
-      "audioOn": "このレンダーには生成音声が含まれます。無音エンジンがある場合、その出力は無音のままです。"
-    },
     "jobs": {
       "progress": "{{percent}}% 完了",
       "cancel": "ジョブをキャンセル",
@@ -1344,8 +2120,8 @@
       "retryConfirmationConfirm": "確認して再試行",
       "retryDownload": "ダウンロードを再試行",
       "retryChargeTitle": "重複料金の可能性を承知して再試行しますか？",
-      "retryChargeBody": "前回の送信結果は不明です。再試行するとプロバイダー料金が再度発生する場合があります。",
-      "retryChargeConfirm": "了承して再試行",
+      "retryChargeBody": "前回の送信結果は不明です。代替生成ではプロバイダー料金が再度発生する場合があります。続行しても新しい見積もりが有効になるだけで、まだ処理は送信されません。",
+      "retryChargeConfirm": "了承して見積もりを確認",
       "status": {
         "queuedLocal": "送信待ち",
         "submitting": "送信中",
@@ -1358,6 +2134,7 @@
       },
       "errors": {
         "invalidRequest": "生成リクエストが無効です。",
+        "contentRejected": "プロバイダーが開始画像を拒否しました。構図を変更するか静止画を再生成してから、もう一度お試しください。",
         "auth": "プロバイダーが認証情報を拒否しました。",
         "quota": "プロバイダーアカウントの利用枠が不足しています。",
         "rateLimited": "プロバイダーのレート制限に達しました。後でもう一度お試しください。",
@@ -1368,7 +2145,9 @@
         "submissionUnknown": "送信結果は不明です。再試行前に重複料金の警告を確認してください。",
         "downloadFailed": "生成は完了しましたが、出力をダウンロードできませんでした。",
         "unsupported": "このプロバイダーは要求された操作に対応していません。",
-        "unknown": "不明な理由で生成ジョブが失敗しました。"
+        "seedStillVariationGrid": "生成された画像には複数パネルのバリエーショングリッドが含まれているため、現在の最初のフレームや参照画像には使用できません。",
+        "unknown": "不明な理由で生成ジョブが失敗しました。",
+        "referenceVariationGridRepeated": "モデルが再び複数パネルのバリエーショングリッドを返しました。「写真を読み込む」が、この参照画像を設定する確実な方法です。"
       }
     },
     "preview": {
@@ -1427,15 +2206,20 @@
     "errors": {
       "featureDisabled": "Creative Studio はこのビルドでは無効です。",
       "invalidPayload": "リクエストに無効または不完全な情報が含まれています。",
+      "mutationRefused": "この変更はプロジェクトの現在の状態には適用できません。プロジェクトを確認して、もう一度お試しください。",
+      "pricingRefused": "送信前に見積もりが拒否されました。何も送信されていません。",
       "projectNotFound": "このクリエイティブスタジオのプロジェクトは存在しません。",
       "storyboardExists": "このプロジェクトには既にストーリーボードがあります。再作成する前に置き換えを確認してください。",
       "staleProject": "プロジェクトが別の場所で変更されました。更新してから再試行してください。",
+      "staleExportCatalog": "書き出しカタログが変更されました。書き出し履歴を更新してから再試行してください。",
       "planningUnavailable": "ストーリーボードを作成できません。手動編集は続けられます。",
       "invalidRoute": "選択した生成エンジンは無効または利用できません。",
       "cancellationRefused": "プロバイダーは実行中のこのジョブをキャンセルできません。",
       "duplicateChargeAcknowledgementRequired": "再試行前にプロバイダー料金が重複する可能性を了承してください。",
       "busy": "このプロジェクトには進行中の生成処理があります。",
       "provider": "プロバイダーがリクエストを完了できませんでした。",
+      "runtimeInactive": "Creative Studio の生成機能は準備できていません。対応プロジェクトを開くか作成してから、もう一度お試しください。",
+      "projectQuarantined": "プロジェクト {{projectId}} の復旧が必要なため、Creative Studio を起動できませんでした。Studio ライブラリで確認してください。",
       "storage": "クリエイティブスタジオがローカルデータを更新できませんでした。",
       "ruleBreach": "課金前にルールによって生成がブロックされました。変更が必要な内容は「ルール」で確認してください。"
     },
@@ -1505,43 +2289,13 @@
         "frame": "このエンジンは {{ratio}} を作成できません。",
         "resolution": "このエンジンは {{resolution}} を作成できません。",
         "duration": "このエンジンは {{seconds}} 秒のショットを作成できません。",
-        "firstFrame": "このエンジンは参照画像から開始できません。",
+        "firstFrame": "このエンジンはレビュー済みの最初のフレームから開始できません。",
         "catalogUnloaded": "エンジン一覧はまだ読み込まれていません。",
         "aria": "レンダリングできません。{{reason}}",
         "actionSetEngines": "エンジンを設定",
         "actionRemoveReference": "参照を削除",
-        "actionShorten": "このショットを短くする"
+        "actionShorten": "ショットの長さを調整"
       }
-    },
-    "brief": {
-      "conversationTitle": "ブリーフの会話",
-      "danglingNotice": "このプロジェクトのブリーフの会話は利用できなくなりました。",
-      "danglingStartFresh": "新しい会話を始める",
-      "proposalTitle": "提案された台本",
-      "proposalMeta": "リビジョン {{revision}} に基づく · {{createdAt}}",
-      "proposalSummary": "追加 {{added}} · 削除 {{removed}} · 変更 {{changed}}",
-      "proposalSceneChange": "ショット {{position}}：{{fields}}",
-      "proposalFieldSeparator": "、",
-      "proposalNoChanges": "現在のスクリプトに変更はありません",
-      "proposalDiffUnavailable": "変更概要を表示できません — この提案の作成後にスクリプトが更新されました",
-      "proposalField": {
-        "title": "タイトル",
-        "purpose": "目的",
-        "visualPrompt": "ビジュアルプロンプト",
-        "narration": "ナレーション",
-        "onScreenText": "画面上のテキスト",
-        "mediaKind": "出力形式",
-        "durationSeconds": "長さ",
-        "referenceAssetId": "参照画像"
-      },
-      "proposalAccept": "台本を承認",
-      "proposalReject": "却下",
-      "proposalAccepted": "台本を適用しました",
-      "proposalRejected": "却下しました",
-      "proposalExpired": "期限切れ",
-      "proposalStale": "この提案を待っている間に台本が変更されました。再作成を依頼してください。",
-      "proposalRepropose": "再作成を依頼",
-      "proposalFlushRefused": "未保存の編集を保存できなかったため、提案は適用されませんでした。編集を修正してからもう一度お試しください。"
     },
     "shell": {
       "showDirector": "クリエイティブディレクターを表示",

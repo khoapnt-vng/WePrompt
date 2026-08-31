@@ -22,6 +22,7 @@ type HttpCall = {
 
 const httpBridgeMocks = vi.hoisted(() => {
   const calls: HttpCall[] = [];
+  const responses = new Map<string, unknown>();
   const provider =
     (method: HttpCall['method']) =>
     <Data, Params = undefined>(path: string | ((params: Params) => string), mapBody?: (params: Params) => unknown) => ({
@@ -31,9 +32,9 @@ const httpBridgeMocks = vi.hoisted(() => {
         calls.push({
           method,
           path: resolvedPath,
-          body: mapBody && params !== undefined ? mapBody(params as Params) : undefined,
+          body: typeof mapBody === 'function' && params !== undefined ? mapBody(params as Params) : undefined,
         });
-        return true as Data;
+        return (responses.has(resolvedPath) ? responses.get(resolvedPath) : true) as Data;
       }),
     });
   const emitter = () => ({ on: vi.fn(() => vi.fn()), emit: vi.fn() });
@@ -52,6 +53,7 @@ const httpBridgeMocks = vi.hoisted(() => {
 
   return {
     calls,
+    responses,
     httpGet: provider('GET'),
     httpPost: provider('POST'),
     httpPut: provider('PUT'),
@@ -99,6 +101,8 @@ vi.mock('@/common/platform/bridge', () => ({
 describe('ipcBridge conversation adapter', () => {
   beforeEach(() => {
     httpBridgeMocks.calls.length = 0;
+    httpBridgeMocks.responses.clear();
+    httpBridgeMocks.httpRequest.mockReset();
     resetConversationRuntimeViewStoreForTest();
   });
 
@@ -397,5 +401,359 @@ describe('ipcBridge conversation adapter', () => {
       activeTurnId: 'turn-recovery',
     });
     unsubscribe();
+  });
+
+  it('projects shell and assistant identifiers into their exact backend routes and bodies', async () => {
+    const { assistants, shell } = await import('@/common/adapter/ipcBridge');
+
+    await shell.openFile.invoke('/tmp/report one.txt');
+    await shell.showItemInFolder.invoke('/tmp/report one.txt');
+    await shell.openExternal.invoke('https://example.test/path');
+    await assistants.get.invoke({ id: 'assistant/one', locale: 'en-US' });
+    await assistants.get.invoke({ id: 'assistant/two' });
+    await assistants.update.invoke({ id: 'assistant-one', name: 'Updated' } as never);
+    await assistants.delete.invoke({ id: 'assistant-two' });
+    await assistants.setState.invoke({ id: 'assistant-three', enabled: false });
+
+    expect(httpBridgeMocks.calls).toEqual([
+      { method: 'POST', path: '/api/shell/open-file', body: { file_path: '/tmp/report one.txt' } },
+      { method: 'POST', path: '/api/shell/show-item-in-folder', body: { file_path: '/tmp/report one.txt' } },
+      { method: 'POST', path: '/api/shell/open-external', body: { url: 'https://example.test/path' } },
+      { method: 'GET', path: '/api/assistants/assistant%2Fone?locale=en-US', body: undefined },
+      { method: 'GET', path: '/api/assistants/assistant%2Ftwo', body: undefined },
+      { method: 'PUT', path: '/api/assistants/assistant-one', body: undefined },
+      { method: 'DELETE', path: '/api/assistants/assistant-two', body: undefined },
+      { method: 'PATCH', path: '/api/assistants/assistant-three/state', body: { enabled: false } },
+    ]);
+  });
+
+  it('keeps clone, update, and conversation resource payloads on their canonical HTTP contract', async () => {
+    const { conversation } = await import('@/common/adapter/ipcBridge');
+    const model = {
+      id: 'provider-one',
+      platform: 'openai',
+      name: 'Provider',
+      base_url: 'https://provider.example.test',
+      api_key: 'secret',
+      use_model: 'model-one',
+    };
+    httpBridgeMocks.responses.set('/api/conversations/clone', { id: 'clone-1', type: 'aionrs' });
+    httpBridgeMocks.responses.set('/api/conversations/conv-1/associated', []);
+    httpBridgeMocks.responses.set('/api/cron/jobs/cron-1/conversations', []);
+
+    await conversation.createWithConversation.invoke({
+      conversation: { id: 'source-1', type: 'aionrs', model, name: 'Source' } as never,
+    });
+    await conversation.createWithConversation.invoke({
+      conversation: { id: 'source-2', type: 'acp', model, name: 'ACP source' } as never,
+    });
+    await conversation.createWithConversation.invoke({
+      conversation: { id: 'source-3', type: 'aionrs', name: 'Unconfigured source' } as never,
+    });
+    await conversation.get.invoke({ id: 'conv-1' });
+    await conversation.getAssociateConversation.invoke({ conversation_id: 'conv-1' });
+    await conversation.listByCronJob.invoke({ cron_job_id: 'cron-1' });
+    await conversation.update.invoke({ id: 'conv-1', updates: { name: 'Renamed', model }, merge_extra: true });
+    await conversation.update.invoke({ id: 'conv-2', updates: { name: 'No model' } });
+    await conversation.reset.invoke({ id: 'conv-1' });
+    await conversation.ensureRuntime.invoke({ conversation_id: 'conv-1' });
+    await conversation.activeLease.invoke({ conversation_id: 'conv-1' });
+    await conversation.stop.invoke({ conversation_id: 'conv-1', turn_id: 'turn-1' });
+    await conversation.getSlashCommands.invoke({ conversation_id: 'conv-1' });
+    await conversation.askSideQuestion.invoke({ conversation_id: 'conv-1', question: 'Why?' });
+    await conversation.confirmMessage.invoke({
+      conversation_id: 'conv-1',
+      msg_id: 'message-1',
+      call_id: 'call/one',
+      confirm_key: 'allow',
+    });
+    await conversation.listArtifacts.invoke({ conversation_id: 'conv-1' });
+    await conversation.updateArtifact.invoke({
+      conversation_id: 'conv-1',
+      artifact_id: 'artifact-1',
+      status: 'saved',
+    });
+
+    expect(httpBridgeMocks.calls).toEqual([
+      {
+        method: 'POST',
+        path: '/api/conversations/clone',
+        body: {
+          conversation: {
+            id: 'source-1',
+            type: 'aionrs',
+            name: 'Source',
+            model: { provider_id: 'provider-one', model: 'model-one' },
+          },
+        },
+      },
+      {
+        method: 'POST',
+        path: '/api/conversations/clone',
+        body: { conversation: { id: 'source-2', type: 'acp', name: 'ACP source' } },
+      },
+      {
+        method: 'POST',
+        path: '/api/conversations/clone',
+        body: { conversation: { id: 'source-3', type: 'aionrs', name: 'Unconfigured source' } },
+      },
+      { method: 'GET', path: '/api/conversations/conv-1', body: undefined },
+      { method: 'GET', path: '/api/conversations/conv-1/associated', body: undefined },
+      { method: 'GET', path: '/api/cron/jobs/cron-1/conversations', body: undefined },
+      {
+        method: 'PATCH',
+        path: '/api/conversations/conv-1',
+        body: {
+          name: 'Renamed',
+          model: { provider_id: 'provider-one', model: 'model-one' },
+          merge_extra: true,
+        },
+      },
+      {
+        method: 'PATCH',
+        path: '/api/conversations/conv-2',
+        body: { name: 'No model', merge_extra: undefined },
+      },
+      { method: 'POST', path: '/api/conversations/conv-1/reset', body: undefined },
+      { method: 'POST', path: '/api/conversations/conv-1/runtime/ensure', body: undefined },
+      { method: 'POST', path: '/api/conversations/conv-1/active-lease', body: undefined },
+      { method: 'POST', path: '/api/conversations/conv-1/cancel', body: { turn_id: 'turn-1' } },
+      { method: 'GET', path: '/api/conversations/conv-1/slash-commands', body: undefined },
+      { method: 'POST', path: '/api/conversations/conv-1/side-question', body: { question: 'Why?' } },
+      {
+        method: 'POST',
+        path: '/api/conversations/conv-1/confirmations/call%2Fone/confirm',
+        body: { msg_id: 'message-1', data: 'allow' },
+      },
+      { method: 'GET', path: '/api/conversations/conv-1/artifacts', body: undefined },
+      {
+        method: 'PATCH',
+        path: '/api/conversations/conv-1/artifacts/artifact-1',
+        body: { status: 'saved' },
+      },
+    ]);
+  });
+
+  it('projects workspace, confirmation, and approval options without leaking absolute paths into queries', async () => {
+    const { conversation } = await import('@/common/adapter/ipcBridge');
+    httpBridgeMocks.httpRequest.mockResolvedValue([{ name: 'shot.txt', type: 'file' }]);
+
+    const workspace = await conversation.getWorkspace.invoke({
+      conversation_id: 'conv-1',
+      workspace: '/studio/project-one',
+      path: '/studio/project-one/assets',
+      search: 'hero frame',
+    });
+    await conversation.getWorkspace.invoke({
+      conversation_id: 'conv-1',
+      workspace: '/studio/project-one',
+      path: '/studio/project-one',
+    });
+    await conversation.confirmation.confirm.invoke({
+      conversation_id: 'conv-1',
+      msg_id: 'message-1',
+      call_id: 'call/one',
+      data: { choice: 'yes' },
+    });
+    await conversation.confirmation.confirm.invoke({
+      conversation_id: 'conv-1',
+      msg_id: 'message-2',
+      call_id: 'call-two',
+      data: null,
+      always_allow: true,
+    });
+    await conversation.confirmation.list.invoke({ conversation_id: 'conv-1' });
+    await conversation.approval.check.invoke({ conversation_id: 'conv-1', action: 'shell read' });
+    await conversation.approval.check.invoke({
+      conversation_id: 'conv-1',
+      action: 'shell read',
+      command_type: 'read only',
+    });
+
+    expect(workspace).toEqual([
+      {
+        name: 'assets',
+        fullPath: '/studio/project-one/assets',
+        relativePath: 'assets',
+        isDir: true,
+        isFile: false,
+        children: [
+          {
+            name: 'shot.txt',
+            fullPath: '/studio/project-one/assets/shot.txt',
+            relativePath: 'assets/shot.txt',
+            isDir: false,
+            isFile: true,
+          },
+        ],
+      },
+    ]);
+    expect(httpBridgeMocks.httpRequest).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/api/conversations/conv-1/workspace?path=assets&search=hero%20frame'
+    );
+    expect(httpBridgeMocks.httpRequest).toHaveBeenNthCalledWith(2, 'GET', '/api/conversations/conv-1/workspace?path=.');
+    expect(httpBridgeMocks.calls).toEqual([
+      {
+        method: 'POST',
+        path: '/api/conversations/conv-1/confirmations/call%2Fone/confirm',
+        body: { msg_id: 'message-1', data: { choice: 'yes' }, always_allow: false },
+      },
+      {
+        method: 'POST',
+        path: '/api/conversations/conv-1/confirmations/call-two/confirm',
+        body: { msg_id: 'message-2', data: null, always_allow: true },
+      },
+      { method: 'GET', path: '/api/conversations/conv-1/confirmations', body: undefined },
+      {
+        method: 'GET',
+        path: '/api/conversations/conv-1/approvals/check?action=shell%20read',
+        body: undefined,
+      },
+      {
+        method: 'GET',
+        path: '/api/conversations/conv-1/approvals/check?action=shell%20read&command_type=read%20only',
+        body: undefined,
+      },
+    ]);
+  });
+
+  it('preserves a workspace request rejection as an observable transport failure', async () => {
+    const { conversation } = await import('@/common/adapter/ipcBridge');
+    httpBridgeMocks.httpRequest.mockRejectedValueOnce(new Error('workspace unavailable'));
+
+    await expect(
+      conversation.getWorkspace.invoke({
+        conversation_id: 'conv-1',
+        workspace: '/studio/project-one',
+        path: '/studio/project-one/assets',
+      })
+    ).rejects.toThrow('workspace unavailable');
+  });
+
+  it('builds bounded message-history queries for full and default cursor requests', async () => {
+    const { database } = await import('@/common/adapter/ipcBridge');
+    httpBridgeMocks.responses.set('/api/conversations?cursor=cursor-1&limit=25', {
+      items: [],
+      total: 0,
+      has_more: false,
+    });
+    httpBridgeMocks.responses.set('/api/conversations', { items: [], total: 0, has_more: false });
+    httpBridgeMocks.responses.set('/api/messages/search?keyword=hero%20frame&page=2&page_size=10', {
+      items: [],
+      total: 0,
+      has_more: false,
+    });
+    httpBridgeMocks.responses.set('/api/messages/search?keyword=empty&page=1&page_size=50', {
+      items: [],
+      total: 0,
+      has_more: false,
+    });
+
+    await database.getConversationMessages.invoke({
+      conversation_id: 'conv-1',
+      limit: 50,
+      before: 'before-1',
+      after: 'after-1',
+      anchor_message_id: 'message-1',
+      content_mode: 'full',
+    });
+    await database.getConversationMessages.invoke({ conversation_id: 'conv-2' });
+    await database.getConversationMessage.invoke({ conversation_id: 'conv-1', message_id: 'message/one' });
+    await database.getUserConversations.invoke({ cursor: 'cursor-1', limit: 25 });
+    await database.getUserConversations.invoke({});
+    await database.searchConversationMessages.invoke({ keyword: 'hero frame', page: 2, page_size: 10 });
+    await database.searchConversationMessages.invoke({ keyword: 'empty' });
+
+    expect(httpBridgeMocks.calls.map(({ path }) => path)).toEqual([
+      '/api/conversations/conv-1/messages?limit=50&before=before-1&after=after-1&anchor_message_id=message-1&content_mode=full',
+      '/api/conversations/conv-2/messages',
+      '/api/conversations/conv-1/messages/message%2Fone',
+      '/api/conversations?cursor=cursor-1&limit=25',
+      '/api/conversations',
+      '/api/messages/search?keyword=hero%20frame&page=2&page_size=10',
+      '/api/messages/search?keyword=empty&page=1&page_size=50',
+    ]);
+  });
+
+  it('maps preview targets and client settings without renderer-only field drift', async () => {
+    const { previewHistory, systemSettings, webui } = await import('@/common/adapter/ipcBridge');
+    const target = {
+      workspace: '/studio/project-one',
+      filePath: '/studio/project-one/brief.md',
+      contentType: 'markdown' as const,
+    };
+
+    await previewHistory.list.invoke({ target } as never);
+    await previewHistory.save.invoke({ target, content: '# Brief' } as never);
+    await previewHistory.getContent.invoke({ target, snapshot_id: 'snapshot-1' } as never);
+    await systemSettings.setNotificationEnabled.invoke({ enabled: true });
+    await systemSettings.setCronNotificationEnabled.invoke({ enabled: false });
+    await systemSettings.setKeepAwake.invoke({ enabled: true });
+    await systemSettings.changeLanguage.invoke({ language: 'en-US' });
+    await systemSettings.setSaveUploadToWorkspace.invoke({ enabled: false });
+    await systemSettings.setAutoPreviewOfficeFiles.invoke({ enabled: true });
+    await webui.changePassword.invoke({ newPassword: 'new password' });
+    await webui.changeUsername.invoke({ newUsername: 'director' });
+
+    expect(httpBridgeMocks.calls).toEqual([
+      {
+        method: 'POST',
+        path: '/api/preview-history/list',
+        body: {
+          target: {
+            workspace: target.workspace,
+            filePath: target.filePath,
+            contentType: undefined,
+            content_type: 'markdown',
+          },
+        },
+      },
+      {
+        method: 'POST',
+        path: '/api/preview-history/save',
+        body: {
+          target: {
+            workspace: target.workspace,
+            filePath: target.filePath,
+            contentType: undefined,
+            content_type: 'markdown',
+          },
+          content: '# Brief',
+        },
+      },
+      {
+        method: 'POST',
+        path: '/api/preview-history/get-content',
+        body: {
+          target: {
+            workspace: target.workspace,
+            filePath: target.filePath,
+            contentType: undefined,
+            content_type: 'markdown',
+          },
+          snapshot_id: 'snapshot-1',
+        },
+      },
+      { method: 'PUT', path: '/api/settings/client', body: { notificationEnabled: true } },
+      { method: 'PUT', path: '/api/settings/client', body: { cronNotificationEnabled: false } },
+      { method: 'PUT', path: '/api/settings/client', body: { keepAwake: true } },
+      { method: 'PATCH', path: '/api/settings', body: { language: 'en-US' } },
+      { method: 'PUT', path: '/api/settings/client', body: { saveUploadToWorkspace: false } },
+      { method: 'PUT', path: '/api/settings/client', body: { autoPreviewOfficeFiles: true } },
+      { method: 'POST', path: '/api/webui/change-password', body: { new_password: 'new password' } },
+      { method: 'POST', path: '/api/webui/change-username', body: { new_username: 'director' } },
+    ]);
+  });
+
+  it('reads present and absent client settings through the backend query contract', async () => {
+    const { systemSettings } = await import('@/common/adapter/ipcBridge');
+    httpBridgeMocks.httpRequest.mockResolvedValueOnce({ keepAwake: true }).mockResolvedValueOnce(undefined);
+
+    await expect(systemSettings.getKeepAwake.invoke()).resolves.toBe(true);
+    await expect(systemSettings.getKeepAwake.invoke()).resolves.toBeUndefined();
+    expect(httpBridgeMocks.httpRequest).toHaveBeenCalledTimes(2);
+    expect(httpBridgeMocks.httpRequest).toHaveBeenCalledWith('GET', '/api/settings/client?keys=keepAwake');
   });
 });

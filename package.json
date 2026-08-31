@@ -46,6 +46,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:coverage:creative-studio": "vitest run --coverage --config vitest.creative-studio-coverage.config.ts",
     "test:contract": "vitest run tests/contract --passWithNoTests",
     "test:integration": "vitest run tests/integration",
     "eval:kb": "bunx tsx tests/eval/runEval.ts",

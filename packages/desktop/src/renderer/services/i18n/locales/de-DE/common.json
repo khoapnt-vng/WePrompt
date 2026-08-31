@@ -91,6 +91,14 @@
       "diagnosticsReportFailed": "Diagnosepaket konnte nicht gespeichert werden",
       "runtimeComponentDescription": "Diese Installation fehlen erforderliche gebündelte Runtime-Komponenten, daher kann {{resource}} nicht starten. Installiere das neueste WePrompt-Paket neu. Wenn es nach der Neuinstallation immer noch auftritt, überprüfe, ob Sicherheits- oder Antivirus-Software WePrompt-Komponenten unter Quarantäne gestellt hat."
     },
+    "genericFailure": {
+      "title": "Lokales Backend konnte nicht gestartet werden",
+      "description": "WePrompt konnte den lokalen Start nicht abschließen. Starte WePrompt neu. Wenn das Problem weiterhin besteht, speichere das Diagnosepaket für den Support.",
+      "sendDiagnostics": "Diagnosen speichern",
+      "diagnosticsSent": "Diagnosen gespeichert",
+      "diagnosticsReportSuccess": "Diagnosepaket gespeichert",
+      "diagnosticsReportFailed": "Diagnosepaket konnte nicht gespeichert werden"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt-Paket-Architektur-Fehlanpassung",
       "description": "Dieses WePrompt-Paket ist für {{packageArch}}, aber dieser Mac ist {{deviceArch}}. Beziehe das {{expectedArch}}-Installationsprogramm über den genehmigten internen Verteilungskanal, schließe WePrompt und installiere dieses Paket.",

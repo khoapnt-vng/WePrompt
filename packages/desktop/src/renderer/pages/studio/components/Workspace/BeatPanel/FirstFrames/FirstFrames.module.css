@@ -1,0 +1,354 @@
+.root {
+  display: grid;
+  box-sizing: border-box;
+  min-inline-size: 0;
+  block-size: 178px;
+  grid-template-columns: minmax(0, 1fr) 32px 220px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-block-start: 1px solid var(--color-border-1);
+  border-block-end: 1px solid var(--color-border-1);
+  overflow: hidden;
+  background: var(--color-bg-2);
+}
+
+.inputHalf,
+.outputHalf {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 6px;
+}
+
+.outputHalf {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.sectionHeader,
+.sectionHeader > div,
+.caption,
+.viewerTopline,
+.viewerActions {
+  display: flex;
+  min-inline-size: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.eyebrow,
+.shotChip,
+.status,
+.caption,
+.currentBadge,
+.changedTag,
+.viewerTopline {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: var(--fw-bold);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.eyebrow,
+.caption,
+.viewerTopline {
+  color: var(--color-text-3);
+}
+
+/*
+ * Arco positions the Modal's close button absolutely in the top-right corner, over whatever the
+ * content puts there (.arco-modal-close-icon: right 20px, top 18px, 12px icon). The topline's
+ * right-hand slot is the frame counter, and .viewerModal zeroes the modal content's padding while
+ * .viewer supplies 20px, so the counter's right edge lands exactly on the icon. Reserve the corner
+ * rather than move the counter, so it keeps its place opposite the label.
+ *
+ * Logical, not physical: fa-IR is one of the twelve locales and Arco flips the icon under RTL
+ * (.arco-modal-rtl .arco-modal-close-icon { right: initial; left: 20px }), so padding-right would
+ * reserve the wrong corner in Persian.
+ */
+.viewerTopline {
+  padding-inline-end: 24px;
+}
+
+.shotChip,
+.currentBadge {
+  padding: 2px 6px;
+  border-radius: 999px;
+  color: var(--color-primary-6);
+  background: var(--color-fill-2);
+}
+
+.status {
+  color: var(--text-primary);
+}
+
+.strip {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  align-items: flex-start;
+  gap: 8px;
+  padding-block-end: 4px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
+  scrollbar-gutter: stable;
+}
+
+.frameCard {
+  position: relative;
+  display: grid;
+  flex: 0 0 134px;
+  inline-size: 134px;
+  min-inline-size: 134px;
+  gap: 4px;
+  padding: 0;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-fill-1);
+}
+
+.currentFrame {
+  border-color: var(--color-primary-6);
+}
+
+.frameMedia {
+  position: relative;
+  display: grid;
+  inline-size: 132px;
+  block-size: 74px;
+  place-items: center;
+  overflow: hidden;
+  background: var(--color-fill-3);
+}
+
+.frameMedia img,
+.frameOpenSurface img,
+.pictureMediaButton img,
+.pictureMediaButton video,
+.viewerThumb img {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
+.frameOpenSurface {
+  display: block;
+  inline-size: 100%;
+  block-size: 100%;
+  padding: 0;
+  border: 0;
+  cursor: pointer;
+  background: transparent;
+}
+
+.currentBadge {
+  position: absolute;
+  z-index: 2;
+  inset-block-end: 5px;
+  inset-inline-start: 5px;
+  color: var(--color-bg-1);
+  background: var(--color-primary-6);
+}
+
+.hoverActions {
+  position: absolute;
+  z-index: 3;
+  inset-block-start: 5px;
+  inset-inline-end: 5px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.frameCard:hover .hoverActions,
+.frameCard:focus-within .hoverActions {
+  opacity: 1;
+}
+
+.caption {
+  padding-inline: 5px;
+  white-space: nowrap;
+}
+
+.caption > span {
+  min-inline-size: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.caption > span:last-child {
+  text-align: end;
+}
+
+.changedTag {
+  padding: 2px 5px 4px;
+  color: var(--color-warning-6);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.importTile {
+  flex: 0 0 64px;
+  inline-size: 64px;
+  min-inline-size: 64px;
+  block-size: 74px;
+  border-style: dashed;
+}
+
+.empty,
+.pictureEmpty {
+  margin: 0;
+  color: var(--color-text-3);
+  overflow-wrap: anywhere;
+}
+
+.pictureEmpty {
+  display: grid;
+  min-block-size: 0;
+  align-content: center;
+  justify-items: start;
+}
+
+.divider {
+  display: grid;
+  min-block-size: 0;
+  place-items: center;
+  border-inline-start: 1px solid var(--color-border-2);
+  color: var(--color-text-3);
+}
+
+.pictureCard {
+  position: relative;
+  display: grid;
+  min-inline-size: 0;
+  align-content: start;
+  gap: 3px;
+}
+
+.pictureHoverActions {
+  position: absolute;
+  z-index: 2;
+  inset-block-start: 5px;
+  inset-inline-end: 5px;
+  display: flex;
+  gap: 4px;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+
+.pictureCard:hover .pictureHoverActions,
+.pictureCard:focus-within .pictureHoverActions {
+  opacity: 1;
+}
+
+.pictureMediaButton {
+  inline-size: 190px !important;
+  block-size: 107px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border-radius: 8px !important;
+  background: var(--color-fill-3) !important;
+}
+
+.destructiveItem {
+  color: var(--color-danger-6) !important;
+}
+
+.destructiveButton {
+  color: var(--color-danger-6) !important;
+}
+
+.viewerModal {
+  inline-size: min(1180px, calc(100vw - 32px));
+}
+
+.viewerModal :global(.arco-modal-content) {
+  padding: 0;
+  background: var(--color-mask-bg);
+}
+
+.viewerModal :global(.arco-modal-close-icon) {
+  color: var(--color-text-1);
+}
+
+.viewer {
+  display: grid;
+  min-block-size: min(760px, calc(100vh - 80px));
+  grid-template-rows: auto minmax(0, 1fr) 74px auto auto;
+  gap: 14px;
+  padding: 20px;
+  color: var(--color-text-1);
+}
+
+.viewerStage {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.viewer[data-viewer-kind='picture'] .viewerStage {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.viewerMedia {
+  display: grid;
+  min-inline-size: 0;
+  min-block-size: 0;
+  block-size: 100%;
+  place-items: center;
+  overflow: hidden;
+}
+
+.viewerMedia img,
+.viewerMedia video {
+  display: block;
+  max-inline-size: 100%;
+  max-block-size: 100%;
+  object-fit: contain;
+}
+
+.viewerFilmstrip {
+  display: flex;
+  min-inline-size: 0;
+  gap: 8px;
+  overflow-x: auto;
+}
+
+.viewerThumb {
+  flex: 0 0 112px;
+  inline-size: 112px !important;
+  block-size: 63px !important;
+  padding: 0 !important;
+  overflow: hidden;
+  border: 2px solid transparent !important;
+  border-radius: 7px !important;
+}
+
+.viewerThumb[aria-pressed='true'] {
+  border-color: var(--color-primary-6) !important;
+}
+
+.viewerActions {
+  justify-content: flex-end;
+}
+
+@media (max-width: 860px) {
+  .root {
+    grid-template-columns: minmax(0, 1fr) 24px 190px;
+  }
+
+  .pictureMediaButton {
+    inline-size: 160px !important;
+    block-size: 90px !important;
+  }
+}

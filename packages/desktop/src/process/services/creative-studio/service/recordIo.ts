@@ -108,8 +108,17 @@ export async function resolveCompleteDirectorySet<const ChildName extends string
   rootName: string;
   childNames: readonly ChildName[];
   createIfWhollyAbsent: boolean;
+  authorizeBeforePublish?: () => Promise<void>;
 }): Promise<({ root: string } & Record<ChildName, string>) | null> {
   const root = resolveConfinedRecordPath(input.canonicalRoot, input.parent, input.rootName);
+  const parentStats = await input.fs.lstat(input.parent);
+  if (
+    !parentStats.isDirectory() ||
+    parentStats.isSymbolicLink() ||
+    (await input.fs.realpath(input.parent)) !== input.parent
+  ) {
+    throw new RecordIoError('unsafe_path');
+  }
   let rootExists = true;
   try {
     const stats = await input.fs.lstat(root);
@@ -123,18 +132,295 @@ export async function resolveCompleteDirectorySet<const ChildName extends string
 
   if (!rootExists) {
     if (!input.createIfWhollyAbsent) return null;
+    const stagePrefix = `.${input.rootName}.`;
+    let stage: string | undefined;
+    let ownedStageIdentity: { dev: number; ino: number } | undefined;
+    const ownedChildIdentities = new Map<string, { dev: number; ino: number }>();
+    const verifiedChildIdentities = new Map<string, { dev: number; ino: number }>();
+    let authorizationFailed = false;
+    const authorize = async (): Promise<void> => {
+      try {
+        await input.authorizeBeforePublish?.();
+      } catch (error) {
+        authorizationFailed = true;
+        throw error;
+      }
+    };
     try {
-      await input.fs.mkdir(root);
+      const parentEntries = await input.fs.readdir(input.parent, { withFileTypes: true });
+      const stagedEntries = parentEntries.filter(
+        (entry) => entry.name.startsWith(stagePrefix) && entry.name.endsWith('.tmp')
+      );
+      if (stagedEntries.length > 1) throw new RecordIoError('partial_directory_set');
+      if (stagedEntries.length === 1) {
+        const stagedEntry = stagedEntries[0];
+        if (stagedEntry === undefined || !stagedEntry.isDirectory() || stagedEntry.isSymbolicLink()) {
+          throw new RecordIoError('partial_directory_set');
+        }
+        stage = resolveConfinedRecordPath(input.canonicalRoot, input.parent, stagedEntry.name);
+      } else {
+        await authorize();
+        stage = resolveConfinedRecordPath(
+          input.canonicalRoot,
+          input.parent,
+          `${stagePrefix}${process.pid}_${++temporaryFileCounter}.tmp`
+        );
+        await input.fs.mkdir(stage);
+        const createdStageStats = await input.fs.lstat(stage);
+        ownedStageIdentity = { dev: createdStageStats.dev, ino: createdStageStats.ino };
+      }
+      const stageStats = await input.fs.lstat(stage);
+      if (!stageStats.isDirectory() || stageStats.isSymbolicLink() || (await input.fs.realpath(stage)) !== stage) {
+        throw new RecordIoError('unsafe_path');
+      }
+      const stagedChildren = await input.fs.readdir(stage, { withFileTypes: true });
+      if (
+        stagedChildren.length > input.childNames.length ||
+        stagedChildren.some(
+          (entry) =>
+            !entry.isDirectory() || entry.isSymbolicLink() || !input.childNames.includes(entry.name as ChildName)
+        )
+      ) {
+        throw new RecordIoError('partial_directory_set');
+      }
       for (const childName of input.childNames) {
-        // A newly exclusive-created family root has no pre-existing child authority.
+        const childPath = resolveConfinedRecordPath(input.canonicalRoot, stage, childName);
+        if (!stagedChildren.some((entry) => entry.name === childName)) {
+          // A sole safe partial stage is recoverable because it has never been published. Repairing
+          // it cannot alter the final family and every existing entry was classified above.
+          // eslint-disable-next-line no-await-in-loop
+          await authorize();
+          // eslint-disable-next-line no-await-in-loop
+          await input.fs.mkdir(childPath);
+          if (ownedStageIdentity !== undefined) {
+            // Capture ownership immediately after creation. Rollback never derives authority from
+            // whatever happens to occupy this pathname later.
+            // eslint-disable-next-line no-await-in-loop
+            const createdChild = await input.fs.lstat(childPath);
+            if (!createdChild.isDirectory() || createdChild.isSymbolicLink()) throw new RecordIoError('unsafe_path');
+            ownedChildIdentities.set(childName, { dev: createdChild.dev, ino: createdChild.ino });
+          }
+        }
+        // Every staged child is independently no-follow/canonical verified and empty before publication.
         // eslint-disable-next-line no-await-in-loop
-        await input.fs.mkdir(resolveConfinedRecordPath(input.canonicalRoot, root, childName));
+        const child = await resolveSafeRecordDirectory({
+          fs: input.fs,
+          canonicalRoot: input.canonicalRoot,
+          parent: stage,
+          name: childName,
+          createIfMissing: false,
+        });
+        if (child === null) throw new RecordIoError('partial_directory_set');
+        // eslint-disable-next-line no-await-in-loop
+        const verifiedChild = await input.fs.lstat(child);
+        if (!verifiedChild.isDirectory() || verifiedChild.isSymbolicLink()) throw new RecordIoError('unsafe_path');
+        verifiedChildIdentities.set(childName, { dev: verifiedChild.dev, ino: verifiedChild.ino });
+        // eslint-disable-next-line no-await-in-loop
+        if ((await input.fs.readdir(child)).length !== 0) throw new RecordIoError('partial_directory_set');
+        // eslint-disable-next-line no-await-in-loop
+        const childHandle = await input.fs.open(child, 'r');
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await childHandle.sync();
+        } finally {
+          // eslint-disable-next-line no-await-in-loop
+          await childHandle.close();
+        }
+      }
+      const stageHandle = await input.fs.open(stage, 'r');
+      try {
+        await stageHandle.sync();
+      } finally {
+        await stageHandle.close();
+      }
+      await authorize();
+      const currentParentStats = await input.fs.lstat(input.parent);
+      if (
+        !currentParentStats.isDirectory() ||
+        currentParentStats.isSymbolicLink() ||
+        currentParentStats.dev !== parentStats.dev ||
+        currentParentStats.ino !== parentStats.ino ||
+        (await input.fs.realpath(input.parent)) !== input.parent
+      ) {
+        throw new RecordIoError('unsafe_path');
+      }
+      const finalStageChildren = await input.fs.readdir(stage, { withFileTypes: true });
+      if (
+        finalStageChildren.length !== input.childNames.length ||
+        finalStageChildren.some(
+          (entry) =>
+            !entry.isDirectory() || entry.isSymbolicLink() || !input.childNames.includes(entry.name as ChildName)
+        )
+      ) {
+        throw new RecordIoError('partial_directory_set');
+      }
+      const finalParentEntries = await input.fs.readdir(input.parent, { withFileTypes: true });
+      const finalStagedEntries = finalParentEntries.filter(
+        (entry) => entry.name.startsWith(stagePrefix) && entry.name.endsWith('.tmp')
+      );
+      if (finalStagedEntries.length !== 1 || finalStagedEntries[0]?.name !== path.basename(stage)) {
+        throw new RecordIoError('partial_directory_set');
+      }
+      try {
+        await input.fs.lstat(root);
+        throw new RecordIoError('partial_directory_set');
+      } catch (error) {
+        if (error instanceof RecordIoError) throw error;
+        if (!hasErrorCode(error, 'ENOENT')) throw new RecordIoError('storage_error');
+      }
+      // All filesystem proofs above await I/O after the earlier authorization. Re-run the
+      // caller's project/schema fence as the final awaited operation before publication.
+      await authorize();
+      for (const childName of input.childNames) {
+        const childPath = resolveConfinedRecordPath(input.canonicalRoot, stage, childName);
+        // Emptiness and canonicality are observed first; the captured inode is the final awaited
+        // proof for each child before the stage can enter the authoritative namespace.
+        // eslint-disable-next-line no-await-in-loop
+        const childEntries = await input.fs.readdir(childPath);
+        // eslint-disable-next-line no-await-in-loop
+        const childRealpath = await input.fs.realpath(childPath);
+        // eslint-disable-next-line no-await-in-loop
+        const childStats = await input.fs.lstat(childPath);
+        const verifiedIdentity = verifiedChildIdentities.get(childName);
+        if (
+          verifiedIdentity === undefined ||
+          childEntries.length !== 0 ||
+          childRealpath !== childPath ||
+          !childStats.isDirectory() ||
+          childStats.isSymbolicLink() ||
+          childStats.dev !== verifiedIdentity.dev ||
+          childStats.ino !== verifiedIdentity.ino
+        ) {
+          throw new RecordIoError('partial_directory_set');
+        }
+      }
+      const publishStageEntries = await input.fs.readdir(stage, { withFileTypes: true });
+      if (
+        publishStageEntries.length !== input.childNames.length ||
+        publishStageEntries.some(
+          (entry) =>
+            !entry.isDirectory() || entry.isSymbolicLink() || !input.childNames.includes(entry.name as ChildName)
+        )
+      ) {
+        throw new RecordIoError('partial_directory_set');
+      }
+      const publishStageStats = await input.fs.lstat(stage);
+      if (
+        !publishStageStats.isDirectory() ||
+        publishStageStats.isSymbolicLink() ||
+        publishStageStats.dev !== stageStats.dev ||
+        publishStageStats.ino !== stageStats.ino
+      ) {
+        throw new RecordIoError('unsafe_path');
+      }
+      try {
+        await input.fs.lstat(root);
+        throw new RecordIoError('partial_directory_set');
+      } catch (error) {
+        if (error instanceof RecordIoError) throw error;
+        if (!hasErrorCode(error, 'ENOENT')) throw new RecordIoError('storage_error');
+      }
+      // Publication authority is the final awaited operation. The rename is the commit boundary;
+      // a project/schema replacement observed here cannot inherit the staged family.
+      await authorize();
+      await input.fs.rename(stage, root);
+      const publishedStats = await input.fs.lstat(root);
+      if (
+        !publishedStats.isDirectory() ||
+        publishedStats.isSymbolicLink() ||
+        publishedStats.dev !== stageStats.dev ||
+        publishedStats.ino !== stageStats.ino
+      ) {
+        throw new RecordIoError('unsafe_path');
+      }
+      const parentHandle = await input.fs.open(input.parent, 'r');
+      try {
+        await parentHandle.sync();
+      } finally {
+        await parentHandle.close();
       }
     } catch (error) {
+      if (authorizationFailed && stage !== undefined && ownedStageIdentity !== undefined) {
+        try {
+          const entries = await input.fs.readdir(stage, { withFileTypes: true });
+          const currentStageRealpath = await input.fs.realpath(stage);
+          const currentStage = await input.fs.lstat(stage);
+          if (
+            currentStage.isDirectory() &&
+            !currentStage.isSymbolicLink() &&
+            currentStage.dev === ownedStageIdentity.dev &&
+            currentStage.ino === ownedStageIdentity.ino &&
+            currentStageRealpath === stage &&
+            entries.length === ownedChildIdentities.size &&
+            entries.every((entry) => ownedChildIdentities.has(entry.name))
+          ) {
+            let empty = true;
+            for (const entry of entries) {
+              const identity = ownedChildIdentities.get(entry.name);
+              if (identity === undefined) {
+                empty = false;
+                break;
+              }
+              const child = { path: path.join(stage, entry.name), ...identity };
+              if (empty) {
+                // Non-recursive removal preserves any raced content or replacement.
+                // eslint-disable-next-line no-await-in-loop
+                const childEntries = await input.fs.readdir(child.path);
+                // eslint-disable-next-line no-await-in-loop
+                const childRealpath = await input.fs.realpath(child.path);
+                // The exact identity proof is the final awaited operation before rmdir.
+                // eslint-disable-next-line no-await-in-loop
+                const currentChild = await input.fs.lstat(child.path);
+                if (
+                  !currentChild.isDirectory() ||
+                  currentChild.isSymbolicLink() ||
+                  currentChild.dev !== child.dev ||
+                  currentChild.ino !== child.ino ||
+                  childRealpath !== child.path ||
+                  childEntries.length !== 0
+                ) {
+                  empty = false;
+                  break;
+                }
+                // eslint-disable-next-line no-await-in-loop
+                await input.fs.rmdir(child.path);
+              }
+            }
+            if (empty) {
+              const stageEntries = await input.fs.readdir(stage);
+              const stageRealpath = await input.fs.realpath(stage);
+              // The exact identity proof is the final awaited operation before rmdir.
+              const finalStage = await input.fs.lstat(stage);
+              if (
+                finalStage.isDirectory() &&
+                !finalStage.isSymbolicLink() &&
+                finalStage.dev === ownedStageIdentity.dev &&
+                finalStage.ino === ownedStageIdentity.ino &&
+                stageRealpath === stage &&
+                stageEntries.length === 0
+              ) {
+                await input.fs.rmdir(stage);
+              }
+            }
+          }
+        } catch {
+          // Preserve any replaced or ambiguous stage rather than deleting foreign authority.
+        }
+      }
       throw preserveOrNeutralize(error);
     }
   }
 
+  const rootEntries = await input.fs.readdir(root, { withFileTypes: true });
+  if (
+    rootEntries.length !== input.childNames.length ||
+    rootEntries.some((entry) => !input.childNames.includes(entry.name as ChildName))
+  ) {
+    throw new RecordIoError('partial_directory_set');
+  }
+  if (rootEntries.some((entry) => !entry.isDirectory() || entry.isSymbolicLink())) {
+    throw new RecordIoError('unsafe_path');
+  }
   const result: Record<string, string> = { root };
   for (const childName of input.childNames) {
     let child: string | null;
@@ -172,13 +458,18 @@ export type BoundedRegularFileRead = {
   identity: { dev: number; ino: number };
 };
 
-/** Reads a named immutable record and returns the verified named inode identity. */
-export async function readBoundedRegularFileWithIdentity(input: {
+export type BoundedRegularBinaryFileRead = {
+  bytes: Uint8Array;
+  identity: { dev: number; ino: number };
+};
+
+/** Reads a named immutable binary file and returns the verified named inode identity. */
+export async function readBoundedRegularBinaryFileWithIdentity(input: {
   fs: RecordIoFileSystem;
   canonicalRoot: string;
   file: string;
   maxBytes: number;
-}): Promise<BoundedRegularFileRead | null> {
+}): Promise<BoundedRegularBinaryFileRead | null> {
   const file = resolveConfinedRecordPath(input.canonicalRoot, path.dirname(input.file), path.basename(input.file));
   let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
   try {
@@ -234,13 +525,32 @@ export async function readBoundedRegularFileWithIdentity(input: {
     }
     await assertNoUnconfirmedPublication(input.fs, file);
     return {
-      bytes: bytes.subarray(0, offset).toString('utf8'),
+      bytes: bytes.subarray(0, offset),
       identity: { dev: stats.dev, ino: stats.ino },
     };
   } catch (error) {
     throw preserveOrNeutralize(error);
   } finally {
     await handle?.close().catch((): undefined => undefined);
+  }
+}
+
+/** Reads a named immutable UTF-8 record and returns the verified named inode identity. */
+export async function readBoundedRegularFileWithIdentity(input: {
+  fs: RecordIoFileSystem;
+  canonicalRoot: string;
+  file: string;
+  maxBytes: number;
+}): Promise<BoundedRegularFileRead | null> {
+  try {
+    const record = await readBoundedRegularBinaryFileWithIdentity(input);
+    if (record === null) return null;
+    return {
+      bytes: new TextDecoder('utf-8', { fatal: true }).decode(record.bytes),
+      identity: record.identity,
+    };
+  } catch (error) {
+    throw preserveOrNeutralize(error);
   }
 }
 

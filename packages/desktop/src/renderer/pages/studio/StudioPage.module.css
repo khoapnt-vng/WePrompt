@@ -13,19 +13,6 @@
   font-weight: var(--fw-regular);
 }
 
-/*
- * The project frame.
- *
- * `height: 100%` rather than `min-height` is the whole point: the parent is a bounded flex column,
- * so a min-height lets this box grow past the viewport instead of being measured by it, and every
- * descendant that says `flex: 1` then divides up content height rather than screen height. That is
- * what stranded the Director's composer 418px below the fold on Review while leaving it floating
- * mid-page on Brief — one cause, two opposite symptoms.
- *
- * `overflow: hidden` moves scrolling into the work panel, so the conversation keeps its own scroll
- * and its composer stays put. `padding: 0` is deliberate: the Director pane is flush against the
- * app side menu the way a conversation is, and the work panel carries the inset instead.
- */
 .pageProject {
   display: flex;
   height: 100%;
@@ -55,31 +42,4 @@
   gap: 12px;
   color: var(--color-text-2);
   text-align: center;
-}
-
-/* Full width and unmargined: a centred `min(100%, 1560px)` put dead page between the app side menu
-   and the Director pane on any window wider than that, which reads as the pane having drifted away
-   from the menu. The work panel caps its own content instead, so the pane stays flush.
-   `flex: 1` + `min-height: 0` is what passes the frame's bounded height down to the shell. */
-.projectShell {
-  display: flex;
-  width: 100%;
-  min-width: 0;
-  min-height: 0;
-  flex: 1;
-  flex-direction: column;
-  gap: 18px;
-}
-
-.projectAlert {
-  border: 1px solid var(--color-danger-light-3);
-  border-radius: 8px;
-  padding: 10px 12px;
-  color: var(--color-danger-6);
-  background: var(--color-danger-light-1);
-  overflow-wrap: anywhere;
-}
-
-.modalSurface {
-  composes: surface from './StudioTypography.module.css';
 }

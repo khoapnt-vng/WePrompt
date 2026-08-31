@@ -13,7 +13,11 @@ import {
   getNativeBridgeProviderKey,
   getRendererBridgeQueryResponseKey,
 } from './native/constants';
-import { parseNativeBridgePayload, parseRendererBridgeQueryResponse } from './native/payloadSchemas';
+import {
+  getNativeBridgePayloadDiagnostic,
+  parseNativeBridgePayload,
+  parseRendererBridgeQueryResponse,
+} from './native/payloadSchemas';
 import { registerWebSocketBroadcaster, getBridgeEmitter, setBridgeEmitter, broadcastToAll } from './registry';
 
 type BridgeEventData = {
@@ -88,7 +92,20 @@ function parseBridgeEventData(info: unknown): BridgeEventData {
     throw new Error('[adapter] Native IPC request rejected: operation is not allowed');
   }
 
-  const validatedPayload = parseNativeBridgePayload(providerKey, parsed.data.data);
+  let validatedPayload: unknown;
+  try {
+    validatedPayload = parseNativeBridgePayload(providerKey, parsed.data.data);
+  } catch (error) {
+    const diagnostic = getNativeBridgePayloadDiagnostic(error);
+    if (diagnostic !== null) {
+      try {
+        console.error(`[adapter] Native IPC payload validation failed ${JSON.stringify(diagnostic)}`);
+      } catch {
+        // A diagnostic sink must never replace the generic IPC rejection.
+      }
+    }
+    throw error;
+  }
 
   return {
     name: parsed.name,

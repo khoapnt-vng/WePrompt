@@ -7,6 +7,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
+import { mergeWithFallback } from '@/common/config/i18n';
+
 const LOCALE_ROOT = new URL('../../../../../packages/desktop/src/renderer/services/i18n/locales/', import.meta.url);
 const CONFIG_URL = new URL('../../../../../packages/desktop/src/common/config/i18n-config.json', import.meta.url);
 
@@ -47,6 +49,16 @@ const MEDIA_MODEL_KEYS = [
   'integration.openRouterVideo',
 ] as const;
 
+const VALIDATION_FAILURE_KEYS = [
+  'unsupported',
+  'auth',
+  'rateLimited',
+  'providerUnavailable',
+  'timeout',
+  'invalidResponse',
+  'unknown',
+] as const;
+
 type LocaleConfig = {
   referenceLanguage: string;
   supportedLanguages: string[];
@@ -65,6 +77,12 @@ const resolveLeaf = (root: Record<string, unknown> | undefined, path: string): u
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
     return (value as Record<string, unknown>)[part];
   }, root);
+
+const asObject = (value: unknown): Record<string, unknown> => {
+  expect(value).toEqual(expect.any(Object));
+  expect(Array.isArray(value)).toBe(false);
+  return value as Record<string, unknown>;
+};
 
 const placeholders = (value: string): string[] =>
   [...value.matchAll(/{{\s*([^},\s]+)[^}]*}}/g)].map((match) => match[1]).sort();
@@ -105,6 +123,26 @@ describe('Creative Studio media model settings copy', () => {
       'integration.openRouterVideo',
     ]) {
       expect(adapterIds).not.toContain(resolveLeaf(settings.mediaModels, key));
+    }
+  });
+
+  it('keeps the exact validation-failure inventory in en-US and falls deferred locales back to it', () => {
+    const reference = readJson<SettingsLocale>(new URL(`${config.referenceLanguage}/settings.json`, LOCALE_ROOT));
+    const referenceFailures = asObject(resolveLeaf(reference.mediaModels, 'validationFailure'));
+    expect(Object.keys(referenceFailures).toSorted()).toEqual([...VALIDATION_FAILURE_KEYS].toSorted());
+
+    for (const key of VALIDATION_FAILURE_KEYS) {
+      expect(resolveLeaf(referenceFailures, key)).toEqual(expect.any(String));
+      expect((resolveLeaf(referenceFailures, key) as string).trim()).not.toBe('');
+    }
+
+    for (const language of config.supportedLanguages.filter(
+      (candidateLanguage) => candidateLanguage !== config.referenceLanguage
+    )) {
+      const locale = readJson<SettingsLocale>(new URL(`${language}/settings.json`, LOCALE_ROOT));
+      expect(resolveLeaf(locale.mediaModels, 'validationFailure'), language).toBeUndefined();
+      const merged = mergeWithFallback(reference, locale);
+      expect(resolveLeaf(merged.mediaModels, 'validationFailure'), language).toEqual(referenceFailures);
     }
   });
 

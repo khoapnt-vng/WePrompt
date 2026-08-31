@@ -7,8 +7,8 @@
  *   1. **Packaged mode** (CI default): Launches from electron-builder's unpacked output
  *      (e.g. out/linux-unpacked/weprompt, out/mac-arm64/WePrompt.app, out/win-unpacked/WePrompt.exe).
  *      This validates that packaged resources are intact.
- *   2. **Dev mode** (local default): Launches via `electron .` from project root with
- *      the Vite dev server (electron-vite dev).
+ *   2. **Dev mode** (local default): Launches the compiled Electron app via `electron .`
+ *      from the project root and resolves a local aioncore binary explicitly.
  *
  * Set `E2E_PACKAGED=1` to force packaged mode, or `E2E_DEV=1` to force dev mode.
  */
@@ -32,6 +32,11 @@ type RendererDiagnostic = {
   text: string;
 };
 
+type MainProcessDiagnostic = {
+  stream: 'stdout' | 'stderr';
+  text: string;
+};
+
 // Singleton – one app per test worker
 let app: ElectronApplication | null = null;
 let mainPage: Page | null = null;
@@ -41,6 +46,18 @@ const e2eStateFile = path.join(e2eStateSandboxDir, 'extension-states.json');
 const e2eUserDataSandboxDir = path.join(e2eStateSandboxDir, 'user-data');
 fs.mkdirSync(e2eUserDataSandboxDir, { recursive: true });
 const rendererDiagnostics = new WeakMap<Page, RendererDiagnostic[]>();
+const mainProcessDiagnostics: MainProcessDiagnostic[] = [];
+
+function attachMainProcessDiagnostics(electronApp: ElectronApplication): void {
+  mainProcessDiagnostics.length = 0;
+  const child = electronApp.process();
+  const capture = (stream: MainProcessDiagnostic['stream'], chunk: unknown): void => {
+    mainProcessDiagnostics.push({ stream, text: String(chunk) });
+    if (mainProcessDiagnostics.length > 200) mainProcessDiagnostics.splice(0, mainProcessDiagnostics.length - 200);
+  };
+  child.stdout?.on('data', (chunk: unknown) => capture('stdout', chunk));
+  child.stderr?.on('data', (chunk: unknown) => capture('stderr', chunk));
+}
 
 function isDevToolsWindow(page: Page): boolean {
   return page.url().startsWith('devtools://');
@@ -184,6 +201,29 @@ function shouldUsePackagedMode(): boolean {
   return !!process.env.CI;
 }
 
+function backendBinaryName(): string {
+  return process.platform === 'win32' ? 'aioncore.exe' : 'aioncore';
+}
+
+function resolveDevBackendBinary(): string {
+  const binaryName = backendBinaryName();
+  const candidates = [
+    process.env.AIONUI_BACKEND_BINARY,
+    process.env.AIONUI_BACKEND_BIN,
+    path.join(projectRoot, '..', 'aionCore', 'target', 'debug', binaryName),
+    path.join(projectRoot, '..', 'aionCore', 'target', 'release', binaryName),
+    path.join(os.homedir(), '.cargo', 'bin', binaryName),
+  ].filter((candidate): candidate is string => typeof candidate === 'string' && candidate.trim().length > 0);
+
+  const resolved = candidates.find((candidate) => fs.existsSync(candidate));
+  if (resolved) return path.resolve(resolved);
+
+  throw new Error(
+    `E2E dev mode: could not find ${binaryName}. Set AIONUI_BACKEND_BINARY, ` +
+      `build ../aionCore, or install it under ${path.join(os.homedir(), '.cargo', 'bin')}.`
+  );
+}
+
 async function launchApp(): Promise<ElectronApplication> {
   const usePackaged = shouldUsePackagedMode();
 
@@ -203,7 +243,7 @@ async function launchApp(): Promise<ElectronApplication> {
     if (!packaged) {
       throw new Error(
         'E2E packaged mode: could not find packaged app under out/. ' +
-          'Run `node scripts/build-with-builder.js auto --<platform> --pack-only` first.'
+          'Run `bun run build` or the platform-specific electron-builder command without `--pack-only` first.'
       );
     }
 
@@ -228,11 +268,17 @@ async function launchApp(): Promise<ElectronApplication> {
       timeout: 60_000,
     });
 
+    attachMainProcessDiagnostics(electronApp);
+
     return electronApp;
   }
 
   // Dev mode: launch via electron .
   console.log(`[E2E] Launching DEV app from: ${projectRoot}`);
+  const backendBinary = resolveDevBackendBinary();
+  const inheritedPath = process.env.PATH ?? process.env.Path ?? '';
+  const backendPath = path.dirname(backendBinary);
+  console.log(`[E2E] Using DEV backend: ${backendBinary}`);
 
   const launchArgs = ['.'];
   if (process.platform === 'linux' && process.env.CI) {
@@ -244,10 +290,13 @@ async function launchApp(): Promise<ElectronApplication> {
     cwd: projectRoot,
     env: {
       ...commonEnv,
+      PATH: [backendPath, inheritedPath].filter(Boolean).join(path.delimiter),
       NODE_ENV: 'development',
     },
     timeout: 60_000,
   });
+
+  attachMainProcessDiagnostics(electronApp);
 
   return electronApp;
 }
@@ -267,7 +316,7 @@ function cleanupE2EWorker(): Promise<void> {
       app = null;
       mainPage = null;
     }
-    fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true });
+    fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   })();
 
   return cleanupPromise;
@@ -331,6 +380,12 @@ export const test = base.extend<Fixtures, WorkerFixtures>({
     // Playwright's built-in `screenshot: 'only-on-failure'` relies on its
     // own `page` fixture, which we override for Electron — so we do it manually.
     if (testInfo.status !== testInfo.expectedStatus && mainPage && !mainPage.isClosed()) {
+      if (mainProcessDiagnostics.length > 0) {
+        await testInfo.attach('main-process.log', {
+          body: Buffer.from(mainProcessDiagnostics.map((entry) => `[${entry.stream}] ${entry.text}`).join(''), 'utf8'),
+          contentType: 'text/plain',
+        });
+      }
       try {
         const screenshot = await mainPage.screenshot();
         await testInfo.attach('screenshot-on-failure', {
@@ -365,7 +420,7 @@ function registerCleanup(): void {
   // Synchronous fallback for abrupt termination
   process.on('exit', () => {
     try {
-      fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true });
+      fs.rmSync(e2eStateSandboxDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
     } catch {
       // best-effort
     }

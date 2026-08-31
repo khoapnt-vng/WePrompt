@@ -5,6 +5,7 @@
  */
 
 import { localTokenAuthHeaders } from '@/common/adapter/httpBridge';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 
 const MAX_FRAME_BYTES = 256 * 1024;
 const MAX_PENDING_TUPLES = 32;
@@ -112,9 +113,9 @@ function parseTerminalEvent(value: unknown, observedAt: string): PresentationRun
   if (!isRecord(value.data)) return null;
   const data = value.data;
   const runtime = data.runtime === null ? null : parseRuntime(data.runtime);
+  const conversationId = normalizePresentationConversationId(data.session_id);
   if (
-    typeof data.session_id !== 'string' ||
-    !UUID_PATTERN.test(data.session_id) ||
+    conversationId === null ||
     typeof data.turn_id !== 'string' ||
     !UUID_PATTERN.test(data.turn_id) ||
     data.status !== 'finished' ||
@@ -123,7 +124,7 @@ function parseTerminalEvent(value: unknown, observedAt: string): PresentationRun
     return null;
   }
   return {
-    conversationId: data.session_id,
+    conversationId,
     turnId: data.turn_id,
     status: 'finished',
     runtime,
@@ -200,7 +201,9 @@ export class PresentationRuntimeEventClient {
 
   async consumePending(conversationId: string, turnId: string): Promise<PendingTerminalDisposition> {
     this.expireTerminalState();
-    const key = this.tupleKey(conversationId, turnId);
+    const canonicalConversationId = normalizePresentationConversationId(conversationId);
+    if (canonicalConversationId === null || !UUID_PATTERN.test(turnId)) return 'missing';
+    const key = this.tupleKey(canonicalConversationId, turnId);
     const epoch = this.socketEpoch;
     const inFlight = this.inFlight.get(key);
     if (inFlight !== undefined) {

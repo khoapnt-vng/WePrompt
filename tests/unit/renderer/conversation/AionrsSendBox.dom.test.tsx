@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Message } from '@arco-design/web-react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import type {
@@ -56,6 +56,25 @@ type ThoughtDisplayPropsMock = {
   onStop?: () => void;
 };
 
+type CommandQueuePanelPropsMock = {
+  onEdit: (item: Record<string, unknown>) => void;
+  onSendNow: (item: Record<string, unknown>) => Promise<void>;
+  onRemove: (commandId: string) => void;
+  onClear: () => void;
+};
+
+type MobileActionSheetEntryMock = {
+  key: string;
+  submenu?: {
+    options: Array<{ key: string; label: string; description?: string; active?: boolean }>;
+    onSelect: (value: string) => void;
+  };
+};
+
+type AgentModeSelectorPropsMock = {
+  modeLabelFormatter: (mode: { value: string; label: string }) => string;
+};
+
 const {
   aionrsMessageState,
   checkAndUpdateTitleMock,
@@ -81,6 +100,7 @@ const {
   handleFilesAddedMock,
   clearSelectionMock,
   composeSendMock,
+  createPresentationControllerMock,
   draftMutateMock,
   draftState,
   featureEnabledState,
@@ -104,6 +124,30 @@ const {
   sourceOwnerState,
   sourcePendingState,
   sourceRefsState,
+  aionrsConfigChangedHandler,
+  agentModeSelectorProps,
+  classifyConfigSetErrorState,
+  commandQueuePanelProps,
+  conversationContextState,
+  conversationQueueItemsState,
+  conversationStopInvokeMock,
+  discardScratchMock,
+  eventHandlers,
+  interruptScratchTurnMock,
+  layoutState,
+  mergeFileSelectionItemsMock,
+  mobileActionSheetProps,
+  queueClearMock,
+  queuePrioritizeMock,
+  queueRemoveMock,
+  runtimeConfigState,
+  setUploadFileMock,
+  templateGalleryState,
+  aionrsChatSendBoxProps,
+  kbHintProps,
+  pendingRecoveryMock,
+  updateLocalImageMock,
+  useMessageLstCacheMock,
 } = vi.hoisted(() => ({
   checkAndUpdateTitleMock: vi.fn(),
   createAionrsMessageState: (): AionrsMessageStateMock => ({
@@ -166,6 +210,9 @@ const {
       onFilesAdded?: (files: unknown[]) => void;
       onManagedDrop?: (files: readonly File[]) => Promise<void> | void;
       managedPresentationSubmission?: ManagedPresentationSubmission;
+      onMobilePlusClick?: () => void;
+      onSelectedWorkspaceItemsChange?: (items: unknown[]) => void;
+      onStop?: () => Promise<void>;
     } | null,
   },
   clearFilesMock: vi.fn(),
@@ -173,6 +220,7 @@ const {
   handleFilesAddedMock: vi.fn(),
   clearSelectionMock: vi.fn(),
   composeSendMock: vi.fn((input: string, files: string[]) => ({ input, files, injectSkills: [] })),
+  createPresentationControllerMock: vi.fn(),
   draftMutateMock: vi.fn(),
   draftState: {
     current: {
@@ -184,7 +232,7 @@ const {
   featureEnabledState: { current: false },
   hydrateSourceOwnerMock: vi.fn().mockResolvedValue({
     ok: true,
-    owner: { owner_type: 'conversation', conversation_id: 'conv-1' },
+    owner: { owner_type: 'conversation', conversation_id: 'd0921953' },
     ownerRevision: 0,
     grants: [],
   }),
@@ -219,6 +267,83 @@ const {
   sourceOwnerState: { current: null as PresentationGrantOwner | null },
   sourcePendingState: { current: false },
   sourceRefsState: { current: [] as PresentationSourceRef[] },
+  aionrsConfigChangedHandler: {
+    current: null as null | ((capabilities: { modes?: string[] }) => void),
+  },
+  agentModeSelectorProps: { current: null as AgentModeSelectorPropsMock | null },
+  classifyConfigSetErrorState: { current: 'unknown' },
+  commandQueuePanelProps: { current: null as CommandQueuePanelPropsMock | null },
+  conversationContextState: {
+    current: {
+      loadedSkills: [] as string[],
+      loadedMcpStatuses: [] as Array<{ id: string; name: string; status: string; reason?: string }>,
+      loadedMcpServers: [] as string[],
+      conversation: {
+        id: 'd0921953',
+        name: 'AionRS budget fixture',
+        type: 'aionrs',
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '/tmp/aionrs-budget' },
+        model: {
+          id: 'provider-1',
+          name: 'Provider',
+          platform: 'openai',
+          base_url: '',
+          api_key: '',
+          use_model: 'gpt-4.1',
+        },
+      },
+    },
+  },
+  conversationQueueItemsState: { current: [] as Array<Record<string, unknown>> },
+  conversationStopInvokeMock: vi.fn().mockResolvedValue({ runtime: null }),
+  discardScratchMock: vi.fn().mockResolvedValue(undefined),
+  eventHandlers: { current: new Map<string, (...args: unknown[]) => void>() },
+  interruptScratchTurnMock: vi.fn().mockResolvedValue(undefined),
+  layoutState: { current: { isMobile: false } },
+  mergeFileSelectionItemsMock: vi.fn((items: unknown[]) => items),
+  mobileActionSheetProps: {
+    current: null as null | {
+      open: boolean;
+      onClose: () => void;
+      entries: MobileActionSheetEntryMock[];
+    },
+  },
+  queueClearMock: vi.fn(),
+  queuePrioritizeMock: vi.fn(),
+  queueRemoveMock: vi.fn(),
+  runtimeConfigState: {
+    current: {
+      setStatus: { state: 'idle' },
+      mode: null as null | {
+        id: string;
+        currentValue: string;
+        options: Array<{ value: string; label: string; description?: string | null }>;
+      },
+      model: null,
+      thoughtLevel: null as null | {
+        id: string;
+        currentValue: string;
+        options: Array<{ value: string; label: string; description?: string | null }>;
+      },
+      reload: vi.fn(),
+      setConfigOption: vi.fn().mockResolvedValue(undefined),
+    },
+  },
+  setUploadFileMock: vi.fn(),
+  templateGalleryState: {
+    current: {
+      galleryOpen: false,
+      templatesLoading: false,
+      templates: [] as PresentationTemplateSummary[],
+    },
+  },
+  aionrsChatSendBoxProps: { current: null as null | Record<string, unknown> },
+  kbHintProps: { current: null as null | Record<string, unknown> },
+  pendingRecoveryMock: vi.fn(),
+  updateLocalImageMock: vi.fn(),
+  useMessageLstCacheMock: vi.fn(),
 }));
 
 vi.mock('@/common/config/constants', async (importOriginal) => {
@@ -238,7 +363,7 @@ vi.mock('@/common', () => ({
         invoke: sendMessageInvokeMock,
       },
       stop: {
-        invoke: vi.fn().mockResolvedValue(undefined),
+        invoke: conversationStopInvokeMock,
       },
     },
     presentationRuns: {
@@ -255,6 +380,10 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     enableContextCommand,
     onSend,
     onChange,
+    onMobilePlusClick,
+    onSelectedWorkspaceItemsChange,
+    onSlashBuiltinCommand,
+    onStop,
     managedPresentationSubmission,
     prefix,
     rightTools,
@@ -263,12 +392,23 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     enableContextCommand?: boolean;
     onSend: (message: string) => Promise<void>;
     onChange?: (value: string) => void;
+    onMobilePlusClick?: () => void;
+    onSelectedWorkspaceItemsChange?: (items: unknown[]) => void;
+    onSlashBuiltinCommand?: (name: string) => void;
+    onStop?: () => Promise<void>;
     managedPresentationSubmission?: ManagedPresentationSubmission;
     prefix?: React.ReactNode;
     rightTools?: React.ReactNode;
   }) =>
     (() => {
-      sendBoxProps.current = { ...props, managedPresentationSubmission };
+      sendBoxProps.current = {
+        ...props,
+        managedPresentationSubmission,
+        onMobilePlusClick,
+        onSelectedWorkspaceItemsChange,
+        onSlashBuiltinCommand,
+        onStop,
+      };
       return (
         <div>
           {rightTools}
@@ -302,13 +442,22 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
           <button type='button' onClick={() => void onSend('/context pin').catch(() => {})}>
             invalid context
           </button>
+          <button type='button' onClick={() => void onSend('/context compact later').catch(() => {})}>
+            context with arguments
+          </button>
+          <button type='button' onClick={() => void onSend('/context mystery').catch(() => {})}>
+            unsupported context
+          </button>
         </div>
       );
     })(),
 }));
 
 vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
-  default: () => <span data-testid='composer-permission-control' />,
+  default: (props: AgentModeSelectorPropsMock) => {
+    agentModeSelectorProps.current = props;
+    return <span data-testid='composer-permission-control' />;
+  },
 }));
 vi.mock('@/renderer/components/agent/ContextUsageIndicator', () => ({
   default: (props: {
@@ -327,15 +476,20 @@ vi.mock('@/renderer/components/agent/ContextUsageIndicator', () => ({
 }));
 
 vi.mock('@/renderer/components/chat/TemplateGallery', () => ({
-  TemplateChipCard: ({ template }: { template: PresentationTemplateSummary }) => (
-    <span data-testid='template-chip-card'>{template.manifest.name}</span>
+  TemplateChipCard: ({ template, onRemove }: { template: PresentationTemplateSummary; onRemove: () => void }) => (
+    <span data-testid='template-chip-card'>
+      {template.manifest.name}
+      <button type='button' aria-label='Remove template' onClick={onRemove}>
+        remove
+      </button>
+    </span>
   ),
   TemplateGalleryButton: () => null,
   TemplateGalleryPanel: () => null,
   usePresentationTemplates: () => ({
-    templates: [],
-    templatesLoading: false,
-    galleryOpen: false,
+    templates: templateGalleryState.current.templates,
+    templatesLoading: templateGalleryState.current.templatesLoading,
+    galleryOpen: templateGalleryState.current.galleryOpen,
     openGallery: vi.fn(),
     closeGallery: vi.fn(),
     toggleGallery: vi.fn(),
@@ -349,13 +503,21 @@ vi.mock('@/renderer/components/chat/TemplateGallery', () => ({
     registerScratchTurn: vi.fn(),
     retainScratchRun: vi.fn().mockResolvedValue(undefined),
     handleScratchTerminal: vi.fn(),
-    interruptScratchTurn: vi.fn(),
-    discardScratch: vi.fn().mockResolvedValue(undefined),
+    interruptScratchTurn: interruptScratchTurnMock,
+    discardScratch: discardScratchMock,
   }),
 }));
-vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({ default: () => null }));
+vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({
+  default: (props: CommandQueuePanelPropsMock) => {
+    commandQueuePanelProps.current = props;
+    return null;
+  },
+}));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: () => null,
+  default: (props: { open: boolean; onClose: () => void; entries: MobileActionSheetEntryMock[] }) => {
+    mobileActionSheetProps.current = props;
+    return null;
+  },
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
 }));
 vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({
@@ -368,48 +530,55 @@ vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({
   },
 }));
 vi.mock('@/renderer/components/media/FileAttachButton', () => ({ default: () => null }));
-vi.mock('@/renderer/components/media/FilePreview', () => ({ default: () => null }));
+vi.mock('@/renderer/components/media/FilePreview', () => ({
+  default: ({ path, onRemove }: { path: string; onRemove: () => void }) => (
+    <button type='button' aria-label={`Remove file ${path}`} onClick={onRemove} />
+  ),
+}));
 vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
   default: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
 }));
 vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', () => ({
-  classifyConfigSetError: () => 'unknown',
-  useAcpConfigOptions: () => ({
-    setStatus: { state: 'idle' },
-    mode: null,
-    model: null,
-    thoughtLevel: null,
-    reload: vi.fn(),
-    setConfigOption: vi.fn(),
-  }),
+  classifyConfigSetError: () => classifyConfigSetErrorState.current,
+  useAcpConfigOptions: () => runtimeConfigState.current,
 }));
 vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
-  useConversationContextSafe: () => ({
-    loadedSkills: [],
-    loadedMcpStatuses: [],
-    conversation: {
-      id: 'conv-1',
-      name: 'AionRS budget fixture',
-      type: 'aionrs',
-      created_at: 1,
-      modified_at: 1,
-      extra: { backend: 'aionrs', workspace: '/tmp/aionrs-budget' },
-      model: {
-        id: 'provider-1',
-        name: 'Provider',
-        platform: 'openai',
-        base_url: '',
-        api_key: '',
-        use_model: 'gpt-4.1',
-      },
-    },
-  }),
+  ConversationProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  useConversationContextSafe: () => conversationContextState.current,
 }));
 vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({
+  MessageListLoadingProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  MessageListProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  MessagePaginationProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   useMessageList: () => [],
+  useMessageLstCache: useMessageLstCacheMock,
 }));
+vi.mock('@/renderer/pages/conversation/Messages/MessageList', () => ({
+  default: ({ emptySlot }: { emptySlot?: React.ReactNode }) => <div data-testid='aionrs-message-list'>{emptySlot}</div>,
+}));
+vi.mock('@/renderer/pages/conversation/Messages/artifacts', () => ({
+  ConversationArtifactProvider: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
+vi.mock('@/renderer/pages/conversation/Messages/usePendingConfirmationsRecovery', () => ({
+  usePendingConfirmationsRecovery: pendingRecoveryMock,
+}));
+vi.mock('@/renderer/pages/conversation/knowledge/KbStaleChatHint', () => ({
+  default: (props: Record<string, unknown>) => {
+    kbHintProps.current = props;
+    return <div data-testid='kb-stale-hint' />;
+  },
+}));
+vi.mock('@/renderer/components/layout/FlexFullContainer', () => ({
+  default: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+}));
+vi.mock('@/renderer/components/media/LocalImageView', () => {
+  const LocalImageView = () => null;
+  LocalImageView.useUpdateLocalImage = () => updateLocalImageMock;
+  LocalImageView.Provider = ({ children }: { children?: React.ReactNode }) => <>{children}</>;
+  return { default: LocalImageView };
+});
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
-  useLayoutContext: () => ({ isMobile: false }),
+  useLayoutContext: () => layoutState.current,
 }));
 vi.mock('@/renderer/hooks/useLocalTokenUsage', () => ({
   useLocalTokenUsage: () => ({ today: 120, weekToDate: 560, monthToDate: 1_240 }),
@@ -430,7 +599,7 @@ vi.mock('@/renderer/hooks/chat/useSendBoxFiles', () => ({
     handleFilesAdded: handleFilesAddedMock,
     clearFiles: clearFilesMock,
   }),
-  createSetUploadFile: () => vi.fn(),
+  createSetUploadFile: () => setUploadFileMock,
 }));
 vi.mock('@/renderer/hooks/chat/useSlashCommands', () => ({
   useSlashCommands: () => [],
@@ -466,22 +635,26 @@ vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({
   },
 }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
-  createPresentationCommandQueueController: () => presentationControllerMock,
+  createPresentationCommandQueueController: (options: unknown) => {
+    createPresentationControllerMock(options);
+    return presentationControllerMock;
+  },
   shouldEnqueueConversationCommand: () => false,
   useConversationCommandQueue: () => ({
-    items: [],
+    items: conversationQueueItemsState.current,
     isPaused: false,
     isInteractionLocked: false,
     hasPendingCommands: false,
     enqueue: enqueueMock,
-    remove: vi.fn(),
-    clear: vi.fn(),
+    remove: queueRemoveMock,
+    clear: queueClearMock,
     reorder: vi.fn(),
     pause: vi.fn(),
     resume: vi.fn(),
     lockInteraction: vi.fn(),
     unlockInteraction: vi.fn(),
     resetActiveExecution: vi.fn(),
+    prioritize: queuePrioritizeMock,
   }),
 }));
 vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
@@ -518,10 +691,12 @@ vi.mock('@/renderer/utils/emitter', () => ({
   emitter: {
     emit: emitMock,
   },
-  useAddEventListener: vi.fn(),
+  useAddEventListener: (name: string, handler: (...args: unknown[]) => void) => {
+    eventHandlers.current.set(name, handler);
+  },
 }));
 vi.mock('@/renderer/utils/file/fileSelection', () => ({
-  mergeFileSelectionItems: vi.fn((items: unknown[]) => items),
+  mergeFileSelectionItems: mergeFileSelectionItemsMock,
 }));
 vi.mock('@/renderer/utils/file/messageFiles', () => ({
   buildDisplayMessage: (input: string) => input,
@@ -558,7 +733,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: translateMock }),
 }));
 vi.mock('@/renderer/pages/conversation/platforms/aionrs/useAionrsMessage', () => ({
-  useAionrsMessage: () => aionrsMessageState.current,
+  useAionrsMessage: (_conversationId: string, options: { onConfigChanged: (value: { modes?: string[] }) => void }) => {
+    aionrsConfigChangedHandler.current = options.onConfigChanged;
+    return aionrsMessageState.current;
+  },
 }));
 
 const pptxTemplate: PresentationTemplateSummary = {
@@ -592,7 +770,7 @@ const sourceDescriptor: PresentationSourceDescriptor = {
 
 const currentConversationOwner: PresentationGrantOwner = {
   owner_type: 'conversation',
-  conversation_id: 'conv-1',
+  conversation_id: 'd0921953',
 };
 
 const hydratedOwnerResult: GetPresentationSourceOwnerResult = {
@@ -637,6 +815,24 @@ const presentationQueueItem = (
   execution,
 });
 
+const presentationRunLookup = (dispatchStatus: string) => ({
+  ok: true,
+  run: {
+    runId: '33333333-3333-4333-8333-333333333333',
+    clientRequestId: '22222222-2222-4222-8222-222222222222',
+    conversationId: 'd0921953',
+    selectedTemplateId: 'business-review',
+    revision: 5,
+    dispatchStatus,
+    artifactPhase: 'sources_extracted',
+    disposition: null,
+    retainedCandidate: null,
+    actions: { openAllowed: false, discardAllowed: false },
+    createdAt: '2026-08-05T00:00:00.000Z',
+    updatedAt: '2026-08-05T00:00:01.000Z',
+  },
+});
+
 const modelSelection = {
   current_model: {
     provider_id: 'openai',
@@ -647,7 +843,7 @@ const modelSelection = {
 
 describe('AionrsSendBox', () => {
   beforeEach(() => {
-    clearActiveContextBudget('conv-1');
+    clearActiveContextBudget('d0921953');
     vi.clearAllMocks();
     sessionStorage.clear();
     aionrsMessageState.current = createAionrsMessageState();
@@ -660,6 +856,11 @@ describe('AionrsSendBox', () => {
     thoughtDisplayProps.current = null;
     contextUsageIndicatorProps.current = null;
     sendBoxProps.current = null;
+    commandQueuePanelProps.current = null;
+    mobileActionSheetProps.current = null;
+    aionrsConfigChangedHandler.current = null;
+    agentModeSelectorProps.current = null;
+    eventHandlers.current.clear();
     draftState.current = { atPath: [], uploadFile: [], content: '' };
     draftMutateMock.mockImplementation((updater: unknown) => {
       if (typeof updater === 'function') {
@@ -669,6 +870,53 @@ describe('AionrsSendBox', () => {
       }
       return Promise.resolve(draftState.current);
     });
+    setUploadFileMock.mockImplementation((next: string[] | ((previous: string[]) => string[])) => {
+      draftState.current = {
+        ...draftState.current,
+        uploadFile: typeof next === 'function' ? next(draftState.current.uploadFile) : next,
+      };
+    });
+    layoutState.current = { isMobile: false };
+    conversationContextState.current = {
+      loadedSkills: [],
+      loadedMcpStatuses: [],
+      loadedMcpServers: [],
+      conversation: {
+        id: 'd0921953',
+        name: 'AionRS budget fixture',
+        type: 'aionrs',
+        created_at: 1,
+        modified_at: 1,
+        extra: { backend: 'aionrs', workspace: '/tmp/aionrs-budget' },
+        model: {
+          id: 'provider-1',
+          name: 'Provider',
+          platform: 'openai',
+          base_url: '',
+          api_key: '',
+          use_model: 'gpt-4.1',
+        },
+      },
+    };
+    conversationQueueItemsState.current = [];
+    runtimeConfigState.current = {
+      setStatus: { state: 'idle' },
+      mode: null,
+      model: null,
+      thoughtLevel: null,
+      reload: vi.fn(),
+      setConfigOption: vi.fn().mockResolvedValue(undefined),
+    };
+    classifyConfigSetErrorState.current = 'unknown';
+    templateGalleryState.current = { galleryOpen: false, templatesLoading: false, templates: [] };
+    sendMessageInvokeMock.mockResolvedValue({ msg_id: 'msg-1', turn_id: 'turn-1', runtime: null });
+    conversationStopInvokeMock.mockResolvedValue({ runtime: null });
+    discardScratchMock.mockResolvedValue(undefined);
+    interruptScratchTurnMock.mockResolvedValue(undefined);
+    queueClearMock.mockClear();
+    queuePrioritizeMock.mockClear();
+    queueRemoveMock.mockClear();
+    mergeFileSelectionItemsMock.mockImplementation((items: unknown[]) => items);
     featureEnabledState.current = false;
     isElectronDesktopMock.mockReturnValue(true);
     selectedTemplateState.current = null;
@@ -679,7 +927,7 @@ describe('AionrsSendBox', () => {
     presentationQueueItemsState.current = [];
     presentationControllerMock.read.mockImplementation(() => ({
       version: 2,
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 1,
       items: presentationQueueItemsState.current,
     }));
@@ -707,7 +955,7 @@ describe('AionrsSendBox', () => {
       async (_queueItemId: string, start: (request: Record<string, unknown>) => Promise<Record<string, unknown>>) => {
         const item = presentationQueueItemsState.current[0];
         const result = await start({
-          conversation_id: 'conv-1',
+          conversation_id: 'd0921953',
           client_request_id: item.clientRequestId,
           input: item.input,
           selected_template_id: item.selectedTemplateId,
@@ -767,7 +1015,7 @@ describe('AionrsSendBox', () => {
       ok: true,
       status: 'bound',
       runId: '33333333-3333-4333-8333-333333333333',
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 6,
       dispatchStatus: 'bound',
     });
@@ -799,12 +1047,139 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue(null);
   });
 
+  it('lets a human composer interception consume a message before any model turn is submitted', async () => {
+    const beforeSend = vi.fn().mockResolvedValue(true);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} beforeSend={beforeSend} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+
+    await waitFor(() => expect(beforeSend).toHaveBeenCalledWith({ message: 'Hello', hasAttachments: false }));
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
+    expect(markSendStartedMock).not.toHaveBeenCalled();
+  });
+
+  it('passes attachment authority to an interceptor that declines and preserves the ordinary human send', async () => {
+    draftState.current = {
+      atPath: [{ path: '/private/reference', name: 'reference', isFile: false }],
+      uploadFile: [],
+      content: 'Hello',
+    };
+    const beforeSend = vi.fn().mockResolvedValue(false);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} beforeSend={beforeSend} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+
+    expect(beforeSend).toHaveBeenCalledWith({ message: 'Hello', hasAttachments: true });
+    expect(markSendStartedMock).toHaveBeenCalledTimes(1);
+    expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails closed when a human composer interceptor rejects', async () => {
+    const beforeSend = vi.fn().mockRejectedValue(new Error('review state changed'));
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} beforeSend={beforeSend} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+
+    expect(beforeSend).toHaveBeenCalledTimes(1);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(enqueueMock).not.toHaveBeenCalled();
+  });
+
+  it('restores a queued human command for editing and releases its presentation scratch', () => {
+    const queued = {
+      id: 'queue-1',
+      input: 'Revise this turn',
+      files: ['/private/a.png', '/private/a.png'],
+      artifactScratchRunId: 'scratch-1',
+    };
+    conversationQueueItemsState.current = [queued];
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    act(() => commandQueuePanelProps.current?.onEdit(queued));
+
+    expect(queueRemoveMock).toHaveBeenCalledWith('queue-1');
+    expect(discardScratchMock).toHaveBeenCalledWith('scratch-1');
+    expect(setUploadFileMock).toHaveBeenCalledWith(['/private/a.png']);
+  });
+
+  it('cleans queued scratch state across remove, clear, and send-now actions', async () => {
+    const scratchItem = {
+      id: 'queue-1',
+      input: 'First',
+      files: [],
+      artifactScratchRunId: 'scratch-1',
+    };
+    const plainItem = { id: 'queue-2', input: 'Second', files: [] };
+    conversationQueueItemsState.current = [scratchItem, plainItem];
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    act(() => {
+      commandQueuePanelProps.current?.onRemove('queue-1');
+      commandQueuePanelProps.current?.onRemove('missing');
+      commandQueuePanelProps.current?.onClear();
+    });
+    await act(async () => commandQueuePanelProps.current?.onSendNow(plainItem));
+
+    expect(queueClearMock).toHaveBeenCalledTimes(1);
+    expect(queuePrioritizeMock).toHaveBeenCalledWith('queue-2');
+    expect(aionrsMessageState.current?.resetState).toHaveBeenCalledTimes(1);
+  });
+
+  it('stops the active human turn and acknowledges backend runtime authority', async () => {
+    runtimeViewState.current = { ...createRuntimeViewState(), activeTurnId: 'turn-active', state: 'running' };
+    conversationStopInvokeMock.mockResolvedValueOnce({ runtime: { status: 'idle' } });
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await act(async () => sendBoxProps.current?.onStop?.());
+
+    expect(interruptScratchTurnMock).toHaveBeenCalledWith('turn-active');
+    expect(runtimeViewState.current.markStopRequested).toHaveBeenCalledWith('turn-active');
+    expect(runtimeViewState.current.markStopAcknowledged).toHaveBeenCalledWith('turn-active', { status: 'idle' });
+  });
+
+  it('resets the local execution gate when active-turn cancellation fails', async () => {
+    runtimeViewState.current = { ...createRuntimeViewState(), activeTurnId: 'turn-active', state: 'running' };
+    interruptScratchTurnMock.mockRejectedValueOnce(new Error('scratch unavailable'));
+    conversationStopInvokeMock.mockRejectedValueOnce(new Error('stop unavailable'));
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await act(async () => sendBoxProps.current?.onStop?.());
+
+    expect(runtimeViewState.current.resetLocalGate).toHaveBeenCalledWith('stop_failed');
+    expect(aionrsMessageState.current?.resetState).toHaveBeenCalledTimes(1);
+  });
+
+  it('canonicalizes an uppercase short presentation identity without changing the ordinary route identity', async () => {
+    featureEnabledState.current = true;
+    selectedTemplateState.current = pptxTemplate;
+    sourceOwnerState.current = currentConversationOwner;
+    sourceOwnerRevisionState.current = 0;
+
+    render(<AionrsSendBox conversation_id='D0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() =>
+      expect(hydrateSourceOwnerMock).toHaveBeenCalledWith({
+        owner_type: 'conversation',
+        conversation_id: 'd0921953',
+      })
+    );
+    expect(createPresentationControllerMock).toHaveBeenCalledWith({ conversationId: 'd0921953' });
+    expect(sendBoxProps.current?.managedPresentationSubmission).toBeDefined();
+  });
+
   it('blocks managed preparation for a legacy attachment while preserving the submitted draft', async () => {
     featureEnabledState.current = true;
     selectedTemplateState.current = pptxTemplate;
     draftState.current = { atPath: [], uploadFile: ['/private/legacy.xlsx'], content: 'Draft request' };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
@@ -855,7 +1230,7 @@ describe('AionrsSendBox', () => {
     draftState.current.content = 'Draft request';
     arrange();
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -878,7 +1253,7 @@ describe('AionrsSendBox', () => {
     sourcePendingState.current = true;
     draftState.current.content = 'Draft request';
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -887,7 +1262,7 @@ describe('AionrsSendBox', () => {
     sourcePendingState.current = false;
     sourceOwnerState.current = currentConversationOwner;
     sourceOwnerRevisionState.current = 0;
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -903,7 +1278,7 @@ describe('AionrsSendBox', () => {
     selectedTemplateState.current = pptxTemplate;
     draftState.current = { atPath: [], uploadFile: ['/private/legacy.xlsx'], content: 'Draft request' };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -930,7 +1305,7 @@ describe('AionrsSendBox', () => {
       ownerRevision: 1,
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -951,7 +1326,7 @@ describe('AionrsSendBox', () => {
     sourceOwnerState.current = currentConversationOwner;
     sourceOwnerRevisionState.current = 0;
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -968,20 +1343,20 @@ describe('AionrsSendBox', () => {
     });
     expect(presentationControllerMock.claimHead).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111');
     expect(presentationStartInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       client_request_id: '22222222-2222-4222-8222-222222222222',
       input: 'Hello',
       selected_template_id: 'business-review',
       sources: [],
     });
     expect(presentationClaimInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       run_id: '33333333-3333-4333-8333-333333333333',
       holder_id: '11111111-1111-4111-8111-111111111111',
       expected_revision: 4,
     });
     expect(presentationDispatchInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       run_id: '33333333-3333-4333-8333-333333333333',
       lease_token: 'opaque-lease',
       expected_revision: 5,
@@ -1004,7 +1379,7 @@ describe('AionrsSendBox', () => {
       },
     ];
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1035,7 +1410,7 @@ describe('AionrsSendBox', () => {
     ];
     presentationControllerMock.enqueue.mockRejectedValueOnce(new Error('localStorage quota'));
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     const managed = sendBoxProps.current?.managedPresentationSubmission;
     expect(managed).toBeDefined();
     await expect(
@@ -1068,7 +1443,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1080,7 +1455,7 @@ describe('AionrsSendBox', () => {
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
 
     runtimeViewState.current = createRuntimeViewState();
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(1));
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
@@ -1105,7 +1480,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1130,7 +1505,7 @@ describe('AionrsSendBox', () => {
     presentationControllerMock.allocateClaimed.mockImplementationOnce(
       async (_queueItemId: string, start: (request: Record<string, unknown>) => Promise<unknown>) => {
         await start({
-          conversation_id: 'conv-1',
+          conversation_id: 'd0921953',
           client_request_id: '22222222-2222-4222-8222-222222222222',
           input: 'Hello',
           selected_template_id: 'business-review',
@@ -1145,7 +1520,7 @@ describe('AionrsSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 4,
         dispatchStatus: 'committed',
@@ -1158,14 +1533,14 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
 
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationGetInvokeMock).toHaveBeenCalledWith({
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       client_request_id: '22222222-2222-4222-8222-222222222222',
     });
     expect(presentationControllerMock.transition).toHaveBeenCalledWith('11111111-1111-4111-8111-111111111111', {
@@ -1174,6 +1549,118 @@ describe('AionrsSendBox', () => {
       revision: 4,
       postInvoked: false,
     });
+  });
+
+  it('keeps a claimed managed item observable when authority lookup temporarily fails', async () => {
+    featureEnabledState.current = true;
+    presentationQueueItemsState.current = [
+      presentationQueueItem('queue-claimed', 'request-claimed', {
+        state: 'claimed',
+        claimedAt: '2026-08-05T00:00:01.000Z',
+      }),
+    ];
+    presentationGetInvokeMock.mockRejectedValueOnce(new Error('lookup unavailable'));
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() =>
+      expect(presentationGetInvokeMock).toHaveBeenCalledWith({
+        conversation_id: 'd0921953',
+        client_request_id: 'request-claimed',
+      })
+    );
+    expect(presentationControllerMock.transition).not.toHaveBeenCalled();
+  });
+
+  it('keeps a claimed managed item unchanged after a definitive lookup failure', async () => {
+    featureEnabledState.current = true;
+    presentationQueueItemsState.current = [
+      presentationQueueItem('queue-claimed', 'request-claimed', {
+        state: 'claimed',
+        claimedAt: '2026-08-05T00:00:01.000Z',
+      }),
+    ];
+    presentationGetInvokeMock.mockResolvedValueOnce({ ok: false, code: 'LOOKUP_DENIED' });
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
+    expect(presentationControllerMock.allocateClaimed).not.toHaveBeenCalled();
+  });
+
+  it('publishes the persisted claimed item when restart allocation fails', async () => {
+    featureEnabledState.current = true;
+    presentationQueueItemsState.current = [
+      presentationQueueItem('queue-claimed', 'request-claimed', {
+        state: 'claimed',
+        claimedAt: '2026-08-05T00:00:01.000Z',
+      }),
+    ];
+    presentationControllerMock.allocateClaimed.mockRejectedValueOnce(new Error('allocation failed'));
+    presentationGetInvokeMock.mockResolvedValueOnce({ ok: false, code: 'RUN_NOT_FOUND' });
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() => expect(presentationControllerMock.allocateClaimed).toHaveBeenCalledTimes(1));
+    expect(presentationQueueItemsState.current[0]).toMatchObject({ queueItemId: 'queue-claimed' });
+  });
+
+  it.each([
+    ['dispatching', 'dispatching'],
+    ['bound', 'bound'],
+    ['dispatch_uncertain', 'dispatch_uncertain'],
+    ['failed', 'bound'],
+  ])('recovers a claimed managed item whose main dispatch status is %s', async (dispatchStatus, expectedState) => {
+    featureEnabledState.current = true;
+    presentationQueueItemsState.current = [
+      presentationQueueItem('queue-claimed', 'request-claimed', {
+        state: 'claimed',
+        claimedAt: '2026-08-05T00:00:01.000Z',
+      }),
+    ];
+    presentationGetInvokeMock.mockResolvedValue(presentationRunLookup(dispatchStatus));
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() =>
+      expect(presentationControllerMock.transition).toHaveBeenCalledWith(
+        'queue-claimed',
+        expect.objectContaining({ state: expectedState })
+      )
+    );
+  });
+
+  it.each([
+    ['dispatch_uncertain', 'dispatch_uncertain'],
+    ['allocating', 'dispatching'],
+    ['committed', 'dispatching'],
+    ['dispatching', 'dispatching'],
+    ['bound', 'bound'],
+  ])('observes a dispatching managed item whose main status is %s', async (dispatchStatus, expectedState) => {
+    featureEnabledState.current = true;
+    presentationQueueItemsState.current = [
+      presentationQueueItem('queue-dispatching', 'request-dispatching', {
+        state: 'dispatching',
+        runId: '33333333-3333-4333-8333-333333333333',
+        revision: 4,
+      }),
+    ];
+    presentationGetInvokeMock.mockResolvedValue(presentationRunLookup(dispatchStatus));
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() =>
+      expect(presentationGetInvokeMock).toHaveBeenCalledWith({
+        conversation_id: 'd0921953',
+        run_id: '33333333-3333-4333-8333-333333333333',
+      })
+    );
+    if (expectedState !== 'dispatching') {
+      expect(presentationControllerMock.transition).toHaveBeenCalledWith(
+        'queue-dispatching',
+        expect.objectContaining({ state: expectedState })
+      );
+    }
   });
 
   it('keeps a definitive claim failure in safe committed state without dispatching or allocating another run', async () => {
@@ -1193,7 +1680,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1232,7 +1719,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    const first = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const first = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1244,7 +1731,7 @@ describe('AionrsSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 5,
         dispatchStatus: 'committed',
@@ -1256,7 +1743,7 @@ describe('AionrsSendBox', () => {
         updatedAt: '2026-08-05T00:00:01.000Z',
       },
     });
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(2));
     expect(presentationStartInvokeMock).toHaveBeenCalledTimes(1);
@@ -1280,7 +1767,7 @@ describe('AionrsSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 5,
         dispatchStatus: 'dispatching',
@@ -1293,7 +1780,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationClaimInvokeMock).not.toHaveBeenCalled();
@@ -1315,7 +1802,7 @@ describe('AionrsSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 6,
         dispatchStatus: 'bound',
@@ -1328,7 +1815,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1350,7 +1837,7 @@ describe('AionrsSendBox', () => {
       run: {
         runId: '33333333-3333-4333-8333-333333333333',
         clientRequestId: '22222222-2222-4222-8222-222222222222',
-        conversationId: 'conv-1',
+        conversationId: 'd0921953',
         selectedTemplateId: 'business-review',
         revision: 6,
         dispatchStatus: 'dispatch_uncertain',
@@ -1363,7 +1850,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1419,12 +1906,12 @@ describe('AionrsSendBox', () => {
       ok: true,
       status: 'bound',
       runId: request.run_id,
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       revision: 6,
       dispatchStatus: 'bound',
     }));
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(presentationQueueItemsState.current).toEqual([]));
     expect(presentationControllerMock.claimHead.mock.calls.map(([queueItemId]) => queueItemId)).toEqual([
@@ -1453,7 +1940,7 @@ describe('AionrsSendBox', () => {
       },
     });
 
-    const { unmount } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { unmount } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1475,14 +1962,14 @@ describe('AionrsSendBox', () => {
     });
 
     unmount();
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => expect(presentationGetInvokeMock).toHaveBeenCalledTimes(1));
     expect(presentationDispatchInvokeMock).toHaveBeenCalledTimes(1);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('keeps the create-project first message stored until runtime and queue readiness are available', async () => {
-    const storageKey = 'aionrs_initial_message_conv-1';
+    const storageKey = 'aionrs_initial_message_d0921953';
     const initialMessage = JSON.stringify({ input: 'Build the project BRD.', files: ['/brief.md'] });
     const runtimeReady = createDeferred<{ recovered: boolean; config_options: never[]; runtime: null }>();
     ensureConversationRuntimeMock.mockReturnValueOnce(runtimeReady.promise);
@@ -1494,9 +1981,9 @@ describe('AionrsSendBox', () => {
     sendMessageInvokeMock.mockResolvedValueOnce({ msg_id: 'msg-1', turn_id: 'turn-1', runtime: null });
     sessionStorage.setItem(storageKey, initialMessage);
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
-    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1'));
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('d0921953'));
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
     expect(sessionStorage.getItem(storageKey)).toBe(initialMessage);
 
@@ -1508,20 +1995,20 @@ describe('AionrsSendBox', () => {
     expect(sessionStorage.getItem(storageKey)).toBe(initialMessage);
 
     runtimeViewState.current = createRuntimeViewState();
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
   });
 
   it('consumes the create-project first message only after the backend accepts the turn', async () => {
-    const storageKey = 'aionrs_initial_message_conv-1';
-    const processedKey = 'aionrs_initial_processed_conv-1';
+    const storageKey = 'aionrs_initial_message_d0921953';
+    const processedKey = 'aionrs_initial_processed_d0921953';
     const initialMessage = JSON.stringify({ input: 'Build the project BRD.', files: ['/brief.md'] });
     const accepted = createDeferred<{ msg_id: string; turn_id: string; runtime: null }>();
     sendMessageInvokeMock.mockReturnValueOnce(accepted.promise);
     sessionStorage.setItem(storageKey, initialMessage);
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
     expect(sessionStorage.getItem(storageKey)).toBe(initialMessage);
@@ -1538,22 +2025,22 @@ describe('AionrsSendBox', () => {
   });
 
   it('preserves a failed create-project first message and retries it after remount', async () => {
-    const storageKey = 'aionrs_initial_message_conv-1';
-    const processedKey = 'aionrs_initial_processed_conv-1';
+    const storageKey = 'aionrs_initial_message_d0921953';
+    const processedKey = 'aionrs_initial_processed_d0921953';
     const initialMessage = JSON.stringify({ input: 'Build the project BRD.', files: ['/brief.md'] });
     sendMessageInvokeMock
       .mockRejectedValueOnce(new Error('backend unavailable'))
       .mockResolvedValueOnce({ msg_id: 'msg-2', turn_id: 'turn-2', runtime: null });
     sessionStorage.setItem(storageKey, initialMessage);
 
-    const firstRender = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const firstRender = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(messageErrorMock).toHaveBeenCalledWith('workspace failed'));
     expect(sessionStorage.getItem(storageKey)).toBe(initialMessage);
     expect(sessionStorage.getItem(processedKey)).toBeNull();
 
     firstRender.unmount();
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(2));
     await waitFor(() => expect(sessionStorage.getItem(storageKey)).toBeNull());
@@ -1561,19 +2048,19 @@ describe('AionrsSendBox', () => {
   });
 
   it('does not double-submit the create-project first message across rerenders or remounts while acceptance is pending', async () => {
-    const storageKey = 'aionrs_initial_message_conv-1';
+    const storageKey = 'aionrs_initial_message_d0921953';
     const initialMessage = JSON.stringify({ input: 'Build the project BRD.', files: ['/brief.md'] });
     const accepted = createDeferred<{ msg_id: string; turn_id: string; runtime: null }>();
     sendMessageInvokeMock.mockReturnValueOnce(accepted.promise);
     sessionStorage.setItem(storageKey, initialMessage);
 
-    const firstRender = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const firstRender = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
 
-    firstRender.rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
-    firstRender.rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    firstRender.rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+    firstRender.rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     firstRender.unmount();
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
     expect(sessionStorage.getItem(storageKey)).toBe(initialMessage);
@@ -1595,7 +2082,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
     sessionStorage.setItem(
-      'aionrs_initial_message_conv-1',
+      'aionrs_initial_message_d0921953',
       JSON.stringify({
         input: 'Create a presentation from the request below. Managed rules.\n\nInitial deck',
         files: [
@@ -1606,7 +2093,7 @@ describe('AionrsSendBox', () => {
       })
     );
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(presentationControllerMock.enqueue).toHaveBeenCalledTimes(1));
     const initial = presentationControllerMock.enqueue.mock.calls[0]?.[0] as {
@@ -1623,7 +2110,7 @@ describe('AionrsSendBox', () => {
     });
     expect(initial.queueItemId).toMatch(/^[0-9a-f-]{36}$/i);
     expect(initial.clientRequestId).toMatch(/^[0-9a-f-]{36}$/i);
-    expect(sessionStorage.getItem('aionrs_initial_processed_conv-1')).toBe('1');
+    expect(sessionStorage.getItem('aionrs_initial_processed_d0921953')).toBe('1');
     expect(presentationControllerMock.claimHead).not.toHaveBeenCalled();
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
@@ -1642,7 +2129,7 @@ describe('AionrsSendBox', () => {
       ],
     });
     sessionStorage.setItem(
-      'aionrs_initial_message_conv-1',
+      'aionrs_initial_message_d0921953',
       JSON.stringify({
         input: 'Create a presentation from the request below. Managed rules.\n\nInitial sourced deck',
         files: [
@@ -1653,7 +2140,7 @@ describe('AionrsSendBox', () => {
       })
     );
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => expect(presentationControllerMock.enqueue).toHaveBeenCalledTimes(1));
     expect(presentationControllerMock.enqueue).toHaveBeenCalledWith(
@@ -1686,7 +2173,7 @@ describe('AionrsSendBox', () => {
     },
   ])('fails closed for a managed initial handoff whose files value is $name', async ({ files }) => {
     featureEnabledState.current = true;
-    const storageKey = 'aionrs_initial_message_conv-1';
+    const storageKey = 'aionrs_initial_message_d0921953';
     const serialized = JSON.stringify({
       input: 'Create a presentation from the request below. Managed rules.\n\nInitial deck',
       files,
@@ -1695,13 +2182,13 @@ describe('AionrsSendBox', () => {
     sendMessageInvokeMock.mockResolvedValue({ turn_id: 'legacy-turn', runtime: null, msg_id: 'legacy-msg' });
     sessionStorage.setItem(storageKey, serialized);
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
 
     expect(sessionStorage.getItem(storageKey)).toBe(serialized);
-    expect(sessionStorage.getItem('aionrs_initial_processed_conv-1')).toBeNull();
+    expect(sessionStorage.getItem('aionrs_initial_processed_d0921953')).toBeNull();
     expect(presentationControllerMock.enqueue).not.toHaveBeenCalled();
     expect(presentationControllerMock.claimHead).not.toHaveBeenCalled();
     expect(presentationStartInvokeMock).not.toHaveBeenCalled();
@@ -1721,7 +2208,7 @@ describe('AionrsSendBox', () => {
       injectSkills: ['officecli'],
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1729,7 +2216,7 @@ describe('AionrsSendBox', () => {
     await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
     expect(sendMessageInvokeMock).toHaveBeenCalledWith({
       input: 'legacy directive\n\nHello',
-      conversation_id: 'conv-1',
+      conversation_id: 'd0921953',
       files: ['/private/legacy.xlsx', '/private/template/SKILL.md', '/private/template/reference.pptx'],
       pinned_context: [],
       inject_skills: ['officecli'],
@@ -1744,12 +2231,12 @@ describe('AionrsSendBox', () => {
     selectedTemplateState.current = pptxTemplate;
     sourceDescriptorsState.current = [sourceDescriptor];
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() =>
       expect(hydrateSourceOwnerMock).toHaveBeenCalledWith({
         owner_type: 'conversation',
-        conversation_id: 'conv-1',
+        conversation_id: 'd0921953',
       })
     );
     await act(async () => {
@@ -1771,7 +2258,7 @@ describe('AionrsSendBox', () => {
     sourceOwnerRevisionState.current = 0;
     const droppedFile = new File(['quarterly results'], 'quarterly-results.xlsx');
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await act(async () => {
       await sendBoxProps.current?.onManagedDrop?.([droppedFile]);
@@ -1792,7 +2279,7 @@ describe('AionrsSendBox', () => {
     grantExternalDropMock.mockResolvedValueOnce({ ok: false });
     const droppedFile = new File(['quarterly results'], 'quarterly-results.xlsx');
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await act(async () => {
       await sendBoxProps.current?.onManagedDrop?.([droppedFile]);
@@ -1814,14 +2301,14 @@ describe('AionrsSendBox', () => {
     grantExternalDropMock.mockReturnValueOnce(dropResult.promise);
     const droppedFile = new File(['quarterly results'], 'quarterly-results.xlsx');
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     let pendingDrop: Promise<void> | void = undefined;
     act(() => {
       pendingDrop = sendBoxProps.current?.onManagedDrop?.([droppedFile]);
     });
 
     featureEnabledState.current = false;
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       dropResult.resolve({ ok: true, status: 'granted', grants: [sourceDescriptor], ownerRevision: 1 });
       await pendingDrop;
@@ -1836,7 +2323,7 @@ describe('AionrsSendBox', () => {
     featureEnabledState.current = false;
     selectedTemplateState.current = pptxTemplate;
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(sendBoxProps.current?.onManagedDrop).toBeUndefined();
     expect(sendBoxProps.current?.onFilesAdded).toBe(handleFilesAddedMock);
@@ -1850,7 +2337,7 @@ describe('AionrsSendBox', () => {
     hydrateSourceOwnerMock.mockImplementationOnce(() => effectHydration.promise);
     hydrateSourceOwnerMock.mockImplementationOnce(() => pickerHydration.promise);
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => expect(hydrateSourceOwnerMock).toHaveBeenCalledTimes(1));
 
     act(() => {
@@ -1879,7 +2366,7 @@ describe('AionrsSendBox', () => {
     draftState.current = { atPath: [], uploadFile: ['/private/legacy.xlsx'], content: 'Draft request' };
     hydrateSourceOwnerMock.mockResolvedValue(failedOwnerHydration);
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1903,14 +2390,14 @@ describe('AionrsSendBox', () => {
     hydrateSourceOwnerMock.mockImplementationOnce(() => effectHydration.promise);
     hydrateSourceOwnerMock.mockImplementationOnce(() => pickerHydration.promise);
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => expect(hydrateSourceOwnerMock).toHaveBeenCalledTimes(1));
     act(() => {
       sendBoxProps.current?.onSlashBuiltinCommand?.('open');
     });
     expect(hydrateSourceOwnerMock).toHaveBeenCalledTimes(2);
 
-    rerender(<AionrsSendBox conversation_id='conv-2' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921954' modelSelection={modelSelection} />);
     await act(async () => {
       pickerHydration.resolve(hydratedOwnerResult);
       await pickerHydration.promise;
@@ -1935,7 +2422,7 @@ describe('AionrsSendBox', () => {
     const pickerResult = createDeferred<PickPresentationSourcesResult>();
     pickSourcesMock.mockReturnValueOnce(pickerResult.promise);
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
     });
@@ -1946,7 +2433,7 @@ describe('AionrsSendBox', () => {
     expect(pickSourcesMock).toHaveBeenCalledTimes(1);
 
     featureEnabledState.current = false;
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
 
     await act(async () => {
@@ -1969,12 +2456,12 @@ describe('AionrsSendBox', () => {
     selectedTemplateState.current = pptxTemplate;
     sourceDescriptorsState.current = [sourceDescriptor];
 
-    const { rerender } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     expect(screen.getByText('quarterly-results.xlsx')).toBeInTheDocument();
     expect(sendBoxProps.current?.hasPendingAttachments).toBe(true);
 
     featureEnabledState.current = false;
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(screen.queryByText('quarterly-results.xlsx')).not.toBeInTheDocument();
     expect(sendBoxProps.current?.hasPendingAttachments).toBe(false);
@@ -1987,13 +2474,13 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => {
       expect(warmupSession).toHaveBeenCalled();
     });
@@ -2011,13 +2498,13 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
     await waitFor(() => {
       expect(warmupSession).toHaveBeenCalled();
     });
@@ -2037,13 +2524,13 @@ describe('AionrsSendBox', () => {
     useTeamPermissionMock.mockReturnValue({
       isTeamMode: true,
       isLeaderAgent: true,
-      leaderConversationId: 'conv-1',
-      allConversationIds: ['conv-1'],
+      leaderConversationId: 'd0921953',
+      allConversationIds: ['d0921953'],
       propagateMode: vi.fn(),
       warmupSession,
     });
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => {
       expect(warmupSession).toHaveBeenCalled();
@@ -2052,25 +2539,47 @@ describe('AionrsSendBox', () => {
   });
 
   it('uses runtime ensure instead of legacy warmup for standalone runtime preparation', async () => {
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await waitFor(() => {
-      expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1');
+      expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('d0921953');
     });
+  });
+
+  it('reports a standalone runtime preparation failure without warming the composer', async () => {
+    ensureConversationRuntimeMock.mockRejectedValueOnce(new Error('workspace unavailable'));
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await waitFor(() => expect(messageErrorMock).toHaveBeenCalledWith('workspace failed'));
+  });
+
+  it('uses the supplied team transport for an ordinary human message', async () => {
+    const teamSendMessage = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} teamSendMessage={teamSendMessage} />
+    );
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+
+    expect(teamSendMessage).toHaveBeenCalledWith({ input: 'Hello', files: [] });
+    expect(markSendStartedMock).not.toHaveBeenCalled();
   });
 
   it('suppresses visible error and preserves runtime gate for active-turn busy conflicts', async () => {
     sendMessageInvokeMock.mockRejectedValue(
       new BackendHttpError({
         method: 'POST',
-        path: '/api/conversations/conv-1/messages',
+        path: '/api/conversations/d0921953/messages',
         status: 409,
-        body: { success: false, code: 'CONFLICT', error: 'conversation conv-1 is already running' },
+        body: { success: false, code: 'CONFLICT', error: 'conversation d0921953 is already running' },
       })
     );
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
-    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('conv-1'));
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+    await waitFor(() => expect(ensureConversationRuntimeMock).toHaveBeenCalledWith('d0921953'));
 
     await act(async () => {
       screen.getByRole('button', { name: 'send' }).click();
@@ -2085,10 +2594,164 @@ describe('AionrsSendBox', () => {
     expect(Message.error).not.toHaveBeenCalled();
   });
 
+  it('exposes complete mobile model, permission, thought, skill, and MCP actions', async () => {
+    layoutState.current = { isMobile: true };
+    conversationContextState.current = {
+      ...conversationContextState.current,
+      loadedSkills: ['slides'],
+      loadedMcpStatuses: [
+        { id: 'mcp-loaded', name: 'Loaded MCP', status: 'loaded' },
+        { id: 'mcp-reason', name: 'Failed MCP', status: 'failed', reason: 'offline' },
+        { id: 'mcp-plain', name: 'Plain failure', status: 'failed' },
+      ],
+    };
+    const propagateMode = vi.fn();
+    useTeamPermissionMock.mockReturnValue({
+      warmupSession: vi.fn().mockResolvedValue(undefined),
+      propagateMode,
+    });
+    const setConfigOption = vi.fn().mockResolvedValue(undefined);
+    runtimeConfigState.current = {
+      ...runtimeConfigState.current,
+      mode: {
+        id: 'permission-mode',
+        currentValue: 'auto_edit',
+        options: [
+          { value: 'auto_edit', label: 'Auto', description: 'Review edits' },
+          { value: 'yolo', label: 'Full access', description: null },
+        ],
+      },
+      thoughtLevel: {
+        id: 'thought-level',
+        currentValue: 'high',
+        options: [
+          { value: 'high', label: 'High', description: 'Think longer' },
+          { value: 'low', label: 'Low', description: null },
+        ],
+      },
+      setConfigOption,
+    };
+    const provider = {
+      id: 'provider-1',
+      name: 'Provider',
+      platform: 'openai',
+      base_url: '',
+      api_key: '',
+      models: ['gpt-4.1', 'gpt-4.1-mini'],
+    };
+    const handleSelectModel = vi.fn().mockResolvedValue(undefined);
+    const mobileModelSelection = {
+      current_model: { ...provider, use_model: 'gpt-4.1' },
+      providers: [provider],
+      getAvailableModels: () => ['gpt-4.1', 'gpt-4.1-mini'],
+      handleSelectModel,
+      getDisplayModelName: (name?: string) => name ?? '',
+    } as AionrsModelSelection;
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={mobileModelSelection} />);
+    await act(async () => {
+      aionrsConfigChangedHandler.current?.({});
+      aionrsConfigChangedHandler.current?.({ modes: [] });
+      aionrsConfigChangedHandler.current?.({ modes: ['deep_mode'] });
+    });
+
+    act(() => sendBoxProps.current?.onMobilePlusClick?.());
+    await waitFor(() => expect(mobileActionSheetProps.current?.open).toBe(true));
+    const entries = mobileActionSheetProps.current?.entries ?? [];
+    expect(entries.map((entry) => entry.key)).toEqual(['model', 'thought-level', 'permission', 'skills', 'mcp']);
+
+    const permission = entries.find((entry) => entry.key === 'permission')?.submenu;
+    permission?.onSelect('auto_edit');
+    expect(setConfigOption).not.toHaveBeenCalled();
+    for (const errorKind of ['command_ack', 'confirmation_timeout', 'config_update_in_progress', 'unknown']) {
+      classifyConfigSetErrorState.current = errorKind;
+      setConfigOption.mockRejectedValueOnce(new Error(errorKind));
+      await act(async () => permission?.onSelect('yolo'));
+    }
+    setConfigOption.mockResolvedValueOnce(undefined);
+    await act(async () => permission?.onSelect('yolo'));
+    expect(propagateMode).toHaveBeenCalledWith('yolo');
+
+    const model = entries.find((entry) => entry.key === 'model')?.submenu;
+    model?.onSelect('missing::gpt-4.1');
+    model?.onSelect('provider-1::');
+    model?.onSelect('provider-1::gpt-4.1-mini');
+    expect(handleSelectModel).toHaveBeenCalledWith(provider, 'gpt-4.1-mini');
+
+    const thought = entries.find((entry) => entry.key === 'thought-level')?.submenu;
+    await act(async () => thought?.onSelect('low'));
+    entries.find((entry) => entry.key === 'skills')?.submenu?.onSelect('slides');
+    entries.find((entry) => entry.key === 'mcp')?.submenu?.onSelect('mcp-loaded');
+    expect(draftState.current.content).toBe('/slides ');
+
+    act(() => mobileActionSheetProps.current?.onClose());
+    await waitFor(() => expect(mobileActionSheetProps.current?.open).toBe(false));
+  });
+
+  it('uses mobile fallback modes and a select-model prompt without runtime options', () => {
+    layoutState.current = { isMobile: true };
+    const noModelSelection = {
+      current_model: undefined,
+      providers: [],
+      getAvailableModels: () => [],
+      handleSelectModel: vi.fn(),
+      getDisplayModelName: () => '',
+    } as AionrsModelSelection;
+
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={noModelSelection} />);
+
+    const entries = mobileActionSheetProps.current?.entries ?? [];
+    const permissionOptions = entries.find((entry) => entry.key === 'permission')?.submenu?.options ?? [];
+    expect(permissionOptions.map((option) => option.key)).toEqual(['default', 'auto_edit', 'yolo']);
+    expect(entries.find((entry) => entry.key === 'model')).toBeDefined();
+  });
+
+  it('keeps file, folder, template, event, and mode controls wired to their owners', () => {
+    const initialAtPath = [
+      '/private/string-file.txt',
+      { path: '/private/folder', name: 'Folder', isFile: false },
+      { path: '/private/object-file.txt', name: 'Object file', isFile: true },
+    ];
+    draftState.current = {
+      atPath: initialAtPath,
+      uploadFile: ['/private/upload-a.png', '/private/upload-b.png'],
+      content: 'Draft',
+    };
+    conversationContextState.current = {
+      ...conversationContextState.current,
+      loadedMcpStatuses: undefined as unknown as [],
+      loadedMcpServers: ['filesystem'],
+    };
+    selectedTemplateState.current = pptxTemplate;
+    templateGalleryState.current = { galleryOpen: true, templatesLoading: true, templates: [pptxTemplate] };
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    screen.getByRole('button', { name: 'Remove file /private/upload-a.png' }).click();
+    screen.getByRole('button', { name: 'Remove Folder' }).click();
+    screen.getByRole('button', { name: 'Remove template' }).click();
+    act(() => sendBoxProps.current?.onSelectedWorkspaceItemsChange?.(['/private/replaced.txt']));
+
+    const merged = [...initialAtPath, '/private/appended.txt'];
+    mergeFileSelectionItemsMock.mockReturnValueOnce(merged);
+    act(() => eventHandlers.current.get('aionrs.selected.file.append')?.(['/private/appended.txt']));
+    mergeFileSelectionItemsMock.mockReturnValueOnce(initialAtPath);
+    act(() => eventHandlers.current.get('aionrs.selected.file.append')?.(['/private/duplicate.txt']));
+
+    expect(agentModeSelectorProps.current?.modeLabelFormatter({ value: 'auto_edit', label: 'Auto' })).toBe(
+      'agentMode.auto'
+    );
+    expect(agentModeSelectorProps.current?.modeLabelFormatter({ value: 'yolo', label: 'Full' })).toBe(
+      'agentMode.full-access'
+    );
+    expect(agentModeSelectorProps.current?.modeLabelFormatter({ value: 'default', label: 'Default label' })).toBe(
+      'Default label'
+    );
+  });
+
   it('renders model and permission controls in the composer action row', () => {
     render(
       <AionrsSendBox
-        conversation_id='conv-1'
+        conversation_id='d0921953'
         modelSelection={modelSelection}
         modelSelector={<span data-testid='composer-model-selector'>Model</span>}
       />
@@ -2112,7 +2775,7 @@ describe('AionrsSendBox', () => {
       },
     } as AionrsModelSelection;
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={miniMaxSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={miniMaxSelection} />);
 
     expect(screen.getByTestId('context-usage-indicator')).toBeInTheDocument();
     expect(contextUsageIndicatorProps.current).toEqual({
@@ -2137,25 +2800,25 @@ describe('AionrsSendBox', () => {
       tokenUsage: { total_tokens: 110_000 },
     };
 
-    const { rerender, unmount } = render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    const { rerender, unmount } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
-    expect(getActiveContextBudget('conv-1')).toEqual(contextUsageIndicatorProps.current?.budget);
+    expect(getActiveContextBudget('d0921953')).toEqual(contextUsageIndicatorProps.current?.budget);
 
     aionrsMessageState.current = {
       ...createAionrsMessageState(),
       tokenUsage: { total_tokens: 220_000 },
     };
-    rerender(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    rerender(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
-    expect(getActiveContextBudget('conv-1')).toEqual(contextUsageIndicatorProps.current?.budget);
-    expect(getActiveContextBudget('conv-1')?.totalTokens).toBe(220_000);
+    expect(getActiveContextBudget('d0921953')).toEqual(contextUsageIndicatorProps.current?.budget);
+    expect(getActiveContextBudget('d0921953')?.totalTokens).toBe(220_000);
 
     unmount();
-    expect(getActiveContextBudget('conv-1')).toBeUndefined();
+    expect(getActiveContextBudget('d0921953')).toBeUndefined();
   });
 
   it('renders an estimated context usage meter when AionRS runtime usage is unavailable', () => {
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(screen.getByTestId('context-usage-indicator')).toBeInTheDocument();
     expect(contextUsageIndicatorProps.current?.budget.source).toBe('estimated');
@@ -2172,7 +2835,7 @@ describe('AionrsSendBox', () => {
       },
     } as unknown as AionrsModelSelection;
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={rawModelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={rawModelSelection} />);
 
     expect(contextUsageIndicatorProps.current?.budget.contextLimit).toBe(204_800);
     expect(contextUsageIndicatorProps.current?.budget.source).toBe('estimated');
@@ -2190,7 +2853,7 @@ describe('AionrsSendBox', () => {
       state: 'idle',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(screen.queryByTestId('thought-display')).not.toBeInTheDocument();
     expect(thoughtDisplayProps.current?.running).toBe(false);
@@ -2206,7 +2869,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(screen.getByTestId('thought-display')).toBeInTheDocument();
     expect(thoughtDisplayProps.current?.running).toBe(true);
@@ -2223,7 +2886,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(thoughtDisplayProps.current?.awaitingApproval).toBe(true);
   });
@@ -2239,7 +2902,7 @@ describe('AionrsSendBox', () => {
       state: 'waiting_confirmation',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(thoughtDisplayProps.current?.awaitingApproval).toBe(true);
   });
@@ -2255,7 +2918,7 @@ describe('AionrsSendBox', () => {
       state: 'running',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(thoughtDisplayProps.current?.awaitingApproval).toBe(false);
   });
@@ -2271,26 +2934,26 @@ describe('AionrsSendBox', () => {
       state: 'waiting_confirmation',
     };
 
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(thoughtDisplayProps.current?.awaitingApproval).toBe(false);
   });
 
   it('advertises the native context command in the shared slash menu', () => {
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     expect(screen.getByTestId('context-command-enabled')).toHaveTextContent('true');
   });
 
   it('intercepts valid context commands before queueing or sending a chat turn', async () => {
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await act(async () => {
       screen.getByRole('button', { name: 'compact context' }).click();
     });
 
     expect(emitMock).toHaveBeenCalledWith('aionrs.context-command', {
-      conversationId: 'conv-1',
+      conversationId: 'd0921953',
       command: { action: 'compact' },
     });
     expect(enqueueMock).not.toHaveBeenCalled();
@@ -2299,7 +2962,7 @@ describe('AionrsSendBox', () => {
   });
 
   it('shows a localized validation error without sending invalid context commands', async () => {
-    render(<AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />);
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
 
     await act(async () => {
       screen.getByRole('button', { name: 'invalid context' }).click();
@@ -2309,5 +2972,111 @@ describe('AionrsSendBox', () => {
     expect(emitMock).not.toHaveBeenCalledWith('aionrs.context-command', expect.anything());
     expect(enqueueMock).not.toHaveBeenCalled();
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['context with arguments', 'conversation.contextHandoff.command.unexpectedArguments'],
+    ['unsupported context', 'conversation.contextHandoff.command.unsupportedSubcommand'],
+  ])('localizes the %s validation failure without starting a model turn', async (buttonName, messageKey) => {
+    render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+
+    await act(async () => {
+      screen.getByRole('button', { name: buttonName }).click();
+    });
+
+    expect(messageErrorMock).toHaveBeenCalledWith(messageKey);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('AionrsChat human-submit bridge', () => {
+  let AionrsChat: typeof import('@/renderer/pages/conversation/platforms/aionrs/AionrsChat').default;
+
+  beforeAll(async () => {
+    vi.doMock('@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox', () => ({
+      default: (props: Record<string, unknown>) => {
+        aionrsChatSendBoxProps.current = props;
+        return <div data-testid='aionrs-chat-sendbox' />;
+      },
+    }));
+    ({ default: AionrsChat } = await import('@/renderer/pages/conversation/platforms/aionrs/AionrsChat'));
+  });
+
+  beforeEach(() => {
+    aionrsChatSendBoxProps.current = null;
+    kbHintProps.current = null;
+    pendingRecoveryMock.mockClear();
+    updateLocalImageMock.mockClear();
+    useMessageLstCacheMock.mockClear();
+  });
+
+  it('passes the optional human-submit interceptor through the configured chat surface', async () => {
+    const beforeSend = vi.fn().mockResolvedValue(true);
+    const { rerender } = render(
+      <AionrsChat
+        conversation_id='director-chat'
+        workspace='/tmp/director-a'
+        modelSelection={modelSelection}
+        modelSelector={<span>Model selector</span>}
+        session_mode='agent'
+        emptySlot={<span>Director empty state</span>}
+        loadedSkills={['slides']}
+        loadedMcpServers={['studio']}
+        loadedMcpStatuses={[]}
+        agent_name='Director'
+        assistantId='director-assistant'
+        project_id='project-1'
+        session_mcp_servers={[]}
+        beforeSend={beforeSend}
+      />
+    );
+
+    expect(useMessageLstCacheMock).toHaveBeenCalledWith('director-chat');
+    expect(pendingRecoveryMock).toHaveBeenCalledWith('director-chat');
+    expect(updateLocalImageMock).toHaveBeenCalledWith({ root: '/tmp/director-a' });
+    expect(screen.getByText('Director empty state')).toBeInTheDocument();
+    expect(aionrsChatSendBoxProps.current).toMatchObject({
+      conversation_id: 'director-chat',
+      modelSelection,
+      session_mode: 'agent',
+      agent_name: 'Director',
+      beforeSend,
+    });
+    expect(kbHintProps.current).toMatchObject({
+      conversationId: 'director-chat',
+      projectId: 'project-1',
+      workspace: '/tmp/director-a',
+      sessionMcpServers: [],
+    });
+
+    rerender(
+      <AionrsChat
+        conversation_id='director-chat'
+        workspace='/tmp/director-b'
+        modelSelection={modelSelection}
+        project_id='project-1'
+        beforeSend={beforeSend}
+      />
+    );
+
+    await waitFor(() => {
+      expect(updateLocalImageMock).toHaveBeenLastCalledWith({ root: '/tmp/director-b' });
+    });
+  });
+
+  it('leaves ordinary chats unintercepted when the optional bridge is absent', () => {
+    render(<AionrsChat conversation_id='ordinary-chat' workspace='/tmp/ordinary' modelSelection={modelSelection} />);
+
+    expect(aionrsChatSendBoxProps.current).toMatchObject({
+      conversation_id: 'ordinary-chat',
+      modelSelection,
+      beforeSend: undefined,
+    });
+    expect(kbHintProps.current).toMatchObject({
+      conversationId: 'ordinary-chat',
+      projectId: undefined,
+      workspace: '/tmp/ordinary',
+      sessionMcpServers: undefined,
+    });
   });
 });

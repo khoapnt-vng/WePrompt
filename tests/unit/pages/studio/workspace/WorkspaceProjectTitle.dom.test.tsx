@@ -1,0 +1,255 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import React from 'react';
+import { describe, expect, it, vi } from 'vitest';
+
+import { WorkspaceProjectTitle } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+  }),
+}));
+
+const RENAME = 'conversation.creativeStudio.phase.shared.renameProject';
+const INVALID = 'conversation.creativeStudio.phase.shared.invalidProjectName';
+const AUTHORITY = { projectId: 'project_1', expectedRevision: 7 };
+const renameButton = (name = 'Launch film'): HTMLButtonElement =>
+  screen.getByRole('button', { name: `${RENAME}: ${name}` });
+
+describe('WorkspaceProjectTitle', () => {
+  it('includes the visible project name in the rename button accessible name', () => {
+    render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={vi.fn(async () => true)}
+      />
+    );
+
+    const button = screen.getByRole('button', { name: `${RENAME}: Launch film` });
+    expect(button).toHaveTextContent('Launch film');
+  });
+
+  it('styles the real Arco title button with selectors that survive the disabled Tooltip wrapper', () => {
+    const css = readFileSync(
+      resolve(process.cwd(), 'packages/desktop/src/renderer/pages/studio/components/Workspace/Workspace.module.css'),
+      'utf8'
+    );
+
+    expect(css).toMatch(
+      /\.projectTitle\s+:global\(\.arco-btn\.arco-btn-text\)\s*\{[^}]*padding-block:\s*2px[^}]*font:\s*inherit/s
+    );
+    expect(css).toMatch(
+      /\.projectTitle\s+:global\(\.arco-btn\.arco-btn-text\):not\(:global\(\.arco-btn-disabled\)\)\s*\{[^}]*color:\s*inherit/s
+    );
+  });
+
+  it('uses the same bounded text box for editable and read-only titles', () => {
+    const onRename = vi.fn(async () => true);
+    const view = render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name={'A very long project title '.repeat(12)}
+        pending={false}
+        onRename={onRename}
+      />
+    );
+    const editableTextClass = view.container.querySelector('bdi')?.className;
+    expect(editableTextClass).not.toBe('');
+
+    view.rerender(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name={'A very long project title '.repeat(12)}
+        pending={false}
+      />
+    );
+    expect(view.container.querySelector('bdi')?.className).toBe(editableTextClass);
+  });
+
+  it('commits one trimmed inline rename on Enter and reflects the refreshed authority', async () => {
+    const onRename = vi.fn(async () => true);
+    const view = render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    const input = screen.getByRole('textbox', { name: RENAME });
+    expect(input).toHaveFocus();
+    fireEvent.change(input, { target: { value: '  Retitled film  ' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith('Retitled film', AUTHORITY));
+    expect(onRename).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={8}
+        name='Retitled film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+    expect(screen.getByRole('heading', { name: 'Retitled film' })).toHaveTextContent('Retitled film');
+  });
+
+  it('commits on blur but treats an unchanged trimmed name as a local no-op', async () => {
+    const onRename = vi.fn(async () => true);
+    render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    const input = screen.getByRole('textbox', { name: RENAME });
+    fireEvent.change(input, { target: { value: ' Launch film ' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument());
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('rejects an empty name locally and lets Escape restore the canonical title', () => {
+    const onRename = vi.fn(async () => true);
+    render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    const input = screen.getByRole('textbox', { name: RENAME });
+    fireEvent.change(input, { target: { value: '   ' } });
+    expect(screen.getByRole('alert')).toHaveTextContent(INVALID);
+    fireEvent.keyDown(input, { key: 'Enter' });
+    expect(onRename).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert')).toBeVisible();
+
+    fireEvent.keyDown(input, { key: 'Escape' });
+    expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toBeInTheDocument();
+  });
+
+  it('restores the canonical title when an invalid draft loses focus', async () => {
+    const onRename = vi.fn(async () => true);
+    render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    const input = screen.getByRole('textbox', { name: RENAME });
+    fireEvent.change(input, { target: { value: '   ' } });
+    fireEvent.blur(input);
+
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toHaveTextContent('Launch film');
+    expect(onRename).not.toHaveBeenCalled();
+  });
+
+  it('keeps a refused rename retryable and clears it when the project changes', async () => {
+    const onRename = vi.fn(async () => false);
+    const view = render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    const input = screen.getByRole('textbox', { name: RENAME });
+    fireEvent.change(input, { target: { value: 'Retry this title' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    await waitFor(() => expect(onRename).toHaveBeenCalledWith('Retry this title', AUTHORITY));
+    expect(screen.getByRole('textbox', { name: RENAME })).toHaveValue('Retry this title');
+
+    view.rerender(
+      <WorkspaceProjectTitle
+        projectId='project_2'
+        projectRevision={4}
+        name='Second film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+    expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Second film' })).toBeInTheDocument();
+  });
+
+  it('disables rename while an owner mutation is pending', () => {
+    const onRename = vi.fn(async () => true);
+    render(
+      <WorkspaceProjectTitle projectId='project_1' projectRevision={7} name='Launch film' pending onRename={onRename} />
+    );
+
+    fireEvent.click(renameButton());
+    expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument();
+    expect(renameButton()).toBeDisabled();
+  });
+
+  it('discards an inline draft when refreshed authority changes during editing', async () => {
+    const onRename = vi.fn(async () => true);
+    const view = render(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={7}
+        name='Launch film'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    fireEvent.click(renameButton());
+    fireEvent.change(screen.getByRole('textbox', { name: RENAME }), {
+      target: { value: 'Stale local title' },
+    });
+    view.rerender(
+      <WorkspaceProjectTitle
+        projectId='project_1'
+        projectRevision={8}
+        name='Concurrent title'
+        pending={false}
+        onRename={onRename}
+      />
+    );
+
+    await waitFor(() => expect(screen.queryByRole('textbox', { name: RENAME })).not.toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Concurrent title' })).toHaveTextContent('Concurrent title');
+    expect(onRename).not.toHaveBeenCalled();
+  });
+});

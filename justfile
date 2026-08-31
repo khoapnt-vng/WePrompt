@@ -332,10 +332,23 @@ i18n-check:
 # Run all checks (lint + format + typecheck + i18n) — mirrors CI code-quality job
 check: lint fmt-check typecheck i18n-check
 
-# Pre-push gate: lint + format check + typecheck + i18n + test, then push
-# Uses --quiet to suppress warnings (exit code is still non-zero on errors)
-push *ARGS: lint-strict fmt-check typecheck i18n-check test
+# Pre-push gate: lint + format check + typecheck + i18n + the tests the change actually needs,
+# then push. Uses --quiet to suppress warnings (exit code is still non-zero on errors).
+#
+# The test leg is chosen from the commits being pushed: the reviewed Creative Studio coverage gate
+# whenever anything carrying behaviour changed, and nothing at all when the push is inert
+# documentation. Two legs only -- see the script for why a third was unsound, and for why ".md" is
+# not the same thing as "documentation" here. It fails safe to the coverage gate when it cannot tell.
+push *ARGS: lint-strict fmt-check typecheck i18n-check test-for-push
     git push {{ ARGS }}
+
+# Run the narrowest test leg that still proves what is being pushed. See the script for the rules.
+#
+# When that leg is the coverage gate, the script takes a machine-wide lock first: two gates at once
+# saturate the cores and manufacture timeouts in tests that pass alone. A second push waits for the
+# first and then runs -- it is never refused, and a gate killed mid-run does not wedge the next one.
+test-for-push:
+    node scripts/select-push-tests.js
 
 # Lint with only errors reported (for CI/push gates)
 lint-strict:
@@ -356,6 +369,15 @@ test-watch:
 # Run tests with coverage
 test-coverage:
     bun run test:coverage
+
+# Enforce the reviewed Creative Studio runtime manifest's per-file coverage thresholds.
+#
+# Takes the same machine-wide lock the push gate takes, because it is the same ~6-minute suite:
+# running it beside someone's `just push` manufactures the very timeouts both are trying to avoid.
+# It queues and says what it is waiting for rather than failing. CI is untouched -- the workflow
+# calls the package script directly, and one runner has nothing to contend with.
+test-coverage-creative-studio:
+    node packages/shared-scripts/src/push-gate-lock.js bun run test:coverage:creative-studio
 
 # Run contract tests
 test-contract:

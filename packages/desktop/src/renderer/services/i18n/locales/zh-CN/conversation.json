@@ -878,27 +878,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "项目参考图",
-      "inheritanceDescription": "每张新的参考静帧都会使用此项目中所有启用的角色和视觉风格图片。",
-      "castHeading": "角色",
-      "lookHeading": "视觉风格",
-      "castEmpty": "尚无角色参考图。",
-      "lookEmpty": "尚无视觉风格参考图。",
-      "addCast": "添加角色参考图",
-      "addLook": "添加视觉风格参考图",
-      "activeCount": "{{count}} 张启用的参考图",
-      "activeCount_other": "{{count}} 张启用的参考图",
-      "limitReached": "此项目已有 6 张启用的参考图。请先移除一张再添加。",
-      "removeFromBrief": "从简报中移除",
-      "removeAccessible": "从简报中移除 {{label}}",
-      "previewAccessible": "{{role}}参考图：{{label}}",
-      "engineCapacityNone": "此图像引擎尚未通过参考图验证。请打开“模型设置”并重新验证。",
-      "engineMenuCapacityNone": "无参考图像",
-      "engineCapacityMaximum": "最多 {{count}} 张参考图",
-      "engineCapacityMaximum_other": "最多 {{count}} 张参考图",
-      "capacityMismatch": "你有 {{count}} 张启用的参考图，但此图像引擎仅支持 {{maximum}} 张。在移除参考图或更换、重新验证引擎之前，无法生成新的参考静帧。",
-      "importError": "无法添加参考图，请重试。"
+    "workspace": {
+      "views": {
+        "references": "参考图"
+      },
+      "start": {
+        "title": "先从导演开始",
+        "description": "导演会根据你的简介起草第一份方案。方案完成后，请在这里审核。"
+      },
+      "notReady": {
+        "references": "导演规划参考资料后，才能进行审核。",
+        "table": "导演起草故事板后，才能进行编排。",
+        "board": "表格设置完成后，才能开始制作。",
+        "cut": "制作开始后，才能进行剪辑。"
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "规范图像",
+          "intro": "为每个角色和重复出现的地点各制作一张当前图像。在选择其他成片前，这些图像会一直作为规范参考。",
+          "progress": "{{total}} 个中有 {{current}} 个当前图像",
+          "bindShots": "绑定镜头",
+          "characterRule": "先制作角色",
+          "placeRule": "再制作重复地点",
+          "addCharacter": "添加角色",
+          "addCharacterUnavailable": "角色身份来自已批准的导演参考计划。",
+          "places": "地点",
+          "addPlace": "添加地点",
+          "kind": {
+            "character": "角色",
+            "background": "地点"
+          },
+          "nameLabel": "{{kind}}名称",
+          "meta": {
+            "character": "角色 · {{count}} 张照片",
+            "background": "地点 · {{count}} 张照片"
+          },
+          "status": {
+            "noPhoto": "无照片",
+            "current": "已设为当前",
+            "generating": "正在生成"
+          },
+          "duplicateName": "此参考类型已使用该名称。",
+          "emptyPhoto": "生成第一张照片",
+          "currentHandle": "{{handle}} · 当前",
+          "currentReference": "当前规范参考",
+          "download": "下载 {{handle}}",
+          "choosePhoto": "将 {{handle}} 设为当前",
+          "addPhoto": "再生成一张照片",
+          "photoCount": "{{count}} 张照片",
+          "promptLabel": "{{label}} 的提示词",
+          "promptPlaceholder": {
+            "character": "描述稳定的角色身份、服装和视觉特征。",
+            "background": "描述重复出现的地点及其稳定的视觉特征。"
+          },
+          "action": {
+            "generate": "生成",
+            "generateAnother": "再生成一张",
+            "generateAgain": "重新生成",
+            "cancelRun": "取消运行"
+          },
+          "tag": {
+            "running": "运行中",
+            "edited": "提示词已编辑"
+          },
+          "importPhoto": "导入照片",
+          "removePhoto": "移除 {{handle}}",
+          "removePhotoLocked": "这张照片因未解决的工作而被锁定。移除前，请查看下方的阻止项。",
+          "removalBlocker": {
+            "activeReferenceJob": "此参考的{{purpose}}任务（{{jobId}}）尚未解决。任务进入终止状态前，当前照片会保持锁定。",
+            "activeAssetConsumer": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}任务正在使用这张照片。任务解决前，照片会保持锁定。",
+            "activeAssetConsumerRetained": "保留的 Shot {{shotId}} 的{{purpose}}任务正在使用这张照片。任务解决前，照片会保持锁定。",
+            "activeAssetConsumerOther": "{{purpose}}任务（{{jobId}}）正在使用这张照片。任务解决前，照片会保持锁定。",
+            "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}任务已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Shot 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 内 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Beat 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryOther": "{{purpose}}任务（{{jobId}}）已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
+            "invalidAuthority": "当前照片的参考数据不一致。请重新加载项目并检查此参考，然后再尝试移除。",
+            "reviewInBoard": "在 Board 中检查"
+          }
+        },
+        "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
+        "generationScope": "生成范围",
+        "characters": {
+          "title": "角色",
+          "description": "为每个有名字的角色生成一张当前标准图。",
+          "empty": "此故事没有有名字的角色。现在可以审核背景。"
+        },
+        "backgrounds": {
+          "title": "背景",
+          "description": "生成重复出现的场景，让影片保持视觉一致。",
+          "charactersRequired": "请先生成所有角色，再审核背景。",
+          "empty": "不需要重复出现的背景。",
+          "add": "添加背景",
+          "addTitle": "添加重复出现的背景",
+          "nameLabel": "背景名称",
+          "promptLabel": "生成提示词",
+          "duplicate": "已存在同名背景。",
+          "cancel": "取消",
+          "confirm": "添加背景"
+        },
+        "previewPending": "尚未生成参考图。",
+        "previewAlt": "{{label}} 的当前参考图",
+        "status": {
+          "idle": "尚未生成",
+          "queued": "已排队",
+          "running": "生成中",
+          "succeeded": "已生成",
+          "failed": "生成失败",
+          "current": "当前"
+        },
+        "regenerate": "重新生成",
+        "chooseGenerated": "选择已生成的图片",
+        "regeneratePromptLabel": "生成提示词",
+        "regenerateCancel": "取消",
+        "reviewGeneration": "审核生成费用",
+        "generatedHistory": "已生成的图片",
+        "historyClose": "关闭",
+        "historyPreviewAlt": "{{label}} 的已生成参考图",
+        "historyCurrent": "当前图片",
+        "historyChoose": "选择此图片",
+        "currentProgress": "已生成 {{current}} / {{total}} 个参考",
+        "bindings": {
+          "title": "Shot 绑定",
+          "description": "选择每个 Shot 的 Board 面板和首帧所使用的确切当前角色与背景。",
+          "empty": "没有需要绑定的活动 Shot。",
+          "shot": "Shot {{position}}",
+          "unassigned": "此 Shot 尚未作出参考选择。",
+          "invalid": "已保存的绑定不再有效。请选择当前参考并重新保存。",
+          "capacity": "角色和背景共选择了 {{count}} 个参考，但共享的图像路由额度最多支持 {{limit}} 个。",
+          "capacityUsage": "已使用 {{count}} / {{limit}} 个共享图像参考位（角色 + 背景）",
+          "characters": "角色",
+          "background": "背景",
+          "save": "保存绑定",
+          "progress": "已绑定 {{ready}} / {{total}} 个 Shot"
+        }
+      },
+      "references": {
+        "referenceCount": "已为 {{total}} 个项目请求参考图"
+      },
+      "handoffs": {
+        "referenceCount": "此交接包含 {{total}} 张参考图",
+        "progress": "排队 {{queued}} · 运行 {{running}} · 成功 {{succeeded}} · 失败 {{failed}}",
+        "reviewReferences": "审核参考图",
+        "retryFailed": "重试失败的参考图",
+        "awaiting_spend": "等待费用审核",
+        "running": "正在生成参考。",
+        "succeeded": "已生成所有请求的参考。",
+        "partially_failed": "部分参考已生成；请单独重试失败的参考。",
+        "failed": "参考生成失败。不会自动重试。",
+        "dismissed": "未花费并已关闭"
+      },
+      "table": {
+        "reorder": {
+          "label": "重新排序 {{title}} 的操作",
+          "dragHandle": "重新排序位于第 {{position}} 位的 {{title}}",
+          "moveEarlier": "将 {{title}} 前移",
+          "moveLater": "将 {{title}} 后移",
+          "announcement": "已将 {{title}} 从第 {{from}} 位移至第 {{to}} 位（共 {{total}} 位）。",
+          "failed": "Beat 顺序未更改。"
+        },
+        "authoring": {
+          "label": "故事编写与恢复",
+          "coverageGap": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "coverageGap_one": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "coverageGap_other": "{{total}} 个 Beat 中有 {{count}} 个没有 Shot",
+          "unscriptedWarning": "{{count}} 个 Shot 没有拍摄脚本",
+          "unscriptedWarning_one": "{{count}} 个 Shot 没有拍摄脚本",
+          "unscriptedWarning_other": "{{count}} 个 Shot 没有拍摄脚本",
+          "askDirector": "询问 Director",
+          "addBeat": "添加 Beat",
+          "addShot": "添加 Shot",
+          "addShotForBeat": "向 {{title}} 添加 Shot",
+          "unassignedReferenceNote": "手动创建的 Shot 初始未分配参考图，并且必须在付费生成前进行审查。"
+        },
+        "columns": {
+          "length": "合计",
+          "panel": "分镜",
+          "story": "故事"
+        },
+        "plannedPending": "暂无计划总时长",
+        "panel": {
+          "openDetails": "打开 {{title}} 的分镜",
+          "closeDetails": "关闭 {{title}} 的分镜",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "shotDetails": "镜头 {{position}} 详情",
+          "head": "链首",
+          "status": {
+            "missing": "未绘制",
+            "current": "当前",
+            "stale": "已过期",
+            "statusPending": "状态待定",
+            "queued": "已排队",
+            "drawing": "绘制中",
+            "needsAttention": "需要处理",
+            "failed": "失败",
+            "cancelled": "已取消"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "状态不可用",
+        "blockers": "{{count}} 个阻塞项",
+        "blockers_one": "{{count}} 个阻塞项",
+        "blockers_other": "{{count}} 个阻塞项"
+      },
+      "library": {
+        "subtitle": "以节拍和镜头规划故事，然后检查每个镜头的当前画面。",
+        "pictureCount": "{{count}} 个画面已就绪",
+        "pictureCount_one": "{{count}} 个画面已就绪",
+        "pictureCount_other": "{{count}} 个画面已就绪",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "项目状态不可用",
+          "stage": {
+            "brief": "创作简报",
+            "engines": "引擎",
+            "references": "参考图",
+            "storyboard": "故事板",
+            "bindings": "绑定",
+            "production": "制作",
+            "cut": "剪辑"
+          },
+          "progress": {
+            "ready": "已就绪",
+            "needsWork": "需要处理",
+            "references": "已批准 {{current}} / {{total}} 个参考图",
+            "shots": "{{current}} / {{total}} 个 Shot"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "导演分镜控制",
+          "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
+          "progressLabel": "分镜板完成度",
+          "staleCount": "{{count}} 个已过期",
+          "busyCount": "{{count}} 个进行中",
+          "stop": "停止绘制",
+          "stopNote": "停止操作会在可能的情况下请求取消。已完成的分镜和已经产生的费用会保留。",
+          "drawNext": "绘制下一批（{{count}}）"
+        },
+        "panel": {
+          "beatActions": "导演分镜控制 · {{title}}",
+          "drawMissing": "绘制缺失项（{{count}}）",
+          "redrawBeat": "重新绘制 Beat · 付费",
+          "cardLabel": "Shot {{position}}：{{status}}",
+          "redrawShot": "重新绘制 Shot {{position}} · 付费",
+          "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
+          "status": {
+            "missing": "未绘制",
+            "current": "当前",
+            "stale": "已过期",
+            "statusPending": "状态待定",
+            "queued": "已排队",
+            "drawing": "绘制中",
+            "needsAttention": "需要处理",
+            "failed": "失败",
+            "cancelled": "已取消"
+          }
+        },
+        "statusUnavailable": "当前 Board 顺序不完整或不明确。请刷新项目后再检查 Shot 卡片。",
+        "renderedCount": "{{total}} 个中已渲染 {{count}} 个",
+        "staleCount": "{{count}} 个已过时的 Shot",
+        "staleCount_one": "{{count}} 个已过时的 Shot",
+        "staleCount_other": "{{count}} 个已过时的 Shot",
+        "inFlightCount": "{{count}} 个 Shot 正在排队或渲染",
+        "inFlightCount_one": "{{count}} 个 Shot 正在排队或渲染",
+        "inFlightCount_other": "{{count}} 个 Shot 正在排队或渲染",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}，Shot {{shot}}",
+          "listLabel": "{{title}} 中的 Shot",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "当前 Shot 视频",
+          "stale": "已过时",
+          "chainHead": "镜头链起点",
+          "chainAfter": "接在 {{beat}}.{{shot}} 之后",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "此项目修订版的阻塞详情不可用。",
+          "blocker": {
+            "heading": "受以下因素阻止",
+            "referenceBindingTable": "生成前必须在 Table 中修正参考图绑定。",
+            "reviewOnTable": "在 Table 中检查参考图",
+            "cause": {
+              "routeInventoryUnavailable": "引擎列表不可用。",
+              "routeNotSelected": "尚未选择生成引擎。",
+              "routeSetupRequired": "所选引擎需要设置。",
+              "routeUnavailable": "所选引擎不可用。",
+              "routeRetired": "所选引擎已停用。",
+              "routeIncompatibleFrame": "该引擎与此帧不兼容。",
+              "routeFirstFrameUnsupported": "该引擎不支持此首帧。",
+              "routeDurationUnsupported": "该引擎不支持此 Shot 时长。",
+              "referencePlanInvalid": "参考图计划需要检查。",
+              "referenceGenerationRequired": "必须生成一张参考图。",
+              "referenceApprovalRequired": "参考图需要人工批准。",
+              "referenceGenerationFailed": "参考图生成失败。",
+              "referenceBindingUnassigned": "尚未分配参考图。",
+              "referenceBindingUnknownReference": "绑定中指定了未知参考图。",
+              "referenceBindingWrongKind": "绑定使用了错误的参考图类型。",
+              "referenceBindingUnapprovedReference": "绑定使用了未批准的参考图。",
+              "referenceBindingMissingAsset": "缺少已绑定的参考图。",
+              "referenceBindingCapacityExceeded": "绑定超出了引擎的参考图容量。",
+              "seedSelectionRequired": "必须选择首帧。",
+              "seedGenerationRequired": "必须创建首帧。",
+              "conditioningFrameRequired": "必须从前一个 Shot 提取一帧。",
+              "extractionFailed": "前序帧提取失败。",
+              "dependencyFailed": "上游 Shot 失败。",
+              "generationInvalidRequest": "生成请求无效。",
+              "generationContentRejected": "提供商拒绝了内容。",
+              "generationAuth": "提供商拒绝了身份验证。",
+              "generationQuota": "提供商额度已用尽。",
+              "generationRateLimited": "提供商正在限制请求速率。",
+              "generationProviderUnavailable": "生成提供商不可用。",
+              "generationTimeout": "生成超时。",
+              "generationPollDeadline": "生成未能在轮询期限前完成。",
+              "generationNoOutput": "生成已完成，但没有可用输出。",
+              "generationVariationGrid": "输出是变体网格，需要检查。",
+              "generationSubmissionUnknown": "提供商未确认提交。",
+              "generationDownloadFailed": "无法下载生成的媒体。",
+              "generationUnsupported": "不支持此生成请求。",
+              "generationUnknown": "生成因未知原因失败。",
+              "cutInvalidMedia": "当前画面不适用于 Cut。",
+              "cutBedTooShort": "音频底轨比 Cut 短。"
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "影片预览",
+          "beatBadge": "节拍 {{position}} · {{title}}",
+          "slate": "场记卡 · 无镜头素材",
+          "slateHold": "在剪辑中保留 {{clock}}",
+          "videoLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 镜头 {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "节拍 {{beatPosition}} · {{beatTitle}} · 场记卡 · 无镜头素材",
+          "noMedia": "暂无影片预览。",
+          "awaitingPictureOne": "节拍 {{beatPosition}}、镜头 {{shotPosition}} 尚无当前画面。",
+          "awaitingPictureMany": "{{count}} 个镜头尚无当前画面。",
+          "mediaError": "无法加载此预览。",
+          "play": "播放影片",
+          "pause": "暂停影片",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "仅画面 — 此处音轨已静音",
+          "shotAudioOnly": "仅播放镜头音频——此预览不包含配乐音轨",
+          "controlsLabel": "影片播放控制",
+          "seekLabel": "影片定位轨",
+          "previousJoin": "上一个接点",
+          "nextJoin": "下一个接点",
+          "loopJoin": "循环接点",
+          "buffering": "正在加载预览画面"
+        },
+        "exports": {
+          "editorFolderDescription": "按影片顺序导出当前镜头画面、目标场记板、时间线数据和可选音轨。"
+        },
+        "film": {
+          "under": "少 {{clock}}",
+          "over": "超出 {{clock}}"
+        },
+        "openBeat": "打开节拍",
+        "bed": {
+          "silentPreview": "预览时静音 · 导出时应用",
+          "extent": "从 0:00 开始 · 范围 {{seconds}} 秒"
+        },
+        "slate": {
+          "openBeat": "打开无镜头素材的节拍"
+        }
+      },
+      "proposals": {
+        "proposalId": "提案 ID",
+        "mutationCount": "{{count}} 项提议编辑",
+        "mutationCount_one": "{{count}} 项提议编辑",
+        "mutationCount_other": "{{count}} 项提议编辑",
+        "terminalCount": "有 {{count}} 项导演提案无法接受",
+        "terminalCount_one": "有 {{count}} 项导演提案无法接受",
+        "terminalCount_other": "有 {{count}} 项导演提案无法接受",
+        "showTerminal": "查看以往提案",
+        "hideTerminal": "隐藏以往提案",
+        "reviewDetails": "查看提案详情",
+        "before": "之前",
+        "after": "之后",
+        "ownerBeat": "所属节拍",
+        "reviewUnavailable": "无法安全审核此提案，因此不能接受。",
+        "refusal": {
+          "applyCoverage": "覆盖规划无法替换这些已固定的镜头。请改为直接编辑它们的拍摄脚本。",
+          "applyCoverageFixedWork": "覆盖规划无法替换已有工作的镜头。请查看固定工作原因并直接编辑受影响的镜头。",
+          "editShotsDirectly": "直接编辑这些镜头",
+          "reason": {
+            "beat_capacity_reached": "项目已达到节拍数量上限。",
+            "beat_shot_capacity_reached": "此节拍已达到镜头数量上限。",
+            "project_shot_capacity_reached": "项目已达到镜头数量上限。",
+            "invalid_shot_duration": "提议镜头的时长超出允许范围。",
+            "dependency_blocked": "现有工作阻止了此项提议更改。",
+            "identity_collision": "提议的标识已被使用。",
+            "invalid_operation": "此项提议更改不适用于当前项目。",
+            "undo_conflict": "此提案与后续编辑冲突。",
+            "validation_failed": "更改后的项目未通过验证。"
+          },
+          "fixedReason": {
+            "owned_asset": "已存储的镜头媒体",
+            "owned_job": "生成历史",
+            "video_asset": "当前视频",
+            "seed_still": "已选首帧",
+            "conditioning_frame": "连续性帧",
+            "conditioning_input": "下游条件输入",
+            "shooting_script": "现有拍摄脚本"
+          }
+        },
+        "refreshing": "正在对照当前项目检查此提案…",
+        "authorityUnavailable": "无法验证提案权限。提案仍保持待处理，其操作当前不可用。",
+        "requestUpdated": "准备更新提案",
+        "saveAndRequestUpdated": "保存并准备更新提案",
+        "reviewRuleDrafts": "检查规则草稿",
+        "reviewRuleDraftsFirst": "接受此规则提案前，请检查或丢弃本地规则草稿。",
+        "reproposalPrompt": "请使用 studio_get_proposal 检查提案 {{proposalId}}，然后调用 read_storyboard，并针对当前修订版拟定一份新提案。不要应用原提案，也不要在未告知的情况下对其变基。",
+        "chatDecisionBusy": "另一个审核操作仍在进行中。",
+        "chatDirty": "批准此提案前，请保存或重置与它冲突的草稿。",
+        "chatNoPending": "当前没有待处理的导演提案。",
+        "chatMultiplePending": "有多个当前导演提案已就绪。请使用完整 ID 输入 /approve PROPOSAL_ID 或 /reject PROPOSAL_ID。",
+        "chatProposalNotFound": "该指定提案已不再待处理。",
+        "chatUnavailable": "当前没有已就绪的待处理导演提案。请在卡片中检查，或请求更新提案。",
+        "chatStale": "此提案已与当前项目版本不匹配。",
+        "chatAccepted": "提案已接受。",
+        "chatRejected": "提案已拒绝。",
+        "reviewStale": "此审核基于修订版 {{baseRevision}}，但项目当前为修订版 {{currentRevision}}。",
+        "noChanges": "此提案没有语义变更。",
+        "paidRecovery": {
+          "heading": "付费恢复",
+          "explanation": "Director 找到了需要重新生成的恢复方案。花费前请检查具体受影响的工作和价格。",
+          "blockedBy": "阻塞原因",
+          "affectedWork": "受影响的工作",
+          "price": "预计费用",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "生成范围",
+          "generationCount": "{{count}} 个生成项目",
+          "includesCascade": "包含依赖工作",
+          "expires": "此价格将于 {{expiresAt}} 过期。",
+          "expired": "保存的价格已过期。请在确认前刷新。",
+          "confirm": "确认并付费",
+          "refresh": "刷新价格",
+          "refreshed": "价格已刷新。请检查后再次确认以付费。",
+          "cardOnly": "付费恢复只能在检查当前价格后从其提案卡确认。",
+          "location": {
+            "project": "项目",
+            "cut": "剪辑",
+            "route": "{{route}} 路由",
+            "reference": "参考 · {{reference}}",
+            "shot": "{{beat}} · 镜头 {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "项目",
+          "reference": "参考",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "已添加",
+          "edited": "已编辑",
+          "removed": "已移除",
+          "reordered": "已重新排序"
+        },
+        "placementValue": {
+          "active": "活动",
+          "bin": "Bin",
+          "removed": "已移除"
+        },
+        "field": {
+          "name": "名称",
+          "brief": "Brief",
+          "rules": "规则",
+          "aspectRatio": "宽高比",
+          "resolution": "分辨率",
+          "targetDurationSeconds": "目标时长",
+          "boardStyle": "Board 风格",
+          "prompt": "提示词",
+          "title": "标题",
+          "story": "故事",
+          "targetSeconds": "Beat 目标",
+          "shootingScript": "拍摄脚本",
+          "durationSeconds": "时长",
+          "chainBreak": "连续性",
+          "placement": "位置",
+          "order": "顺序"
+        }
+      },
+      "playbackAudio": {
+        "label": "播放声音",
+        "mute": "静音",
+        "unmute": "取消静音",
+        "volume": "播放音量：{{percent}}%",
+        "shotStatus": {
+          "analyzing": "正在分析镜头音频…",
+          "audible": "有可听声音",
+          "effectivelySilent": "实际无声",
+          "noAudioStream": "无音频流",
+          "unavailable": "无法分析音频"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "镜头 {{shotIndex}} 的首帧 {{stillIndex}}",
+          "previewAlt": "预览 · {{label}}",
+          "effective": "当前首帧",
+          "pinnedBadge": "已固定",
+          "authorizationLocked": "已授权的视频工作已锁定此镜头的首帧。导入的候选仍会保留，但不能替换已审核报价中的种子帧。",
+          "authorizationIncompatible": "不可用于已授权工作"
+        },
+        "firstFrames": {
+          "title": "首帧",
+          "shotChip": "镜头 {{shot}}",
+          "on": "当前",
+          "status": {
+            "notReady": "未就绪",
+            "ready": "可渲染",
+            "rendering": "渲染中",
+            "rendered": "已渲染"
+          },
+          "frameLabel": "帧 {{index}}",
+          "origin": {
+            "generated": "已生成",
+            "imported": "已导入",
+            "board": "分镜",
+            "inherited": "来自镜头 {{shot}}"
+          },
+          "current": "当前",
+          "unavailable": "不可用",
+          "previewAlt": "预览 · {{label}}",
+          "openFrame": "全屏打开 {{label}}",
+          "pinned": "已固定为首帧",
+          "pin": "固定为首帧",
+          "firstFrameChanged": "首帧已更改 · 尚未重跑",
+          "promptChanged": "已编辑 · 尚未运行",
+          "import": "导入首帧",
+          "empty": "没有可用的首帧",
+          "currentPicture": "当前画面",
+          "pictureEmpty": "尚无画面",
+          "pictureAlt": "镜头 {{shot}} 的当前画面",
+          "sendLastFrame": "将最后一帧发送到镜头 {{shot}}",
+          "cancelRun": "取消运行",
+          "generateShot": "生成镜头 {{shot}}",
+          "generateAgain": "再次生成",
+          "promptLabel": "镜头提示词",
+          "regenerate": "重新生成",
+          "menu": {
+            "download": "下载",
+            "copyPrompt": "复制提示词",
+            "remove": "移除"
+          },
+          "viewer": {
+            "currentFirstFrame": "当前首帧",
+            "counter": "第 {{current}} 个，共 {{total}} 个",
+            "previous": "上一个",
+            "next": "下一个"
+          }
+        },
+        "picture": {
+          "title": "当前画面",
+          "label": "镜头 {{index}} 的当前画面",
+          "empty": "尚未生成画面",
+          "sourceDuration": "源视频 {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} 秒",
+          "unavailable": "当前画面不可用",
+          "videoPreview": "播放器 · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "再次生成",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "再次生成"
+        },
+        "lift": {
+          "shot": "移到废纸篓",
+          "shotTitle": "将镜头 {{index}} 移到废纸篓？",
+          "shotBodyNoStale": "此镜头中的已创作内容和付费生成素材都会保留。将它移到废纸篓？",
+          "shotBodyStale": "此镜头中的已创作内容和付费生成素材都会保留。移到废纸篓后，以下内容会变为过时状态：{{shots}}。",
+          "confirmShot": "移到废纸篓",
+          "beat": "移到废纸篓",
+          "beatTitle": "将此节拍移到废纸篓？",
+          "beatBodyNoStale": "此节拍中的所有镜头、已创作内容和付费生成素材都会保留。将它移到废纸篓？",
+          "beatBodyStale": "此节拍中的所有镜头、已创作内容和付费生成素材都会保留。移到废纸篓后，以下内容会变为过时状态：{{shots}}。",
+          "confirmBeat": "移到废纸篓"
+        },
+        "beatFieldsLabel": "Beat 故事",
+        "fieldGuidance": {
+          "story": "故事 · 此 Beat 的叙事目的与推进"
+        },
+        "fields": {
+          "story": "故事",
+          "shootingScript": "拍摄脚本",
+          "shootingScriptFor": "Shot {{index}} 的拍摄脚本"
+        },
+        "chain": {
+          "hardCutState": "硬切 · 从首帧开始",
+          "hardCutUnavailable": "暂时无法更改硬切。必须先审阅所需替换媒体的报价。",
+          "reviewSever": "审阅硬切…",
+          "reviewRejoin": "审阅重新衔接…",
+          "reviewSeverDescription": "硬切会让镜头 {{shot}} 从符合条件的首帧开始；如有需要，会创建一个新首帧。确认后，将替换此镜头及其后所有连续镜头，直到下一个硬切。",
+          "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其首帧选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
+          "segmentHead": "链首 · 从首帧开始",
+          "continuous": "承接镜头 {{position}} 的最后一帧"
+        },
+        "coverage": {
+          "trimGuidance": "边缘 · 修剪 · 免费",
+          "boundaryGuidance": "边界 · 需要重新渲染",
+          "segmentState": {
+            "noPicture": "暂无画面",
+            "queued": "已加入队列",
+            "nextUp": "下一个",
+            "waitingOnShot": "等待镜头 {{position}}",
+            "waitingOnFrame": "等待连续性帧",
+            "rendering": "正在渲染",
+            "renderingProgress": "正在渲染 · {{progress}}%",
+            "renderingStill": "正在渲染 · 正在显示首帧",
+            "rendered": "已渲染",
+            "untouched": "未更改",
+            "needsRerender": "需要重新渲染",
+            "staleStillPlays": "已过时 · 仍可播放",
+            "failedNotBilled": "失败 · 未计费",
+            "neverDispatched": "从未提交",
+            "shotKept": "镜头 {{position}} · 已保留",
+            "statusPending": "状态不可用",
+            "needsAttention": "需要处理"
+          },
+          "boundaryFrame": {
+            "empty": "镜头 {{position}} 后的边界 · 等待连续性帧",
+            "ready": "镜头 {{position}} 后的边界 · 连续性帧已就绪",
+            "gone": "镜头 {{position}} 后的边界 · 连续性帧缺失",
+            "stale": "镜头 {{position}} 后的边界 · 连续性帧已过时"
+          },
+          "seekGuidance": "轨道 · 定位 · 免费",
+          "seekLane": "节拍定位轨",
+          "seekValue": "{{current}} / {{total}}"
+        },
+        "preview": {
+          "label": "节拍预览",
+          "noMedia": "节拍预览不可用",
+          "mediaError": "无法预览当前画面。",
+          "videoLabel": "镜头 {{position}} 视频 · {{shootingScript}}",
+          "slateLabel": "镜头 {{position}} 规划场记卡 · {{shootingScript}}",
+          "slate": "规划场记卡",
+          "slateHold": "保留 {{clock}}",
+          "play": "播放节拍",
+          "pause": "暂停节拍",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "仅画面",
+          "controlsLabel": "节拍播放控制",
+          "previousJoin": "上一个接点",
+          "nextJoin": "下一个接点",
+          "loopJoin": "循环最近接点",
+          "keyboardGuidance": "空格键播放 · 方向键定位 · [ ] 切换接点 · L 循环"
+        },
+        "directorRequestHint": "请 Creative Director 提供经审核的重新拆分方案。",
+        "recovery": {
+          "cancelAndReviewRejoin": "取消并审核重新衔接",
+          "cancelAndReviewRejoinTitle": "取消已授权工作并审核重新衔接？",
+          "cancelAndReviewRejoinBody": "这只会取消尚未提交的等待中视频工作。已完成的媒体和授权历史会保留。替代生成前必须审核新的重新衔接估算。",
+          "cancelAndReviewRejoinConfirm": "取消并审核重新衔接",
+          "cancelAndReviewRejoinUnconfirmed": "等待中的工作已取消，但无法确认刷新后的工作区。请先刷新，再审核重新衔接。",
+          "cancelAndReviewRejoinOutcomeUnknown": "无法确认取消结果。请先刷新工作区，再审核重新衔接。"
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "影片设置",
+        "videoAudioCapability": {
+          "silentOnly": "此引擎生成无声片段。",
+          "audioCapable": "此引擎可以生成声音；生成完成的镜头音频将另行分析。"
+        },
+        "undoLabel": {
+          "promote_board_panel": "将分镜用作首帧",
+          "set_reference_plan": "参考计划",
+          "amend_reference_plan": "添加背景",
+          "set_reference_label": "参考名称",
+          "set_reference_prompt": "参考提示词",
+          "select_reference_image": "当前参考图",
+          "remove_reference_image": "移除参考图像",
+          "dismiss_seed_still": "忽略首帧",
+          "select_video_take": "选择视频片段",
+          "remove_video_take": "移除视频片段",
+          "set_shot_reference_binding": "Shot 参考绑定"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "分镜",
+          "reference_image": "参考图像"
+        },
+        "promotion": {
+          "title": "将分镜用作首帧",
+          "summary": "将 Shot {{shotId}} 的当前导演分镜提升为首帧。此操作不会更改该 Shot 的连续性边界。",
+          "impactNone": "没有当前画面依赖此帧。",
+          "impactIntro": "以下 {{count}} 个当前画面仍可播放，但会变为已过期：",
+          "impactItem": "Shot {{shotId}} 的当前画面",
+          "optionsLabel": "选择如何处理当前画面",
+          "promoteOnly": "仅提升 — 保留可播放但已过期的画面",
+          "freePrice": "$0",
+          "promoteAndRerender": "提升并查看确切的重新渲染任务",
+          "priceAfterReview": "下一步显示价格",
+          "promoteOnlyAction": "免费提升",
+          "reviewPaidAction": "查看重新渲染价格",
+          "paidUnavailable": "此片段的当前画面过多，无法一次付费确认。仍可选择仅提升。",
+          "headline": "提升 + 重新渲染 {{count}} 个 · {{cost}}",
+          "requiredWork": "所列重新渲染项正是此次提升会使其过期的当前画面。不包括缺失的覆盖内容。",
+          "confirm": "确认提升 + 重新渲染 {{count}} 个 · {{cost}}",
+          "promoted": "分镜已提升。现有画面仍可播放，并已标记为过期。",
+          "promoting": "正在提升分镜…",
+          "confirmed": "分镜已提升，并已开始重新渲染确认的画面。",
+          "close": "关闭"
+        },
+        "headline_one": "{{count}} 次生成 · {{cost}}",
+        "headline_other": "{{count}} 次生成 · {{cost}}",
+        "confirm_one": "确认 {{count}} 次生成 · {{cost}}",
+        "confirm_other": "确认 {{count}} 次生成 · {{cost}}",
+        "hideBreakdown": "隐藏每次生成",
+        "showBreakdown": "显示每次生成",
+        "conditioningFrameAlt": "{{shot}} 的条件帧",
+        "routeShared": "全部使用 {{model}}",
+        "group": {
+          "required": "必需"
+        },
+        "continuity": {
+          "severTitle": "审阅硬切",
+          "rejoinTitle": "审阅重新衔接",
+          "severSummary": "此报价会将该镜头设为链头，复用符合条件的首帧或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
+          "rejoinSummary": "此报价会清除该镜头的首帧选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
+          "severHeadline": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "severHeadline_one": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "severHeadline_other": "硬切 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline_one": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "rejoinHeadline_other": "重新衔接 · {{count}} 次必需生成 · {{cost}}",
+          "requiredWork": "此链变更必须完成列出的全部替换工作。",
+          "confirmSever": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_one": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmSever_other": "确认硬切 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_one": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "confirmRejoin_other": "确认重新衔接 + {{count}} 次生成 · {{cost}}",
+          "close": "关闭 — 保持链不变",
+          "severConfirmed": "已确认硬切。请在镜头中查看首帧和替换工作的进度，以及任何必要的恢复操作。",
+          "rejoinConfirmed": "已确认重新衔接。请在镜头中查看帧提取和替换工作的进度，以及任何必要的恢复操作。"
+        },
+        "errors": {
+          "routesUnavailable": "准备此估算前，请在“影片设置”中选择可用的图像和视频路线。",
+          "pricing": {
+            "invalidQuote": "报价数据内部不一致。未提交任何内容。",
+            "inactiveShot": "一个已选镜头已不再处于活动状态。请刷新项目后重新准备报价。",
+            "inFlight": "一个已选生成任务正在进行中。请等待其完成或更改选择。",
+            "duplicateShotPurpose": "同一生成任务被选择了多次。请检查选择后重新准备报价。",
+            "invalidDependency": "后续生成的依赖关系已失效。请刷新项目后重新准备报价。",
+            "invalidPrepareRequest": "无法安全地准备所选生成任务。请检查选择后重新准备报价。",
+            "invalidReference": "一个已选参考图已不再适用于此次生成。请选择其他参考图。",
+            "missingShootingScript": "生成媒体前，请先编写此 Shot 的拍摄脚本。",
+            "missingConditioning": "一个视频镜头缺少可用的首帧或前序帧。请添加或选择所需图像。",
+            "unsafeTotal": "无法安全表示报价总额。请减少选择；未提交任何内容。"
+          }
+        },
+        "reviewShotBinding": "审核 Shot 绑定",
+        "readout": {
+          "prompt": "确切提示词",
+          "rendersAs": "渲染配置",
+          "sourceRevision": "来源修订版",
+          "source": "来源",
+          "story": "故事",
+          "shootingScript": "拍摄脚本",
+          "referencePrompt": "参考描述",
+          "references": "已解析参考",
+          "noReferences": "无直接参考输入",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        },
+        "referenceGridRetry": "如果模型返回变体网格，每个参考图可自动重试一次。首次尝试共计 {{lower}}；需要重试时最高为 {{upper}}。"
+      },
+      "editorFolderExport": {
+        "action": "导出剪辑文件夹…",
+        "actionWithSlates": "导出剪辑文件夹 · {{count}} 个占位画面…",
+        "exporting": "正在导出… 不会生成媒体，也不会产生费用。",
+        "reveal": "在访达中显示",
+        "dismiss": "关闭",
+        "none": "无",
+        "successFacts": "{{bytes}} 字节 · {{count}} 个文件",
+        "successSlates": "占位画面镜头编号：{{shots}}",
+        "successQuarantine": "已移到一旁的旧导出：{{count}}",
+        "disabled": {
+          "no_beats": "请先添加节拍再导出",
+          "duration_pending": "请先为每个空节拍设置时长",
+          "invalid_media": "请先处理过期或无效的已选媒体",
+          "bed_too_short": "请选择足以覆盖时间线的音频床",
+          "mutationActive": "请等待当前工作区更改完成",
+          "exportRunning": "剪辑文件夹导出正在进行",
+          "catalogUnavailable": "剪辑文件夹导出存储不可用"
+        },
+        "errors": {
+          "catalogUnavailable": "导出目录不可用。请重新加载项目后重试。",
+          "staleAuthority": "项目已更改。请检查当前项目后再导出。",
+          "staleCatalog": "导出目录已更改。请重新加载导出记录后重试。",
+          "invalidMedia": "所选媒体已过期、不是标准媒体或无效。请先检查剪辑。",
+          "mediaUnavailable": "无法验证所选媒体文件。未发布任何不完整导出。",
+          "busy": "Creative Studio 正在完成另一项工作区操作。请稍后重试。",
+          "artifactUnavailable": "此导出已不在当前目录中。请重新加载后再显示。",
+          "resultConflict": "确认结果前收到了更新的导出目录。请重新加载并检查导出。"
+        }
+      },
+      "filmExport": {
+        "action": "导出影片…",
+        "actionWithSlates": "导出影片 · {{count}} 个场记卡…",
+        "actionWithSlates_one": "导出影片 · {{count}} 个场记卡…",
+        "actionWithSlates_other": "导出影片 · {{count}} 个场记卡…",
+        "cancel": "取消导出",
+        "cut": "直接剪切",
+        "description": "从当前剪辑创建可供编辑的 MP4。未覆盖的镜头会成为定时黑场。",
+        "disabled": {
+          "no_beats": "导出前请添加 Beat",
+          "duration_pending": "请为每个空 Beat 设置时长",
+          "invalid_media": "导出前请处理陈旧或无效媒体",
+          "bed_too_short": "请选择足够长的音频床",
+          "mutationActive": "请先完成当前工作区更改",
+          "exportRunning": "影片导出已在运行",
+          "catalogUnavailable": "影片导出存储不可用"
+        },
+        "dismiss": "关闭",
+        "dissolve": "叠化",
+        "errors": {
+          "catalogUnavailable": "导出目录不可用。请重新加载项目。",
+          "staleAuthority": "项目已更改。未发布任何陈旧影片——请检查当前项目后再导出。",
+          "staleCatalog": "导出目录已更改。未发布任何陈旧影片——请重新加载导出记录后再导出。",
+          "unavailable": "影片导出需要 FFmpeg，但在此设备上未找到。请安装 FFmpeg，或将 FFMPEG_PATH 设置为已有副本的路径，然后重新打开项目。",
+          "renderFailed": "无法验证本地影片渲染，未发布部分导出。",
+          "cancelled": "影片导出已取消，项目媒体未更改。",
+          "invalidMedia": "剪辑包含陈旧、非规范或无效媒体。",
+          "busy": "Creative Studio 正在完成另一项操作。",
+          "artifactUnavailable": "该影片已不在活动目录中。",
+          "resultConflict": "确认影片前收到了更新的导出目录。"
+        },
+        "export": "导出影片",
+        "noSpend": "此操作在本机运行，不会生成媒体，也不会产生费用。",
+        "phase": {
+          "preparing": "正在准备精确源媒体…",
+          "analyzing": "正在分析媒体和静止尾部…",
+          "rendering": "正在本地渲染影片…",
+          "publishing": "正在验证并发布完成的影片…"
+        },
+        "reveal": "在 Finder 中显示",
+        "successFacts": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successFacts_one": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successFacts_other": "创作 {{nominal}} 秒 · 导出 {{rendered}} 秒 · 裁剪 {{count}} 个尾部",
+        "successQuarantine": "已移到一旁的旧影片导出：{{count}}",
+        "successQuarantine_one": "已移到一旁的旧影片导出：{{count}}",
+        "successQuarantine_other": "已移到一旁的旧影片导出：{{count}}",
+        "title": "导出影片",
+        "transition": "转场",
+        "trimTails": "裁剪每个镜头末尾的静止尾部",
+        "trimTailsHelp": "仅影响导出的文件，不会改动项目中的镜头。最后一个镜头保持完整时长。"
+      }
     },
     "rules": {
       "open": "规则",
@@ -948,10 +1819,7 @@
     "close": {
       "saveAndClose": "保存并关闭",
       "discard": "放弃更改并关闭",
-      "cancel": "取消",
-      "unsavedMessage": "有 {{count}} 个场景包含未保存的编辑。是否保存后再关闭？",
-      "unsavedMessage_other": "有 {{count}} 个场景包含未保存的编辑。是否保存后再关闭？",
-      "unavailableMessage": "创意工作室没有响应。现在关闭可能会丢失未保存的场景编辑。"
+      "cancel": "取消"
     },
     "phase": {
       "nav": {
@@ -1243,98 +2111,6 @@
       "durationSeconds_other": "{{seconds}} 秒",
       "selected": "已选场景"
     },
-    "inspector": {
-      "title": "场景指导",
-      "sectionsLabel": "场景编辑区",
-      "directionTab": "视觉",
-      "scriptTab": "脚本",
-      "titleLabel": "场景标题",
-      "purposeLabel": "场景目标",
-      "purposePlaceholder": "这个场景要达到什么目的？",
-      "visualPromptLabel": "视觉提示词",
-      "visualPromptPlaceholder": "描述镜头、主体、环境、光线和运动。",
-      "narrationLabel": "旁白",
-      "onScreenTextLabel": "画面文字",
-      "mediaKindLabel": "输出类型",
-      "durationLabel": "场景时长（秒）",
-      "invalidDuration": "请输入 1 到 60 秒之间的整数。",
-      "saving": "正在保存场景...",
-      "saved": "场景已保存",
-      "saveFailed": "无法保存场景。",
-      "unsavedChanges": "未保存的更改已为你保留。"
-    },
-    "draft": {
-      "title": "起草故事板",
-      "body": "WePrompt 将提出场景、旁白、画面文字和时长，供你审核。",
-      "checking": "正在检查所选分镜模型...",
-      "ready": "可以起草",
-      "setupRequired": "请选择并配置分镜模型以使用 AI 起草。",
-      "unavailable": "故事板起草功能当前不可用。",
-      "providerLabel": "分镜提供商",
-      "modelLabel": "分镜模型",
-      "chargeNotice": "起草将使用项目所选的分镜模型，可能产生提供商费用。",
-      "replaceTitle": "替换现有故事板？",
-      "replaceBody": "再次起草仅会在返回有效方案后替换所有当前场景。",
-      "confirm": "起草故事板",
-      "cancel": "取消",
-      "configureModel": "打开模型设置",
-      "manualFallback": "继续手动编辑",
-      "failed": "无法起草故事板。当前场景未被更改。"
-    },
-    "conditioning": {
-      "inputsTitle": "此静帧的输入",
-      "role": { "cast": "角色", "look": "风格" },
-      "maximum": "此引擎最多接受 {{count}} 个简报参考。",
-      "unsupported": "此图像引擎无法使用有效的简报参考。请选择其他图像引擎，或从简报中移除这些参考。",
-      "overflow": "此图像引擎最多接受 {{maximum}} 个简报参考，但当前有 {{count}} 个有效参考。",
-      "malformed": "简报参考已更改或无效。请在生成前刷新审核。",
-      "reviewChanged": "简报参考或图像引擎已更改。请在生成前审核刷新后的输入。",
-      "plateOutOfDate": "所选首帧使用了不同的简报参考、宽高比或分辨率。你仍可渲染此片段。"
-    },
-    "reference": {
-      "generate": "生成参考图",
-      "dialogTitle": "生成参考图像",
-      "promptLabel": "参考图提示词",
-      "reviewTag": "参考图",
-      "excludedSummary": "部分请求的场景尚未就绪，因此不包含在本次批准中：",
-      "excludedNoneReady": "请求的场景均未准备好生成参考图：",
-      "discardExcludedRequests": "丢弃这些请求",
-      "excludedUnavailable": "场景已不可用",
-      "excludedPromptUnusable": "该场景的画面提示词无法描述参考图",
-      "dismissFailed": "无法更新请求队列。审核窗口已关闭，请稍后重试。"
-    },
-    "review": {
-      "generateReadyScenes": "生成 {{count}} 个已就绪场景",
-      "generateReadyScenes_other": "生成 {{count}} 个已就绪场景",
-      "noReadyScenes": "没有可生成的已就绪场景。",
-      "generateScene": "生成场景",
-      "regenerateScene": "生成另一个变体",
-      "title": "审核生成设置",
-      "sceneCount": "已选择 {{count}} 个场景",
-      "videoSeconds": "请求生成 {{seconds}} 秒视频",
-      "selectedDurationFull": "已选时长：{{seconds}} 秒",
-      "selectedDurationFull_other": "已选时长：{{seconds}} 秒",
-      "targetDurationFull": "目标时长：{{seconds}} 秒",
-      "targetDurationFull_other": "目标时长：{{seconds}} 秒",
-      "providerLabel": "服务商",
-      "modelLabel": "模型",
-      "aspectRatio": "宽高比",
-      "resolution": "分辨率",
-      "watermarkOff": "已禁用水印",
-      "audioOff": "静音输出；已禁用音频生成",
-      "missingRoute": "至少有一个场景没有引擎。",
-      "invalidRoute": "至少有一个所选引擎无效。",
-      "durationMismatch": "故事板时长与项目目标不一致。",
-      "chargeNotice": "生成会使用你选择的服务商账户，并可能产生服务商费用。",
-      "confirm": "确认并生成",
-      "cancel": "取消",
-      "disabledMissingRoutes": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
-      "disabledMissingRoutes_other": "有 {{count}} 个镜头没有引擎。关闭此窗口进行设置。",
-      "setEngines": "关闭并设置引擎",
-      "excludedFirstFrame": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
-      "excludedFirstFrame_other": "本次渲染不包含 {{count}} 个镜头——此引擎无法从一帧开始。",
-      "audioOn": "此次渲染包含生成的音频；静音引擎（如有）仍将保持静音。"
-    },
     "jobs": {
       "progress": "已完成 {{percent}}%",
       "cancel": "取消任务",
@@ -1344,8 +2120,8 @@
       "retryConfirmationConfirm": "确认并重试",
       "retryDownload": "重试下载",
       "retryChargeTitle": "重试可能产生重复费用，是否继续？",
-      "retryChargeBody": "上次提交结果未知。重试可能再次产生服务商费用。",
-      "retryChargeConfirm": "确认风险并重试",
+      "retryChargeBody": "上次提交结果未知。替代生成可能再次产生服务商费用。继续只会解锁新的费用估算，尚不会提交生成任务。",
+      "retryChargeConfirm": "确认风险并查看估算",
       "status": {
         "queuedLocal": "等待提交",
         "submitting": "正在提交",
@@ -1358,6 +2134,7 @@
       },
       "errors": {
         "invalidRequest": "生成请求无效。",
+        "contentRejected": "服务商拒绝了起始图像。请重新构图或重新生成静帧后再试。",
         "auth": "服务商拒绝了凭据。",
         "quota": "服务商账户额度不足。",
         "rateLimited": "已达到服务商速率限制，请稍后重试。",
@@ -1368,7 +2145,9 @@
         "submissionUnknown": "提交结果未知。重试前请查看重复扣费警告。",
         "downloadFailed": "生成已完成，但无法下载输出。",
         "unsupported": "此服务商不支持请求的操作。",
-        "unknown": "生成任务因未知原因失败。"
+        "seedStillVariationGrid": "生成的图像包含多面板变体网格，不能用作当前首帧或参考图。",
+        "unknown": "生成任务因未知原因失败。",
+        "referenceVariationGridRepeated": "模型再次返回了多面板变体网格。导入照片是设置此参考图的可靠方式。"
       }
     },
     "preview": {
@@ -1427,15 +2206,20 @@
     "errors": {
       "featureDisabled": "此版本中已禁用 Creative Studio。",
       "invalidPayload": "请求包含无效或不完整的信息。",
+      "mutationRefused": "无法在项目当前状态下应用此更改。请检查项目后重试。",
+      "pricingRefused": "报价在提交前被拒绝。未提交任何内容。",
       "projectNotFound": "此创意工作室项目已不存在。",
       "storyboardExists": "此项目已有故事板。再次起草前请确认替换。",
       "staleProject": "项目已在其他位置发生更改。请刷新后重试。",
+      "staleExportCatalog": "导出目录已更改。请刷新导出记录后重试。",
       "planningUnavailable": "故事板起草不可用，你仍可继续手动编辑。",
       "invalidRoute": "所选生成引擎无效或不可用。",
       "cancellationRefused": "服务商已无法取消这个运行中的任务。",
       "duplicateChargeAcknowledgementRequired": "重试前请确认可能产生重复服务商费用。",
       "busy": "此项目有正在进行的生成任务。",
       "provider": "服务商无法完成请求。",
+      "runtimeInactive": "创意工作室的生成功能尚未就绪。请打开或创建一个受支持的项目，然后重试。",
+      "projectQuarantined": "创意工作室无法启动，因为项目 {{projectId}} 需要恢复。请在创意工作室项目库中查看该项目。",
       "storage": "创意工作室无法更新本地数据。",
       "ruleBreach": "一条规则在产生任何费用前阻止了生成。打开“规则”查看需要修改的内容。"
     },
@@ -1505,43 +2289,13 @@
         "frame": "此引擎无法生成 {{ratio}}。",
         "resolution": "此引擎无法生成 {{resolution}}。",
         "duration": "此引擎无法生成 {{seconds}} 秒的镜头。",
-        "firstFrame": "此引擎无法从参考图像开始。",
+        "firstFrame": "此引擎无法从已审阅的首帧开始。",
         "catalogUnloaded": "引擎列表尚未加载。",
         "aria": "无法渲染。{{reason}}",
         "actionSetEngines": "设置引擎",
         "actionRemoveReference": "移除参考图",
-        "actionShorten": "缩短此镜头"
+        "actionShorten": "调整镜头长度"
       }
-    },
-    "brief": {
-      "conversationTitle": "简报对话",
-      "danglingNotice": "此项目的简报对话已不可用。",
-      "danglingStartFresh": "开始新对话",
-      "proposalTitle": "提议的脚本",
-      "proposalMeta": "基于修订版 {{revision}} · {{createdAt}}",
-      "proposalSummary": "新增 {{added}} · 删除 {{removed}} · 修改 {{changed}}",
-      "proposalSceneChange": "镜头 {{position}}：{{fields}}",
-      "proposalFieldSeparator": "、",
-      "proposalNoChanges": "当前脚本无更改",
-      "proposalDiffUnavailable": "更改摘要不可用 — 此提案起草后，脚本已发生变化",
-      "proposalField": {
-        "title": "标题",
-        "purpose": "目标",
-        "visualPrompt": "视觉提示词",
-        "narration": "旁白",
-        "onScreenText": "画面文字",
-        "mediaKind": "输出类型",
-        "durationSeconds": "时长",
-        "referenceAssetId": "参考图"
-      },
-      "proposalAccept": "接受脚本",
-      "proposalReject": "拒绝",
-      "proposalAccepted": "脚本已应用",
-      "proposalRejected": "已拒绝",
-      "proposalExpired": "已过期",
-      "proposalStale": "此提案等待期间脚本已发生变化。请请求重新起草。",
-      "proposalRepropose": "请求重新起草",
-      "proposalFlushRefused": "无法保存你尚未保存的编辑，因此未应用此提案。请修正这些编辑后重试。"
     },
     "shell": {
       "showDirector": "显示创意总监",

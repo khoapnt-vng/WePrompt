@@ -4,50 +4,35 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
-import type { StudioProject, StudioScene } from '@/common/types/project/creativeStudioTypes';
+import { STUDIO_MUTATION_BATCH_SCHEMA_VERSION } from '@/common/types/project/creativeStudioTypes';
+import { writeReferenceRequestRecordV2 } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
 import {
   createStudioE2EFakeBundle,
-  STUDIO_E2E_CREDENTIAL_SENTINEL,
-  STUDIO_E2E_PROVIDER_JOB_SENTINEL,
-  STUDIO_E2E_PROVIDER_URL_SENTINEL,
-  STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
-  STUDIO_E2E_RAW_OUTPUT_PATH_SENTINEL,
+  createStudioE2EFakeRemoteState,
 } from '@process/services/creative-studio/adapters/e2eFakeAdapter';
-import type { ResolvedStudioGenerationRequest } from '@process/services/creative-studio/adapters/types';
-import {
-  createStudioJobManager,
-  type StudioJobManager,
-  type StudioResolvedSceneRouteSnapshot,
-} from '@process/services/creative-studio/jobManager';
+import { createStudioJobManager } from '@process/services/creative-studio/jobManager';
 import { createStudioMediaStore } from '@process/services/creative-studio/mediaStore';
 import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
-import { createCreativeStudioService } from '@process/services/creative-studio/service';
-import { createCreativeStudioStore } from '@process/services/creative-studio/store';
-import { afterEach, describe, expect, it } from 'vitest';
+import { createCreativeStudioServiceV2 } from '@process/services/creative-studio/service';
+import { createStudioRateCardV2 } from '@process/services/creative-studio/service/schema2/pricing';
+import { CreativeStudioStoreError, createCreativeStudioStore } from '@process/services/creative-studio/store';
+import { describe, expect, it, vi } from 'vitest';
 
-const scene: StudioScene = {
-  id: 'scene_1',
-  title: 'Opening',
-  purpose: 'Introduce the product',
-  visualPrompt: 'A paper airplane crossing a sunrise',
-  narration: '',
-  onScreenText: '',
-  mediaKind: 'video',
-  durationSeconds: 5,
-  referenceAssetId: null,
-  selectedAssetId: null,
-  assetIds: [],
-  jobIds: [],
-  reviewState: 'ready',
-};
-
-const waitFor = async <T>(read: () => Promise<T | null>, attemptsRemaining = 200): Promise<T> => {
-  const value = await read();
-  if (value !== null) return value;
+const waitFor = async <T>(read: () => Promise<T | null>, attemptsRemaining = 2_000): Promise<T> => {
+  try {
+    const value = await read();
+    if (value !== null) return value;
+  } catch (error) {
+    // The integration probe deliberately reads while a multi-record media publication is in
+    // flight. The store fails closed until that authority transaction settles, then becomes
+    // readable again; only that bounded transient state is retryable here.
+    if (!(error instanceof CreativeStudioStoreError) || error.code !== 'storage_error' || attemptsRemaining <= 1) {
+      throw error;
+    }
+  }
   if (attemptsRemaining <= 1) throw new Error('Timed out waiting for Creative Studio integration state');
   await new Promise<void>((resolve) => setTimeout(resolve, 5));
   return waitFor(read, attemptsRemaining - 1);
@@ -101,867 +86,1314 @@ class ControlledPollClock {
   }
 }
 
-type Harness = {
-  rootDir: string;
-  project: StudioProject;
-  route: StudioResolvedSceneRouteSnapshot;
-  manager: StudioJobManager;
-  clock: ControlledPollClock;
-  store: ReturnType<typeof createCreativeStudioStore>;
-  mediaStore: ReturnType<typeof createStudioMediaStore>;
-  fake: ReturnType<typeof createStudioE2EFakeBundle>;
-};
+/**
+ * An integration file: 5 cases, each standing up a temporary project root and driving a whole
+ * generation lifecycle through it. The sweep measured one at 11.1s even on a quiet machine.
+ *
+ * Under full-suite parallelism these exceeded the 10s global testTimeout and failed the push gate on
+ * timing rather than on merit. The ceiling is set on the suite because which case loses the race
+ * under load is arbitrary — the first such failure in this file family was a 1.35s case, not the
+ * slowest. It is a hang-detector, not a performance budget: a genuine hang still fails, just later,
+ * and no assertion is weakened. See tests/unit/assets/prepareAioncoreActionsArtifact.test.ts, where
+ * 30s was tried for the same class of case and proved too tight.
+ *
+ * No case here may carry its own timeout: a per-test ceiling overrides the suite's rather than
+ * tightening it, so a leftover cap silently keeps that case outside this raise. Two sat at 60s
+ * and 30s, from before this ceiling existed, until 2026-08-30 -- the sibling film.test.ts lost a
+ * gate run to the same oversight at 15s.
+ */
+const GENERATION_LIFECYCLE_TIMEOUT_MS = 120_000;
 
-const REFERENCE_FIXTURE_BYTES = Buffer.from(
-  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWMwTpv5HwAENAIyeXoBdAAAAABJRU5ErkJggg==',
-  'base64'
-);
+describe('Creative Studio generation lifecycle integration', { timeout: GENERATION_LIFECYCLE_TIMEOUT_MS }, () => {
+  it('persists two direct semantic-reference jobs across a store reload', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-direct-reference-integration-'));
+    const fake = createStudioE2EFakeBundle({ rootDir });
+    let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
+    let restartedManager: ReturnType<typeof createStudioJobManager> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const providerResolver = createStudioProviderResolver({
+        listProviders: async () => [fake.provider],
+        listConnections: () => store.listConnections(),
+      });
+      const imageRoute = (await providerResolver.listGenerationRoutes()).routes.find(
+        (candidate) => candidate.kind === 'image'
+      );
+      if (!imageRoute) throw new Error('Shared-reference lifecycle did not resolve the fake image route');
 
-const activeHarnesses: Harness[] = [];
-const activeManagers: StudioJobManager[] = [];
-
-const createHarness = async (): Promise<Harness> => {
-  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-generation-integration-'));
-  const fake = createStudioE2EFakeBundle({ rootDir });
-  const store = createCreativeStudioStore({ rootDir });
-  await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
-  const created = await store.createProject({
-    name: 'Launch film',
-    brief: 'A concise launch story',
-    aspectRatio: '16:9',
-    targetDurationSeconds: 5,
-    resolution: '720p',
-  });
-  let project = await store.updateProject(created.id, (current) => ({
-    ...current,
-    sceneOrder: [scene.id],
-    scenes: { [scene.id]: structuredClone(scene) },
-  }));
-  const listProviders = async () => [fake.provider];
-  const providerResolver = createStudioProviderResolver({
-    listProviders,
-    listConnections: () => store.listConnections(),
-  });
-  const catalog = await providerResolver.listGenerationRoutes();
-  const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
-  if (!videoRoute) throw new Error('E2E fake video route was not resolved');
-  const route: StudioResolvedSceneRouteSnapshot = {
-    sceneId: scene.id,
-    providerId: videoRoute.providerId,
-    adapterId: videoRoute.adapterId,
-    model: videoRoute.model,
-    kind: videoRoute.kind,
-  };
-  project = await store.updateProject(project.id, (current) => ({
-    ...current,
-    routing: {
-      ...current.routing,
-      video: { providerId: route.providerId, adapterId: route.adapterId, model: route.model },
-    },
-  }));
-  const mediaStore = createStudioMediaStore({ store });
-  const clock = new ControlledPollClock();
-  const manager = createStudioJobManager({
-    store,
-    mediaStore,
-    providerResolver,
-    adapters: fake.adapters,
-    listProviders,
-    createJobId: () => 'job_lifecycle',
-    createIdempotencyKey: () => 'idempotency_lifecycle',
-    sleep: clock.sleep,
-    jitterMs: (baseMs) => baseMs,
-  });
-  const harness = { rootDir, project, route, manager, clock, store, mediaStore, fake };
-  activeHarnesses.push(harness);
-  return harness;
-};
-
-const importBriefReferences = async (
-  harness: Harness
-): Promise<{ project: StudioProject; castAssetId: string; lookAssetId: string }> => {
-  const castPath = path.join(harness.rootDir, 'Lead Hero.png');
-  const lookPath = path.join(harness.rootDir, 'Golden Atrium.png');
-  await Promise.all([writeFile(castPath, REFERENCE_FIXTURE_BYTES), writeFile(lookPath, REFERENCE_FIXTURE_BYTES)]);
-  const cast = await harness.mediaStore.importReferenceFromPath({
-    projectId: harness.project.id,
-    expectedRevision: harness.project.revision,
-    sourcePath: castPath,
-    briefReferenceRole: 'cast',
-    returnProject: true,
-  });
-  const look = await harness.mediaStore.importReferenceFromPath({
-    projectId: harness.project.id,
-    expectedRevision: cast.project.revision,
-    sourcePath: lookPath,
-    briefReferenceRole: 'look',
-    returnProject: true,
-  });
-  return { project: look.project, castAssetId: cast.asset.id, lookAssetId: look.asset.id };
-};
-
-const submitReferenceAndStopWithRemoteIdentity = async (
-  harness: Harness
-): Promise<{
-  configured: StudioProject;
-  providerResolver: ReturnType<typeof createStudioProviderResolver>;
-}> => {
-  const listProviders = async () => [harness.fake.provider];
-  const providerResolver = createStudioProviderResolver({
-    listProviders,
-    listConnections: () => harness.store.listConnections(),
-  });
-  const catalog = await providerResolver.listGenerationRoutes();
-  const catalogImageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
-  if (!catalogImageRoute) throw new Error('E2E fake image route was not resolved');
-  const imageRoute: StudioResolvedSceneRouteSnapshot = {
-    sceneId: scene.id,
-    providerId: catalogImageRoute.providerId,
-    adapterId: catalogImageRoute.adapterId,
-    model: catalogImageRoute.model,
-    kind: catalogImageRoute.kind,
-  };
-  const configured = await harness.store.updateProject(harness.project.id, (current) => ({
-    ...current,
-    routing: {
-      ...current.routing,
-      image: {
-        providerId: imageRoute.providerId,
-        adapterId: imageRoute.adapterId,
-        model: imageRoute.model,
-      },
-    },
-  }));
-
-  await harness.manager.submitScenes({
-    projectId: configured.id,
-    expectedRevision: configured.revision,
-    sceneIds: [scene.id],
-    routes: [imageRoute],
-    catalogVersion: catalog.generationCatalogVersion,
-    outputRole: 'reference',
-    referencePrompts: [{ sceneId: scene.id, prompt: 'A restart-safe reference plate' }],
-  });
-  await waitFor(async () => {
-    const job = (await harness.store.getProject(configured.id))?.jobs.job_lifecycle;
-    return job?.status === 'queued_remote' && job.providerJobId ? job : null;
-  });
-  await harness.clock.take(2_000);
-  const disposal = harness.manager.dispose();
-  harness.clock.releaseAll();
-  await disposal;
-
-  return { configured, providerResolver };
-};
-
-const createRestartedManager = (
-  harness: Harness,
-  providerResolver: ReturnType<typeof createStudioProviderResolver>
-): StudioJobManager => {
-  const manager = createStudioJobManager({
-    store: harness.store,
-    mediaStore: harness.mediaStore,
-    providerResolver,
-    adapters: harness.fake.adapters,
-    listProviders: async () => [harness.fake.provider],
-    sleep: async () => undefined,
-    jitterMs: (baseMs) => baseMs,
-  });
-  activeManagers.push(manager);
-  return manager;
-};
-
-const forbiddenDtoKeys = new Set([
-  'path',
-  'filepath',
-  'sourcepath',
-  'destinationpath',
-  'url',
-  'signedurl',
-  'apikey',
-  'credential',
-  'credentials',
-  'authorization',
-  'bytes',
-  'base64',
-  'secret',
-]);
-
-const collectForbiddenDtoKeys = (value: unknown, found: string[] = []): string[] => {
-  if (Array.isArray(value)) {
-    for (const item of value) collectForbiddenDtoKeys(item, found);
-    return found;
-  }
-  if (typeof value !== 'object' || value === null) return found;
-  for (const [key, nested] of Object.entries(value)) {
-    const normalized = key.replaceAll(/[^A-Za-z0-9]/g, '').toLowerCase();
-    if (forbiddenDtoKeys.has(normalized)) found.push(key);
-    collectForbiddenDtoKeys(nested, found);
-  }
-  return found;
-};
-
-afterEach(async () => {
-  await Promise.all(activeManagers.splice(0).map((manager) => manager.dispose().catch((): undefined => undefined)));
-  await Promise.all(
-    activeHarnesses.splice(0).map(async (harness) => {
-      harness.clock.releaseAll();
-      await harness.manager.dispose().catch((): undefined => undefined);
-      await harness.fake.dispose().catch((): undefined => undefined);
-      await rm(harness.rootDir, { recursive: true, force: true });
-    })
-  );
-});
-
-describe('Creative Studio generation lifecycle integration', () => {
-  it('resumes a reference job on a video scene through its durable image route', async () => {
-    const harness = await createHarness();
-    const { configured, providerResolver } = await submitReferenceAndStopWithRemoteIdentity(harness);
-    const manager = createRestartedManager(harness, providerResolver);
-
-    await manager.resumePendingJobs();
-
-    const recovered = await waitFor(async () => {
-      const current = await harness.store.getProject(configured.id);
-      const status = current?.jobs.job_lifecycle.status;
-      return current && (status === 'succeeded' || status === 'needs_attention') ? current : null;
-    });
-    expect(recovered.jobs.job_lifecycle).toMatchObject({
-      status: 'succeeded',
-      outputRole: 'reference',
-      error: null,
-    });
-    expect(recovered.jobs.job_lifecycle.error?.code).not.toBe('provider_unavailable');
-  });
-
-  it('retries a reference download on a video scene through its durable image route', async () => {
-    const harness = await createHarness();
-    const { configured, providerResolver } = await submitReferenceAndStopWithRemoteIdentity(harness);
-    const failed = await harness.store.updateProject(configured.id, (current) => {
-      const next = structuredClone(current);
-      next.jobs.job_lifecycle.status = 'failed';
-      next.jobs.job_lifecycle.error = {
-        code: 'download_failed',
-        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
-      };
-      next.scenes[scene.id].reviewState = 'blocked';
-      return next;
-    });
-    const manager = createRestartedManager(harness, providerResolver);
-
-    const retried = await manager.retryDownload({
-      projectId: failed.id,
-      jobId: 'job_lifecycle',
-      expectedRevision: failed.revision,
-    });
-
-    expect(retried).toMatchObject({
-      status: 'failed',
-      outputRole: 'reference',
-      error: { code: 'download_failed' },
-    });
-  });
-
-  it('persists Cast-before-Look still provenance and reloads only the selected plate into video', async () => {
-    const harness = await createHarness();
-    const imported = await importBriefReferences(harness);
-    const providerResolver = createStudioProviderResolver({
-      listProviders: async () => [harness.fake.provider],
-      listConnections: () => harness.store.listConnections(),
-    });
-    const catalog = await providerResolver.listGenerationRoutes();
-    const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
-    const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
-    if (!imageRoute || !videoRoute) throw new Error('Reference lifecycle routes were not resolved');
-    expect(videoRoute.constraints.supportsFirstFrame).toBe(true);
-    expect(videoRoute.constraints.maxConditioningImages).toBe(0);
-    expect(imageRoute.constraints.maxConditioningImages).toBe(6);
-
-    const configured = await harness.store.updateProject(imported.project.id, (current) => ({
-      ...current,
-      routing: {
-        ...current.routing,
-        image: {
-          providerId: imageRoute.providerId,
-          adapterId: imageRoute.adapterId,
-          model: imageRoute.model,
-        },
-        video: {
-          providerId: videoRoute.providerId,
-          adapterId: videoRoute.adapterId,
-          model: videoRoute.model,
-        },
-      },
-    }));
-    const adapters = new Map(harness.fake.adapters);
-    const fakeImageAdapter = adapters.get(imageRoute.adapterId);
-    const fakeVideoAdapter = adapters.get(videoRoute.adapterId);
-    if (!fakeImageAdapter || !fakeVideoAdapter) throw new Error('E2E fake lifecycle adapters were not resolved');
-    const imageRequests: ResolvedStudioGenerationRequest[] = [];
-    const videoRequests: ResolvedStudioGenerationRequest[] = [];
-    adapters.set(imageRoute.adapterId, {
-      ...fakeImageAdapter,
-      submit: async (request, provider, signal) => {
-        imageRequests.push(request);
-        return fakeImageAdapter.submit(request, provider, signal);
-      },
-    });
-    adapters.set(videoRoute.adapterId, {
-      ...fakeVideoAdapter,
-      submit: async (request, provider, signal) => {
-        videoRequests.push(request);
-        return fakeVideoAdapter.submit(request, provider, signal);
-      },
-    });
-    const jobIds = ['job_reference_lifecycle', 'job_take_lifecycle'];
-    const idempotencyKeys = ['idempotency_reference_lifecycle', 'idempotency_take_lifecycle'];
-    const manager = createStudioJobManager({
-      store: harness.store,
-      mediaStore: harness.mediaStore,
-      providerResolver,
-      adapters,
-      listProviders: async () => [harness.fake.provider],
-      createJobId: () => jobIds.shift() ?? 'job_unexpected_lifecycle',
-      createIdempotencyKey: () => idempotencyKeys.shift() ?? 'idempotency_unexpected_lifecycle',
-      sleep: harness.clock.sleep,
-      jitterMs: (baseMs) => baseMs,
-    });
-    activeManagers.push(manager);
-    harness.clock.releaseAll();
-
-    await manager.submitScenes({
-      projectId: configured.id,
-      expectedRevision: configured.revision,
-      sceneIds: [scene.id],
-      routes: [
-        {
-          sceneId: scene.id,
-          providerId: imageRoute.providerId,
-          adapterId: imageRoute.adapterId,
-          model: imageRoute.model,
-          kind: 'image',
-        },
-      ],
-      catalogVersion: catalog.generationCatalogVersion,
-      outputRole: 'reference',
-      referencePrompts: [{ sceneId: scene.id, prompt: '  A precise sunrise reference plate  ' }],
-    });
-
-    const plated = await waitFor(async () => {
-      const current = await harness.store.getProject(configured.id);
-      return current?.jobs.job_reference_lifecycle.status === 'succeeded' ? current : null;
-    });
-    const platedScene = plated.scenes[scene.id];
-    const referenceAssetId = platedScene.referenceAssetId;
-    if (!referenceAssetId) throw new Error('Reference job succeeded without a committed asset');
-    const referenceAsset = plated.assets[referenceAssetId];
-    expect(imageRequests).toHaveLength(1);
-    expect(imageRequests[0]?.conditioningImages?.map(({ assetId }) => assetId)).toEqual([
-      imported.castAssetId,
-      imported.lookAssetId,
-    ]);
-    expect(imageRequests[0]?.firstFrame).toBeUndefined();
-    expect(plated.jobs.job_reference_lifecycle).toMatchObject({
-      status: 'succeeded',
-      outputRole: 'reference',
-      referenceInputSnapshot: {
-        sourceVisualPrompt: 'A precise sunrise reference plate',
-        conditioningReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
+      const created = await store.createProjectV2({
+        name: 'Direct reference film',
+        brief: 'Persist two independently targeted character sheets.',
         aspectRatio: '16:9',
+        targetDurationSeconds: 5,
         resolution: '720p',
-      },
-    });
-    expect({
-      outputAssetIds: plated.jobs.job_reference_lifecycle.outputAssetIds,
-      sceneId: referenceAsset?.sceneId,
-      collection: referenceAsset?.managedAsset.collection,
-      assetIds: platedScene.assetIds,
-      sourceVisualPrompt: referenceAsset?.sourceVisualPrompt,
-      sourceReferenceAssetIds: referenceAsset?.sourceReferenceAssetIds,
-      sourceAspectRatio: referenceAsset?.sourceAspectRatio,
-      sourceResolution: referenceAsset?.sourceResolution,
-    }).toEqual({
-      outputAssetIds: [referenceAssetId],
-      sceneId: scene.id,
-      collection: 'references',
-      assetIds: [referenceAssetId],
-      sourceVisualPrompt: 'A precise sunrise reference plate',
-      sourceReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
-      sourceAspectRatio: '16:9',
-      sourceResolution: '720p',
-    });
-    expect(platedScene.selectedAssetId).toBeNull();
-    expect(platedScene.reviewState).toBe('draft');
-    expect(
-      Object.values(plated.assets).some((asset) => isCanonicalStudioGeneratedTake(asset, plated.id, platedScene))
-    ).toBe(false);
-
-    await manager.dispose();
-    const reloadedStore = createCreativeStudioStore({ rootDir: harness.rootDir });
-    const reloadedMediaStore = createStudioMediaStore({ store: reloadedStore });
-    const reloadedProviderResolver = createStudioProviderResolver({
-      listProviders: async () => [harness.fake.provider],
-      listConnections: () => reloadedStore.listConnections(),
-    });
-    const reloaded = await reloadedStore.getProject(plated.id);
-    if (!reloaded) throw new Error('Persisted reference lifecycle project did not reload');
-    expect(reloaded.scenes[scene.id].referenceAssetId).toBe(referenceAssetId);
-    expect(reloaded.jobs.job_reference_lifecycle.referenceInputSnapshot).toEqual({
-      sourceVisualPrompt: 'A precise sunrise reference plate',
-      conditioningReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
-      aspectRatio: '16:9',
-      resolution: '720p',
-    });
-    const reloadedReferenceAsset = reloaded.assets[referenceAssetId];
-    expect({
-      sceneId: reloadedReferenceAsset?.sceneId,
-      collection: reloadedReferenceAsset?.managedAsset.collection,
-      sourceVisualPrompt: reloadedReferenceAsset?.sourceVisualPrompt,
-      sourceReferenceAssetIds: reloadedReferenceAsset?.sourceReferenceAssetIds,
-      sourceAspectRatio: reloadedReferenceAsset?.sourceAspectRatio,
-      sourceResolution: reloadedReferenceAsset?.sourceResolution,
-    }).toEqual({
-      sceneId: scene.id,
-      collection: 'references',
-      sourceVisualPrompt: 'A precise sunrise reference plate',
-      sourceReferenceAssetIds: [imported.castAssetId, imported.lookAssetId],
-      sourceAspectRatio: '16:9',
-      sourceResolution: '720p',
-    });
-    const rendererProject = await createCreativeStudioService({
-      store: reloadedStore,
-      onProjectUpdated: () => undefined,
-      storyboardPlanner: {
-        listModels: async () => [],
-        draft: async () => {
-          throw new Error('Storyboard planning is not part of this lifecycle');
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        beatOrder: ['section_reunion'],
+        beats: {
+          section_reunion: {
+            id: 'section_reunion',
+            title: 'Cast introduction',
+            story: 'Ming and Mei meet again in soft directional daylight.',
+            targetSeconds: null,
+            shotOrder: ['shot_reunion'],
+          },
         },
-        dispose: async () => undefined,
-      },
-    }).getProject(reloaded.id);
-    expect(rendererProject?.jobs.job_reference_lifecycle).toMatchObject({
-      status: 'succeeded',
-      outputRole: 'reference',
-    });
-    expect(rendererProject?.jobs.job_reference_lifecycle).not.toHaveProperty('referenceInputSnapshot');
-
-    const reloadedCatalog = await reloadedProviderResolver.listGenerationRoutes();
-    const reloadedManager = createStudioJobManager({
-      store: reloadedStore,
-      mediaStore: reloadedMediaStore,
-      providerResolver: reloadedProviderResolver,
-      adapters,
-      listProviders: async () => [harness.fake.provider],
-      createJobId: () => jobIds.shift() ?? 'job_unexpected_lifecycle',
-      createIdempotencyKey: () => idempotencyKeys.shift() ?? 'idempotency_unexpected_lifecycle',
-      sleep: async () => undefined,
-      jitterMs: (baseMs) => baseMs,
-    });
-    activeManagers.push(reloadedManager);
-
-    await reloadedManager.submitScenes({
-      projectId: reloaded.id,
-      expectedRevision: reloaded.revision,
-      sceneIds: [scene.id],
-      routes: [
+        shots: {
+          shot_reunion: {
+            id: 'shot_reunion',
+            shootingScript: 'Ming and Mei enter the room together.',
+            durationSeconds: 5,
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            chainBreak: 'none',
+            referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+            seedStillId: null,
+            dismissedSeedStillIds: [],
+            boardAssetId: null,
+            supersededBoardAssetIds: [],
+            videoAssetId: null,
+            supersededVideoAssetIds: [],
+            assetIds: [],
+            jobIds: [],
+          },
+        },
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const rateCard = createStudioRateCardV2([
         {
-          sceneId: scene.id,
-          providerId: videoRoute.providerId,
-          adapterId: videoRoute.adapterId,
-          model: videoRoute.model,
-          kind: 'video',
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
         },
-      ],
-      catalogVersion: reloadedCatalog.generationCatalogVersion,
-    });
+      ]);
+      const dispatchedJobIds: string[][] = [];
+      let jobIndex = 0;
+      let idempotencyIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store,
+        providerResolver,
+        jobManager: {
+          dispatchAuthorizedJobsV2: async ({ jobIds }: { jobIds: string[] }) => {
+            dispatchedJobIds.push([...jobIds]);
+            return [];
+          },
+        } as never,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_shared_reference_proxy',
+        createJobId: () => `job_shared_reference_${++jobIndex}`,
+        createIdempotencyKey: () => `idempotency_shared_reference_${++idempotencyIndex}`,
+        onProjectUpdated: () => {},
+      });
 
-    const takeRequest = await waitFor(async () => videoRequests[0] ?? null);
-    expect(takeRequest.firstFrame).toMatchObject({
-      assetId: referenceAssetId,
-      mimeType: 'image/png',
-    });
-    expect(takeRequest).not.toHaveProperty('conditioningImages');
-    expect(takeRequest).not.toHaveProperty('conditioningImageLimit');
+      const defined = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_reference_plan',
+              references: [
+                {
+                  kind: 'character',
+                  label: 'Ming',
+                  prompt: 'A consistent character sheet for Ming.',
+                },
+                {
+                  kind: 'character',
+                  label: 'Mei',
+                  prompt: 'A consistent character sheet for Mei.',
+                },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'define_shared_reference_proxy', capturedAt: new Date().toISOString() }
+      );
+      const referenceIds = defined.project.referenceOrder;
+      const prepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: defined.project.revision,
+        referenceIds,
+      });
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: prepared.baseOnly.id,
+          expectedRevision: defined.project.revision,
+        })
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: defined.project.revision + 1 });
+      expect(dispatchedJobIds).toEqual([['job_shared_reference_1', 'job_shared_reference_2']]);
+
+      service.dispose();
+      service = null;
+      const restartedStore = createCreativeStudioStore({ rootDir });
+      const reloaded = await restartedStore.getProjectV2(configured.id);
+      expect(reloaded.status).toBe('supported');
+      if (reloaded.status !== 'supported') throw new Error('Shared-reference project did not survive reload');
+      const authorization = reloaded.project.spendAuthorizations.at(-1);
+      expect({
+        referenceOrder: reloaded.project.referenceOrder,
+        shotBinding: reloaded.project.shots.shot_reunion.referenceBinding,
+        shotJobIds: reloaded.project.shots.shot_reunion.jobIds,
+        authorizationItems: authorization?.baseItems.map((item) => [item.target, item.purpose]),
+        referenceJobs: referenceIds.map((referenceId) => {
+          const reference = reloaded.project.references[referenceId]!;
+          const job = reloaded.project.jobs[reference.jobIds[0]!]!;
+          return [reference.jobIds, job.id, job.status, job.target, job.purpose];
+        }),
+      }).toEqual({
+        referenceOrder: referenceIds,
+        shotBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+        shotJobIds: [],
+        authorizationItems: [
+          [{ kind: 'reference', referenceId: referenceIds[0] }, 'reference_image'],
+          [{ kind: 'reference', referenceId: referenceIds[1] }, 'reference_image'],
+        ],
+        referenceJobs: [
+          [
+            ['job_shared_reference_1'],
+            'job_shared_reference_1',
+            'queued_local',
+            { kind: 'reference', referenceId: referenceIds[0] },
+            'reference_image',
+          ],
+          [
+            ['job_shared_reference_2'],
+            'job_shared_reference_2',
+            'queued_local',
+            { kind: 'reference', referenceId: referenceIds[1] },
+            'reference_image',
+          ],
+        ],
+      });
+
+      const restartedMediaStore = createStudioMediaStore({ store: restartedStore });
+      restartedManager = createStudioJobManager({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: createStudioProviderResolver({
+          listProviders: async () => [fake.provider],
+          listConnections: () => restartedStore.listConnections(),
+        }),
+        adapters: fake.adapters,
+        listProviders: async () => [fake.provider],
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      await restartedManager.dispatchAuthorizedJobsV2({
+        projectId: configured.id,
+        jobIds: ['job_shared_reference_1', 'job_shared_reference_2'],
+      });
+      const completedAfterRestart = await waitFor(async () => {
+        const loaded = await restartedStore.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        return ['job_shared_reference_1', 'job_shared_reference_2'].every(
+          (jobId) => loaded.project.jobs[jobId]?.status === 'succeeded'
+        )
+          ? loaded.project
+          : null;
+      });
+      expect(referenceIds.map((referenceId) => completedAfterRestart.references[referenceId]?.approvedAssetId)).toEqual(
+        [expect.any(String), expect.any(String)]
+      );
+    } finally {
+      service?.dispose();
+      await restartedManager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
-  it('rejects active Brief references at route capacity zero before persistence or provider spend', async () => {
-    const harness = await createHarness();
-    const imported = await importBriefReferences(harness);
-    const imageConnection = harness.fake.connections.find((connection) =>
-      connection.capabilities.mediaKinds.includes('image')
-    );
-    if (!imageConnection) throw new Error('E2E fake image connection was not resolved');
-    await harness.store.saveConnection({
-      ...imageConnection,
-      capabilities: { ...imageConnection.capabilities, maxConditioningImages: 0 },
-    });
-    const providerResolver = createStudioProviderResolver({
-      listProviders: async () => [harness.fake.provider],
-      listConnections: () => harness.store.listConnections(),
-    });
-    const catalog = await providerResolver.listGenerationRoutes();
-    const imageRoute = catalog.routes.find(
-      (candidate) => candidate.kind === 'image' && candidate.model === imageConnection.model
-    );
-    if (!imageRoute) throw new Error('Capacity-zero image route was not resolved');
-    expect(imageRoute.constraints.maxConditioningImages).toBe(0);
-    const configured = await harness.store.updateProject(imported.project.id, (current) => ({
-      ...current,
-      routing: {
-        ...current.routing,
-        image: {
-          providerId: imageRoute.providerId,
-          adapterId: imageRoute.adapterId,
-          model: imageRoute.model,
-        },
-      },
-    }));
-    const adapters = new Map(harness.fake.adapters);
-    const imageAdapter = adapters.get(imageRoute.adapterId);
-    const videoAdapter = [...adapters.values()].find((adapter) => adapter.id !== imageRoute.adapterId);
-    if (!imageAdapter || !videoAdapter) throw new Error('E2E fake spend-boundary adapters were not resolved');
-    const imageRequests: ResolvedStudioGenerationRequest[] = [];
-    const videoRequests: ResolvedStudioGenerationRequest[] = [];
-    adapters.set(imageRoute.adapterId, {
-      ...imageAdapter,
-      submit: async (request, provider, signal) => {
-        imageRequests.push(request);
-        return imageAdapter.submit(request, provider, signal);
-      },
-    });
-    adapters.set(videoAdapter.id, {
-      ...videoAdapter,
-      submit: async (request, provider, signal) => {
-        videoRequests.push(request);
-        return videoAdapter.submit(request, provider, signal);
-      },
-    });
-    const manager = createStudioJobManager({
-      store: harness.store,
-      mediaStore: harness.mediaStore,
-      providerResolver,
-      adapters,
-      listProviders: async () => [harness.fake.provider],
-      createJobId: () => 'job_capacity_zero',
-      createIdempotencyKey: () => 'idempotency_capacity_zero',
-      sleep: harness.clock.sleep,
-      jitterMs: (baseMs) => baseMs,
-    });
-    activeManagers.push(manager);
-    const before = await harness.store.getProject(configured.id);
-    const delaysBefore = [...harness.clock.observedDelays];
+  it('retries a paid direct reference after an unrelated Shot is parked and the project is reloaded', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-parked-reference-retry-integration-'));
+    const fake = createStudioE2EFakeBundle({ rootDir });
+    let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const providerResolver = createStudioProviderResolver({
+        listProviders: async () => [fake.provider],
+        listConnections: () => store.listConnections(),
+      });
+      const imageRoute = (await providerResolver.listGenerationRoutes()).routes.find(
+        (candidate) => candidate.kind === 'image'
+      );
+      if (!imageRoute) throw new Error('Parked-reference retry did not resolve the fake image route');
 
-    await expect(
-      manager.submitScenes({
+      const created = await store.createProjectV2({
+        name: 'Parked reference retry film',
+        brief: 'Keep a paid reference retry attached to its durable handoff.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 10,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        beatOrder: ['section_parked_retry'],
+        beats: {
+          section_parked_retry: {
+            id: 'section_parked_retry',
+            title: 'Reference anchors',
+            story: 'Establish the recurring character before the fallback Shot in soft daylight.',
+            targetSeconds: null,
+            shotOrder: ['clip_reference_anchor', 'clip_reference_fallback'],
+          },
+        },
+        shots: Object.fromEntries(
+          ['clip_reference_anchor', 'clip_reference_fallback'].map((shotId, index) => [
+            shotId,
+            {
+              id: shotId,
+              shootingScript: index === 0 ? 'An unrelated establishing Shot.' : 'An active fallback Shot.',
+              durationSeconds: 5,
+              trimInSeconds: null,
+              trimOutSeconds: null,
+              chainBreak: 'none' as const,
+              referenceBinding: {
+                status: 'unassigned' as const,
+                characterReferenceIds: [],
+                backgroundReferenceId: null,
+              },
+              seedStillId: null,
+              dismissedSeedStillIds: [],
+              boardAssetId: null,
+              supersededBoardAssetIds: [],
+              videoAssetId: null,
+              supersededVideoAssetIds: [],
+              assetIds: [],
+              jobIds: [],
+            },
+          ])
+        ),
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+      ]);
+      const initialDispatch = vi.fn(async () => []);
+      let initialReferenceIdempotencyIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store,
+        providerResolver,
+        jobManager: { dispatchAuthorizedJobsV2: initialDispatch } as never,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_parked_reference_initial',
+        createJobId: () => 'job_parked_reference_initial',
+        createIdempotencyKey: () => `idempotency_parked_reference_initial_${++initialReferenceIdempotencyIndex}`,
+        onProjectUpdated: () => {},
+      });
+
+      const defined = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_reference_plan',
+              references: [
+                {
+                  kind: 'character',
+                  label: 'Recurring character',
+                  prompt: 'One stable character sheet for the recurring character.',
+                },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'define_parked_reference', capturedAt: new Date().toISOString() }
+      );
+      const referenceId = defined.project.referenceOrder[0]!;
+      const requestPaths = await store.resolveReferenceRequestPathsV2(configured.id);
+      const canonicalRoot = await realpath(requestPaths.projectDir);
+      const rootStats = await lstat(canonicalRoot);
+      const request = await writeReferenceRequestRecordV2({
+        pendingDir: requestPaths.pendingDir,
         projectId: configured.id,
-        expectedRevision: configured.revision,
-        sceneIds: [scene.id],
-        routes: [
+        requestId: 'request_parked_reference',
+        referenceIds: [referenceId],
+        projectAuthority: {
+          canonicalRoot,
+          rootIdentity: { dev: rootStats.dev, ino: rootStats.ino },
+        },
+      });
+      const decision = await service.decideReferenceRequest({
+        projectId: configured.id,
+        requestId: request.id,
+        expectedRevision: defined.project.revision,
+        outcome: { kind: 'generation_gate' },
+      });
+      if (decision.outcome.kind !== 'generation_gate') throw new Error('Expected a generation handoff');
+      const prepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: defined.project.revision,
+        referenceIds: [referenceId],
+      });
+      expect(prepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({
+          target: { kind: 'reference', referenceId },
+          purpose: 'reference_image',
+        }),
+      ]);
+      const confirmed = await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: defined.project.revision,
+      });
+      expect(initialDispatch).toHaveBeenCalledExactlyOnceWith({
+        projectId: configured.id,
+        jobIds: ['job_parked_reference_initial'],
+      });
+
+      const cancelled = await store.updateProjectV2(
+        configured.id,
+        (project) => {
+          const next = structuredClone(project);
+          const job = next.jobs.job_parked_reference_initial;
+          if (job === undefined) throw new Error('Confirmed reference job was not persisted');
+          job.status = 'cancelled';
+          job.providerJobId = null;
+          delete job.remoteStartedAt;
+          job.outputAssetIds = [];
+          job.outputAssetIdsByRole = { primary: null, poster: null };
+          job.error = null;
+          job.spendReceipt = null;
+          job.updatedAt = new Date().toISOString();
+          return next;
+        },
+        confirmed.projectRevision,
+        'test:cancel-parked-reference'
+      );
+      const partiallyFailedHandoffs = await waitFor(async () => {
+        try {
+          return await service!.listReferenceGenerationHandoffs({ projectId: configured.id });
+        } catch {
+          // A terminal job can be visible just before its guarded journal cleanup finishes.
+          return null;
+        }
+      });
+      expect(partiallyFailedHandoffs).toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'failed',
+          counts: { queued: 0, running: 0, succeeded: 0, failed: 1 },
+          failedReferenceIds: [referenceId],
+        }),
+      ]);
+      const parked = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: cancelled.revision,
+          operations: [{ kind: 'park_shot', shotId: 'clip_reference_anchor' }],
+        },
+        { mutationId: 'park_reference_anchor', capturedAt: new Date().toISOString() }
+      );
+      expect(parked.project.beats.section_parked_retry?.shotOrder).toEqual(['clip_reference_fallback']);
+
+      service.dispose();
+      service = null;
+      const restartedStore = createCreativeStudioStore({ rootDir });
+      const reloaded = await restartedStore.getProjectV2(configured.id);
+      if (reloaded.status !== 'supported') throw new Error('Parked-reference project did not survive reload');
+      const retryDispatch = vi.fn(async () => []);
+      const restartedProviderResolver = createStudioProviderResolver({
+        listProviders: async () => [fake.provider],
+        listConnections: () => restartedStore.listConnections(),
+      });
+      const listGenerationRoutes = vi.spyOn(restartedProviderResolver, 'listGenerationRoutes');
+      const loadRateCard = vi.fn(async () => rateCard);
+      const createQuoteId = vi.fn(() => 'quote_parked_reference_retry');
+      const onProjectUpdated = vi.fn();
+      let retryReferenceIdempotencyIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store: restartedStore,
+        providerResolver: restartedProviderResolver,
+        jobManager: { dispatchAuthorizedJobsV2: retryDispatch } as never,
+        rateCard: loadRateCard,
+        createQuoteId,
+        createJobId: () => 'job_parked_reference_retry',
+        createIdempotencyKey: () => `idempotency_parked_reference_retry_${++retryReferenceIdempotencyIndex}`,
+        onProjectUpdated,
+      });
+      const completedHandoffs = await waitFor(async () => {
+        try {
+          return await service!.listReferenceGenerationHandoffs({ projectId: configured.id });
+        } catch {
+          // Preserve the exact terminal assertion while waiting out the guarded publication fence.
+          return null;
+        }
+      });
+      expect(completedHandoffs).toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'failed',
+          failedReferenceIds: [referenceId],
+        }),
+      ]);
+      const retryPrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: reloaded.project.revision,
+        referenceIds: [referenceId],
+      });
+      expect(retryPrepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({ target: { kind: 'reference', referenceId }, purpose: 'reference_image' }),
+      ]);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: retryPrepared.baseOnly.id,
+          expectedRevision: reloaded.project.revision,
+        })
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: reloaded.project.revision + 1 });
+
+      const after = await restartedStore.getProjectV2(configured.id);
+      if (after.status !== 'supported') throw new Error('Reference retry damaged the reloaded project');
+      expect(after.project.references[referenceId]?.jobIds).toEqual([
+        'job_parked_reference_initial',
+        'job_parked_reference_retry',
+      ]);
+      expect(after.project.jobs.job_parked_reference_retry).toMatchObject({
+        target: { kind: 'reference', referenceId },
+        purpose: 'reference_image',
+        status: 'queued_local',
+      });
+      expect(after.project.shots.clip_reference_anchor?.jobIds).toEqual([]);
+      expect(after.project.shots.clip_reference_fallback?.jobIds).toEqual([]);
+      expect(listGenerationRoutes).toHaveBeenCalled();
+      expect(loadRateCard).toHaveBeenCalled();
+      expect(createQuoteId).toHaveBeenCalledOnce();
+      expect(retryDispatch).toHaveBeenCalledExactlyOnceWith({
+        projectId: configured.id,
+        jobIds: ['job_parked_reference_retry'],
+      });
+      expect(onProjectUpdated).toHaveBeenCalled();
+    } finally {
+      service?.dispose();
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('retains two successful references and retries only one failed reference after restart', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-partial-reference-integration-'));
+    const fake = createStudioE2EFakeBundle({ rootDir });
+    let manager: ReturnType<typeof createStudioJobManager> | null = null;
+    let service: ReturnType<typeof createCreativeStudioServiceV2> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => store.listConnections(),
+      });
+      const imageRoute = (await providerResolver.listGenerationRoutes()).routes.find(
+        (candidate) => candidate.kind === 'image'
+      );
+      if (imageRoute === undefined) throw new Error('Partial-reference lifecycle did not resolve the fake image route');
+      const created = await store.createProjectV2({
+        name: 'Partial reference retry film',
+        brief: 'Generate three recurring character references and retain partial success.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 12,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const mediaStore = createStudioMediaStore({ store });
+      const baseImageAdapter = fake.adapters.get('weprompt-image-v1');
+      if (baseImageAdapter === undefined || baseImageAdapter.poll === undefined) {
+        throw new Error('Partial-reference fake image adapter was unavailable');
+      }
+      const failedProviderJobId = 'forced_reference_failure';
+      const failingAdapters = new Map(fake.adapters);
+      failingAdapters.set('weprompt-image-v1', {
+        ...baseImageAdapter,
+        async submit(request, provider, signal) {
+          if (request.prompt.includes('FORCE_REFERENCE_FAILURE')) {
+            signal.throwIfAborted();
+            return { kind: 'remote', providerJobId: failedProviderJobId };
+          }
+          return baseImageAdapter.submit(request, provider, signal);
+        },
+        async poll(providerJobId, provider, signal) {
+          if (providerJobId === failedProviderJobId) {
+            signal.throwIfAborted();
+            return { status: 'failed', error: { code: 'unknown' } };
+          }
+          return baseImageAdapter.poll!(providerJobId, provider, signal);
+        },
+      });
+      manager = createStudioJobManager({
+        store,
+        mediaStore,
+        providerResolver,
+        adapters: failingAdapters,
+        listProviders,
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+      ]);
+      let initialJobIndex = 0;
+      let initialIdempotencyIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_partial_reference_initial',
+        createJobId: () => `job_partial_reference_${++initialJobIndex}`,
+        createIdempotencyKey: () => `idempotency_partial_reference_${++initialIdempotencyIndex}`,
+        onProjectUpdated: () => {},
+      });
+      const planned = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_reference_plan',
+              references: [
+                { kind: 'character', label: 'Ming', prompt: 'Stable character sheet for Ming.' },
+                {
+                  kind: 'character',
+                  label: 'Mei',
+                  prompt: 'FORCE_REFERENCE_FAILURE while generating Mei.',
+                },
+                { kind: 'character', label: 'Jun', prompt: 'Stable character sheet for Jun.' },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'plan_partial_references', capturedAt: new Date().toISOString() }
+      );
+      const [mingId, failedReferenceId, junId] = planned.project.referenceOrder;
+      if (mingId === undefined || failedReferenceId === undefined || junId === undefined) {
+        throw new Error('Partial-reference identities were unavailable');
+      }
+      const requestPaths = await store.resolveReferenceRequestPathsV2(configured.id);
+      const canonicalRoot = await realpath(requestPaths.projectDir);
+      const rootStats = await lstat(canonicalRoot);
+      const request = await writeReferenceRequestRecordV2({
+        pendingDir: requestPaths.pendingDir,
+        projectId: configured.id,
+        requestId: 'request_partial_references',
+        referenceIds: [mingId, failedReferenceId, junId],
+        projectAuthority: {
+          canonicalRoot,
+          rootIdentity: { dev: rootStats.dev, ino: rootStats.ino },
+        },
+      });
+      const decision = await service.decideReferenceRequest({
+        projectId: configured.id,
+        requestId: request.id,
+        expectedRevision: planned.project.revision,
+        outcome: { kind: 'generation_gate' },
+      });
+      if (decision.outcome.kind !== 'generation_gate') throw new Error('Expected a partial-reference handoff');
+      const prepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: planned.project.revision,
+        referenceIds: [mingId, failedReferenceId, junId],
+      });
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: planned.project.revision,
+      });
+      const partiallyFailed = await waitFor(async () => {
+        const loaded = await store.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        const jobs = ['job_partial_reference_1', 'job_partial_reference_2', 'job_partial_reference_3'].map(
+          (jobId) => loaded.project.jobs[jobId]?.status
+        );
+        return jobs.every((status) => status === 'succeeded' || status === 'failed') ? loaded.project : null;
+      });
+      expect([
+        partiallyFailed.jobs.job_partial_reference_1?.status,
+        partiallyFailed.jobs.job_partial_reference_2?.status,
+        partiallyFailed.jobs.job_partial_reference_3?.status,
+      ]).toEqual(['succeeded', 'failed', 'succeeded']);
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'partially_failed',
+          counts: { queued: 0, running: 0, succeeded: 2, failed: 1 },
+          failedReferenceIds: [failedReferenceId],
+        }),
+      ]);
+      const successfulCandidateIds = [
+        partiallyFailed.references[mingId]?.approvedAssetId,
+        partiallyFailed.references[junId]?.approvedAssetId,
+      ];
+      expect(successfulCandidateIds).toEqual([expect.any(String), expect.any(String)]);
+      const successfulCandidateSnapshots = successfulCandidateIds.map((assetId) => {
+        if (assetId === null || assetId === undefined) throw new Error('Successful reference candidate was missing');
+        const asset = partiallyFailed.assets[assetId];
+        if (asset === undefined) throw new Error('Successful reference asset was missing');
+        return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
+      });
+      expect(partiallyFailed.references[failedReferenceId]?.approvedAssetId).toBeNull();
+
+      service.dispose();
+      service = null;
+      await manager.dispose();
+      manager = null;
+
+      const restartedStore = createCreativeStudioStore({ rootDir });
+      const restartedMediaStore = createStudioMediaStore({ store: restartedStore });
+      const restartedProviderResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => restartedStore.listConnections(),
+      });
+      manager = createStudioJobManager({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: restartedProviderResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: async () => undefined,
+        jitterMs: (baseMs) => baseMs,
+      });
+      let retryIdempotencyIndex = 0;
+      service = createCreativeStudioServiceV2({
+        store: restartedStore,
+        mediaStore: restartedMediaStore,
+        providerResolver: restartedProviderResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_partial_reference_retry',
+        createJobId: () => 'job_partial_reference_retry',
+        createIdempotencyKey: () => `idempotency_partial_reference_retry_${++retryIdempotencyIndex}`,
+        onProjectUpdated: () => {},
+      });
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'partially_failed',
+          failedReferenceIds: [failedReferenceId],
+        }),
+      ]);
+      const reloaded = await restartedStore.getProjectV2(configured.id);
+      if (reloaded.status !== 'supported') throw new Error('Partial-reference project did not survive restart');
+      const retryPrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: reloaded.project.revision,
+        referenceIds: [failedReferenceId],
+      });
+      expect(retryPrepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({
+          target: { kind: 'reference', referenceId: failedReferenceId },
+          purpose: 'reference_image',
+        }),
+      ]);
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: retryPrepared.baseOnly.id,
+        expectedRevision: reloaded.project.revision,
+      });
+      const recovered = await waitFor(async () => {
+        const loaded = await restartedStore.getProjectV2(configured.id);
+        if (loaded.status !== 'supported') return null;
+        return loaded.project.jobs.job_partial_reference_retry?.status === 'succeeded' ? loaded.project : null;
+      });
+      expect(recovered.references[mingId]?.jobIds).toEqual(['job_partial_reference_1']);
+      expect(recovered.references[junId]?.jobIds).toEqual(['job_partial_reference_3']);
+      expect(recovered.references[failedReferenceId]?.jobIds).toEqual([
+        'job_partial_reference_2',
+        'job_partial_reference_retry',
+      ]);
+      expect(
+        [recovered.references[mingId]?.approvedAssetId, recovered.references[junId]?.approvedAssetId].map((assetId) => {
+          if (assetId === null || assetId === undefined) throw new Error('Recovered reference candidate was missing');
+          const asset = recovered.assets[assetId];
+          if (asset === undefined) throw new Error('Recovered reference asset was missing');
+          return { assetId, sha256: asset.sha256, producerJobId: asset.producerJobId };
+        })
+      ).toEqual(successfulCandidateSnapshots);
+      expect(recovered.references[failedReferenceId]?.approvedAssetId).toEqual(expect.any(String));
+      expect(recovered.spendAuthorizations).toHaveLength(2);
+      await expect(service.listReferenceGenerationHandoffs({ projectId: configured.id })).resolves.toEqual([
+        expect.objectContaining({
+          handoffId: decision.outcome.handoffId,
+          status: 'succeeded',
+          counts: { queued: 0, running: 0, succeeded: 3, failed: 0 },
+          failedReferenceIds: [],
+        }),
+      ]);
+    } finally {
+      service?.dispose();
+      await manager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it('runs a real V2 paid seed submission through durable authorization, job, and primary ownership', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-generation-integration-'));
+    const fake = createStudioE2EFakeBundle({ rootDir });
+    const clock = new ControlledPollClock();
+    let manager: ReturnType<typeof createStudioJobManager> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => store.listConnections(),
+      });
+      const catalog = await providerResolver.listGenerationRoutes();
+      const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+      const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
+      if (!imageRoute || !videoRoute) throw new Error('V2 lifecycle did not resolve the fake media routes');
+      const created = await store.createProjectV2({
+        name: 'V2 lifecycle film',
+        brief: 'Persist one clip-owned generated take',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        beatOrder: ['section_lifecycle'],
+        beats: {
+          section_lifecycle: {
+            id: 'section_lifecycle',
+            title: 'Opening',
+            story: 'Introduce the product in a luminous folded-paper world.',
+            targetSeconds: null,
+            shotOrder: ['clip_lifecycle'],
+          },
+        },
+        shots: {
+          clip_lifecycle: {
+            id: 'clip_lifecycle',
+            shootingScript: 'A paper aircraft banks across a sunrise.',
+            durationSeconds: 5,
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            chainBreak: 'none',
+            seedStillId: null,
+            dismissedSeedStillIds: [],
+            boardAssetId: null,
+            supersededBoardAssetIds: [],
+            videoAssetId: null,
+            supersededVideoAssetIds: [],
+            referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+            assetIds: [],
+            jobIds: [],
+          },
+        },
+        imageRouteId: imageRoute.choiceId,
+        videoRouteId: videoRoute.choiceId,
+      }));
+      const mediaStore = createStudioMediaStore({ store });
+      manager = createStudioJobManager({
+        store,
+        mediaStore,
+        providerResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: clock.sleep,
+        jitterMs: (baseMs) => baseMs,
+      });
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+        {
+          routeId: videoRoute.choiceId,
+          kind: 'video',
+          currency: 'USD',
+          rateUnit: 'second',
+          rateMinorUnits: 5,
+        },
+      ]);
+      let quoteIndex = 0;
+      let jobIndex = 0;
+      let idempotencyIndex = 0;
+      const lifecycleJobIds = [
+        'job_v2_lifecycle_reference',
+        'job_v2_lifecycle_reference_replacement',
+        'job_v2_lifecycle',
+      ] as const;
+      const service = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => `quote_v2_lifecycle_${++quoteIndex}`,
+        createJobId: () => lifecycleJobIds[jobIndex++] ?? `job_v2_lifecycle_extra_${jobIndex}`,
+        createIdempotencyKey: () => `idempotency_v2_lifecycle_${++idempotencyIndex}`,
+        onProjectUpdated: () => {},
+      });
+
+      const seedChoice = {
+        target: { kind: 'shot' as const, shotId: 'clip_lifecycle' },
+        purpose: 'seed_still' as const,
+      };
+      const unassignedBefore = await store.getProjectV2(configured.id);
+      await expect(
+        service.prepareSubmission({
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [seedChoice],
+          cascadeChoices: [],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_reference' });
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(unassignedBefore);
+
+      const referenceDefined = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [
+            {
+              kind: 'set_reference_plan',
+              references: [
+                {
+                  kind: 'background',
+                  label: 'Folded-paper sunrise',
+                  prompt: 'A luminous folded-paper sunrise world.',
+                },
+              ],
+            },
+          ],
+        },
+        { mutationId: 'define_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
+      );
+      const referenceId = referenceDefined.project.referenceOrder[0]!;
+      const referencePrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: referenceDefined.project.revision,
+        referenceIds: [referenceId],
+      });
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: referencePrepared.baseOnly.id,
+        expectedRevision: referenceDefined.project.revision,
+      });
+      for (const delayMs of [2_000, 4_000, 8_000]) (await clock.take(delayMs)).release();
+      const referenceCompleted = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_lifecycle_reference;
+          return job?.status === 'succeeded' && job.outputAssetIdsByRole.primary !== null
+            ? { project: loaded.project, assetId: job.outputAssetIdsByRole.primary }
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      const bound = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: referenceCompleted.project.revision,
+          operations: [
+            {
+              kind: 'set_shot_reference_binding',
+              shotId: 'clip_lifecycle',
+              characterReferenceIds: [],
+              backgroundReferenceId: referenceId,
+            },
+          ],
+        },
+        { mutationId: 'bind_v2_lifecycle_reference', capturedAt: new Date().toISOString() }
+      );
+
+      const replacementPrepared = await service.prepareProjectReferences({
+        projectId: configured.id,
+        expectedRevision: bound.project.revision,
+        referenceIds: [referenceId],
+      });
+      await service.confirmSubmission({
+        projectId: configured.id,
+        quoteId: replacementPrepared.baseOnly.id,
+        expectedRevision: bound.project.revision,
+      });
+      for (const delayMs of [2_000, 4_000, 8_000]) (await clock.take(delayMs)).release();
+      const replacementCurrent = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          if (loaded.status !== 'supported') return null;
+          const job = loaded.project.jobs.job_v2_lifecycle_reference_replacement;
+          const currentAssetId = loaded.project.references[referenceId]?.approvedAssetId;
+          return job?.status === 'succeeded' && currentAssetId !== null && currentAssetId !== undefined
+            ? { project: loaded.project, assetId: currentAssetId }
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      expect(replacementCurrent.assetId).not.toBe(referenceCompleted.assetId);
+
+      const replacementStaleQuote = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: replacementCurrent.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [seedChoice],
+        cascadeChoices: [],
+      });
+      const replacementApproved = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: replacementCurrent.project.revision,
+          operations: [{ kind: 'select_reference_image', referenceId, assetId: referenceCompleted.assetId }],
+        },
+        { mutationId: 'select_v2_lifecycle_reference_image', capturedAt: new Date().toISOString() }
+      );
+      expect(replacementApproved.project.references[referenceId]).toMatchObject({
+        approvedAssetId: referenceCompleted.assetId,
+        supersededAssetIds: [replacementCurrent.assetId],
+      });
+      const afterReplacementApproval = await store.getProjectV2(configured.id);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: replacementStaleQuote.baseOnly.id,
+          expectedRevision: replacementStaleQuote.baseOnly.projectRevision,
+        })
+      ).rejects.toBeDefined();
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(afterReplacementApproval);
+
+      const imageBinding = fake.connections.find(
+        (connection) =>
+          connection.providerId === imageRoute.providerId &&
+          connection.adapterId === imageRoute.adapterId &&
+          connection.model === imageRoute.model
+      );
+      if (imageBinding === undefined) throw new Error('V2 lifecycle image binding was unavailable');
+      await store.saveConnection({
+        ...structuredClone(imageBinding),
+        capabilities: { ...structuredClone(imageBinding.capabilities), maxConditioningImages: 0 },
+      });
+      const beforeCapacityRefusal = await store.getProjectV2(configured.id);
+      await expect(
+        service.prepareSubmission({
+          projectId: configured.id,
+          expectedRevision: replacementApproved.project.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [seedChoice],
+          cascadeChoices: [],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_reference' });
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(beforeCapacityRefusal);
+      await store.saveConnection(imageBinding);
+
+      const routeStaleQuote = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: replacementApproved.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [seedChoice],
+        cascadeChoices: [],
+      });
+      const nextImageBinding = fake.connections.find(
+        (connection) => connection.adapterId === imageBinding.adapterId && connection.model !== imageBinding.model
+      );
+      if (nextImageBinding === undefined) throw new Error('V2 lifecycle replacement image route was unavailable');
+      await store.saveConnection({ ...structuredClone(imageBinding), model: nextImageBinding.model });
+      const beforeRouteRefusal = await store.getProjectV2(configured.id);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: routeStaleQuote.baseOnly.id,
+          expectedRevision: routeStaleQuote.baseOnly.projectRevision,
+        })
+      ).rejects.toBeDefined();
+      await expect(store.getProjectV2(configured.id)).resolves.toEqual(beforeRouteRefusal);
+      await store.saveConnection(imageBinding);
+
+      const prepared = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: replacementApproved.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [seedChoice],
+        cascadeChoices: [
           {
-            sceneId: scene.id,
-            providerId: imageRoute.providerId,
-            adapterId: imageRoute.adapterId,
-            model: imageRoute.model,
-            kind: 'image',
+            target: { kind: 'shot', shotId: 'clip_lifecycle' },
+            purpose: 'video_take',
           },
         ],
-        catalogVersion: catalog.generationCatalogVersion,
-        outputRole: 'reference',
-        referencePrompts: [{ sceneId: scene.id, prompt: 'A capacity-zero reference plate' }],
-      })
-    ).rejects.toMatchObject({ code: 'invalid_route' });
+      });
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: prepared.baseOnly.id,
+          expectedRevision: replacementApproved.project.revision,
+        })
+      ).resolves.toEqual({
+        projectId: configured.id,
+        projectRevision: replacementApproved.project.revision + 1,
+      });
+      clock.releaseAll();
 
-    expect(await harness.store.getProject(configured.id)).toEqual(before);
-    expect(imageRequests).toEqual([]);
-    expect(videoRequests).toEqual([]);
-    expect(harness.clock.observedDelays).toEqual(delaysBefore);
+      const completed = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          return loaded.status === 'supported' && loaded.project.jobs.job_v2_lifecycle.status === 'succeeded'
+            ? loaded.project
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      const job = completed.jobs.job_v2_lifecycle;
+      const shot = completed.shots.clip_lifecycle;
+      const primaryAssetId = job.outputAssetIdsByRole.primary;
+      const asset = primaryAssetId ? completed.assets[primaryAssetId] : null;
+      expect({
+        jobTarget: job.target,
+        purpose: job.purpose,
+        authorizationId: job.authorizationId,
+        authorizationCount: completed.spendAuthorizations.length,
+        outputAssetIds: job.outputAssetIds,
+        outputAssetIdsByRole: job.outputAssetIdsByRole,
+        receiptAuthorizationId: job.spendReceipt?.authorizationId,
+        shotJobIds: shot.jobIds,
+        shotAssetIds: shot.assetIds,
+        generationReferenceAssetIds: asset?.generationReferenceAssetIds,
+        videoAssetId: shot.videoAssetId,
+        assetShotId: asset?.shotId,
+        mediaKind: asset?.mediaKind,
+        collection: asset?.managedAsset.collection,
+      }).toEqual({
+        jobTarget: { kind: 'shot', shotId: 'clip_lifecycle' },
+        purpose: 'seed_still',
+        authorizationId: prepared.baseOnly.id,
+        authorizationCount: 3,
+        outputAssetIds: [primaryAssetId],
+        outputAssetIdsByRole: { primary: primaryAssetId, poster: null },
+        receiptAuthorizationId: prepared.baseOnly.id,
+        shotJobIds: ['job_v2_lifecycle'],
+        shotAssetIds: [primaryAssetId],
+        generationReferenceAssetIds: [referenceCompleted.assetId],
+        videoAssetId: null,
+        assetShotId: 'clip_lifecycle',
+        mediaKind: 'image',
+        collection: 'assets',
+      });
+      expect(primaryAssetId ? await mediaStore.resolveAssetV2(completed.id, primaryAssetId) : null).not.toBeNull();
+      service.dispose();
+    } finally {
+      clock.releaseAll();
+      await manager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
+    }
   });
 
-  it('uses one selected model per kind across a batch and only applies changes to later submissions', async () => {
-    const harness = await createHarness();
-    const providerResolver = createStudioProviderResolver({
-      listProviders: async () => [harness.fake.provider],
-      listConnections: () => harness.store.listConnections(),
-    });
-    const catalog = await providerResolver.listGenerationRoutes();
-    const imageRoutes = catalog.routes
-      .filter((candidate) => candidate.kind === 'image')
-      .toSorted((left, right) => left.model.localeCompare(right.model));
-    const videoRoute = catalog.routes.find((candidate) => candidate.kind === 'video');
-    expect(imageRoutes.map((candidate) => candidate.model)).toEqual(['weprompt-e2e-image', 'weprompt-e2e-image-next']);
-    if (!imageRoutes[0] || !imageRoutes[1] || !videoRoute) throw new Error('Acceptance routes were not resolved');
-
-    const imageSceneOne = { ...structuredClone(scene), id: 'scene_image_one', mediaKind: 'image' as const };
-    const imageSceneTwo = { ...structuredClone(scene), id: 'scene_image_two', mediaKind: 'image' as const };
-    const imageSceneLater = { ...structuredClone(scene), id: 'scene_image_later', mediaKind: 'image' as const };
-    const videoScene = { ...structuredClone(scene), id: 'scene_video' };
-    const configured = await harness.store.updateProject(harness.project.id, (current) => ({
-      ...current,
-      sceneOrder: [imageSceneOne.id, imageSceneTwo.id, imageSceneLater.id, videoScene.id],
-      scenes: {
-        [imageSceneOne.id]: imageSceneOne,
-        [imageSceneTwo.id]: imageSceneTwo,
-        [imageSceneLater.id]: imageSceneLater,
-        [videoScene.id]: videoScene,
-      },
-      routing: {
-        ...current.routing,
-        image: {
-          providerId: imageRoutes[0].providerId,
-          adapterId: imageRoutes[0].adapterId,
-          model: imageRoutes[0].model,
-        },
-        video: {
-          providerId: videoRoute.providerId,
-          adapterId: videoRoute.adapterId,
-          model: videoRoute.model,
-        },
-      },
-    }));
-    let jobIndex = 0;
-    let idempotencyIndex = 0;
-    const manager = createStudioJobManager({
-      store: harness.store,
-      mediaStore: harness.mediaStore,
-      providerResolver,
-      adapters: harness.fake.adapters,
-      listProviders: async () => [harness.fake.provider],
-      createJobId: () => `job_acceptance_${++jobIndex}`,
-      createIdempotencyKey: () => `idempotency_acceptance_${++idempotencyIndex}`,
-      sleep: harness.clock.sleep,
-      jitterMs: (baseMs) => baseMs,
-    });
-    activeManagers.push(manager);
-
-    const submittedBatch = await manager.submitScenes({
-      projectId: configured.id,
-      expectedRevision: configured.revision,
-      sceneIds: [imageSceneOne.id, imageSceneTwo.id, videoScene.id],
-      routes: [
-        {
-          sceneId: imageSceneOne.id,
-          providerId: imageRoutes[0].providerId,
-          adapterId: imageRoutes[0].adapterId,
-          model: imageRoutes[0].model,
-          kind: 'image',
-        },
-        {
-          sceneId: imageSceneTwo.id,
-          providerId: imageRoutes[0].providerId,
-          adapterId: imageRoutes[0].adapterId,
-          model: imageRoutes[0].model,
-          kind: 'image',
-        },
-        {
-          sceneId: videoScene.id,
-          providerId: videoRoute.providerId,
-          adapterId: videoRoute.adapterId,
-          model: videoRoute.model,
-          kind: 'video',
-        },
-      ],
-      catalogVersion: catalog.generationCatalogVersion,
-    });
-    expect(submittedBatch.map(({ sceneId: submittedSceneId, provider }) => [submittedSceneId, provider])).toEqual([
-      [
-        imageSceneOne.id,
-        {
-          providerId: imageRoutes[0].providerId,
-          adapterId: imageRoutes[0].adapterId,
-          model: imageRoutes[0].model,
-        },
-      ],
-      [
-        imageSceneTwo.id,
-        {
-          providerId: imageRoutes[0].providerId,
-          adapterId: imageRoutes[0].adapterId,
-          model: imageRoutes[0].model,
-        },
-      ],
-      [
-        videoScene.id,
-        {
-          providerId: videoRoute.providerId,
-          adapterId: videoRoute.adapterId,
-          model: videoRoute.model,
-        },
-      ],
-    ]);
-
-    // The per-project cap admits two paid jobs at a time, so this batch of three settles
-    // at two `queued_remote` and one still `queued_local` — waiting for all three to reach
-    // `queued_remote` would hang forever. Wait for that capped state specifically: it is
-    // quiescent until the harness clock is released, so the revision read here stays valid
-    // for the compare-and-set below.
-    const activeProject = await waitFor(async () => {
-      const current = await harness.store.getProject(configured.id);
-      const batch = [current?.jobs.job_acceptance_1, current?.jobs.job_acceptance_2, current?.jobs.job_acceptance_3];
-      const remote = batch.filter((job) => job?.status === 'queued_remote').length;
-      const local = batch.filter((job) => job?.status === 'queued_local').length;
-      return current && remote === 2 && local === 1 ? current : null;
-    });
-    const changed = await harness.store.updateProject(
-      configured.id,
-      (current) => ({
-        ...current,
-        routing: {
-          ...current.routing,
-          image: {
-            providerId: imageRoutes[1].providerId,
-            adapterId: imageRoutes[1].adapterId,
-            model: imageRoutes[1].model,
+  it('runs a publicly selected Board style through confirmation before one image dispatch and atomic ownership', async () => {
+    const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-board-generation-integration-'));
+    const remoteState = createStudioE2EFakeRemoteState();
+    const fake = createStudioE2EFakeBundle({ rootDir, remoteState });
+    const clock = new ControlledPollClock();
+    let manager: ReturnType<typeof createStudioJobManager> | null = null;
+    try {
+      const store = createCreativeStudioStore({ rootDir });
+      await Promise.all(fake.connections.map((connection) => store.saveConnection(connection)));
+      const listProviders = async () => [fake.provider];
+      const providerResolver = createStudioProviderResolver({
+        listProviders,
+        listConnections: () => store.listConnections(),
+      });
+      const catalog = await providerResolver.listGenerationRoutes();
+      const imageRoute = catalog.routes.find((candidate) => candidate.kind === 'image');
+      if (!imageRoute) throw new Error('Board lifecycle did not resolve the fake image route');
+      const created = await store.createProjectV2({
+        name: 'Board lifecycle film',
+        brief: 'Draw one confirmed production storyboard panel',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 5,
+        resolution: '720p',
+      });
+      const configured = await store.updateProjectV2(created.id, (project) => ({
+        ...project,
+        beatOrder: ['section_board'],
+        beats: {
+          section_board: {
+            id: 'section_board',
+            title: 'Opening',
+            story: 'Reveal the product in one deliberate move under restrained morning light.',
+            targetSeconds: null,
+            shotOrder: ['clip_board'],
           },
         },
-      }),
-      activeProject.revision
-    );
-    const later = await manager.submitScenes({
-      projectId: changed.id,
-      expectedRevision: changed.revision,
-      sceneIds: [imageSceneLater.id],
-      routes: [
-        {
-          sceneId: imageSceneLater.id,
-          providerId: imageRoutes[1].providerId,
-          adapterId: imageRoutes[1].adapterId,
-          model: imageRoutes[1].model,
-          kind: 'image',
+        shots: {
+          clip_board: {
+            id: 'clip_board',
+            shootingScript: 'A wide frame reveals the product on a quiet stage.',
+            durationSeconds: 5,
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            chainBreak: 'none',
+            seedStillId: null,
+            dismissedSeedStillIds: [],
+            boardAssetId: null,
+            supersededBoardAssetIds: [],
+            videoAssetId: null,
+            supersededVideoAssetIds: [],
+            referenceBinding: { status: 'ready', characterReferenceIds: [], backgroundReferenceId: null },
+            assetIds: [],
+            jobIds: [],
+          },
         },
-      ],
-      catalogVersion: catalog.generationCatalogVersion,
-    });
-    expect(later[0]?.provider).toEqual({
-      providerId: imageRoutes[1].providerId,
-      adapterId: imageRoutes[1].adapterId,
-      model: imageRoutes[1].model,
-    });
-    harness.clock.releaseAll();
-    const persisted = await waitFor(async () => {
-      const current = await harness.store.getProject(configured.id);
-      return current &&
-        Object.values(current.jobs).every((job) =>
-          ['succeeded', 'failed', 'cancelled', 'needs_attention'].includes(job.status)
-        )
-        ? current
-        : null;
-    });
-    expect(persisted.jobs.job_acceptance_1.status).toBe('succeeded');
-    expect(persisted.jobs.job_acceptance_1.provider.model).toBe('weprompt-e2e-image');
-    expect(persisted.jobs.job_acceptance_2.provider.model).toBe('weprompt-e2e-image');
-    expect(persisted.jobs.job_acceptance_4.provider.model).toBe('weprompt-e2e-image-next');
-    expect(persisted.routing.image).toEqual({
-      providerId: imageRoutes[1].providerId,
-      adapterId: imageRoutes[1].adapterId,
-      model: imageRoutes[1].model,
-    });
-  });
+        imageRouteId: imageRoute.choiceId,
+      }));
+      const mediaStore = createStudioMediaStore({ store });
+      manager = createStudioJobManager({
+        store,
+        mediaStore,
+        providerResolver,
+        adapters: fake.adapters,
+        listProviders,
+        sleep: clock.sleep,
+        jitterMs: (baseMs) => baseMs,
+      });
+      const rateCard = createStudioRateCardV2([
+        {
+          routeId: imageRoute.choiceId,
+          kind: 'image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+        },
+      ]);
+      const service = createCreativeStudioServiceV2({
+        store,
+        mediaStore,
+        providerResolver,
+        jobManager: manager,
+        rateCard: async () => rateCard,
+        createQuoteId: () => 'quote_v2_board_lifecycle',
+        createJobId: () => 'job_v2_board_lifecycle',
+        createIdempotencyKey: () => 'idempotency_v2_board_lifecycle',
+        onProjectUpdated: () => {},
+      });
 
-  it('moves a remote video through queued and running states before selecting a managed output', async () => {
-    const harness = await createHarness();
-    const catalog = await createStudioProviderResolver({
-      listProviders: async () => [harness.fake.provider],
-      listConnections: () => harness.store.listConnections(),
-    }).listGenerationRoutes();
+      const styled = await service.applyMutations(
+        {
+          schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
+          projectId: configured.id,
+          expectedRevision: configured.revision,
+          operations: [{ kind: 'edit_project', changes: { boardStyle: 'line_art' } }],
+        },
+        { mutationId: 'select_board_style', capturedAt: new Date().toISOString() }
+      );
+      expect(styled.project.boardStyle).toBe('line_art');
 
-    const submitted = await harness.manager.submitScenes({
-      projectId: harness.project.id,
-      expectedRevision: harness.project.revision,
-      sceneIds: [scene.id],
-      routes: [harness.route],
-      catalogVersion: catalog.generationCatalogVersion,
-    });
+      const prepared = await service.prepareSubmission({
+        projectId: configured.id,
+        expectedRevision: styled.project.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [
+          {
+            target: { kind: 'shot', shotId: 'clip_board' },
+            purpose: 'board_still',
+          },
+        ],
+        cascadeChoices: [],
+      });
+      expect(prepared).toMatchObject({
+        baseOnly: {
+          projectRevision: styled.project.revision,
+          baseItems: [
+            {
+              target: { kind: 'shot', shotId: 'clip_board' },
+              purpose: 'board_still',
+              route: { choiceId: imageRoute.choiceId },
+              generationCount: 1,
+              durationSeconds: null,
+            },
+          ],
+          cascadeItems: [],
+        },
+        withCascade: null,
+      });
+      expect(remoteState.taskCounter).toBe(0);
 
-    expect(submitted).toMatchObject([{ id: 'job_lifecycle', status: 'queued_local', providerJobId: null }]);
-    const queued = await waitFor(async () => {
-      const job = (await harness.store.getProject(harness.project.id))?.jobs.job_lifecycle;
-      return job?.status === 'queued_remote' ? job : null;
-    });
-    expect(queued.providerJobId).toBe(`${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1`);
+      await expect(
+        service.confirmSubmission({
+          projectId: configured.id,
+          quoteId: prepared.baseOnly.id,
+          expectedRevision: styled.project.revision,
+        })
+      ).resolves.toEqual({ projectId: configured.id, projectRevision: styled.project.revision + 1 });
+      clock.releaseAll();
 
-    const firstPoll = await harness.clock.take(2_000);
-    firstPoll.release();
-    const secondPoll = await harness.clock.take(4_000);
-    secondPoll.release();
-    const thirdPoll = await harness.clock.take(8_000);
-    const running = await waitFor(async () => {
-      const job = (await harness.store.getProject(harness.project.id))?.jobs.job_lifecycle;
-      return job?.status === 'running' ? job : null;
-    });
-    expect(running.progress).toBe(50);
-    thirdPoll.release();
-
-    const completed = await waitFor(async () => {
-      const project = await harness.store.getProject(harness.project.id);
-      return project &&
-        ['succeeded', 'failed', 'cancelled', 'needs_attention'].includes(project.jobs.job_lifecycle.status)
-        ? project
-        : null;
-    });
-    const completedJob = completed.jobs.job_lifecycle;
-    expect(completedJob).toMatchObject({ status: 'succeeded', error: null });
-    const selectedAssetId = completed.scenes.scene_1.selectedAssetId;
-    expect({
-      outputAssetIds: completedJob.outputAssetIds,
-      selectedAssetId,
-      assetIds: completed.scenes.scene_1.assetIds,
-      mediaKind: selectedAssetId ? completed.assets[selectedAssetId]?.mediaKind : null,
-      collection: selectedAssetId ? completed.assets[selectedAssetId]?.managedAsset.collection : null,
-    }).toEqual({
-      outputAssetIds: [selectedAssetId],
-      selectedAssetId,
-      assetIds: [selectedAssetId],
-      mediaKind: 'video',
-      collection: 'assets',
-    });
-    const resolved = selectedAssetId ? await harness.mediaStore.resolveAsset(completed.id, selectedAssetId) : null;
-    expect(resolved?.asset.id).toBe(selectedAssetId);
-    expect(collectForbiddenDtoKeys(completed)).toEqual([]);
-    const serialized = JSON.stringify(completed);
-    expect(serialized).not.toContain(harness.rootDir);
-    const projectManifest = await readFile(path.join(harness.rootDir, completed.id, 'project.json'), 'utf8');
-    const connectionManifest = await readFile(path.join(harness.rootDir, 'connections.json'), 'utf8');
-    const exportDirectory = path.join(harness.rootDir, 'safe-export');
-    await mkdir(exportDirectory);
-    const exported = await harness.mediaStore.exportAssetsToDirectory({
-      projectId: completed.id,
-      destinationDirectory: exportDirectory,
-      includeReferences: false,
-      timestamp: '20260731-120000',
-    });
-    const exportedMetadata = await readFile(path.join(exportDirectory, exported.folderName, 'storyboard.json'), 'utf8');
-    const mainProcessOnlySentinels = [
-      STUDIO_E2E_CREDENTIAL_SENTINEL,
-      STUDIO_E2E_PROVIDER_URL_SENTINEL,
-      STUDIO_E2E_RAW_OUTPUT_BODY_SENTINEL,
-      STUDIO_E2E_RAW_OUTPUT_PATH_SENTINEL,
-      harness.rootDir,
-    ];
-    for (const sentinel of mainProcessOnlySentinels) {
-      expect(serialized).not.toContain(sentinel);
-      expect(projectManifest).not.toContain(sentinel);
-      expect(connectionManifest).not.toContain(sentinel);
-      expect(exportedMetadata).not.toContain(sentinel);
+      const completed = await waitFor(async () => {
+        try {
+          const loaded = await store.getProjectV2(configured.id);
+          return loaded.status === 'supported' && loaded.project.jobs.job_v2_board_lifecycle.status === 'succeeded'
+            ? loaded.project
+            : null;
+        } catch {
+          return null;
+        }
+      });
+      const job = completed.jobs.job_v2_board_lifecycle;
+      const shot = completed.shots.clip_board;
+      const boardAssetId = job.outputAssetIdsByRole.primary;
+      const asset = boardAssetId ? completed.assets[boardAssetId] : null;
+      expect(remoteState.taskCounter).toBe(1);
+      expect({
+        purpose: job.purpose,
+        boardAssetId: shot.boardAssetId,
+        supersededBoardAssetIds: shot.supersededBoardAssetIds,
+        assetId: boardAssetId,
+        assetShotId: asset?.shotId,
+        mediaKind: asset?.mediaKind,
+        collection: asset?.managedAsset.collection,
+      }).toEqual({
+        purpose: 'board_still',
+        boardAssetId,
+        supersededBoardAssetIds: [],
+        assetId: boardAssetId,
+        assetShotId: 'clip_board',
+        mediaKind: 'image',
+        collection: 'boardStills',
+      });
+      expect(boardAssetId ? await mediaStore.resolveAssetV2(completed.id, boardAssetId) : null).not.toBeNull();
+      service.dispose();
+    } finally {
+      clock.releaseAll();
+      await manager?.dispose().catch((): undefined => undefined);
+      await fake.dispose().catch((): undefined => undefined);
+      await rm(rootDir, { recursive: true, force: true });
     }
-    expect(projectManifest).toContain(`${STUDIO_E2E_PROVIDER_JOB_SENTINEL}_1`);
-    expect(connectionManifest).not.toContain(STUDIO_E2E_PROVIDER_JOB_SENTINEL);
-    expect(exportedMetadata).not.toContain(STUDIO_E2E_PROVIDER_JOB_SENTINEL);
-  });
-
-  it('rejects a stale route catalog without persisting or submitting a job', async () => {
-    const harness = await createHarness();
-
-    await expect(
-      harness.manager.submitScenes({
-        projectId: harness.project.id,
-        expectedRevision: harness.project.revision,
-        sceneIds: [scene.id],
-        routes: [harness.route],
-        catalogVersion: 'stale_catalog',
-      })
-    ).rejects.toMatchObject({ code: 'invalid_route' });
-
-    expect((await harness.store.getProject(harness.project.id))?.jobs).toEqual({});
-    expect(harness.clock.observedDelays).toEqual([]);
   });
 });

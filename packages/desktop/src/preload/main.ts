@@ -11,6 +11,7 @@
 import '@sentry/electron/preload';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { ADAPTER_BRIDGE_EVENT_KEY } from '../common/adapter/native/constants';
+import { normalizePresentationConversationId } from '../common/types/office/presentationConversationId';
 import type {
   GrantPresentationExternalDropRequest,
   GrantPresentationExternalDropResult,
@@ -18,7 +19,7 @@ import type {
 } from '../common/types/office/presentationRun';
 
 const PRESENTATION_EXTERNAL_DROP_CHANNEL = 'presentation-sources:grant-external-drop';
-const UUID_PATTERN = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -28,23 +29,20 @@ const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): 
   return actualKeys.length === keys.length && actualKeys.every((key) => keys.includes(key));
 };
 
-const isPresentationGrantOwner = (value: unknown): value is PresentationGrantOwner => {
-  if (!isRecord(value) || typeof value.owner_type !== 'string') return false;
+const parsePresentationGrantOwner = (value: unknown): PresentationGrantOwner | null => {
+  if (!isRecord(value) || typeof value.owner_type !== 'string') return null;
 
   if (value.owner_type === 'draft') {
-    return (
-      hasExactKeys(value, ['owner_type', 'draft_id']) &&
+    return hasExactKeys(value, ['owner_type', 'draft_id']) &&
       typeof value.draft_id === 'string' &&
       UUID_PATTERN.test(value.draft_id)
-    );
+      ? { owner_type: 'draft', draft_id: value.draft_id }
+      : null;
   }
 
-  return (
-    value.owner_type === 'conversation' &&
-    hasExactKeys(value, ['owner_type', 'conversation_id']) &&
-    typeof value.conversation_id === 'string' &&
-    UUID_PATTERN.test(value.conversation_id)
-  );
+  if (value.owner_type !== 'conversation' || !hasExactKeys(value, ['owner_type', 'conversation_id'])) return null;
+  const conversationId = normalizePresentationConversationId(value.conversation_id);
+  return conversationId === null ? null : { owner_type: 'conversation', conversation_id: conversationId };
 };
 
 const presentationDropFailure = (
@@ -61,10 +59,11 @@ const presentationDropFailure = (
 const grantPresentationExternalDrop = async (
   request: GrantPresentationExternalDropRequest
 ): Promise<GrantPresentationExternalDropResult> => {
+  const owner = isRecord(request) ? parsePresentationGrantOwner(request.owner) : null;
   if (
     !isRecord(request) ||
     !hasExactKeys(request, ['owner', 'files', 'expected_owner_revision']) ||
-    !isPresentationGrantOwner(request.owner) ||
+    owner === null ||
     !Number.isSafeInteger(request.expected_owner_revision) ||
     (request.expected_owner_revision as number) < 0 ||
     !Array.isArray(request.files) ||
@@ -91,7 +90,7 @@ const grantPresentationExternalDrop = async (
 
   try {
     return (await ipcRenderer.invoke(PRESENTATION_EXTERNAL_DROP_CHANNEL, {
-      owner: request.owner,
+      owner,
       native_paths: nativePaths,
       expected_owner_revision: request.expected_owner_revision,
     })) as GrantPresentationExternalDropResult;

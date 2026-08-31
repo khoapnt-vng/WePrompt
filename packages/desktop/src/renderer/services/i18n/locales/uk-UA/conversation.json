@@ -878,33 +878,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Референси проєкту",
-      "inheritanceDescription": "Кожен новий референсний кадр використовує всі активні зображення акторів і стилю цього проєкту.",
-      "castHeading": "Актори",
-      "lookHeading": "Стиль",
-      "castEmpty": "Референсів акторів ще немає.",
-      "lookEmpty": "Референсів стилю ще немає.",
-      "addCast": "Додати референс актора",
-      "addLook": "Додати референс стилю",
-      "activeCount": "Активних референсів: {{count}}",
-      "activeCount_one": "{{count}} активний референс",
-      "activeCount_few": "{{count}} активні референси",
-      "activeCount_many": "{{count}} активних референсів",
-      "activeCount_other": "{{count}} активного референсу",
-      "limitReached": "У проєкті вже 6 активних референсів. Приберіть один перед додаванням нового.",
-      "removeFromBrief": "Прибрати з брифу",
-      "removeAccessible": "Прибрати {{label}} з брифу",
-      "previewAccessible": "Референс «{{role}}»: {{label}}",
-      "engineCapacityNone": "Цей рушій зображень ще не перевірено для референсів. Відкрийте налаштування моделей і виконайте повторну перевірку.",
-      "engineMenuCapacityNone": "Немає референсних зображень",
-      "engineCapacityMaximum": "Підтримується до {{count}} референсів",
-      "engineCapacityMaximum_one": "Можна використати не більше {{count}} референсу",
-      "engineCapacityMaximum_few": "Допустимо не більше {{count}} референсів",
-      "engineCapacityMaximum_many": "Максимум — {{count}} референсів",
-      "engineCapacityMaximum_other": "Підтримується до {{count}} референсу",
-      "capacityMismatch": "Активних референсів: {{count}}, але цей рушій зображень підтримує {{maximum}}. Нові референсні кадри заблоковано, доки ви не приберете референси або не зміните чи повторно не перевірите рушій.",
-      "importError": "Не вдалося додати референс. Спробуйте ще раз."
+    "workspace": {
+      "views": {
+        "references": "Референси"
+      },
+      "start": {
+        "title": "Почніть із режисера",
+        "description": "Режисер підготує перший план на основі вашого брифу. Коли він з’явиться, перегляньте його тут."
+      },
+      "notReady": {
+        "references": "Переглядати поки нічого — зачекайте, доки режисер спланує референси.",
+        "table": "Упорядковувати поки нічого — зачекайте, доки режисер підготує розкадрування.",
+        "board": "Виробництво стане доступним, коли Таблиця буде готова.",
+        "cut": "Монтаж стане доступним після початку виробництва."
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Канонічні зображення",
+          "intro": "Створіть по одному поточному зображенню для кожного персонажа й повторюваного місця. Вони залишатимуться канонічними, доки ви не виберете інший дубль.",
+          "progress": "Поточних: {{current}} з {{total}}",
+          "bindShots": "Прив’язати шоти",
+          "characterRule": "Спочатку персонажі",
+          "placeRule": "Потім повторювані місця",
+          "addCharacter": "Додати персонажа",
+          "addCharacterUnavailable": "Образ персонажа визначається затвердженим планом референсів режисера.",
+          "places": "Місця",
+          "addPlace": "Додати місце",
+          "kind": {
+            "character": "персонаж",
+            "background": "місце"
+          },
+          "nameLabel": "Назва: {{kind}}",
+          "meta": {
+            "character": "Персонаж · фото: {{count}}",
+            "background": "Місце · фото: {{count}}"
+          },
+          "status": {
+            "noPhoto": "НЕМАЄ ФОТО",
+            "current": "ПОТОЧНЕ ЗАДАНО",
+            "generating": "СТВОРЮЄТЬСЯ"
+          },
+          "duplicateName": "Ця назва вже використовується для референсу такого типу.",
+          "emptyPhoto": "Створити перше фото",
+          "currentHandle": "{{handle}} · Поточне",
+          "currentReference": "Поточний канонічний референс",
+          "download": "Завантажити {{handle}}",
+          "choosePhoto": "Зробити {{handle}} поточним",
+          "addPhoto": "Створити ще фото",
+          "photoCount": "Фото: {{count}}",
+          "promptLabel": "Промпт для {{label}}",
+          "promptPlaceholder": {
+            "character": "Опишіть сталу зовнішність, одяг і візуальні риси.",
+            "background": "Опишіть повторюване місце та його сталі візуальні риси."
+          },
+          "action": {
+            "generate": "Створити",
+            "generateAnother": "Створити ще",
+            "generateAgain": "Створити знову",
+            "cancelRun": "Скасувати запуск"
+          },
+          "tag": {
+            "running": "Виконується",
+            "edited": "Промпт змінено"
+          },
+          "importPhoto": "Імпортувати фото",
+          "removePhoto": "Видалити {{handle}}",
+          "removePhotoLocked": "Фото заблоковане невирішеною роботою. Перед видаленням перегляньте наведені нижче причини блокування.",
+          "removalBlocker": {
+            "activeReferenceJob": "Завдання «{{purpose}}» ({{jobId}}) для цього референсу ще не вирішене. Поточне фото залишатиметься заблокованим, доки завдання не перейде в кінцевий стан.",
+            "activeAssetConsumer": "Завдання «{{purpose}}» для Beat {{beatPosition}}, Shot {{shotPosition}} використовує саме це фото. Воно залишатиметься заблокованим, доки завдання не буде вирішене.",
+            "activeAssetConsumerRetained": "Завдання «{{purpose}}» для збереженого Shot {{shotId}} використовує саме це фото. Воно залишатиметься заблокованим, доки завдання не буде вирішене.",
+            "activeAssetConsumerOther": "Завдання «{{purpose}}» ({{jobId}}) використовує саме це фото. Воно залишатиметься заблокованим, доки завдання не буде вирішене.",
+            "downloadRecovery": "Завдання «{{purpose}}» для Beat {{beatPosition}}, Shot {{shotPosition}} завершилося в постачальника, але результат не завантажився. Повторіть завантаження тут; фото залишатиметься заблокованим до успішного відновлення.",
+            "downloadRecoveryRetainedShot": "Завдання «{{purpose}}» для збереженого Shot {{shotId}} завершилося в постачальника, але результат не завантажився. Відновіть Shot із кошика Board, щоб перевірити відновлення; фото залишатиметься заблокованим до успіху.",
+            "downloadRecoveryRetainedBeat": "Завдання «{{purpose}}» для Shot {{shotId}} усередині збереженого Beat {{beatId}} завершилося в постачальника, але результат не завантажився. Відновіть Beat із кошика Board, щоб перевірити відновлення; фото залишатиметься заблокованим до успіху.",
+            "downloadRecoveryOther": "Завдання «{{purpose}}» ({{jobId}}) завершилося в постачальника, але результат не завантажився. Повторіть завантаження тут; фото залишатиметься заблокованим до успішного відновлення.",
+            "invalidAuthority": "Дані референсу для поточного фото неузгоджені. Перезавантажте проєкт і перевірте цей референс перед новою спробою видалення.",
+            "reviewInBoard": "Перевірити в Board"
+          }
+        },
+        "description": "Спочатку створіть канонічні зображення персонажів, потім зображення повторюваних фонів. Прив’яжіть поточні референси до кожного кадру перед створенням розкадрування або першого кадру.",
+        "generationScope": "Обсяг створення",
+        "characters": {
+          "title": "Персонажі",
+          "description": "Створіть одне поточне канонічне зображення для кожного названого персонажа.",
+          "empty": "У цій історії немає названих персонажів. Тепер можна переглянути фони."
+        },
+        "backgrounds": {
+          "title": "Фони",
+          "description": "Створіть повторювані локації, що зберігають візуальну цілісність фільму.",
+          "charactersRequired": "Створіть усіх персонажів перед переглядом фонів.",
+          "empty": "Повторювані фони не потрібні.",
+          "add": "Додати фон",
+          "addTitle": "Додати повторюваний фон",
+          "nameLabel": "Назва фону",
+          "promptLabel": "Промпт генерації",
+          "duplicate": "Фон із такою назвою вже існує.",
+          "cancel": "Скасувати",
+          "confirm": "Додати фон"
+        },
+        "previewPending": "Зображення референсу ще не створене.",
+        "previewAlt": "Поточне зображення референсу для {{label}}",
+        "status": {
+          "idle": "Не створено",
+          "queued": "У черзі",
+          "running": "Створюється",
+          "succeeded": "Створено",
+          "failed": "Помилка створення",
+          "current": "Поточне"
+        },
+        "regenerate": "Створити знову",
+        "chooseGenerated": "Вибрати створене зображення",
+        "regeneratePromptLabel": "Промпт створення",
+        "regenerateCancel": "Скасувати",
+        "reviewGeneration": "Переглянути вартість створення",
+        "generatedHistory": "Створені зображення",
+        "historyClose": "Закрити",
+        "historyPreviewAlt": "Створене зображення референсу {{label}}",
+        "historyCurrent": "Поточне зображення",
+        "historyChoose": "Вибрати це зображення",
+        "currentProgress": "Створено {{current}} з {{total}} референсів",
+        "bindings": {
+          "title": "Прив’язки шотів",
+          "description": "Виберіть точні поточні зображення персонажів і фон, які кожен шот використовує для панелі борду та першого кадру.",
+          "empty": "Немає активних шотів для прив’язки.",
+          "shot": "Шот {{position}}",
+          "unassigned": "Для цього шоту ще не ухвалено рішення щодо референсів.",
+          "invalid": "Збережена прив’язка більше не дійсна. Виберіть поточні референси й збережіть знову.",
+          "capacity": "Для персонажів і тла вибрано {{count}} референсів, але їхній спільний ліміт маршруту зображення — {{limit}}.",
+          "capacityUsage": "Використано {{count}} / {{limit}} спільних слотів референсів (персонажі + тло)",
+          "characters": "Персонажі",
+          "background": "Фон",
+          "save": "Зберегти прив’язку",
+          "progress": "Прив’язано шотів: {{ready}} з {{total}}"
+        }
+      },
+      "references": {
+        "referenceCount": "Запитано референси для {{total}} елементів"
+      },
+      "handoffs": {
+        "referenceCount": "У цій передачі {{total}} референсів",
+        "progress": "У черзі {{queued}} · Виконується {{running}} · Успішно {{succeeded}} · Помилки {{failed}}",
+        "reviewReferences": "Переглянути референси",
+        "retryFailed": "Повторити невдалі референси",
+        "awaiting_spend": "Очікує перевірки витрат",
+        "running": "Створення референсів триває.",
+        "succeeded": "Усі запитані референси створено.",
+        "partially_failed": "Частину референсів створено; повторіть лише невдалі.",
+        "failed": "Не вдалося створити референси. Автоматичних повторів немає.",
+        "dismissed": "Закрито без витрат"
+      },
+      "table": {
+        "reorder": {
+          "label": "Дії для зміни порядку {{title}}",
+          "dragHandle": "Змінити порядок {{title}} на позиції {{position}}",
+          "moveEarlier": "Перемістити {{title}} раніше",
+          "moveLater": "Перемістити {{title}} пізніше",
+          "announcement": "{{title}} переміщено з позиції {{from}} на {{to}} із {{total}}.",
+          "failed": "Порядок бітів не змінено."
+        },
+        "authoring": {
+          "label": "Створення та відновлення історії",
+          "coverageGap": "У {{count}} із {{total}} Beats немає Shots",
+          "coverageGap_one": "У {{count}} із {{total}} Beat немає Shots",
+          "coverageGap_other": "У {{count}} із {{total}} Beats немає Shots",
+          "unscriptedWarning": "У {{count}} Shots немає знімального сценарію",
+          "unscriptedWarning_one": "У {{count}} Shot немає знімального сценарію",
+          "unscriptedWarning_other": "У {{count}} Shots немає знімального сценарію",
+          "askDirector": "Запитати Director",
+          "addBeat": "Додати Beat",
+          "addShot": "Додати Shot",
+          "addShotForBeat": "Додати Shot до {{title}}",
+          "unassignedReferenceNote": "Створений вручну Shot починається з непризначеними референсами та потребує перевірки перед платною генерацією."
+        },
+        "columns": {
+          "length": "Сума",
+          "panel": "Панель",
+          "story": "Історія"
+        },
+        "plannedPending": "Немає запланованої суми",
+        "panel": {
+          "openDetails": "Відкрити панелі розкадровки для {{title}}",
+          "closeDetails": "Закрити панелі розкадровки для {{title}}",
+          "cardLabel": "Шот {{position}}: {{status}}",
+          "shotDetails": "Відомості про шот {{position}}",
+          "head": "Початок ланцюжка",
+          "status": {
+            "missing": "Не намальовано",
+            "current": "Актуально",
+            "stale": "Застаріло",
+            "statusPending": "Очікування статусу",
+            "queued": "У черзі",
+            "drawing": "Малюється",
+            "needsAttention": "Потребує уваги",
+            "failed": "Помилка",
+            "cancelled": "Скасовано"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "Статус недоступний",
+        "blockers": "{{count}} блокувальних проблем",
+        "blockers_one": "{{count}} блокувальна проблема",
+        "blockers_other": "{{count}} блокувальних проблем"
+      },
+      "library": {
+        "subtitle": "Плануйте історії в бітах і шотах, а потім перевіряйте поточне зображення кожного шота.",
+        "pictureCount": "{{count}} зображень готово",
+        "pictureCount_one": "{{count}} зображення готове",
+        "pictureCount_other": "{{count}} зображень готово",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Статус проєкту недоступний",
+          "stage": {
+            "brief": "Бриф",
+            "engines": "Рушії",
+            "references": "Референси",
+            "storyboard": "Розкадрування",
+            "bindings": "Прив’язки",
+            "production": "Виробництво",
+            "cut": "Монтаж"
+          },
+          "progress": {
+            "ready": "Готово",
+            "needsWork": "Потрібне доопрацювання",
+            "references": "Схвалено референсів: {{current}} з {{total}}",
+            "shots": "{{current}} з {{total}} шотів"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "Керування режисерською розкадровкою",
+          "progress": "Намальовано панелей: {{drawn}} із {{total}}",
+          "progressLabel": "Готовність розкадровки",
+          "staleCount": "Застарілих: {{count}}",
+          "busyCount": "У роботі: {{count}}",
+          "stop": "Зупинити малювання",
+          "stopNote": "Після зупинки надсилається запит на скасування там, де це можливо. Готові панелі та вже нараховані витрати зберігаються.",
+          "drawNext": "Намалювати наступну партію ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Керування режисерською розкадровкою · {{title}}",
+          "drawMissing": "Намалювати відсутні ({{count}})",
+          "redrawBeat": "Перемалювати біт · платно",
+          "cardLabel": "Шот {{position}}: {{status}}",
+          "redrawShot": "Перемалювати шот {{position}} · платно",
+          "useAsFirstFrame": "Використати панель шота {{position}} як перший кадр",
+          "status": {
+            "missing": "Не намальовано",
+            "current": "Актуально",
+            "stale": "Застаріло",
+            "statusPending": "Очікування статусу",
+            "queued": "У черзі",
+            "drawing": "Малюється",
+            "needsAttention": "Потребує уваги",
+            "failed": "Помилка",
+            "cancelled": "Скасовано"
+          }
+        },
+        "statusUnavailable": "Поточний порядок у Board неповний або неоднозначний. Оновіть проєкт перед перевіркою плиток Shot.",
+        "renderedCount": "Відрендерено {{count}} із {{total}}",
+        "staleCount": "{{count}} застарілих Shot",
+        "staleCount_one": "{{count}} застарілий Shot",
+        "staleCount_other": "{{count}} застарілих Shot",
+        "inFlightCount": "{{count}} Shot у черзі або рендерингу",
+        "inFlightCount_one": "{{count}} Shot у черзі або рендерингу",
+        "inFlightCount_other": "{{count}} Shot у черзі або рендерингу",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}, Shot {{shot}}",
+          "listLabel": "Shots у {{title}}",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "Поточне відео Shot",
+          "stale": "Застаріло",
+          "chainHead": "Початок ланцюжка",
+          "chainAfter": "Після {{beat}}.{{shot}}",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "Відомості про блокування недоступні для цієї редакції проєкту.",
+          "blocker": {
+            "heading": "Причини блокування",
+            "referenceBindingTable": "Прив’язку референсів потрібно виправити в Table до генерації.",
+            "reviewOnTable": "Перевірити референси в Table",
+            "cause": {
+              "routeInventoryUnavailable": "Список рушіїв недоступний.",
+              "routeNotSelected": "Рушій генерації не вибрано.",
+              "routeSetupRequired": "Вибраний рушій потрібно налаштувати.",
+              "routeUnavailable": "Вибраний рушій недоступний.",
+              "routeRetired": "Вибраний рушій виведено з експлуатації.",
+              "routeIncompatibleFrame": "Рушій несумісний із цим кадром.",
+              "routeFirstFrameUnsupported": "Рушій не підтримує цей перший кадр.",
+              "routeDurationUnsupported": "Рушій не підтримує таку тривалість Shot.",
+              "referencePlanInvalid": "План референсів потребує перевірки.",
+              "referenceGenerationRequired": "Потрібно згенерувати референсне зображення.",
+              "referenceApprovalRequired": "Референсне зображення потребує підтвердження людиною.",
+              "referenceGenerationFailed": "Не вдалося згенерувати референс.",
+              "referenceBindingUnassigned": "Референси не призначено.",
+              "referenceBindingUnknownReference": "У прив’язці вказано невідомий референс.",
+              "referenceBindingWrongKind": "У прив’язці використано неправильний тип референсу.",
+              "referenceBindingUnapprovedReference": "У прив’язці використано непідтверджений референс.",
+              "referenceBindingMissingAsset": "Відсутнє прив’язане референсне зображення.",
+              "referenceBindingCapacityExceeded": "Прив’язка перевищує допустиму для рушія кількість референсів.",
+              "seedSelectionRequired": "Потрібно вибрати перший кадр.",
+              "seedGenerationRequired": "Потрібно створити перший кадр.",
+              "conditioningFrameRequired": "Потрібно видобути кадр із попереднього Shot.",
+              "extractionFailed": "Не вдалося видобути попередній кадр.",
+              "dependencyFailed": "Не вдалося виконати попередній Shot.",
+              "generationInvalidRequest": "Запит на генерацію недійсний.",
+              "generationContentRejected": "Постачальник відхилив вміст.",
+              "generationAuth": "Постачальник відхилив автентифікацію.",
+              "generationQuota": "Квоту постачальника вичерпано.",
+              "generationRateLimited": "Постачальник обмежує частоту запитів.",
+              "generationProviderUnavailable": "Постачальник генерації недоступний.",
+              "generationTimeout": "Час очікування генерації минув.",
+              "generationPollDeadline": "Генерація не завершилася до кінцевого строку опитування.",
+              "generationNoOutput": "Генерація завершилася без придатного результату.",
+              "generationVariationGrid": "Результат є сіткою варіантів і потребує перевірки.",
+              "generationSubmissionUnknown": "Постачальник не підтвердив надсилання.",
+              "generationDownloadFailed": "Не вдалося завантажити згенерований медіафайл.",
+              "generationUnsupported": "Цей запит на генерацію не підтримується.",
+              "generationUnknown": "Генерація завершилася помилкою з невідомої причини.",
+              "cutInvalidMedia": "Поточне зображення неприпустиме для Cut.",
+              "cutBedTooShort": "Аудіопідкладка коротша за Cut."
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "Попередній перегляд фільму",
+          "beatBadge": "Біт {{position}} · {{title}}",
+          "slate": "Заставка · Немає матеріалу",
+          "slateHold": "Залишається в монтажі на {{clock}}",
+          "videoLabel": "Біт {{beatPosition}} · {{beatTitle}} · Шот {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Біт {{beatPosition}} · {{beatTitle}} · Заставка · Немає матеріалу",
+          "noMedia": "Попередній перегляд фільму недоступний.",
+          "awaitingPictureOne": "У Біта {{beatPosition}}, шота {{shotPosition}} ще немає поточного зображення.",
+          "awaitingPictureMany": "У {{count}} шотів ще немає поточного зображення.",
+          "mediaError": "Не вдалося завантажити цей попередній перегляд.",
+          "play": "Відтворити фільм",
+          "pause": "Призупинити фільм",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Лише зображення — аудіодоріжку тут вимкнено",
+          "shotAudioOnly": "Лише звук кадру — музичну підкладку не включено до цього попереднього перегляду",
+          "controlsLabel": "Керування відтворенням фільму",
+          "seekLabel": "Шкала перемотування фільму",
+          "previousJoin": "Попередня склейка",
+          "nextJoin": "Наступна склейка",
+          "loopJoin": "Зациклити склейку",
+          "buffering": "Завантаження кадру попереднього перегляду"
+        },
+        "exports": {
+          "editorFolderDescription": "Поточні зображення шотів, цільові заглушки, дані таймлайна й необов’язкова аудіодоріжка в порядку фільму."
+        },
+        "film": {
+          "under": "на {{clock}} менше",
+          "over": "на {{clock}} більше"
+        },
+        "openBeat": "Відкрити біт",
+        "bed": {
+          "silentPreview": "Без звуку в попередньому перегляді · застосовується під час експорту",
+          "extent": "Від 0:00 · тривалість {{seconds}} с"
+        },
+        "slate": {
+          "openBeat": "Відкрити біт без матеріалу"
+        }
+      },
+      "proposals": {
+        "proposalId": "ID пропозиції",
+        "mutationCount": "Запропоновано змін: {{count}}",
+        "mutationCount_one": "Запропоновано {{count}} зміну",
+        "mutationCount_other": "Запропоновано змін: {{count}}",
+        "terminalCount": "Не можна прийняти пропозицій режисера: {{count}}",
+        "terminalCount_one": "Не можна прийняти {{count}} пропозицію режисера",
+        "terminalCount_other": "Не можна прийняти пропозицій режисера: {{count}}",
+        "showTerminal": "Переглянути минулі пропозиції",
+        "hideTerminal": "Сховати минулі пропозиції",
+        "reviewDetails": "Переглянути деталі пропозиції",
+        "before": "До",
+        "after": "Після",
+        "ownerBeat": "Батьківський біт",
+        "reviewUnavailable": "Не вдалося безпечно перевірити цю пропозицію, тому її не можна прийняти.",
+        "refusal": {
+          "applyCoverage": "План покриття не може замінити ці зафіксовані кадри. Відредагуйте їхні знімальні сценарії безпосередньо.",
+          "applyCoverageFixedWork": "План покриття не може замінити кадри, у яких уже є робота. Перегляньте причини фіксації та відредагуйте заторкнуті кадри безпосередньо.",
+          "editShotsDirectly": "Редагувати ці кадри безпосередньо",
+          "reason": {
+            "beat_capacity_reached": "Проєкт досяг ліміту бітів.",
+            "beat_shot_capacity_reached": "Цей біт досяг ліміту кадрів.",
+            "project_shot_capacity_reached": "Проєкт досяг ліміту кадрів.",
+            "invalid_shot_duration": "Тривалість запропонованого кадру поза дозволеним діапазоном.",
+            "dependency_blocked": "Наявна робота блокує цю запропоновану зміну.",
+            "identity_collision": "Запропонований ідентифікатор уже використовується.",
+            "invalid_operation": "Ця запропонована зміна недійсна для поточного проєкту.",
+            "undo_conflict": "Пропозиція конфліктує з пізнішими правками.",
+            "validation_failed": "Отриманий проєкт не пройшов перевірку."
+          },
+          "fixedReason": {
+            "owned_asset": "збережені матеріали кадру",
+            "owned_job": "історія генерації",
+            "video_asset": "поточне відео",
+            "seed_still": "вибраний перший кадр",
+            "conditioning_frame": "кадр безперервності",
+            "conditioning_input": "вхід для подальшого обумовлення",
+            "shooting_script": "наявний знімальний сценарій"
+          }
+        },
+        "refreshing": "Пропозицію звіряють із поточним проєктом…",
+        "authorityUnavailable": "Не вдалося перевірити повноваження пропозиції. Вона залишається в очікуванні, а дії з нею недоступні.",
+        "requestUpdated": "Підготувати оновлену пропозицію",
+        "saveAndRequestUpdated": "Зберегти й підготувати оновлену пропозицію",
+        "reviewRuleDrafts": "Переглянути чернетки правил",
+        "reviewRuleDraftsFirst": "Перегляньте або видаліть локальну чернетку правила, перш ніж приймати цю пропозицію правила.",
+        "reproposalPrompt": "Перевірте пропозицію {{proposalId}} за допомогою studio_get_proposal, потім викличте read_storyboard і підготуйте нову пропозицію для поточної ревізії. Не застосовуйте й не перебазовуйте початкову пропозицію непомітно.",
+        "chatDecisionBusy": "Інша перевірена дія ще виконується.",
+        "chatDirty": "Збережіть або скиньте чернетки, що конфліктують із цією пропозицією, перш ніж схвалювати її.",
+        "chatNoPending": "Немає пропозиції режисера, що очікує рішення.",
+        "chatMultiplePending": "Готові кілька поточних пропозицій режисера. Використайте /approve PROPOSAL_ID або /reject PROPOSAL_ID із повним ID.",
+        "chatProposalNotFound": "Саме ця пропозиція більше не очікує рішення.",
+        "chatUnavailable": "Зараз немає готової пропозиції режисера, що очікує рішення. Перегляньте її картку або запросіть оновлену пропозицію.",
+        "chatStale": "Пропозиція більше не відповідає поточній ревізії проєкту.",
+        "chatAccepted": "Пропозицію прийнято.",
+        "chatRejected": "Пропозицію відхилено.",
+        "reviewStale": "Цей огляд створено для редакції {{baseRevision}}, а поточна редакція проєкту — {{currentRevision}}.",
+        "noChanges": "Ця пропозиція не вносить змістових змін.",
+        "paidRecovery": {
+          "heading": "Платне відновлення",
+          "explanation": "Director знайшов відновлення, що потребує нової генерації. Перед оплатою перевірте уражену роботу й ціну.",
+          "blockedBy": "Причина блокування",
+          "affectedWork": "Уражена робота",
+          "price": "Орієнтовна вартість",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Обсяг генерації",
+          "generationCount": "Елементів генерації: {{count}}",
+          "includesCascade": "включно із залежною роботою",
+          "expires": "Ця ціна діє до {{expiresAt}}.",
+          "expired": "Збережена ціна закінчилася. Оновіть її перед підтвердженням.",
+          "confirm": "Підтвердити й оплатити",
+          "refresh": "Оновити ціну",
+          "refreshed": "Ціну оновлено. Перевірте її та підтвердьте ще раз для оплати.",
+          "cardOnly": "Платне відновлення можна підтвердити лише в картці пропозиції після перевірки поточної ціни.",
+          "location": {
+            "project": "Проєкт",
+            "cut": "Монтаж",
+            "route": "Маршрут {{route}}",
+            "reference": "Референс · {{reference}}",
+            "shot": "{{beat}} · Кадр {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "Проєкт",
+          "reference": "Референс",
+          "beat": "Біт",
+          "shot": "Шот"
+        },
+        "change": {
+          "added": "Додано",
+          "edited": "Змінено",
+          "removed": "Видалено",
+          "reordered": "Переставлено"
+        },
+        "placementValue": {
+          "active": "Активне",
+          "bin": "Кошик",
+          "removed": "Видалене"
+        },
+        "field": {
+          "name": "Назва",
+          "brief": "Бриф",
+          "rules": "Правила",
+          "aspectRatio": "Співвідношення сторін",
+          "resolution": "Роздільність",
+          "targetDurationSeconds": "Цільова тривалість",
+          "boardStyle": "Стиль борду",
+          "prompt": "Промпт",
+          "title": "Заголовок",
+          "story": "Історія",
+          "targetSeconds": "Ціль біта",
+          "shootingScript": "Знімальний сценарій",
+          "durationSeconds": "Тривалість",
+          "chainBreak": "Безперервність",
+          "placement": "Розташування",
+          "order": "Порядок"
+        }
+      },
+      "playbackAudio": {
+        "label": "Звук відтворення",
+        "mute": "Вимкнути звук",
+        "unmute": "Увімкнути звук",
+        "volume": "Гучність відтворення: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Аналіз звуку кадру…",
+          "audible": "Є чутний звук",
+          "effectivelySilent": "Фактично без звуку",
+          "noAudioStream": "Аудіопотік відсутній",
+          "unavailable": "Аналіз звуку недоступний"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "Перший кадр {{stillIndex}} для шота {{shotIndex}}",
+          "previewAlt": "Попередній перегляд · {{label}}",
+          "effective": "Поточний перший кадр",
+          "pinnedBadge": "Закріплено",
+          "authorizationLocked": "Авторизована робота з відео заблокувала перший кадр цього шота. Імпортовані варіанти залишаються збереженими, але не можуть замінити початковий кадр у перевіреному кошторисі.",
+          "authorizationIncompatible": "Недоступно для авторизованої роботи"
+        },
+        "firstFrames": {
+          "title": "Перші кадри",
+          "shotChip": "Кадр {{shot}}",
+          "on": "Активний",
+          "status": {
+            "notReady": "Не готовий",
+            "ready": "Готовий до рендеру",
+            "rendering": "Рендеринг",
+            "rendered": "Відрендерено"
+          },
+          "frameLabel": "Кадр {{index}}",
+          "origin": {
+            "generated": "Створено",
+            "imported": "Імпортовано",
+            "board": "Розкадрування",
+            "inherited": "З кадру {{shot}}"
+          },
+          "current": "Поточний",
+          "unavailable": "Недоступно",
+          "previewAlt": "Попередній перегляд · {{label}}",
+          "openFrame": "Відкрити {{label}} на весь екран",
+          "pinned": "Закріплено як перший кадр",
+          "pin": "Закріпити як перший кадр",
+          "firstFrameChanged": "Перший кадр змінено · Не перезапущено",
+          "promptChanged": "Відредаговано · Ще не запущено",
+          "import": "Імпортувати перший кадр",
+          "empty": "Немає придатного першого кадру",
+          "currentPicture": "Поточне зображення",
+          "pictureEmpty": "Зображення ще немає",
+          "pictureAlt": "Поточне зображення для кадру {{shot}}",
+          "sendLastFrame": "Надіслати останній кадр до кадру {{shot}}",
+          "cancelRun": "Скасувати запуск",
+          "generateShot": "Створити кадр {{shot}}",
+          "generateAgain": "Створити знову",
+          "promptLabel": "Промпт кадру",
+          "regenerate": "Створити знову",
+          "menu": {
+            "download": "Завантажити",
+            "copyPrompt": "Копіювати промпт",
+            "remove": "Видалити"
+          },
+          "viewer": {
+            "currentFirstFrame": "Поточний перший кадр",
+            "counter": "{{current}} з {{total}}",
+            "previous": "Назад",
+            "next": "Далі"
+          }
+        },
+        "picture": {
+          "title": "Поточне зображення",
+          "label": "Поточне зображення для кадру {{index}}",
+          "empty": "Ще нічого не відтворено",
+          "sourceDuration": "Джерело: {{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} секунд",
+          "unavailable": "Поточне зображення недоступне",
+          "videoPreview": "Програвач · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "Створити знову",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "Згенерувати знову"
+        },
+        "lift": {
+          "shot": "Перемістити в кошик",
+          "shotTitle": "Перемістити шот {{index}} у кошик?",
+          "shotBodyNoStale": "Усі створені й оплачені матеріали залишаться з цим шотом. Перемістити його в кошик?",
+          "shotBodyStale": "Усі створені й оплачені матеріали залишаться з цим шотом. Після переміщення в кошик застаріє таке: {{shots}}.",
+          "confirmShot": "Перемістити в кошик",
+          "beat": "Перемістити в кошик",
+          "beatTitle": "Перемістити цей біт у кошик?",
+          "beatBodyNoStale": "Усі шоти та всі створені й оплачені матеріали залишаться з цим бітом. Перемістити його в кошик?",
+          "beatBodyStale": "Усі шоти та всі створені й оплачені матеріали залишаться з цим бітом. Після переміщення в кошик застаріє таке: {{shots}}.",
+          "confirmBeat": "Перемістити в кошик"
+        },
+        "beatFieldsLabel": "Історія біта",
+        "fieldGuidance": {
+          "story": "Історія · Сюжетна мета й розвиток цього біта"
+        },
+        "fields": {
+          "story": "Історія",
+          "shootingScript": "Знімальний сценарій",
+          "shootingScriptFor": "Знімальний сценарій для шоту {{index}}"
+        },
+        "chain": {
+          "hardCutState": "Жорстка склейка · Починається з першого кадру",
+          "hardCutUnavailable": "Зміна жорсткої склейки тимчасово недоступна. Спочатку необхідно перевірити розрахунок потрібної заміни медіафайлів.",
+          "reviewSever": "Перевірити жорстку склейку…",
+          "reviewRejoin": "Перевірити возз’єднання…",
+          "reviewSeverDescription": "Жорстка склейка починає кадр {{shot}} із придатного першого кадру й за потреби створює новий. Після підтвердження цей кадр і всі безперервні наступні кадри до наступної жорсткої склейки буде замінено.",
+          "reviewRejoinDescription": "Під час возз’єднання кадру {{shot}} вибір першого кадру очищається й використовується останній кадр сцени {{previous}} з урахуванням обрізки. Після підтвердження безкоштовне видобування кадру може завершитися до надсилання цього й наступних безперервних кадрів постачальнику аж до наступної жорсткої склейки.",
+          "segmentHead": "Початок ланцюжка · Починається з першого кадру",
+          "continuous": "Продовжується з останнього кадру шоту {{position}}"
+        },
+        "coverage": {
+          "trimGuidance": "Край · Обрізання · Безкоштовно",
+          "boundaryGuidance": "Межа · Потребує повторного рендерингу",
+          "segmentState": {
+            "noPicture": "Немає зображення",
+            "queued": "У черзі",
+            "nextUp": "Наступний",
+            "waitingOnShot": "Очікування шоту {{position}}",
+            "waitingOnFrame": "Очікування кадру для продовження",
+            "rendering": "Рендеринг",
+            "renderingProgress": "Рендеринг · {{progress}} %",
+            "renderingStill": "Рендеринг · Показ першого кадру",
+            "rendered": "Готово",
+            "untouched": "Без змін",
+            "needsRerender": "Потрібен повторний рендеринг",
+            "staleStillPlays": "Застаріло · Усе ще відтворюється",
+            "failedNotBilled": "Помилка · Без списання",
+            "neverDispatched": "Не відправлено",
+            "shotKept": "Шот {{position}} · Збережено",
+            "statusPending": "Статус недоступний",
+            "needsAttention": "Потребує уваги"
+          },
+          "boundaryFrame": {
+            "empty": "Межа після шоту {{position}} · Очікування кадру для продовження",
+            "ready": "Межа після шоту {{position}} · Кадр для продовження готовий",
+            "gone": "Межа після шоту {{position}} · Кадр для продовження відсутній",
+            "stale": "Межа після шоту {{position}} · Кадр для продовження застарів"
+          },
+          "seekGuidance": "Шкала · Перемотування · Безкоштовно",
+          "seekLane": "Шкала перемотування біта",
+          "seekValue": "{{current}} з {{total}}"
+        },
+        "preview": {
+          "label": "Попередній перегляд біта",
+          "noMedia": "Попередній перегляд біта недоступний",
+          "mediaError": "Не вдалося показати поточне зображення.",
+          "videoLabel": "Відео шоту {{position}} · {{shootingScript}}",
+          "slateLabel": "Планова заставка шоту {{position}} · {{shootingScript}}",
+          "slate": "Планова заставка",
+          "slateHold": "Показ {{clock}}",
+          "play": "Відтворити біт",
+          "pause": "Призупинити біт",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Лише зображення",
+          "controlsLabel": "Керування відтворенням біта",
+          "previousJoin": "Попередня склейка",
+          "nextJoin": "Наступна склейка",
+          "loopJoin": "Зациклити найближчу склейку",
+          "keyboardGuidance": "Пробіл — відтворення · Стрілки — перемотування · [ ] — склейки · L — цикл"
+        },
+        "directorRequestHint": "Попросіть креативного директора запропонувати перевірений новий поділ.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Скасувати й перевірити возз’єднання",
+          "cancelAndReviewRejoinTitle": "Скасувати авторизовану роботу й перевірити возз’єднання?",
+          "cancelAndReviewRejoinBody": "Буде скасовано лише ще не надіслану відеороботу, що очікує. Готові медіафайли та історія авторизації збережуться. Перед замінною генерацією потрібно перевірити новий кошторис возз’єднання.",
+          "cancelAndReviewRejoinConfirm": "Скасувати й перевірити возз’єднання",
+          "cancelAndReviewRejoinUnconfirmed": "Роботу, що очікувала, скасовано, але оновлений робочий простір не вдалося підтвердити. Оновіть його перед перевіркою возз’єднання.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Результат скасування не вдалося підтвердити. Оновіть робочий простір перед перевіркою возз’єднання."
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "Налаштування фільму",
+        "videoAudioCapability": {
+          "silentOnly": "Цей рушій створює кліпи без звуку.",
+          "audioCapable": "Цей рушій може створювати звук; аудіодоріжка готового кадру аналізується окремо."
+        },
+        "undoLabel": {
+          "promote_board_panel": "Використати панель як перший кадр",
+          "set_reference_plan": "план референсів",
+          "amend_reference_plan": "додати фон",
+          "set_reference_label": "назва референсу",
+          "set_reference_prompt": "промпт референсу",
+          "select_reference_image": "поточне зображення референсу",
+          "remove_reference_image": "видалити зображення референсу",
+          "dismiss_seed_still": "відхилити перший кадр",
+          "select_video_take": "вибрати відеодубль",
+          "remove_video_take": "видалити дубль",
+          "set_shot_reference_binding": "прив’язка референсів шоту"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "Панель розкадровки",
+          "reference_image": "Референсне зображення"
+        },
+        "promotion": {
+          "title": "Використати панель як перший кадр",
+          "summary": "Зробити поточну панель розкадровки для шота {{shotId}} першим кадром. Це не змінює межу безперервності шота.",
+          "impactNone": "Від цього кадру не залежить жодне поточне зображення.",
+          "impactIntro": "Поточні зображення, які залишаться доступними для перегляду, але застаріють: {{count}}",
+          "impactItem": "Поточне зображення шота {{shotId}}",
+          "optionsLabel": "Виберіть, що робити з поточними зображеннями",
+          "promoteOnly": "Лише призначити — зберегти доступні застарілі зображення",
+          "freePrice": "$0",
+          "promoteAndRerender": "Призначити та перевірити точний обсяг повторного рендерингу",
+          "priceAfterReview": "Ціну буде показано далі",
+          "promoteOnlyAction": "Призначити за $0",
+          "reviewPaidAction": "Перевірити ціну повторного рендерингу",
+          "paidUnavailable": "У цьому сегменті забагато поточних зображень для одного платного підтвердження. Призначення без рендерингу залишається доступним.",
+          "headline": "Призначити + повторний рендеринг дублів ({{count}}) · {{cost}}",
+          "requiredWork": "Перелічені повторні рендеринги точно відповідають поточним зображенням, які застаріють через це призначення. Відсутнє покриття не включено.",
+          "confirm": "Підтвердити призначення + повторний рендеринг дублів ({{count}}) · {{cost}}",
+          "promoted": "Панель призначено. Наявні зображення залишаються доступними для перегляду та позначені як застарілі.",
+          "promoting": "Панель призначається…",
+          "confirmed": "Панель призначено, і повторний рендеринг підтверджених зображень розпочато.",
+          "close": "Закрити"
+        },
+        "headline_one": "{{count}} генерація · {{cost}}",
+        "headline_other": "{{count}} генерацій · {{cost}}",
+        "confirm_one": "Підтвердити {{count}} генерацію · {{cost}}",
+        "confirm_other": "Підтвердити {{count}} генерацій · {{cost}}",
+        "hideBreakdown": "Приховати кожну генерацію",
+        "showBreakdown": "Показати кожну генерацію",
+        "conditioningFrameAlt": "Кадр-умова для {{shot}}",
+        "routeShared": "Усе через {{model}}",
+        "group": {
+          "required": "Обов’язково"
+        },
+        "continuity": {
+          "severTitle": "Перевірити жорстку склейку",
+          "rejoinTitle": "Перевірити возз’єднання",
+          "severSummary": "Цей розрахунок робить цей кадр початком ланцюжка, повторно використовує придатний перший кадр або створює його за потреби й замінює всі заторкнуті відео до наступної жорсткої склейки.",
+          "rejoinSummary": "Цей розрахунок очищає вибір першого кадру цього шота й возз’єднує його з попереднім кадром з урахуванням обрізки. Після підтвердження безкоштовне видобування кадру може завершитися до надсилання відео на заміну аж до наступної жорсткої склейки.",
+          "severHeadline": "Жорстка склейка · обов’язкових генерацій: {{count}} · {{cost}}",
+          "severHeadline_one": "Жорстка склейка · {{count}} обов’язкова генерація · {{cost}}",
+          "severHeadline_other": "Жорстка склейка · обов’язкових генерацій: {{count}} · {{cost}}",
+          "rejoinHeadline": "Возз’єднання · обов’язкових генерацій: {{count}} · {{cost}}",
+          "rejoinHeadline_one": "Возз’єднання · {{count}} обов’язкова генерація · {{cost}}",
+          "rejoinHeadline_other": "Возз’єднання · обов’язкових генерацій: {{count}} · {{cost}}",
+          "requiredWork": "Для цієї зміни ланцюжка обов’язкові всі перелічені роботи із заміни.",
+          "confirmSever": "Підтвердити жорстку склейку + {{count}} генерацій · {{cost}}",
+          "confirmSever_one": "Підтвердити жорстку склейку + {{count}} генерацію · {{cost}}",
+          "confirmSever_other": "Підтвердити жорстку склейку + {{count}} генерацій · {{cost}}",
+          "confirmRejoin": "Підтвердити возз’єднання + {{count}} генерацій · {{cost}}",
+          "confirmRejoin_one": "Підтвердити возз’єднання + {{count}} генерацію · {{cost}}",
+          "confirmRejoin_other": "Підтвердити возз’єднання + {{count}} генерацій · {{cost}}",
+          "close": "Закрити — залишити ланцюжок без змін",
+          "severConfirmed": "Жорстку склейку підтверджено. Перевірте в шоті перебіг підготовки першого кадру й заміни, а також потребу у відновленні.",
+          "rejoinConfirmed": "Возз’єднання підтверджено. Перевірте в шоті перебіг видобування кадру й заміни, а також потребу у відновленні."
+        },
+        "errors": {
+          "routesUnavailable": "Перед підготовкою цієї оцінки виберіть готові маршрути зображення та відео в розділі «Налаштування фільму».",
+          "pricing": {
+            "invalidQuote": "Дані розрахунку були внутрішньо неузгоджені. Нічого не надіслано.",
+            "inactiveShot": "Один із вибраних кадрів більше не активний. Оновіть проєкт і підготуйте розрахунок знову.",
+            "inFlight": "Одна з вибраних генерацій уже виконується. Дочекайтеся завершення або змініть вибір.",
+            "duplicateShotPurpose": "Одну й ту саму генерацію вибрано кілька разів. Перевірте вибір і підготуйте розрахунок знову.",
+            "invalidDependency": "Залежність продовження більше недійсна. Оновіть проєкт і підготуйте розрахунок знову.",
+            "invalidPrepareRequest": "Не вдалося безпечно підготувати вибрані генерації. Перевірте вибір і повторіть спробу.",
+            "invalidReference": "Одне з вибраних посилань більше не підходить для цієї генерації. Виберіть інше посилання.",
+            "missingShootingScript": "Перед створенням медіа напишіть знімальний сценарій для цього Shot.",
+            "missingConditioning": "Для відеодубля немає придатного першого кадру або попереднього кадру. Додайте чи виберіть потрібне зображення.",
+            "unsafeTotal": "Не вдалося безпечно відобразити підсумок розрахунку. Зменште вибір; нічого не надіслано."
+          }
+        },
+        "reviewShotBinding": "Перевірити прив’язку шоту",
+        "readout": {
+          "prompt": "Точний промпт",
+          "rendersAs": "Параметри рендера",
+          "sourceRevision": "Редакція джерела",
+          "source": "Джерело",
+          "story": "Історія",
+          "shootingScript": "Знімальний сценарій",
+          "referencePrompt": "Опис референсу",
+          "references": "Визначені референси",
+          "noReferences": "Немає прямих вхідних референсів",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        },
+        "referenceGridRetry": "Якщо модель поверне сітку варіантів, для кожного референсу буде виконано одну автоматичну повторну спробу. Перші спроби коштують {{lower}}, максимум із повторами — {{upper}}."
+      },
+      "editorFolderExport": {
+        "action": "Експортувати папку для монтажу…",
+        "actionWithSlates": "Експортувати папку для монтажу · заглушок: {{count}}…",
+        "exporting": "Експорт… Медіа не створюються, кошти не витрачаються.",
+        "reveal": "Показати у Finder",
+        "dismiss": "Закрити",
+        "none": "немає",
+        "successFacts": "{{bytes}} байт · файлів: {{count}}",
+        "successSlates": "Номери Shot із заглушками: {{shots}}",
+        "successQuarantine": "Старих експортів переміщено: {{count}}",
+        "disabled": {
+          "no_beats": "Додайте Beat перед експортом",
+          "duration_pending": "Задайте тривалість кожного порожнього Beat",
+          "invalid_media": "Виправте застарілі або недійсні вибрані медіа",
+          "bed_too_short": "Виберіть звукову доріжку достатньої довжини",
+          "mutationActive": "Дочекайтеся завершення поточної зміни",
+          "exportRunning": "Папка для монтажу вже експортується",
+          "catalogUnavailable": "Сховище експорту папки недоступне"
+        },
+        "errors": {
+          "catalogUnavailable": "Каталог експорту недоступний. Перезавантажте проєкт.",
+          "staleAuthority": "Проєкт змінився. Перевірте поточний проєкт перед повторним експортом.",
+          "staleCatalog": "Каталог експорту змінився. Перезавантажте історію експорту перед повторною спробою.",
+          "invalidMedia": "Вибране медіа застаріле, неканонічне або недійсне. Перевірте Cut.",
+          "mediaUnavailable": "Не вдалося перевірити вибраний файл. Частковий експорт не опубліковано.",
+          "busy": "Creative Studio завершує іншу операцію. Спробуйте пізніше.",
+          "artifactUnavailable": "Цього експорту більше немає в активному каталозі. Перезавантажте проєкт.",
+          "resultConflict": "До підтвердження результату надійшов новий каталог. Перезавантажте й перевірте його."
+        }
+      },
+      "filmExport": {
+        "action": "Експортувати фільм…",
+        "actionWithSlates": "Експортувати фільм · заглушок: {{count}}…",
+        "actionWithSlates_one": "Експортувати фільм · {{count}} заглушка…",
+        "actionWithSlates_other": "Експортувати фільм · заглушок: {{count}}…",
+        "cancel": "Скасувати експорт",
+        "cut": "Прямі склейки",
+        "description": "Створює готовий до монтажу MP4 з поточної збірки. Непокриті кадри стають чорними плашками заданої тривалості.",
+        "disabled": {
+          "no_beats": "Додайте Beat перед експортом",
+          "duration_pending": "Задайте тривалість кожного порожнього Beat",
+          "invalid_media": "Виправте застарілі або недійсні медіа",
+          "bed_too_short": "Оберіть достатньо довгу аудіодоріжку",
+          "mutationActive": "Завершіть поточну зміну",
+          "exportRunning": "Експорт фільму вже виконується",
+          "catalogUnavailable": "Сховище експорту недоступне"
+        },
+        "dismiss": "Закрити",
+        "dissolve": "Наплив",
+        "errors": {
+          "catalogUnavailable": "Каталог експорту недоступний. Перезавантажте проєкт.",
+          "staleAuthority": "Проєкт змінився. Застарілий фільм не опубліковано — перевірте поточний проєкт перед повторним експортом.",
+          "staleCatalog": "Каталог експорту змінився. Застарілий фільм не опубліковано — перезавантажте історію експорту перед повторною спробою.",
+          "unavailable": "Для експорту фільму потрібен FFmpeg, але його не знайдено на цьому пристрої. Установіть його або вкажіть у змінній FFMPEG_PATH шлях до наявної копії, а потім знову відкрийте проєкт.",
+          "renderFailed": "Локальний рендер не пройшов перевірку. Частковий експорт не опубліковано.",
+          "cancelled": "Експорт скасовано. Медіа проєкту не змінено.",
+          "invalidMedia": "Збірка містить застарілі, неканонічні або недійсні медіа.",
+          "busy": "Creative Studio завершує іншу операцію.",
+          "artifactUnavailable": "Фільму більше немає в активному каталозі.",
+          "resultConflict": "Новіший каталог з'явився до підтвердження фільму."
+        },
+        "export": "Експортувати фільм",
+        "noSpend": "Виконується на вашому пристрої. Медіа не створюються, кошти не витрачаються.",
+        "phase": {
+          "preparing": "Підготовка точних джерел…",
+          "analyzing": "Аналіз медіа й тихих хвостів…",
+          "rendering": "Локальний рендеринг фільму…",
+          "publishing": "Перевірка й публікація фільму…"
+        },
+        "reveal": "Показати у Finder",
+        "successFacts": "За задумом {{nominal}} с · експортовано {{rendered}} с · хвостів обрізано: {{count}}",
+        "successFacts_one": "За задумом {{nominal}} с · експортовано {{rendered}} с · обрізано {{count}} хвіст",
+        "successFacts_other": "За задумом {{nominal}} с · експортовано {{rendered}} с · хвостів обрізано: {{count}}",
+        "successQuarantine": "Старих експортів фільму переміщено: {{count}}",
+        "successQuarantine_one": "Старий експорт фільму переміщено: {{count}}",
+        "successQuarantine_other": "Старих експортів фільму переміщено: {{count}}",
+        "title": "Експорт фільму",
+        "transition": "Перехід",
+        "trimTails": "Обрізати статичні хвости в кінці кожного кадру",
+        "trimTailsHelp": "Впливає лише на експортований файл — матеріали проєкту не змінюються. Останній кадр зберігає повну тривалість."
+      }
     },
     "rules": {
       "open": "Правила",
@@ -954,13 +1819,7 @@
     "close": {
       "saveAndClose": "Зберегти й закрити",
       "discard": "Не зберігати й закрити",
-      "cancel": "Скасувати",
-      "unsavedMessage": "У {{count}} сценах є незбережені зміни. Зберегти їх перед закриттям?",
-      "unsavedMessage_one": "{{count}} сцена містить незбережені зміни. Зберегти її перед закриттям?",
-      "unsavedMessage_few": "{{count}} сцени містять незбережені зміни. Зберегти їх перед закриттям?",
-      "unsavedMessage_many": "{{count}} сцен містять незбережені зміни. Зберегти їх перед закриттям?",
-      "unsavedMessage_other": "У {{count}} сцени є незбережені зміни. Зберегти їх перед закриттям?",
-      "unavailableMessage": "Творча студія не відповідає. Якщо закрити зараз, незбережені зміни сцен можуть бути втрачені."
+      "cancel": "Скасувати"
     },
     "phase": {
       "nav": {
@@ -1285,113 +2144,6 @@
       "durationSeconds_other": "{{seconds}} секунди",
       "selected": "Вибрана сцена"
     },
-    "inspector": {
-      "title": "Режисура сцени",
-      "sectionsLabel": "Розділи редагування сцени",
-      "directionTab": "Візуал",
-      "scriptTab": "Сценарій",
-      "titleLabel": "Назва сцени",
-      "purposeLabel": "Мета сцени",
-      "purposePlaceholder": "Якої мети має досягти ця сцена?",
-      "visualPromptLabel": "Візуальний промпт",
-      "visualPromptPlaceholder": "Опишіть кадр, об'єкт, середовище, освітлення та рух.",
-      "narrationLabel": "Закадровий текст",
-      "onScreenTextLabel": "Текст на екрані",
-      "mediaKindLabel": "Тип результату",
-      "durationLabel": "Тривалість сцени в секундах",
-      "invalidDuration": "Введіть ціле число від 1 до 60 секунд.",
-      "saving": "Збереження сцени...",
-      "saved": "Сцену збережено",
-      "saveFailed": "Не вдалося зберегти сцену.",
-      "unsavedChanges": "Незбережені зміни не втрачено."
-    },
-    "draft": {
-      "title": "Створити чернетку розкадрування",
-      "body": "WePrompt запропонує сцени, закадровий і екранний текст, а також хронометраж для вашої перевірки.",
-      "checking": "Перевірка вибраної моделі розкадрування...",
-      "ready": "Готово до створення чернетки",
-      "setupRequired": "Виберіть і налаштуйте модель розкадрування для створення чернетки з ШІ.",
-      "unavailable": "Створення чернетки розкадрування зараз недоступне.",
-      "providerLabel": "Постачальник розкадрування",
-      "modelLabel": "Модель розкадрування",
-      "chargeNotice": "Чернетка використовує вибрану модель проєкту; постачальник може стягувати плату.",
-      "replaceTitle": "Замінити наявне розкадрування?",
-      "replaceBody": "Новий чернетковий варіант замінить усі поточні сцени лише після отримання коректної пропозиції.",
-      "confirm": "Створити чернетку",
-      "cancel": "Скасувати",
-      "configureModel": "Відкрити налаштування моделі",
-      "manualFallback": "Продовжити редагування вручну",
-      "failed": "Не вдалося створити чернетку розкадрування. Поточні сцени не змінено."
-    },
-    "conditioning": {
-      "inputsTitle": "Вхідні дані для цього кадру",
-      "role": { "cast": "Персонажі", "look": "Стиль" },
-      "maximum": "Цей рушій приймає до {{count}} референсів брифу.",
-      "unsupported": "Цей графічний рушій не підтримує активні референси брифу. Виберіть інший рушій або видаліть їх із брифу.",
-      "overflow": "Цей графічний рушій приймає щонайбільше {{maximum}} референсів брифу, але активні {{count}}.",
-      "malformed": "Референси брифу змінилися або недійсні. Оновіть перевірку перед генерацією.",
-      "reviewChanged": "Референси брифу або графічний рушій змінилися. Перевірте оновлені вхідні дані перед генерацією.",
-      "plateOutOfDate": "Вибраний перший кадр створено з іншими референсами брифу, співвідношенням сторін або роздільністю. Цей кліп усе одно можна відрендерити."
-    },
-    "reference": {
-      "generate": "Створити референс",
-      "dialogTitle": "Створити референсне зображення",
-      "promptLabel": "Промпт референсу",
-      "reviewTag": "Референс",
-      "excludedSummary": "Деякі запитані сцени не включено до цього підтвердження, оскільки вони не готові:",
-      "excludedNoneReady": "Жодна із запитаних сцен не готова до створення референсу:",
-      "discardExcludedRequests": "Відхилити ці запити",
-      "excludedUnavailable": "Сцена більше недоступна",
-      "excludedPromptUnusable": "Візуальний промпт сцени не може описати референсне зображення",
-      "dismissFailed": "Не вдалося оновити чергу запитів. Вікно перевірки закрито; повторіть спробу пізніше."
-    },
-    "review": {
-      "generateReadyScenes": "Згенерувати готові сцени: {{count}}",
-      "generateReadyScenes_one": "Згенерувати {{count}} готову сцену",
-      "generateReadyScenes_few": "Згенерувати {{count}} готові сцени",
-      "generateReadyScenes_many": "Згенерувати {{count}} готових сцен",
-      "generateReadyScenes_other": "Згенерувати {{count}} готової сцени",
-      "noReadyScenes": "Немає сцен, готових до генерації.",
-      "generateScene": "Згенерувати сцену",
-      "regenerateScene": "Згенерувати інший варіант",
-      "title": "Перевірка генерації",
-      "sceneCount": "Вибрано сцен: {{count}}",
-      "videoSeconds": "Запитано секунд відео: {{seconds}}",
-      "selectedDurationFull": "Вибрана тривалість: {{seconds}} секунд",
-      "selectedDurationFull_one": "Вибрана тривалість: {{seconds}} секунда",
-      "selectedDurationFull_few": "Вибрана тривалість: {{seconds}} секунди",
-      "selectedDurationFull_many": "Вибрана тривалість: {{seconds}} секунд",
-      "selectedDurationFull_other": "Вибрана тривалість: {{seconds}} секунди",
-      "targetDurationFull": "Цільова тривалість: {{seconds}} секунд",
-      "targetDurationFull_one": "Цільова тривалість: {{seconds}} секунда",
-      "targetDurationFull_few": "Цільова тривалість: {{seconds}} секунди",
-      "targetDurationFull_many": "Цільова тривалість: {{seconds}} секунд",
-      "targetDurationFull_other": "Цільова тривалість: {{seconds}} секунди",
-      "providerLabel": "Постачальник",
-      "modelLabel": "Модель",
-      "aspectRatio": "Співвідношення сторін",
-      "resolution": "Роздільна здатність",
-      "watermarkOff": "Водяний знак вимкнено",
-      "audioOff": "Виведення без звуку; генерацію аудіо вимкнено",
-      "missingRoute": "Принаймні одна сцена не має рушія.",
-      "invalidRoute": "Принаймні один вибраний рушій недійсний.",
-      "durationMismatch": "Хронометраж розкадрування не відповідає цілі проєкту.",
-      "chargeNotice": "Генерація використовує вибраний обліковий запис постачальника й може призвести до витрат.",
-      "confirm": "Підтвердити й згенерувати",
-      "cancel": "Скасувати",
-      "disabledMissingRoutes": "У {{count}} кадрів немає рушія. Закрийте вікно, щоб вибрати його.",
-      "disabledMissingRoutes_one": "{{count}} кадр не має рушія. Закрийте вікно, щоб вибрати його.",
-      "disabledMissingRoutes_few": "{{count}} кадри не мають рушія. Закрийте вікно, щоб вибрати його.",
-      "disabledMissingRoutes_many": "Для {{count}} кадрів не вибрано рушій. Закрийте вікно, щоб вибрати його.",
-      "disabledMissingRoutes_other": "У {{count}} кадрів немає рушія. Закрийте вікно, щоб вибрати його.",
-      "setEngines": "Закрити й вибрати рушії",
-      "excludedFirstFrame": "{{count}} кадрів не входять до цієї генерації — рушій не може почати з кадру.",
-      "excludedFirstFrame_one": "{{count}} кадр не входить до цієї генерації — рушій не може почати з кадру.",
-      "excludedFirstFrame_few": "{{count}} кадри не входять до цієї генерації — рушій не може почати з кадру.",
-      "excludedFirstFrame_many": "{{count}} кадрів виключено з цієї генерації — рушій не може почати з кадру.",
-      "excludedFirstFrame_other": "{{count}} кадрів не входять до цієї генерації — рушій не може почати з кадру.",
-      "audioOn": "Цей рендер містить згенероване аудіо; рушії без звуку, якщо вони є, залишаться без звуку."
-    },
     "jobs": {
       "progress": "Виконано: {{percent}} %",
       "cancel": "Скасувати завдання",
@@ -1401,8 +2153,8 @@
       "retryConfirmationConfirm": "Підтвердити й повторити",
       "retryDownload": "Повторити завантаження",
       "retryChargeTitle": "Повторити з ризиком подвійного списання?",
-      "retryChargeBody": "Результат попереднього надсилання невідомий. Повторна спроба може призвести до додаткового списання в постачальника.",
-      "retryChargeConfirm": "Підтвердити й повторити",
+      "retryChargeBody": "Результат попереднього надсилання невідомий. Заміна може призвести до додаткового списання в постачальника. Продовження лише відкриє нову оцінку вартості; робота ще не надсилається.",
+      "retryChargeConfirm": "Підтвердити й перевірити оцінку",
       "status": {
         "queuedLocal": "Очікує надсилання",
         "submitting": "Надсилання",
@@ -1415,6 +2167,7 @@
       },
       "errors": {
         "invalidRequest": "Запит генерації недійсний.",
+        "contentRejected": "Постачальник відхилив початкове зображення. Змініть кадрування або згенеруйте новий стоп-кадр перед повторною спробою.",
         "auth": "Постачальник відхилив облікові дані.",
         "quota": "В обліковому записі постачальника недостатньо квоти.",
         "rateLimited": "Досягнуто ліміту запитів постачальника. Спробуйте пізніше.",
@@ -1425,7 +2178,9 @@
         "submissionUnknown": "Результат надсилання невідомий. Перед повторною спробою перегляньте попередження про подвійне списання.",
         "downloadFailed": "Генерацію завершено, але результат не вдалося завантажити.",
         "unsupported": "Цей постачальник не підтримує запитану операцію.",
-        "unknown": "Завдання генерації завершилося помилкою з невідомої причини."
+        "seedStillVariationGrid": "Створене зображення містить багатопанельну сітку варіантів і не може використовуватися як поточний перший кадр або референс.",
+        "unknown": "Завдання генерації завершилося помилкою з невідомої причини.",
+        "referenceVariationGridRepeated": "Модель знову повернула багатопанельну сітку варіантів. Надійний спосіб задати цей референс — імпортувати фото."
       }
     },
     "preview": {
@@ -1499,15 +2254,20 @@
     "errors": {
       "featureDisabled": "Creative Studio вимкнено в цій збірці.",
       "invalidPayload": "Запит містить недійсні або неповні дані.",
+      "mutationRefused": "Цю зміну не можна застосувати до проєкту в його поточному стані. Перевірте проєкт і повторіть спробу.",
+      "pricingRefused": "Розрахунок відхилено до надсилання. Нічого не надіслано.",
       "projectNotFound": "Проєкт Creative Studio більше не існує.",
       "storyboardExists": "У цьому проєкті вже є розкадрування. Підтвердьте заміну перед створенням нової чернетки.",
       "staleProject": "Проєкт змінено в іншому місці. Оновіть його перед повторною спробою.",
+      "staleExportCatalog": "Каталог експорту змінився. Оновіть історію експорту перед повторною спробою.",
       "planningUnavailable": "Створення чернетки розкадрування недоступне. Можна продовжити редагування вручну.",
       "invalidRoute": "Вибраний рушій генерації недійсний або недоступний.",
       "cancellationRefused": "Постачальник більше не може скасувати це активне завдання.",
       "duplicateChargeAcknowledgementRequired": "Підтвердьте ризик подвійного списання в постачальника перед повторною спробою.",
       "busy": "У цьому проєкті є активні завдання генерації.",
       "provider": "Постачальник не зміг виконати запит.",
+      "runtimeInactive": "Генерація Creative Studio не готова. Відкрийте або створіть підтримуваний проєкт і повторіть спробу.",
+      "projectQuarantined": "Creative Studio не запустилася, оскільки проєкт {{projectId}} потребує відновлення. Відкрийте бібліотеку Studio, щоб переглянути його.",
       "storage": "Creative Studio не вдалося оновити локальні дані.",
       "ruleBreach": "Правило заблокувало створення до списання коштів. Відкрийте розділ «Правила», щоб дізнатися, що потрібно змінити."
     },
@@ -1580,43 +2340,13 @@
         "frame": "Цей рушій не може створити формат {{ratio}}.",
         "resolution": "Цей рушій не може створити роздільність {{resolution}}.",
         "duration": "Цей рушій не може створити кадр тривалістю {{seconds}} с.",
-        "firstFrame": "Цей рушій не може почати з референсного зображення.",
+        "firstFrame": "Цей рушій не може почати з перевіреного першого кадру.",
         "catalogUnloaded": "Список рушіїв ще не завантажено.",
         "aria": "Неможливо створити. {{reason}}",
         "actionSetEngines": "Вибрати рушії",
         "actionRemoveReference": "Видалити референс",
-        "actionShorten": "Скоротити цей кадр"
+        "actionShorten": "Налаштувати тривалість кадру"
       }
-    },
-    "brief": {
-      "conversationTitle": "Обговорення брифу",
-      "danglingNotice": "Обговорення брифу для цього проєкту більше недоступне.",
-      "danglingStartFresh": "Почати нове обговорення",
-      "proposalTitle": "Запропонований сценарій",
-      "proposalMeta": "На основі ревізії {{revision}} · {{createdAt}}",
-      "proposalSummary": "Додано: {{added}} · видалено: {{removed}} · змінено: {{changed}}",
-      "proposalSceneChange": "Кадр {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "Без змін у поточному сценарії",
-      "proposalDiffUnavailable": "Зведення змін недоступне — після підготовки цієї пропозиції сценарій змінився",
-      "proposalField": {
-        "title": "назва",
-        "purpose": "мета",
-        "visualPrompt": "візуальний промпт",
-        "narration": "закадровий текст",
-        "onScreenText": "текст на екрані",
-        "mediaKind": "тип результату",
-        "durationSeconds": "тривалість",
-        "referenceAssetId": "референс"
-      },
-      "proposalAccept": "Прийняти сценарій",
-      "proposalReject": "Відхилити",
-      "proposalAccepted": "Сценарій застосовано",
-      "proposalRejected": "Відхилено",
-      "proposalExpired": "Термін минув",
-      "proposalStale": "Поки пропозиція очікувала рішення, сценарій змінився. Запросіть нову версію.",
-      "proposalRepropose": "Запросити нову версію",
-      "proposalFlushRefused": "Не вдалося зберегти незбережені зміни, тому пропозицію не застосовано. Виправте зміни й повторіть спробу."
     },
     "shell": {
       "showDirector": "Показати креативного директора",

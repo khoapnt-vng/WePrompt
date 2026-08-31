@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "Não foi possível salvar o pacote de diagnóstico",
       "runtimeComponentDescription": "Esta instalação não tem os componentes de runtime integrados necessários, portanto {{resource}} não pode iniciar. Reinstale o pacote mais recente do WePrompt. Se isso continuar após a reinstalação, verifique se algum software de segurança ou antivírus colocou componentes do WePrompt em quarentena."
     },
+    "genericFailure": {
+      "title": "Não foi possível iniciar o backend local",
+      "description": "O WePrompt não conseguiu concluir a inicialização local. Reinicie o WePrompt. Se o problema continuar, salve o pacote de diagnóstico para o suporte.",
+      "sendDiagnostics": "Salvar diagnósticos",
+      "diagnosticsSent": "Diagnósticos salvos",
+      "diagnosticsReportSuccess": "Pacote de diagnóstico salvo",
+      "diagnosticsReportFailed": "Não foi possível salvar o pacote de diagnóstico"
+    },
     "packageArchitectureMismatch": {
       "title": "Incompatibilidade de arquitetura do pacote WePrompt",
       "description": "Este pacote do WePrompt é para {{packageArch}}, mas este Mac é {{deviceArch}}. Obtenha o instalador {{expectedArch}} pelo canal interno de distribuição aprovado, feche o WePrompt e instale esse pacote.",

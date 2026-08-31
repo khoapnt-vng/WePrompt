@@ -4,2149 +4,4503 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Modal, Spin } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Spin } from '@arco-design/web-react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
+import { planStudioConnections } from '@/common/types/project/creativeStudioConnectionPlan';
+import { exactStudioProjectStatusV2 } from '@/common/types/project/creativeStudioProjectSummary';
 import { useTranslation } from 'react-i18next';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
-import type { StudioBriefRuleDraft } from '@/common/types/project/creativeStudioRules';
 import {
-  STUDIO_REFERENCE_PROMPT_MAX_LENGTH,
-  type StudioBriefReferenceRole,
-  type StudioRendererProject,
-  type StudioReferenceRequest,
-  type StudioLatestRender,
-  type StudioMediaKind,
-  type StudioRouteCatalog,
-  type StudioRouteCatalogEntry,
-  type StudioScene,
-  type StudioSceneGenerationChoice,
-  type StudioSelectVariationRequest,
+  STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  type StudioBinItem,
+  type StudioBriefRuleDraft,
+  type StudioCommandResult,
+  type StudioGenerationBlockV2,
+  type StudioGenerationCapabilityItemV2,
+  type StudioPaidRecoveryQuoteSummaryV2,
+  type StudioRendererAuthoringOperationV2,
+  type StudioRendererExportCatalogV2,
+  type StudioRendererJobV2,
+  type StudioRendererProjectCommitResultV2,
+  type StudioRendererProjectV2,
+  type StudioRendererProposalCatalogV2,
+  type StudioRendererProposalV2,
+  type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { requestedMediaKind } from '@/common/types/project/creativeStudioOutputRole';
+import { StudioLibrary } from './components/Library';
+import { DirectorProposals, type DirectorProposalsProps } from './components/Shell/DirectorProposals';
+import type { DirectorProposalChatIntent } from './components/Workspace/DirectorRail';
 import {
-  getStudioReferencePlateFreshness,
-  resolveActiveStudioBriefReferences,
-  STUDIO_MAX_ACTIVE_BRIEF_REFERENCES,
-  type StudioReferencePlateFreshness,
-} from '@/common/types/project/creativeStudioManagedAssetCollections';
+  SpendGateModal,
+  boardGateDraft,
+  boardPromotionGatePlan,
+  boardSelectionGateDraft,
+  continuityGateDraft,
+  hasGenerationAffectingWorkspaceDrafts,
+  handoffGateDraft,
+  majorUnitsToMinorUnits,
+  buildStudioBarStats,
+  countStoredStudioRuleDrafts,
+  countStoredWorkspaceDrafts,
+  projectWorkspace,
+  filmRenderBatchShotIds,
+  seedRegenerationGateDraft,
+  selectionGateDraft,
+  spendGateDraftIdentity,
+  spendGateRouteIssue,
+  useSpendGate,
+  useWorkspaceDrafts,
+  WorkspaceControls,
+  WorkspaceProjectMenu,
+  WorkspaceShell,
+  type BeatPanelActions,
+  type BeatPanelImportResult,
+  type BeatPanelReviewGraph,
+  type BoardActions,
+  type CutActions,
+  type CutImportResult,
+  type ReferencesViewActions,
+  type StudioReferenceFocusIntent,
+  type StudioShotEditFocusIntent,
+  type SpendGateDraft,
+  type SpendGateBoardPromotion,
+  type SpendGateRouteIssue,
+  type TableReferenceBindingActions,
+  type WorkspaceDraftValue,
+  type WorkspaceMutationCallbacks,
+  type WorkspaceProjection,
+  type WorkspaceReviewedOutput,
+  type WorkspaceDirectorDraftRequest,
+  type WorkspaceShellHandle,
+} from './components/Workspace';
 import {
-  buildFirstFramePrompt,
-  hasFirstFramePromptSubject,
-  stripFirstFramePromptPrefix,
-} from '@/common/types/project/creativeStudioReferencePrompt';
-import {
-  evaluateStudioRules,
-  resolveEffectiveStudioRules,
-  type StudioRuleBreach,
-} from '@/common/types/project/creativeStudioRules';
-
-import {
-  collectReferencePrompts,
-  collectSubmittableRoutes,
-  buildReferenceConditioningSnapshot,
-  describeSceneRenderBlockMessage,
-  GenerationReviewModal,
-  routeSupportsScene,
-  submitExactGenerationReview,
-  type GenerationBatchReviewRequest,
-  type GenerationReviewExcludedScene,
-  type GenerationReviewModalProps,
-  type GenerationReviewConfirmation,
-  type GenerationReviewScene,
-  type GenerationReviewRouteSnapshot,
-  type GenerationReferenceConditioningSnapshot,
-  type GenerationSingleReviewRequest,
-  StoryboardDraftModal,
-  StudioBriefDrawer,
-  StudioExportModal,
-  StudioLibrary,
-  StudioPhaseShell,
-  StudioRulesDrawer,
-  type StudioPhaseControllers,
-} from './components';
-import { BriefConversationProvider, useBriefConversationContext } from './components/Shell/BriefConversationContext';
-import { DirectorPane } from './components/Shell/DirectorPane';
-import {
-  describeRuleBreachInstruction,
-  DirectorProposals,
-  pendingDirectorProposals,
-  sendDirectorInstruction,
-  type StudioRuleBreachReport,
-} from './components/Shell/DirectorProposals';
-import { StudioShell } from './components/Shell/StudioShell';
-import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject, useStudioRender } from './hooks';
-import styles from './StudioPage.module.css';
-import { resolveShotEngine } from './studioRouteConstraints';
+  generationBlockForItem,
+  generationBlockGroupsForItems,
+  generationCapabilityIsCurrent,
+} from './components/Workspace/Gate/generationBlockers';
+import { deriveReferenceRemovalBlockers } from './components/Workspace/Views/References/referenceRemovalBlockers';
+import { useStudioProject } from './hooks/useStudioProject';
+import { StudioPlaybackAudioProvider } from './hooks/useStudioPlaybackAudio';
+import { StudioShotAudioAnalysisProvider } from './hooks/useStudioShotAudioAnalysis';
 import {
   parseStudioView,
   rememberStudioView,
   resolveStudioEntryView,
+  studioProjectPath,
+  studioViewReadiness,
   studioViewPath,
+  type StudioViewReadiness,
   type StudioView,
-  type StudioViewTransition,
-  type StudioWriteFocusIntent,
 } from './studioPhaseRoute';
-import { canOpenSingleSceneReview, deriveStudioReadiness } from './studioReadiness';
-import type { StudioReadinessSummary, StudioSceneStatus } from './studioReadiness';
+import styles from './StudioPage.module.css';
 
-type GenerationReviewState = {
-  mode: 'single' | 'batch';
-  scenes: GenerationReviewScene[];
-  excludedScenes?: GenerationReviewExcludedScene[];
-  catalogVersion: string | null;
-  availableRoutes: StudioRouteCatalogEntry[];
-  projectId: string;
-  projectRevision: number;
-  outputRole?: GenerationSingleReviewRequest['outputRole'];
-  referenceRequestIds?: string[];
-  referenceRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
-  /** Active Brief inputs require human authorization; Cancel leaves these queued on disk. */
-  referenceRequestsRequireConfirmation?: true;
+type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
+
+type StudioProposalAuthoritySnapshot = {
+  project: StudioRendererProjectV2;
+  catalog: StudioRendererProposalCatalogV2;
 };
 
-type ReferenceNotice =
-  | { kind: 'excluded'; scenes: GenerationReviewExcludedScene[]; requestIds: string[] }
-  | { kind: 'dismiss_failed' };
+type StudioProposalAuthorityState = 'ready' | 'stale' | 'unavailable' | 'refreshing';
 
-type DeferredReferenceReview = {
-  requests: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
-  sceneIds: string[];
+type StudioReviewedActionTarget = {
+  kind: 'proposal' | 'reference_request' | 'handoff';
+  id: string;
 };
 
-const routeIdentity = (
-  route: Pick<StudioRouteCatalogEntry | GenerationReviewRouteSnapshot, 'choiceId' | 'kind'>
-): string => `${route.choiceId}\u0000${route.kind}`;
-
-const catalogMatchesProjectImageRoute = (project: StudioRendererProject, catalog: StudioRouteCatalog): boolean => {
-  const selected = resolveShotEngine(project, { mediaKind: 'image' });
-  const catalogSelection = catalog.image.selected;
-  const route = catalog.image.selectedRoute;
-  return (
-    selected !== null &&
-    catalog.image.status === 'ready' &&
-    catalogSelection !== null &&
-    route !== null &&
-    route.kind === 'image' &&
-    catalogSelection.choiceId === selected.choiceId &&
-    catalogSelection.providerId === selected.providerId &&
-    catalogSelection.model === selected.model &&
-    route.choiceId === selected.choiceId &&
-    route.providerId === selected.providerId &&
-    route.model === selected.model
-  );
+type StudioReviewedActionLatch = {
+  token: number;
+  target: StudioReviewedActionTarget | null;
 };
 
-const toReviewScene = (
-  project: StudioRendererProject,
-  scene: StudioScene,
-  route: GenerationReviewRouteSnapshot | null,
-  availableRoutes: readonly StudioRouteCatalogEntry[],
-  routeStatus?: 'valid' | 'invalid' | 'missing',
-  outputRole: GenerationReviewScene['outputRole'] = 'take',
-  referencePrompt?: string,
-  conditioning?: GenerationReferenceConditioningSnapshot | null,
-  conditioningIssue?: 'malformed'
-): GenerationReviewScene => {
-  const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
-  const catalogRoute =
-    route === null ? undefined : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
-  return {
-    id: scene.id,
-    title: scene.title,
-    mediaKind,
-    outputRole,
-    durationSeconds: scene.durationSeconds,
-    promptText:
-      outputRole === 'reference'
-        ? stripFirstFramePromptPrefix((referencePrompt ?? '').trim(), project.aspectRatio)
-        : scene.visualPrompt.trim(),
-    ...(outputRole === 'reference' && referencePrompt !== undefined ? { referencePrompt } : {}),
-    route:
-      route === null
-        ? { status: 'missing', snapshot: null, providerName: null }
-        : {
-            status:
-              routeStatus === 'invalid' ||
-              conditioning === null ||
-              catalogRoute === undefined ||
-              !routeSupportsScene(catalogRoute, {
-                kind: mediaKind,
-                sceneId: scene.id,
-                routeSceneId: route.sceneId,
-                aspectRatio: project.aspectRatio,
-                resolution: project.resolution,
-                durationSeconds: outputRole === 'reference' ? undefined : scene.durationSeconds,
-                hasReference: scene.referenceAssetId !== null,
-                ...(conditioning === undefined ? {} : { conditioningReferenceCount: conditioning.inputs.length }),
-              })
-                ? 'invalid'
-                : 'valid',
-            snapshot: route,
-            providerName: catalogRoute?.providerName ?? null,
-            integrationLabelKey: catalogRoute?.integrationLabelKey ?? null,
-            silentOutput: catalogRoute?.constraints.silentOutput ?? null,
-          },
-    ...(conditioning === undefined || conditioning === null ? {} : { conditioning }),
-    ...(conditioning === null || conditioningIssue === 'malformed' ? { conditioningIssue: 'malformed' as const } : {}),
-    ...(outputRole === 'take' ? { referencePlateFreshness: selectedReferencePlateFreshness(project, scene) } : {}),
-  };
-};
+const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
+  'baseChoices' in draft
+    ? [...draft.baseChoices, ...draft.cascadeChoices].flatMap((choice) =>
+        choice.target.kind === 'shot'
+          ? [
+              {
+                target: { kind: 'shot' as const, shotId: choice.target.shotId },
+                purpose: choice.purpose,
+              },
+            ]
+          : []
+      )
+    : [];
 
-const selectedReferencePlateFreshness = (
-  project: StudioRendererProject,
-  scene: StudioScene
-): StudioReferencePlateFreshness => {
-  if (scene.referenceAssetId === null) return 'unknown';
-  const plate = project.assets[scene.referenceAssetId];
-  const active = resolveActiveStudioBriefReferences(project.assets);
-  if (plate === undefined || plate.managedAsset.collection !== 'references' || active === null) return 'unknown';
-  return getStudioReferencePlateFreshness(plate, {
-    // Task 6 will persist the admitted prompt baseline. Until then, compare the durable prompt to
-    // itself so a manual reference prompt is never invented as stale against scene.visualPrompt.
-    visualPrompt: plate.sourceVisualPrompt ?? '',
-    referenceAssetIds: active.map(({ id }) => id),
-    aspectRatio: project.aspectRatio,
-    resolution: project.resolution,
+const referenceCapabilityItems = (referenceIds: readonly string[]): StudioGenerationCapabilityItemV2[] =>
+  referenceIds.map((referenceId) => ({
+    target: { kind: 'reference', referenceId },
+    purpose: 'reference_image',
+  }));
+
+/** Mirrors Main's prospective continuity scope only to disclose capability blockers before review. */
+const continuityCapabilityItemsForDraft = (
+  project: StudioRendererProjectV2,
+  draft: SpendGateDraft
+): StudioGenerationCapabilityItemV2[] | null => {
+  if (!('baseChoices' in draft) || draft.continuityChange === undefined) return null;
+  const change = draft.continuityChange;
+  const locations = project.beatOrder.flatMap((beatId) => {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    const shotIndex = beat?.id === beatId ? beat.shotOrder.indexOf(change.shotId) : -1;
+    return beat?.id === beatId && shotIndex >= 0 ? [{ beat, shotIndex }] : [];
   });
-};
-
-const catalogEntries = (catalog: StudioRouteCatalog): StudioRouteCatalogEntry[] => [
-  ...catalog.image.options,
-  ...catalog.video.options,
-];
-
-const projectRouteSnapshot = (
-  project: StudioRendererProject,
-  scene: Pick<StudioScene, 'id' | 'mediaKind'>,
-  outputRole: GenerationReviewScene['outputRole'] = 'take'
-): GenerationReviewRouteSnapshot | null => {
-  const mediaKind = requestedMediaKind(scene.mediaKind, outputRole);
-  const selected = resolveShotEngine(project, { mediaKind });
-  return selected === null
-    ? null
-    : {
-        sceneId: scene.id,
-        choiceId: selected.choiceId,
-        providerId: selected.providerId,
-        model: selected.model,
-        kind: mediaKind,
-      };
-};
-
-const referenceExclusionReason = (
-  status: StudioSceneStatus | undefined
-): GenerationReviewExcludedScene['reasonMessageKey'] => {
-  switch (status) {
-    case 'needs_title':
-    case 'needs_prompt':
-    case 'generating':
-    case 'needs_selection':
-    case 'generated':
-    case 'needs_attention':
-      return `conversation.creativeStudio.scene.status.${status}`;
-    case 'ready':
-    case undefined:
-      return 'conversation.creativeStudio.reference.excludedUnavailable';
+  if (locations.length !== 1) return null;
+  const { beat, shotIndex } = locations[0]!;
+  const affectedShotIds: string[] = [];
+  for (let index = shotIndex; index < beat.shotOrder.length; index += 1) {
+    const affectedShotId = beat.shotOrder[index]!;
+    const affectedShot = Object.hasOwn(project.shots, affectedShotId) ? project.shots[affectedShotId] : undefined;
+    if (affectedShot?.id !== affectedShotId) return null;
+    if (index > shotIndex && affectedShot.chainBreak === 'hard_cut') break;
+    affectedShotIds.push(affectedShotId);
   }
+  if (affectedShotIds.length === 0) return null;
+  return [
+    ...(change.requiresSeedGeneration
+      ? [
+          {
+            target: { kind: 'shot' as const, shotId: change.shotId },
+            purpose: 'seed_still' as const,
+          },
+        ]
+      : []),
+    ...affectedShotIds.map((shotId) => ({
+      target: { kind: 'shot' as const, shotId },
+      purpose: 'video_take' as const,
+    })),
+  ];
 };
 
-const batchReviewExcludedScenes = (
-  project: StudioRendererProject,
-  request: GenerationBatchReviewRequest
-): GenerationReviewExcludedScene[] =>
-  request.exclusions.flatMap((exclusion) => {
-    const message = describeSceneRenderBlockMessage(exclusion.block);
-    return exclusion.sceneIds.map((sceneId) => ({
-      id: sceneId,
-      title: project.scenes[sceneId]?.title ?? sceneId,
-      reasonMessageKey:
-        exclusion.block.code === 'first_frame'
-          ? ('conversation.creativeStudio.review.excludedFirstFrame' as const)
-          : message.key,
-      ...(message.values === undefined ? {} : { reasonValues: message.values }),
+type StudioCloseContract = {
+  dirtyDraftCount: number;
+  saveAll: () => Promise<boolean>;
+};
+
+const StudioCloseResponse: React.FC<{ resolve: () => StudioCloseContract }> = ({ resolve }) => {
+  const resolveRef = useRef(resolve);
+  resolveRef.current = resolve;
+  useEffect(() => {
+    const disposeHasUnsavedWork = ipcBridge.creativeStudio.hasUnsavedWork.provider(() => ({
+      dirtyDraftCount: Math.min(resolveRef.current().dirtyDraftCount, STUDIO_MAX_DIRTY_DRAFTS_REPORTED),
     }));
-  });
-
-/**
- * The first-frame prompt a Director-queued request should paint for this scene, or `null` when the
- * scene's own visual prompt cannot produce a usable one.
- *
- * A scene can be `ready` - which only asks for a non-empty visual prompt - and still fail here:
- * `visualPrompt` is allowed to be twice as long as a reference prompt may be. Main refuses such a
- * submission outright, so the caller excludes the scene where the user can see it rather than
- * sending a request that is destroyed on arrival.
- */
-const queuedReferencePrompt = (project: StudioRendererProject, scene: StudioScene): string | null => {
-  const prompt = buildFirstFramePrompt(scene.visualPrompt, project.aspectRatio);
-  return hasFirstFramePromptSubject(prompt, project.aspectRatio) && prompt.length <= STUDIO_REFERENCE_PROMPT_MAX_LENGTH
-    ? prompt
-    : null;
+    const disposeFlushUnsavedWork = ipcBridge.creativeStudio.flushUnsavedWork.provider(async () => ({
+      saved: await resolveRef.current().saveAll(),
+    }));
+    return () => {
+      disposeHasUnsavedWork();
+      disposeFlushUnsavedWork();
+    };
+  }, []);
+  return null;
 };
 
-const buildQueuedReferenceReview = (
-  project: StudioRendererProject,
-  readiness: StudioReadinessSummary,
-  requests: ReadonlyArray<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>,
-  availableRoutes: readonly StudioRouteCatalogEntry[]
-): {
-  scenes: GenerationReviewScene[];
-  excludedScenes: GenerationReviewExcludedScene[];
-  excludedReferenceRequestIds: string[];
-  referenceRequestIds: string[];
-} => {
-  const readySceneIds = new Set(readiness.readySceneIds);
-  const requestedSceneIds = new Set(requests.map(({ sceneId }) => sceneId));
-  const promptUnusableSceneIds = new Set<string>();
-  const scenes = project.sceneOrder.flatMap((sceneId) => {
-    const scene = project.scenes[sceneId];
-    if (scene === undefined || !requestedSceneIds.has(sceneId) || !readySceneIds.has(sceneId)) return [];
-    const referencePrompt = queuedReferencePrompt(project, scene);
-    if (referencePrompt === null) {
-      promptUnusableSceneIds.add(sceneId);
-      return [];
-    }
-    const route = projectRouteSnapshot(project, scene, 'reference');
-    const catalogRoute =
-      route === null
-        ? undefined
-        : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
-    const conditioning =
-      catalogRoute === undefined ? undefined : buildReferenceConditioningSnapshot(project, catalogRoute);
-    return [
-      toReviewScene(project, scene, route, availableRoutes, undefined, 'reference', referencePrompt, conditioning),
-    ];
+const minorUnitsDraft = (minorUnits: number): string => {
+  const whole = Math.trunc(minorUnits / 100);
+  return `${whole}.${String(minorUnits % 100).padStart(2, '0')}`;
+};
+
+const hasAdoptedRuleDrafts = (project: StudioRendererProjectV2, drafts: readonly StudioBriefRuleDraft[]): boolean =>
+  project.rules.length === drafts.length &&
+  project.rules.every((rule, index) => {
+    const draft = drafts[index];
+    if (draft === undefined || rule.id !== draft.id || rule.text !== draft.text) return false;
+    if (rule.predicate === null || draft.predicate === null) return rule.predicate === draft.predicate;
+    return (
+      rule.predicate.kind === draft.predicate.kind &&
+      rule.predicate.terms.length === draft.predicate.terms.length &&
+      rule.predicate.terms.every((term, termIndex) => term === draft.predicate?.terms[termIndex])
+    );
   });
-  const includedSceneIds = new Set(scenes.map(({ id }) => id));
-  const excludedRequests = requests.filter(({ sceneId }) => !includedSceneIds.has(sceneId));
-  const excludedSceneIds = new Set<string>();
-  return {
-    scenes,
-    excludedScenes: excludedRequests.flatMap(({ sceneId }) => {
-      if (excludedSceneIds.has(sceneId)) return [];
-      excludedSceneIds.add(sceneId);
-      const scene = project.scenes[sceneId];
-      return [
-        {
-          id: sceneId,
-          title: scene?.title ?? sceneId,
-          // A scene the readiness summary calls ready, but whose visual prompt cannot describe a
-          // first frame, is excluded for that reason - not for its status, which says nothing
-          // about it and would read as "no longer available".
-          reasonMessageKey: promptUnusableSceneIds.has(sceneId)
-            ? 'conversation.creativeStudio.reference.excludedPromptUnusable'
-            : referenceExclusionReason(readiness.sceneStatuses[sceneId]),
-        },
-      ];
-    }),
-    excludedReferenceRequestIds: excludedRequests.map(({ id }) => id),
-    referenceRequestIds: requests.flatMap(({ id, sceneId }) => (includedSceneIds.has(sceneId) ? [id] : [])),
+
+const beatDraftKey = (beatId: string): string => `beat.${beatId}.story`;
+
+const shotDraftKey = (shotId: string, field: 'shootingScript' | 'durationSeconds'): string => `shot.${shotId}.${field}`;
+
+const containsUnavailableHardCutOperation = (operations: readonly StudioRendererAuthoringOperationV2[]): boolean =>
+  operations.some((operation) => operation.kind === 'set_hard_cut');
+
+const cloneBinItem = (item: StudioBinItem): StudioBinItem => {
+  if (item.kind === 'beat') return { kind: 'beat', beatId: item.beatId, reason: item.reason };
+  return { kind: 'shot', beatId: item.beatId, shotId: item.shotId, reason: 'lifted' };
+};
+
+const boundedUniqueIds = (values: readonly string[], maximum: number): string[] =>
+  [...new Set(values)].slice(0, maximum);
+
+const BOARD_STOP_JOB_STATUSES: ReadonlySet<StudioRendererJobV2['status']> = new Set([
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+]);
+const BOARD_DRAW_PANEL_ACTIVITIES = new Set(['idle', 'failed', 'cancelled']);
+
+type BoardStopCandidate = { shotId: string; jobId: string };
+
+const hasExactActiveShotOwnership = (project: StudioRendererProjectV2, shotId: string): boolean => {
+  let activeOwnerships = 0;
+  for (const beatId of project.beatOrder) {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    if (beat?.id === beatId) activeOwnerships += beat.shotOrder.filter((candidateId) => candidateId === shotId).length;
+  }
+  return activeOwnerships === 1;
+};
+
+const exactLatestCancellableBoardJob = (
+  project: StudioRendererProjectV2,
+  candidate: BoardStopCandidate
+): StudioRendererJobV2 | null => {
+  const shot = Object.hasOwn(project.shots, candidate.shotId) ? project.shots[candidate.shotId] : undefined;
+  if (shot?.id !== candidate.shotId) return null;
+  if (
+    !hasExactActiveShotOwnership(project, shot.id) ||
+    shot.jobIds.filter((jobId) => jobId === candidate.jobId).length !== 1
+  ) {
+    return null;
+  }
+  const boardJobs = shot.jobIds.flatMap((jobId) => {
+    const job = Object.hasOwn(project.jobs, jobId) ? project.jobs[jobId] : undefined;
+    return job?.id === jobId &&
+      job.projectId === project.id &&
+      job.target.kind === 'shot' &&
+      job.target.shotId === shot.id &&
+      job.purpose === 'board_still'
+      ? [job]
+      : [];
+  });
+  const job = boardJobs.at(-1);
+  return job?.id === candidate.jobId && job.canCancel && BOARD_STOP_JOB_STATUSES.has(job.status) ? job : null;
+};
+
+const projectDraftValues = (project: StudioRendererProjectV2): Record<string, WorkspaceDraftValue> => {
+  const values: Record<string, WorkspaceDraftValue> = {
+    'settings.aspectRatio': project.aspectRatio,
+    'settings.resolution': project.resolution,
+    'brief.text': project.brief,
+    'brief.imageRouteId': project.imageRouteId ?? '',
+    'brief.videoRouteId': project.videoRouteId ?? '',
+    'brief.spendCurrency': project.spendPolicy?.currency ?? '',
+    'brief.spendMajorUnits':
+      project.spendPolicy === null ? '' : minorUnitsDraft(project.spendPolicy.maxPerBatchMinorUnits),
+    'gate.choices': '{}',
   };
-};
-
-const newestProject = (...candidates: Array<StudioRendererProject | null>): StudioRendererProject | null =>
-  candidates.reduce<StudioRendererProject | null>(
-    (newest, candidate) =>
-      candidate !== null && (newest === null || candidate.revision > newest.revision) ? candidate : newest,
-    null
-  );
-
-const reviewSceneAuthorityMatches = (
-  reviewed: readonly GenerationReviewScene[],
-  current: readonly GenerationReviewScene[]
-): boolean =>
-  reviewed.length === current.length &&
-  reviewed.every((scene, index) => {
-    const candidate = current[index];
-    if (candidate === undefined || candidate.id !== scene.id || candidate.route.status !== scene.route.status) {
-      return false;
+  for (const beatId of project.beatOrder) {
+    const beat = Object.hasOwn(project.beats, beatId) ? project.beats[beatId] : undefined;
+    if (beat?.id !== beatId) continue;
+    values[beatDraftKey(beatId)] = beat.story;
+    for (const shotId of beat.shotOrder) {
+      const shot = Object.hasOwn(project.shots, shotId) ? project.shots[shotId] : undefined;
+      if (shot?.id !== shotId) continue;
+      values[shotDraftKey(shotId, 'shootingScript')] = shot.shootingScript;
+      values[shotDraftKey(shotId, 'durationSeconds')] = shot.durationSeconds;
     }
-    const routeMatches =
-      scene.route.snapshot === null
-        ? candidate.route.snapshot === null
-        : candidate.route.snapshot !== null &&
-          candidate.route.snapshot.sceneId === scene.route.snapshot.sceneId &&
-          candidate.route.snapshot.choiceId === scene.route.snapshot.choiceId &&
-          candidate.route.snapshot.providerId === scene.route.snapshot.providerId &&
-          candidate.route.snapshot.model === scene.route.snapshot.model &&
-          candidate.route.snapshot.kind === scene.route.snapshot.kind &&
-          candidate.route.status !== 'missing' &&
-          scene.route.status !== 'missing' &&
-          candidate.route.integrationLabelKey === scene.route.integrationLabelKey;
-    if (!routeMatches) return false;
-    const reviewedConditioning = scene.conditioning;
-    const currentConditioning = candidate.conditioning;
-    return reviewedConditioning === undefined
-      ? currentConditioning === undefined
-      : currentConditioning !== undefined &&
-          currentConditioning.maximum === reviewedConditioning.maximum &&
-          currentConditioning.integrationLabelKey === reviewedConditioning.integrationLabelKey &&
-          currentConditioning.inputs.length === reviewedConditioning.inputs.length &&
-          currentConditioning.inputs.every((input, inputIndex) => {
-            const reviewedInput = reviewedConditioning.inputs[inputIndex];
-            return (
-              reviewedInput !== undefined &&
-              input.assetId === reviewedInput.assetId &&
-              input.label === reviewedInput.label &&
-              input.role === reviewedInput.role
-            );
-          });
-  });
-
-const parseWriteFocusIntent = (state: unknown): StudioWriteFocusIntent | null => {
-  if (typeof state !== 'object' || state === null || !Object.hasOwn(state, 'writeFocus')) return null;
-  const writeFocus = (state as { writeFocus?: unknown }).writeFocus;
-  if (typeof writeFocus !== 'object' || writeFocus === null) return null;
-  const candidate = writeFocus as { sceneId?: unknown; field?: unknown };
-  return typeof candidate.sceneId === 'string' &&
-    candidate.sceneId.length > 0 &&
-    (candidate.field === 'visualPrompt' || candidate.field === 'duration')
-    ? { sceneId: candidate.sceneId, field: candidate.field }
-    : null;
+  }
+  return values;
 };
 
-const parseBriefOpenIntent = (state: unknown): boolean =>
-  typeof state === 'object' && state !== null && Object.hasOwn(state, 'openBrief')
-    ? (state as { openBrief?: unknown }).openBrief === true
-    : false;
-
-/**
- * The generation review, plus the one thing it needs from the Director conversation.
- *
- * `BriefConversationProvider` owns the single `useBriefConversation` instance, and the page renders
- * that provider, so the page cannot read the context it supplies. This component sits inside the
- * provider and reads it, which is why the modal moved inside too. Everything else the send needs
- * arrives as `reports`.
- *
- * `onAskDirector` is left undefined when there is nothing to report, so the modal hides the
- * affordance rather than offering a button that does nothing.
- */
-const StudioGenerationReview: React.FC<
-  GenerationReviewModalProps & { reports: readonly StudioRuleBreachReport[]; onAsked: () => void }
-> = ({ reports, onAsked, ...modalProps }) => {
-  const briefConversation = useBriefConversationContext();
-  const askDirector = useCallback((): void => {
-    if (briefConversation.state.kind !== 'ready' || reports.length === 0) return;
-    void sendDirectorInstruction({
-      conversation: briefConversation.state.conversation,
-      instruction: describeRuleBreachInstruction(reports),
-    });
-    onAsked();
-  }, [briefConversation.state, onAsked, reports]);
-
-  return <GenerationReviewModal {...modalProps} onAskDirector={reports.length === 0 ? undefined : askDirector} />;
-};
-
-const StudioProjectShell: React.FC<{ routeView: StudioView | null }> = ({ routeView }) => {
+const StudioProjectPage: React.FC<{
+  projectId: string;
+  routeView: StudioView | null;
+  onCloseContractChange: (contract: StudioCloseContract | null) => void;
+}> = ({ projectId, routeView, onCloseContractChange }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const location = useLocation();
-  const { id: routeProjectId } = useParams<{ id: string }>();
   const {
-    project: loadedProject,
+    project,
     proposals,
-    loading,
-    notFound,
+    proposalCatalog,
+    proposalRefreshing,
+    referenceRequests,
+    referenceGenerationHandoffs,
+    workspaceStatus,
+    chainStatus,
+    projectStatus,
+    projectStatusPending,
+    routeCatalog,
+    generationCapability,
+    filmExportCapability,
+    exportCatalog,
+    loadState,
     errorMessageKey,
-    refetch,
-  } = useStudioProject(routeProjectId, {
-    subscribeToUpdates: false,
+    proposalErrorMessageKey,
+    referenceErrorMessageKey,
+    workspaceErrorMessageKey,
+    routeErrorMessageKey,
+    refetchProjectWorkspace,
+    refetchProposals,
+    refetchReferences,
+    refetchRoutes,
+    refetchExports,
+    installExportCatalog,
+  } = useStudioProject(projectId);
+  const [reviewedAction, setReviewedAction] = useState<StudioReviewedActionLatch | null>(null);
+  const reviewedActionRef = useRef<StudioReviewedActionLatch | null>(null);
+  const reviewedActionSequenceRef = useRef(0);
+  const beginReviewedAction = useCallback((target: StudioReviewedActionTarget | null): number | null => {
+    if (reviewedActionRef.current !== null) return null;
+    reviewedActionSequenceRef.current += 1;
+    const latch = { token: reviewedActionSequenceRef.current, target };
+    reviewedActionRef.current = latch;
+    setReviewedAction(latch);
+    return latch.token;
+  }, []);
+  const retargetReviewedAction = useCallback((token: number, target: StudioReviewedActionTarget): boolean => {
+    const current = reviewedActionRef.current;
+    if (current?.token !== token) return false;
+    const next = { token, target };
+    reviewedActionRef.current = next;
+    setReviewedAction(next);
+    return true;
+  }, []);
+  const finishReviewedAction = useCallback((token: number): void => {
+    if (reviewedActionRef.current?.token !== token) return;
+    reviewedActionRef.current = null;
+    setReviewedAction(null);
+  }, []);
+  const reviewedActionLocked = reviewedAction !== null;
+  const pendingReviewedAction = reviewedAction?.target ?? null;
+  const [pendingReferenceId, setPendingReferenceId] = useState<string | null>(null);
+  const [paidRecoveryQuotes, setPaidRecoveryQuotes] = useState<
+    Readonly<Record<string, StudioPaidRecoveryQuoteSummaryV2>>
+  >({});
+  const [paidRecoveryStatusMessageKeys, setPaidRecoveryStatusMessageKeys] = useState<Readonly<Record<string, string>>>(
+    {}
+  );
+  useEffect(() => {
+    setPaidRecoveryQuotes({});
+    setPaidRecoveryStatusMessageKeys({});
+  }, [projectId]);
+  const [actionErrorMessageKey, setActionErrorMessageKeyState] = useState<string | null>(null);
+  const actionErrorGenerationRef = useRef(0);
+  const ruleAdoptionErrorGenerationsRef = useRef(new Map<string, number>());
+  const setActionErrorMessageKey = useCallback((messageKey: string | null): void => {
+    actionErrorGenerationRef.current += 1;
+    setActionErrorMessageKeyState(messageKey);
+  }, []);
+  const reportRuleAdoptionUnconfirmed = useCallback(
+    (adoptionKey: string): void => {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      ruleAdoptionErrorGenerationsRef.current.set(adoptionKey, actionErrorGenerationRef.current);
+    },
+    [setActionErrorMessageKey]
+  );
+  const acknowledgeRuleAdoption = useCallback(
+    (adoptionKey: string): void => {
+      const generation = ruleAdoptionErrorGenerationsRef.current.get(adoptionKey);
+      ruleAdoptionErrorGenerationsRef.current.delete(adoptionKey);
+      if (generation !== undefined && generation === actionErrorGenerationRef.current) setActionErrorMessageKey(null);
+    },
+    [setActionErrorMessageKey]
+  );
+  const [workspacePending, setWorkspacePending] = useState(false);
+  const [ruleDraftDirtyCount, setRuleDraftDirtyCount] = useState(0);
+  const [activeRuleDraftDirtyCount, setActiveRuleDraftDirtyCount] = useState(0);
+  const [briefDialogRequest, setBriefDialogRequest] = useState(0);
+  const [directorDraftRequest, setDirectorDraftRequest] = useState<WorkspaceDirectorDraftRequest | null>(null);
+  const directorDraftRequestSequenceRef = useRef(0);
+  const [briefRouteFocusRole, setBriefRouteFocusRole] = useState<'image' | 'video' | null>(null);
+  const [referenceFocusIntent, setReferenceFocusIntent] = useState<StudioReferenceFocusIntent | null>(null);
+  const [shotEditFocusIntent, setShotEditFocusIntent] = useState<StudioShotEditFocusIntent | null>(null);
+  const [pendingRejoinReview, setPendingRejoinReview] = useState<{
+    projectId: string;
+    projectRevision: number;
+    shotId: string;
+  } | null>(null);
+  const referenceFocusSequenceRef = useRef(0);
+  const shotEditFocusSequenceRef = useRef(0);
+  const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
+  const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
+  const workspacePendingRef = useRef(false);
+  const projectRef = useRef<StudioRendererProjectV2 | null>(project);
+  projectRef.current = project;
+  const exportCatalogRef = useRef<StudioRendererExportCatalogV2 | null>(exportCatalog);
+  exportCatalogRef.current = exportCatalog;
+  const activeView = routeView;
+  const exactProjectStatus = useMemo(
+    () => (project === null ? null : exactStudioProjectStatusV2(projectStatus, project.id, project.revision)),
+    [project, projectStatus]
+  );
+  const currentViewReadiness = useMemo(
+    () => (exactProjectStatus === null ? null : studioViewReadiness(exactProjectStatus)),
+    [exactProjectStatus]
+  );
+  const lastTrustedViewReadinessRef = useRef<StudioViewReadiness | null>(null);
+  useEffect(() => {
+    if (currentViewReadiness !== null) lastTrustedViewReadinessRef.current = currentViewReadiness;
+  }, [currentViewReadiness]);
+  const viewReadiness = currentViewReadiness ?? (projectStatusPending ? lastTrustedViewReadinessRef.current : null);
+  const explicitViewChoiceRef = useRef(routeView !== null);
+  const autoNavigationRef = useRef<{ view: StudioView | null } | null>(null);
+
+  const chooseStudioView = useCallback(
+    (view: StudioView): void => {
+      explicitViewChoiceRef.current = true;
+      autoNavigationRef.current = null;
+      rememberStudioView(projectId, view);
+      navigate(studioViewPath(projectId, view));
+    },
+    [navigate, projectId]
+  );
+
+  const projection = useMemo(
+    () => (project === null ? null : projectWorkspace(project, workspaceStatus, chainStatus)),
+    [chainStatus, project, workspaceStatus]
+  );
+  const projectionRef = useRef<WorkspaceProjection | null>(projection);
+  projectionRef.current = projection;
+  const currentGenerationCapability =
+    project !== null && generationCapabilityIsCurrent(project, generationCapability) ? generationCapability : null;
+  const canonicalDraftValues = useMemo(() => (project === null ? {} : projectDraftValues(project)), [project]);
+  const drafts = useWorkspaceDrafts({
+    projectId,
+    projectRevision: project?.revision ?? 1,
+    canonicalValues: canonicalDraftValues,
+    activeBeatIds: projection?.activeBeatIds ?? [],
+    activeShotIds: projection?.activeShotIds ?? [],
+    enabled: project !== null,
   });
-  const editor = useStoryboardEditor({ project: loadedProject, refetch });
-  const studioJobs = useStudioJobs({
-    project: editor.project ?? loadedProject,
-    refetch,
-    reconcileOnSubscribe: true,
-  });
-  const project = newestProject(studioJobs.project, editor.project, loadedProject);
-  // Project scope, not view scope: a cut render outlives the Cut view that starts it, and
-  // must stay observable while the user works elsewhere in the document. Keyed on the route id
-  // rather than the loaded project so the stream is not re-subscribed once the project arrives.
-  const studioRender = useStudioRender(routeProjectId);
+  const proposalDraftAuthorityRef = useRef({ workspaceDirtyCount: 0, activeRuleDirtyCount: 0 });
+  proposalDraftAuthorityRef.current = {
+    workspaceDirtyCount: drafts.dirtyCount,
+    activeRuleDirtyCount: activeRuleDraftDirtyCount,
+  };
+  const generationDraftsBlockReview =
+    drafts.staleRevision || activeRuleDraftDirtyCount > 0 || hasGenerationAffectingWorkspaceDrafts(drafts.dirtyKeys);
 
   useEffect(() => {
-    if (project === null) return;
-    if (routeView !== null) {
-      rememberStudioView(project.id, routeView);
+    if (routeView === null) return;
+    if (autoNavigationRef.current?.view === routeView) {
+      autoNavigationRef.current = null;
       return;
     }
-    navigate(studioViewPath(project.id, resolveStudioEntryView(project.id)), {
+    autoNavigationRef.current = null;
+    explicitViewChoiceRef.current = true;
+    rememberStudioView(projectId, routeView);
+  }, [projectId, routeView]);
+
+  useEffect(() => {
+    if (project === null || currentViewReadiness === null || explicitViewChoiceRef.current) return;
+    const nextView = resolveStudioEntryView(projectId, currentViewReadiness);
+    if (nextView === routeView) return;
+    autoNavigationRef.current = { view: nextView };
+    navigate(nextView === null ? studioProjectPath(projectId) : studioViewPath(projectId, nextView), {
       replace: true,
     });
-  }, [navigate, project, routeView]);
-  const studioModels = useStudioModels({
-    project,
-    refetch,
-    beforeMutation: async () => {
-      if (editor.mutationPending) return false;
-      if (!(await editor.flushProjectDraft())) return false;
-      const result = await editor.flushAllSceneDrafts();
-      return result.failed.length === 0 && result.dirtied.length === 0;
+  }, [currentViewReadiness, navigate, project, projectId, routeView]);
+
+  useEffect(() => {
+    setReferenceFocusIntent(null);
+    setPendingRejoinReview(null);
+    setDirectorDraftRequest(null);
+  }, [projectId]);
+
+  useEffect(() => {
+    setShotEditFocusIntent(null);
+  }, [activeView, projectId]);
+
+  const openReferenceFocus = useCallback(
+    (focus: { referenceIds?: readonly string[]; assetIds?: readonly string[]; shotIds?: readonly string[] }): void => {
+      const current = projectRef.current;
+      if (current === null) return;
+      const referenceIds = boundedUniqueIds(focus.referenceIds ?? [], STUDIO_MAX_PROJECT_REFERENCES);
+      const assetIds = boundedUniqueIds(focus.assetIds ?? [], STUDIO_MAX_PROJECT_REFERENCES);
+      const shotIds = boundedUniqueIds(focus.shotIds ?? [], STUDIO_MAX_SHOTS_PER_PROJECT);
+      if (referenceIds.length === 0 && assetIds.length === 0 && shotIds.length === 0) return;
+      referenceFocusSequenceRef.current += 1;
+      setReferenceFocusIntent({
+        id: `${current.id}:${referenceFocusSequenceRef.current}`,
+        projectId: current.id,
+        referenceIds,
+        assetIds,
+        shotIds,
+      });
+      chooseStudioView(
+        shotIds.length > 0 && referenceIds.length === 0 && assetIds.length === 0 ? 'table' : 'references'
+      );
     },
+    [chooseStudioView]
+  );
+  const consumeReferenceFocusIntent = useCallback((intentId: string): void => {
+    setReferenceFocusIntent((current) => (current?.id === intentId ? null : current));
+  }, []);
+
+  const openProposalShotEditor = useCallback(
+    (beatId: string, requestedShotIds: readonly string[]): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        currentProjection.projectId !== current.id ||
+        requestedShotIds.length === 0 ||
+        new Set(requestedShotIds).size !== requestedShotIds.length
+      ) {
+        return;
+      }
+      const shotIds = boundedUniqueIds(requestedShotIds, STUDIO_MAX_SHOTS_PER_PROJECT);
+      const beat = currentProjection.activeBeats.find((candidate) => candidate.id === beatId);
+      if (
+        beat === undefined ||
+        shotIds.length !== requestedShotIds.length ||
+        !shotIds.every((shotId) => beat.shots.some((shot) => shot.id === shotId))
+      ) {
+        return;
+      }
+      const targetView = activeView ?? 'table';
+      shotEditFocusSequenceRef.current += 1;
+      setShotEditFocusIntent({
+        id: `${current.id}:shot-edit:${shotEditFocusSequenceRef.current}`,
+        projectId: current.id,
+        view: targetView,
+        beatId,
+        shotIds,
+      });
+      if (activeView === null) chooseStudioView(targetView);
+    },
+    [activeView, chooseStudioView]
+  );
+  const consumeShotEditFocusIntent = useCallback((intentId: string): void => {
+    setShotEditFocusIntent((current) => (current?.id === intentId ? null : current));
+  }, []);
+
+  const afterPaidConfirm = useCallback(async (): Promise<void> => {
+    const [refreshed] = await Promise.all([refetchProjectWorkspace(), refetchReferences()]);
+    if (refreshed !== null) projectRef.current = refreshed;
+  }, [refetchProjectWorkspace, refetchReferences]);
+  const promoteBoardPanelOnly = useCallback(
+    async (input: {
+      projectId: string;
+      expectedRevision: number;
+      promotion: SpendGateBoardPromotion;
+    }): Promise<boolean> => {
+      const current = projectRef.current;
+      if (
+        current === null ||
+        projection === null ||
+        workspacePendingRef.current ||
+        generationDraftsBlockReview ||
+        current.id !== input.projectId ||
+        current.revision !== input.expectedRevision ||
+        projection.projectId !== current.id ||
+        projection.projectRevision !== current.revision
+      ) {
+        return false;
+      }
+      const plan = boardPromotionGatePlan({
+        project: current,
+        projection,
+        shotId: input.promotion.shotId,
+        boardAssetId: input.promotion.boardAssetId,
+      });
+      const originalShot = Object.hasOwn(current.shots, input.promotion.shotId)
+        ? current.shots[input.promotion.shotId]
+        : undefined;
+      if (
+        plan === null ||
+        originalShot?.id !== input.promotion.shotId ||
+        plan.draft.projectId !== input.projectId ||
+        plan.draft.expectedRevision !== input.expectedRevision ||
+        plan.draft.boardPromotion?.shotId !== input.promotion.shotId ||
+        plan.draft.boardPromotion.boardAssetId !== input.promotion.boardAssetId
+      ) {
+        return false;
+      }
+      const originalChainBreaks = new Map(
+        Object.entries(current.shots).flatMap(([shotId, candidate]) =>
+          candidate?.id === shotId ? [[shotId, candidate.chainBreak] as const] : []
+        )
+      );
+      const originalCurrentTakes = new Map(
+        plan.impact.currentTakeShotIds.flatMap((shotId) => {
+          const candidate = Object.hasOwn(current.shots, shotId) ? current.shots[shotId] : undefined;
+          return candidate?.id === shotId && candidate.videoAssetId !== null
+            ? [[shotId, candidate.videoAssetId] as const]
+            : [];
+        })
+      );
+      if (originalCurrentTakes.size !== plan.impact.currentTakeShotIds.length) return false;
+
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      try {
+        const result = await ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          operations: [
+            {
+              kind: 'promote_board_panel',
+              shotId: input.promotion.shotId,
+              boardAssetId: input.promotion.boardAssetId,
+            },
+          ],
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        const refreshed = await refetchProjectWorkspace();
+        const promotedShot =
+          refreshed !== null && Object.hasOwn(refreshed.shots, input.promotion.shotId)
+            ? refreshed.shots[input.promotion.shotId]
+            : undefined;
+        if (
+          refreshed === null ||
+          refreshed.id !== current.id ||
+          refreshed.revision <= current.revision ||
+          refreshed.revision !== result.data.projectRevision ||
+          promotedShot?.id !== originalShot.id ||
+          promotedShot.boardAssetId !== input.promotion.boardAssetId ||
+          promotedShot.seedStillId !== input.promotion.boardAssetId ||
+          promotedShot.chainBreak !== originalShot.chainBreak ||
+          [...originalChainBreaks].some(([shotId, chainBreak]) => {
+            const candidate = Object.hasOwn(refreshed.shots, shotId) ? refreshed.shots[shotId] : undefined;
+            return candidate?.id !== shotId || candidate.chainBreak !== chainBreak;
+          }) ||
+          [...originalCurrentTakes].some(([shotId, assetId]) => {
+            const candidate = Object.hasOwn(refreshed.shots, shotId) ? refreshed.shots[shotId] : undefined;
+            return candidate?.id !== shotId || candidate.videoAssetId !== assetId;
+          })
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        projectRef.current = refreshed;
+        return true;
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        return false;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [generationDraftsBlockReview, projection, refetchProjectWorkspace, setActionErrorMessageKey]
+  );
+  const spendGate = useSpendGate({
+    onConfirmed: afterPaidConfirm,
+    onPromoteOnly: promoteBoardPanelOnly,
   });
-  const [draftModalVisible, setDraftModalVisible] = useState(false);
-  const [briefOpen, setBriefOpen] = useState(() => parseBriefOpenIntent(location.state));
-  const [pendingEngineFocusRole, setPendingEngineFocusRole] = useState<StudioMediaKind | null>(null);
-  const [rulesOpen, setRulesOpen] = useState(false);
-  const [rulesPending, setRulesPending] = useState(false);
-  const [rulesErrorMessageKey, setRulesErrorMessageKey] = useState<string | null>(null);
-  const [generationReview, setGenerationReview] = useState<GenerationReviewState | null>(null);
-  const effectiveRules = useMemo(() => (project === null ? [] : resolveEffectiveStudioRules(project.rules)), [project]);
-  const ruleBreachesBySceneId = useMemo(() => {
-    if (generationReview === null) return {};
-    const breaches: Record<string, StudioRuleBreach[]> = {};
-    for (const scene of generationReview.scenes) {
-      const verdict = evaluateStudioRules(effectiveRules, scene.promptText);
-      if (verdict.breaches.length > 0) breaches[scene.id] = verdict.breaches;
-    }
-    return breaches;
-  }, [effectiveRules, generationReview]);
-  const breachReports = useMemo<StudioRuleBreachReport[]>(() => {
-    if (generationReview === null) return [];
-    return generationReview.scenes.flatMap((scene) =>
-      (ruleBreachesBySceneId[scene.id] ?? []).map((breach) => ({
-        sceneTitle: scene.title,
-        ruleText: breach.ruleText,
-        matchedTerm: breach.matchedTerm,
-      }))
+  const spendGateDisclosureRef = useRef(spendGate.state.generationDisclosure);
+  spendGateDisclosureRef.current = spendGate.state.generationDisclosure;
+  const spendGateIdentity = spendGate.state.draft === null ? null : spendGateDraftIdentity(spendGate.state.draft);
+  useEffect(() => {
+    if (spendGate.state.phase !== 'choices' || spendGateIdentity === null) return;
+    void refetchRoutes();
+  }, [refetchRoutes, spendGate.state.phase, spendGateIdentity]);
+  useEffect(() => {
+    if (spendGate.state.phase !== 'choices' || spendGateIdentity === null) return;
+    const disclosure = spendGateDisclosureRef.current;
+    if (disclosure === null) return;
+    const items = disclosure.groups.flatMap((group) => group.items);
+    const groups = generationBlockGroupsForItems(currentGenerationCapability, items);
+    spendGate.updateGenerationDisclosure(
+      groups.length === 0 ? undefined : { groups, blocksPrepare: disclosure.blocksPrepare }
     );
-  }, [generationReview, ruleBreachesBySceneId]);
-  const [generationReviewIssueMessageKey, setGenerationReviewIssueMessageKey] = useState<string | null>(null);
-  const [generationReviewRefreshing, setGenerationReviewRefreshing] = useState(false);
-  const [referenceNotice, setReferenceNotice] = useState<ReferenceNotice | null>(null);
-  const [duplicateChargeJobId, setDuplicateChargeJobId] = useState<string | null>(null);
-  const [variationPending, setVariationPending] = useState(false);
-  const [variationIssueMessageKey, setVariationIssueMessageKey] = useState<string | null>(null);
-  const [referenceImportSceneId, setReferenceImportSceneId] = useState<string | null>(null);
-  const [referenceImportIssue, setReferenceImportIssue] = useState<{
-    sceneId: string;
-    messageKey: string;
-  } | null>(null);
-  const [briefReferenceMutationPending, setBriefReferenceMutationPending] = useState(false);
-  const [briefReferenceIssueMessageKey, setBriefReferenceIssueMessageKey] = useState<string | null>(null);
-  const [exportVisible, setExportVisible] = useState(false);
-  const [exportPending, setExportPending] = useState(false);
-  const [exportIncludeReferences, setExportIncludeReferences] = useState(false);
-  const [exportedFolderName, setExportedFolderName] = useState<string | null>(null);
-  const [exportMissingSceneIds, setExportMissingSceneIds] = useState<string[]>([]);
-  const [exportIssueMessageKey, setExportIssueMessageKey] = useState<string | null>(null);
-  const [exportLatestRender, setExportLatestRender] = useState<StudioLatestRender | null>(null);
-  const [exportLatestRenderReady, setExportLatestRenderReady] = useState(false);
-  const [pendingTransition, setPendingTransition] = useState<StudioViewTransition | null>(null);
-  const [transitionReady, setTransitionReady] = useState(false);
-  const [transitionIssueMessageKey, setTransitionIssueMessageKey] = useState<string | null>(null);
-  const [postModalTransition, setPostModalTransition] = useState<StudioViewTransition | null>(null);
-  const generationReviewRefreshingRef = useRef(false);
-  const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
-  const deferredReferenceReviewsRef = useRef<DeferredReferenceReview[]>([]);
-  const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
+  }, [currentGenerationCapability, spendGate.state.phase, spendGate.updateGenerationDisclosure, spendGateIdentity]);
+  const spendGateLocked =
+    spendGate.state.phase === 'promoting' ||
+    spendGate.state.phase === 'confirming' ||
+    spendGate.state.phase === 'quote_in_use';
+  const editSpendGateRoutes = useCallback(
+    (issue: SpendGateRouteIssue): void => {
+      setBriefRouteFocusRole(issue === 'image_and_video' ? null : issue);
+      setBriefDialogRequest((request) => request + 1);
+      void refetchRoutes();
+    },
+    [refetchRoutes]
+  );
   /**
-   * Reference requests this mount has already taken down the paid path, or tried to.
-   *
-   * The effect below re-runs whenever `studioJobs` changes, which includes every job poll, so
-   * without this guard a queued request could be submitted repeatedly — and this is a paid path
-   * with no spend ceiling behind it. Ids are added *before* the first await and are never removed,
-   * including on failure: one attempt spends nothing, but retrying on every poll could.
-   *
-   * It filters the pending requests rather than vetoing the batch they appear in. A request whose
-   * dismissal failed is still queued and so reappears in every later batch; vetoing on that would
-   * take the requests queued after it down with it for the rest of the mount. Recovery is the
-   * review the effect opens on failure, not a silent retry.
+   * The bar's Render action. Submits the largest bounded film-order batch the chain permits. Each
+   * selected frontier authorizes its exact downstream cascade, which advances unattended once the
+   * segment seed is fixed; a later click is needed only for work outside the request cap or recovery.
    */
-  const autoSubmittedReferenceRequestIdsRef = useRef(new Set<string>());
-  const variationPendingRef = useRef(false);
-  const referenceImportSceneIdRef = useRef<string | null>(null);
-  const briefReferenceMutationPendingRef = useRef(false);
-  const pendingTransitionRef = useRef<StudioViewTransition | null>(null);
-  const editorRef = useRef(editor);
-  const canonicalProjectRef = useRef<StudioRendererProject | null>(project);
-  canonicalProjectRef.current = project;
-  editorRef.current = editor;
-  const writeFocusIntent = useMemo(() => parseWriteFocusIntent(location.state), [location.state]);
-
-  useEffect(() => {
-    if (!parseBriefOpenIntent(location.state)) return;
-    navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state, navigate]);
-  const draftConflict = editor.conflict?.operation === 'draft_storyboard' ? editor.conflict : null;
-  const draftErrorMessageKey =
-    editor.error?.operation === 'draft_storyboard'
-      ? editor.error.messageKey
-      : draftConflict
-        ? draftConflict.messageKey
-        : studioModels.errorMessageKey;
-  const readiness = useMemo(() => (project === null ? null : deriveStudioReadiness(project)), [project]);
-  const selectedScene =
-    project !== null && editor.selectedSceneId !== null ? (project.scenes[editor.selectedSceneId] ?? null) : null;
-  const selectedAsset =
-    project !== null && selectedScene?.selectedAssetId ? (project.assets[selectedScene.selectedAssetId] ?? null) : null;
-  const selectedReferenceAsset =
-    project !== null && selectedScene?.referenceAssetId
-      ? (project.assets[selectedScene.referenceAssetId] ?? null)
-      : null;
-  const posterAsset = useMemo(() => {
-    if (
-      project === null ||
-      selectedScene === null ||
-      selectedScene.mediaKind !== 'video' ||
-      selectedScene.selectedAssetId === null
-    ) {
-      return null;
-    }
-    const producingJobs = selectedScene.jobIds
-      .map((jobId) => project.jobs[jobId])
-      .filter(
-        (job) =>
-          job?.status === 'succeeded' &&
-          job.sceneId === selectedScene.id &&
-          job.outputAssetIds[0] === selectedScene.selectedAssetId
-      );
-    if (producingJobs.length !== 1) return null;
-    const producingJob = producingJobs[0]!;
-    const posters = producingJob.outputAssetIds
-      .slice(1)
-      .map((assetId) => project.assets[assetId])
-      .filter(
-        (asset) =>
-          asset?.projectId === project.id &&
-          asset.sceneId === selectedScene.id &&
-          asset.mediaKind === 'image' &&
-          asset.managedAsset.collection === 'thumbnails' &&
-          selectedScene.assetIds.includes(asset.id)
-      );
-    return posters.length === 1 ? posters[0]! : null;
-  }, [project, selectedScene]);
-  const canonicalMutationPending =
-    editor.mutationPending || studioModels.pendingRole !== null || studioJobs.mutationPending || variationPending;
-  const generationBlocked =
-    project === null ||
-    editor.hasUnsavedProjectDraft ||
-    editor.hasUnsavedSceneDrafts ||
-    editor.conflict !== null ||
-    editor.drafting ||
-    canonicalMutationPending ||
-    referenceImportSceneId !== null;
-  const exportBlocked = generationBlocked;
-  const transitionBlocked = generationReview !== null || duplicateChargeJobId !== null || exportVisible;
-
-  useEffect(() => {
-    suppressedReferenceRequestIdsRef.current.clear();
-    deferredReferenceReviewsRef.current = [];
-    notifiedExcludedReferenceRequestsRef.current = null;
-    setReferenceNotice(null);
-  }, [project?.id]);
-
-  useEffect(() => {
-    if (
-      briefReferenceMutationPendingRef.current ||
-      briefReferenceMutationPending ||
-      generationReview !== null ||
-      generationBlocked ||
-      project === null ||
-      readiness === null ||
-      studioModels.catalog === null
-    ) {
+  const renderFilm = useCallback((): void => {
+    const current = projectRef.current;
+    if (current === null || projection === null || spendGateLocked) return;
+    if (generationDraftsBlockReview) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
       return;
     }
-    const availableRoutes = catalogEntries(studioModels.catalog);
-    const pendingRequestById = new Map(studioJobs.referenceRequests.map((request) => [request.id, request]));
-    const retainedDeferredReviews: DeferredReferenceReview[] = [];
-    for (const deferred of deferredReferenceReviewsRef.current) {
-      const exactPendingRequests: DeferredReferenceReview['requests'] = [];
-      const remappedRequests: DeferredReferenceReview['requests'] = [];
-      deferred.requests.forEach((request) => {
-        const pending = pendingRequestById.get(request.id);
-        if (pending === undefined) return;
-        (pending.sceneId === request.sceneId ? exactPendingRequests : remappedRequests).push(request);
-      });
-      const retain = (requests: DeferredReferenceReview['requests']): void => {
-        if (requests.length === 0) return;
-        const requestedSceneIds = new Set(requests.map(({ sceneId }) => sceneId));
-        retainedDeferredReviews.push({
-          requests,
-          sceneIds: deferred.sceneIds.filter((sceneId) => requestedSceneIds.has(sceneId)),
-        });
-      };
-
-      // A reused id no longer carries the frozen scene authority. Keep only that id deferred;
-      // exact siblings can still proceed, while an id that disappeared from the queue is gone.
-      retain(remappedRequests);
-      if (exactPendingRequests.length === 0) continue;
-
-      const review = buildQueuedReferenceReview(project, readiness, exactPendingRequests, availableRoutes);
-      const includedRequestIds = new Set(review.referenceRequestIds);
-      const excludedRequestIds = new Set(review.excludedReferenceRequestIds);
-      const includedRequests = exactPendingRequests.filter(({ id }) => includedRequestIds.has(id));
-      const excludedRequests = exactPendingRequests.filter(({ id }) => excludedRequestIds.has(id));
-      const accountedExactly =
-        review.referenceRequestIds.length + review.excludedReferenceRequestIds.length === exactPendingRequests.length &&
-        review.referenceRequestIds.every((requestId, index) => requestId === includedRequests[index]?.id) &&
-        review.excludedReferenceRequestIds.every((requestId, index) => requestId === excludedRequests[index]?.id) &&
-        exactPendingRequests.every(({ id }) => includedRequestIds.has(id) !== excludedRequestIds.has(id));
-      if (!accountedExactly) {
-        retain(exactPendingRequests);
-        continue;
-      }
-
-      // Excluded ids leave the defer and re-enter the existing unpaid exclusion/notice path.
-      // Included ids require the same frozen scene membership and full route/prompt authority as
-      // before. The canonical project owns submission order, so a reorder alone cannot deadlock
-      // the deferred request; retain only ids whose paid-path predicates are not satisfied.
-      const includedSceneIds = new Set(includedRequests.map(({ sceneId }) => sceneId));
-      const expectedSceneIds = new Set(deferred.sceneIds.filter((sceneId) => includedSceneIds.has(sceneId)));
-      const currentSceneIds = new Set(review.scenes.map(({ id }) => id));
-      const submission = collectSubmittableRoutes(review.scenes);
-      const prompts = submission === null ? null : collectReferencePrompts(review.scenes, submission.sceneIds);
-      const sceneMembershipMatches =
-        currentSceneIds.size === review.scenes.length &&
-        currentSceneIds.size === expectedSceneIds.size &&
-        [...currentSceneIds].every((sceneId) => expectedSceneIds.has(sceneId));
-      if (
-        !catalogMatchesProjectImageRoute(project, studioModels.catalog) ||
-        !sceneMembershipMatches ||
-        submission === null ||
-        prompts === null
-      ) {
-        retain(includedRequests);
-      }
-    }
-    deferredReferenceReviewsRef.current = retainedDeferredReviews;
-    const deferredRequestIds = new Set(retainedDeferredReviews.flatMap(({ requests }) => requests.map(({ id }) => id)));
-
-    // Requests this mount has already acted on are dropped here rather than checked as a whole
-    // batch further down. The batch is rebuilt from every pending request on each run, so an id
-    // that has been through the paid path must not be able to take the requests queued alongside
-    // it with it — filtering leaves the untouched ones free to be submitted on their own.
-    const requests = studioJobs.referenceRequests.filter(
-      ({ id }) =>
-        !suppressedReferenceRequestIdsRef.current.has(id) &&
-        !autoSubmittedReferenceRequestIdsRef.current.has(id) &&
-        !deferredRequestIds.has(id)
-    );
-    if (requests.length === 0) return;
-    const review = buildQueuedReferenceReview(project, readiness, requests, availableRoutes);
-    if (review.scenes.length === 0) {
-      const signature = review.excludedScenes
-        .map(({ id, reasonMessageKey }) => `${id}:${reasonMessageKey}`)
-        .join('\u0000');
-      if (notifiedExcludedReferenceRequestsRef.current === signature) return;
-      notifiedExcludedReferenceRequestsRef.current = signature;
-      setReferenceNotice({
-        kind: 'excluded',
-        scenes: review.excludedScenes,
-        requestIds: review.excludedReferenceRequestIds,
-      });
-      return;
-    }
-    notifiedExcludedReferenceRequestsRef.current = null;
-    setReferenceNotice((current) => (current?.kind === 'excluded' ? null : current));
-    studioJobs.clearIssue();
-    setGenerationReviewIssueMessageKey(null);
-
-    const catalogVersion = studioModels.catalog.catalogVersion;
-    const projectId = project.id;
-    const projectRevision = project.revision;
-    const requestIds = review.referenceRequestIds;
-    const openQueuedReferenceReview = (requiresConfirmation = false, requestsAlreadyConsumed = false): void =>
-      setGenerationReview({
-        mode: 'batch',
-        scenes: review.scenes,
-        excludedScenes: review.excludedScenes,
-        catalogVersion,
-        availableRoutes,
-        projectId,
-        projectRevision,
-        outputRole: 'reference',
-        referenceRequestIds: requestsAlreadyConsumed ? [] : requestIds,
-        referenceRequests: requests.map(({ id, sceneId }) => ({ id, sceneId })),
-        ...(requiresConfirmation ? { referenceRequestsRequireConfirmation: true as const } : {}),
-      });
-
-    const activeBriefReferences = resolveActiveStudioBriefReferences(project.assets);
-    if (activeBriefReferences === null || activeBriefReferences.length > 0) {
-      // The accepted Director proposal may authorize a zero-input plate, but adding cast/look
-      // changes what the paid call will run. Keep every included request queued until the exact
-      // labels, roles, route and capacity have been reviewed by a human.
-      openQueuedReferenceReview(true);
-      return;
-    }
-
-    // The Director decides when to make an image, so a request it queued no longer waits for a
-    // confirmation step. Routes are still resolved by the modal's own rule via
-    // collectSubmittableRoutes, which returns null unless *every* scene has a valid matching
-    // route — so a partial or unroutable batch falls back to the modal rather than spending on a
-    // subset the modal itself would have refused.
-    const submission = collectSubmittableRoutes(review.scenes);
-    if (submission === null) {
-      openQueuedReferenceReview();
-      return;
-    }
-    // The Director's queued reference requests are the one paid path with no human confirm, so the
-    // rule check happens here too. Main refuses this batch anyway; going through the modal instead
-    // means the user sees WHICH rule blocked WHICH shot rather than a bare refusal, and the queued
-    // requests survive to be answered.
-    const breached = review.scenes.some(
-      (scene) => evaluateStudioRules(resolveEffectiveStudioRules(project.rules), scene.promptText).breaches.length > 0
-    );
-    if (breached) {
-      // Say WHY the batch stopped. Redirecting the user into a review they did not ask for, with no
-      // statement that a rule caused it, is exactly the "say the consequence before it runs" failure
-      // this phase exists to fix. The modal's own error slot is the surface: both
-      // `studioJobs.clearIssue()` and `setGenerationReviewIssueMessageKey(null)` ran earlier in this
-      // effect, and the modal falls back to `generationReviewIssueMessageKey` whenever
-      // `studioJobs.issue` is not a `submit_scenes` issue, so this key is what renders.
-      setGenerationReviewIssueMessageKey('conversation.creativeStudio.rules.autoSubmitBlocked');
-      openQueuedReferenceReview();
-      return;
-    }
-    // buildQueuedReferenceReview excludes any scene it could not describe, so this should hold for
-    // every scene it did include. It is checked anyway because the alternative is dismissing the
-    // requests and then having main refuse the batch - which destroys them.
-    const referencePrompts = collectReferencePrompts(review.scenes, submission.sceneIds);
-    if (referencePrompts === null) {
-      openQueuedReferenceReview();
-      return;
-    }
-
-    // Marked before the first await: the effect re-runs whenever `studioJobs` changes, which
-    // includes every job poll, and this is a paid path with no spend ceiling behind it.
-    requestIds.forEach((requestId) => autoSubmittedReferenceRequestIdsRef.current.add(requestId));
-
-    void (async () => {
-      // Consume the queued request *before* paying for it. Both de-dup sets are refs inside a
-      // shell React remounts per project, so the pending request on disk is the only record that
-      // survives leaving the project or quitting the app: dismissing after the submit leaves a
-      // window where the plate is charged and the request is still queued, and the next mount
-      // charges for it again with no human in the loop. Dismissing first can only lose an unpaid
-      // request, which the user can simply ask the Director for again.
-      const consumed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
-      if (!consumed) {
-        // Nothing has been spent, and the request is still queued for a later mount to pick up.
-        setReferenceNotice({ kind: 'dismiss_failed' });
-        return;
-      }
-      requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-      const submitted = await studioJobs.submitScenes({
-        mode: 'batch',
-        sceneIds: submission.sceneIds,
-        routes: submission.routes,
-        catalogVersion,
-        expectedRevision: projectRevision,
-        outputRole: 'reference',
-        referencePrompts,
-      });
-      if (submitted) return;
-      // A refused submit spends nothing and nothing retries it, so with no surface here the
-      // request is simply gone: no error, no modal, nothing to act on. The review this path
-      // replaced is that surface — it shows the failure, its Confirm retries under a human click,
-      // and its Cancel discards the request.
-      openQueuedReferenceReview(false, true);
-    })();
-  }, [
-    briefReferenceMutationPending,
-    generationBlocked,
-    generationReview,
-    project,
-    readiness,
-    studioJobs,
-    studioModels.catalog,
-  ]);
-
-  /**
-   * ⚠️ Currently unreachable, deliberately.
-   *
-   * D10 deleted Write's writing assistant, which held the only "Draft storyboard" button, and with
-   * it the only path to `openDraftReview` → `StoryboardDraftModal` → this. The capability itself is
-   * not lost: the Director drafts a storyboard through the Studio MCP server's `propose_storyboard`
-   * and the user accepts it from the proposal cards in the pane. That is a *different* mechanism —
-   * the Director authors the scenes with its own conversation model and queues them for review,
-   * where this calls the model-routed `storyboardPlanner` and writes scenes straight in.
-   *
-   * The modal, `editor.proposeStoryboard` and the planner path are kept rather than deleted, so
-   * treat everything they reach as dormant, not live: nothing renders it today.
-   */
-  const handleDraftStoryboard = useCallback(
-    async (replaceExisting: boolean): Promise<void> => {
-      if (await editor.proposeStoryboard(replaceExisting)) setDraftModalVisible(false);
-    },
-    [editor]
-  );
-
-  const openSingleReview = useCallback(
-    (request: GenerationSingleReviewRequest): void => {
-      if (project === null || generationBlocked || request.catalogVersion === null) return;
-      const scene = project.scenes[request.sceneId];
-      if (
-        scene === undefined ||
-        (request.outputRole !== 'reference' &&
-          !canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt))
-      ) {
-        return;
-      }
-      studioJobs.clearIssue();
-      setGenerationReviewIssueMessageKey(null);
-      setGenerationReview({
-        mode: 'single',
-        scenes: [
-          toReviewScene(
-            project,
-            scene,
-            request.route,
-            request.availableRoutes,
-            request.routeStatus,
-            request.outputRole ?? 'take',
-            request.referencePrompt,
-            request.conditioning,
-            request.conditioningIssue
-          ),
-        ],
-        catalogVersion: request.catalogVersion,
-        availableRoutes: request.availableRoutes,
-        projectId: project.id,
-        projectRevision: project.revision,
-        ...(request.outputRole === undefined ? {} : { outputRole: request.outputRole }),
-      });
-    },
-    [generationBlocked, project, readiness, studioJobs]
-  );
-
-  const openBatchReview = useCallback(
-    (request: GenerationBatchReviewRequest): void => {
-      if (project === null || generationBlocked || request.catalogVersion === null || request.sceneIds.length === 0) {
-        return;
-      }
-      const scenes = request.sceneIds.flatMap((sceneId) => {
-        const scene = project.scenes[sceneId];
-        if (scene?.id !== sceneId) return [];
-        const resolved = request.routes[scene.mediaKind];
-        const route = resolved === null ? null : { sceneId: scene.id, ...resolved.route };
-        return [toReviewScene(project, scene, route, request.availableRoutes, resolved?.routeStatus)];
-      });
-      if (scenes.length !== request.sceneIds.length) return;
-      studioJobs.clearIssue();
-      setGenerationReviewIssueMessageKey(null);
-      setGenerationReview({
-        mode: 'batch',
-        scenes,
-        excludedScenes: batchReviewExcludedScenes(project, request),
-        catalogVersion: request.catalogVersion,
-        availableRoutes: request.availableRoutes,
-        projectId: project.id,
-        projectRevision: project.revision,
-      });
-    },
-    [generationBlocked, project, studioJobs]
-  );
-
-  const confirmGeneration = useCallback(
-    async (confirmation: GenerationReviewConfirmation): Promise<void> => {
-      const { sceneIds, routes } = confirmation;
-      // Defence in depth behind the modal's disabled confirm button on this paid path.
-      if (
-        generationBlocked ||
-        generationReview?.catalogVersion === null ||
-        generationReview === null ||
-        project === null ||
-        generationReviewRefreshingRef.current
-      ) {
-        return;
-      }
-
-      if (generationReview.projectId !== project.id || generationReview.projectRevision !== project.revision) {
-        generationReviewRefreshingRef.current = true;
-        setGenerationReviewRefreshing(true);
-        setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.staleProject');
-        studioJobs.clearIssue();
-        studioJobs.clearStaleIntent();
-        try {
-          await studioModels.refresh();
-          const catalog = studioModels.catalog;
-          if (catalog === null) {
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.models.loading');
-            return;
-          }
-          const canonical = canonicalProjectRef.current;
-          if (canonical?.id !== project.id || canonical.revision !== project.revision) {
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.staleProject');
-            return;
-          }
-          const canonicalReadiness = deriveStudioReadiness(canonical);
-          const availableRoutes = catalogEntries(catalog);
-          const refreshedReferenceReview =
-            generationReview.mode === 'batch' && generationReview.referenceRequests !== undefined
-              ? buildQueuedReferenceReview(
-                  canonical,
-                  canonicalReadiness,
-                  generationReview.referenceRequests,
-                  availableRoutes
-                )
-              : null;
-          const refreshedScenes =
-            generationReview.mode === 'single'
-              ? generationReview.scenes.flatMap((reviewScene) => {
-                  const scene = canonical.scenes[reviewScene.id];
-                  if (
-                    scene === undefined ||
-                    (generationReview.outputRole !== 'reference' &&
-                      !canOpenSingleSceneReview(canonicalReadiness.sceneStatuses[scene.id], scene.visualPrompt))
-                  ) {
-                    return [];
-                  }
-                  const route = projectRouteSnapshot(canonical, scene, generationReview.outputRole);
-                  const catalogRoute =
-                    route === null
-                      ? undefined
-                      : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
-                  const conditioning =
-                    generationReview.outputRole !== 'reference' || catalogRoute === undefined
-                      ? undefined
-                      : buildReferenceConditioningSnapshot(canonical, catalogRoute);
-                  return [
-                    toReviewScene(
-                      canonical,
-                      scene,
-                      route,
-                      availableRoutes,
-                      undefined,
-                      generationReview.outputRole ?? 'take',
-                      reviewScene.referencePrompt,
-                      conditioning
-                    ),
-                  ];
-                })
-              : (refreshedReferenceReview?.scenes ??
-                generationReview.scenes.flatMap((reviewScene) => {
-                  const scene = canonical.scenes[reviewScene.id];
-                  if (scene?.id !== reviewScene.id || !canonicalReadiness.readySceneIds.includes(reviewScene.id)) {
-                    return [];
-                  }
-                  return [
-                    toReviewScene(
-                      canonical,
-                      scene,
-                      projectRouteSnapshot(canonical, scene, generationReview.outputRole),
-                      availableRoutes,
-                      undefined,
-                      generationReview.outputRole ?? 'take'
-                    ),
-                  ];
-                }));
-          setGenerationReview({
-            mode: generationReview.mode,
-            scenes: refreshedScenes,
-            ...(refreshedReferenceReview === null
-              ? generationReview.excludedScenes === undefined
-                ? {}
-                : { excludedScenes: generationReview.excludedScenes }
-              : { excludedScenes: refreshedReferenceReview.excludedScenes }),
-            catalogVersion: catalog.catalogVersion,
-            availableRoutes,
-            projectId: canonical.id,
-            projectRevision: canonical.revision,
-            ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
-            ...(refreshedReferenceReview === null
-              ? generationReview.referenceRequestIds === undefined
-                ? {}
-                : { referenceRequestIds: generationReview.referenceRequestIds }
-              : { referenceRequestIds: refreshedReferenceReview.referenceRequestIds }),
-            ...(generationReview.referenceRequests === undefined
-              ? {}
-              : { referenceRequests: generationReview.referenceRequests }),
-            ...(generationReview.referenceRequestsRequireConfirmation === true
-              ? { referenceRequestsRequireConfirmation: true as const }
-              : {}),
-          });
-          if (generationReview.outputRole === 'reference') {
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-          }
-        } catch {
-          setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
-        } finally {
-          generationReviewRefreshingRef.current = false;
-          setGenerationReviewRefreshing(false);
-        }
-        return;
-      }
-
-      if (generationReview.outputRole === 'reference') {
-        generationReviewRefreshingRef.current = true;
-        setGenerationReviewRefreshing(true);
-        studioJobs.clearIssue();
-        try {
-          await studioModels.refresh();
-          const catalog = studioModels.catalog;
-          if (catalog === null) {
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.models.loading');
-            return;
-          }
-          const canonical = canonicalProjectRef.current;
-          if (
-            canonical === null ||
-            canonical.id !== generationReview.projectId ||
-            canonical.revision !== generationReview.projectRevision
-          ) {
-            if (canonical?.id === generationReview.projectId) {
-              const canonicalReadiness = deriveStudioReadiness(canonical);
-              const availableRoutes = catalogEntries(catalog);
-              const refreshedReferenceReview =
-                generationReview.referenceRequests === undefined
-                  ? null
-                  : buildQueuedReferenceReview(
-                      canonical,
-                      canonicalReadiness,
-                      generationReview.referenceRequests,
-                      availableRoutes
-                    );
-              setGenerationReview({
-                ...generationReview,
-                scenes: refreshedReferenceReview?.scenes ?? [],
-                ...(refreshedReferenceReview === null
-                  ? {}
-                  : {
-                      excludedScenes: refreshedReferenceReview.excludedScenes,
-                      referenceRequestIds: refreshedReferenceReview.referenceRequestIds,
-                    }),
-                catalogVersion: catalog.catalogVersion,
-                availableRoutes,
-                projectRevision: canonical.revision,
-              });
-            }
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-            return;
-          }
-          const canonicalReadiness = deriveStudioReadiness(canonical);
-          const availableRoutes = catalogEntries(catalog);
-          const refreshedReferenceReview =
-            generationReview.referenceRequests === undefined
-              ? null
-              : buildQueuedReferenceReview(
-                  canonical,
-                  canonicalReadiness,
-                  generationReview.referenceRequests,
-                  availableRoutes
-                );
-          const refreshedScenes =
-            refreshedReferenceReview?.scenes ??
-            generationReview.scenes.flatMap((reviewScene) => {
-              const scene = canonical.scenes[reviewScene.id];
-              if (scene === undefined) return [];
-              const route = projectRouteSnapshot(canonical, scene, 'reference');
-              const catalogRoute =
-                route === null
-                  ? undefined
-                  : availableRoutes.find((candidate) => routeIdentity(candidate) === routeIdentity(route));
-              const conditioning =
-                catalogRoute === undefined ? undefined : buildReferenceConditioningSnapshot(canonical, catalogRoute);
-              return [
-                toReviewScene(
-                  canonical,
-                  scene,
-                  route,
-                  availableRoutes,
-                  undefined,
-                  'reference',
-                  reviewScene.referencePrompt,
-                  conditioning
-                ),
-              ];
-            });
-          if (
-            catalog.catalogVersion !== generationReview.catalogVersion ||
-            !reviewSceneAuthorityMatches(generationReview.scenes, refreshedScenes)
-          ) {
-            setGenerationReview({
-              ...generationReview,
-              scenes: refreshedScenes,
-              ...(refreshedReferenceReview === null
-                ? {}
-                : {
-                    excludedScenes: refreshedReferenceReview.excludedScenes,
-                    referenceRequestIds: refreshedReferenceReview.referenceRequestIds,
-                  }),
-              catalogVersion: catalog.catalogVersion,
-              availableRoutes,
-              projectRevision: canonical.revision,
-            });
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-            return;
-          }
-        } catch {
-          setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.provider');
-          return;
-        } finally {
-          generationReviewRefreshingRef.current = false;
-          setGenerationReviewRefreshing(false);
-        }
-      }
-
-      const submitResult = await submitExactGenerationReview(
-        generationReview.scenes,
-        confirmation,
-        async (exactConfirmation) => {
-          // Defence in depth: main refuses a reference submission whose scenes are not all described,
-          // and a refused submit here would leave the queued requests dismissed and unpaid-for with
-          // nothing on screen. Surfacing the issue keeps the review open so Cancel or a retry works.
-          const referencePrompts =
-            generationReview.outputRole === 'reference'
-              ? collectReferencePrompts(generationReview.scenes, exactConfirmation.sceneIds)
-              : null;
-          if (generationReview.outputRole === 'reference' && referencePrompts === null) {
-            setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidPayload');
-            return false;
-          }
-
-          if (generationReview.referenceRequestIds !== undefined) {
-            const requestIds = generationReview.referenceRequestIds;
-            const canonical = canonicalProjectRef.current;
-            if (
-              canonical?.id !== generationReview.projectId ||
-              canonical.revision !== generationReview.projectRevision
-            ) {
-              setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-              return false;
-            }
-            let consumed = requestIds.length === 0;
-            if (generationReview.referenceRequestsRequireConfirmation === true && requestIds.length > 0) {
-              const reviewedRequestById = new Map(
-                generationReview.referenceRequests?.map((request) => [request.id, request]) ?? []
-              );
-              const expectedRequests = requestIds.flatMap((requestId) => {
-                const request = reviewedRequestById.get(requestId);
-                return request === undefined ? [] : [{ ...request }];
-              });
-              if (expectedRequests.length !== requestIds.length) {
-                setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-                return false;
-              }
-              const consumeResult = await studioJobs.consumeReferenceRequests(
-                expectedRequests,
-                generationReview.projectRevision
-              );
-              if (consumeResult === 'changed') {
-                generationReviewRefreshingRef.current = true;
-                setGenerationReviewRefreshing(true);
-                try {
-                  const authority = await studioJobs.refreshReferenceAuthority();
-                  await studioModels.refresh();
-                  const refreshedCatalog = studioModels.catalog;
-                  if (authority === null || refreshedCatalog === null) {
-                    setGenerationReviewIssueMessageKey('conversation.creativeStudio.reference.dismissFailed');
-                    return false;
-                  }
-                  const currentRequestById = new Map(authority.requests.map((request) => [request.id, request]));
-                  const survivingRequests = expectedRequests.flatMap((expected) => {
-                    const current = currentRequestById.get(expected.id);
-                    return current?.sceneId === expected.sceneId ? [{ id: current.id, sceneId: current.sceneId }] : [];
-                  });
-                  const recoveryRequests = survivingRequests.length > 0 ? survivingRequests : authority.requests;
-                  if (recoveryRequests.length === 0) {
-                    setGenerationReview(null);
-                    return false;
-                  }
-                  const availableRoutes = catalogEntries(refreshedCatalog);
-                  const refreshedReview = buildQueuedReferenceReview(
-                    authority.project,
-                    deriveStudioReadiness(authority.project),
-                    recoveryRequests,
-                    availableRoutes
-                  );
-                  const includedRequestIds = new Set(refreshedReview.referenceRequestIds);
-                  const includedRequests = recoveryRequests.filter(({ id }) => includedRequestIds.has(id));
-                  if (refreshedReview.scenes.length === 0 || includedRequests.length === 0) {
-                    setGenerationReview(null);
-                    return false;
-                  }
-                  setGenerationReview({
-                    mode: 'batch',
-                    scenes: refreshedReview.scenes,
-                    excludedScenes: refreshedReview.excludedScenes,
-                    catalogVersion: refreshedCatalog.catalogVersion,
-                    availableRoutes,
-                    projectId: authority.project.id,
-                    projectRevision: authority.project.revision,
-                    outputRole: 'reference',
-                    referenceRequestIds: refreshedReview.referenceRequestIds,
-                    referenceRequests: includedRequests,
-                    referenceRequestsRequireConfirmation: true,
-                  });
-                  setGenerationReviewIssueMessageKey('conversation.creativeStudio.conditioning.reviewChanged');
-                  return false;
-                } finally {
-                  generationReviewRefreshingRef.current = false;
-                  setGenerationReviewRefreshing(false);
-                }
-              }
-              consumed = consumeResult === 'consumed';
-            } else if (requestIds.length > 0) {
-              consumed = await studioJobs.dismissReferenceRequests(requestIds);
-            }
-            if (!consumed) {
-              setGenerationReviewIssueMessageKey('conversation.creativeStudio.reference.dismissFailed');
-              return false;
-            }
-            requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-            setGenerationReview((current) => (current === null ? null : { ...current, referenceRequestIds: [] }));
-          }
-
-          return studioJobs.submitScenes({
-            mode: generationReview.mode,
-            sceneIds: exactConfirmation.sceneIds,
-            routes: exactConfirmation.routes,
-            catalogVersion: generationReview.catalogVersion,
-            expectedRevision: generationReview.projectRevision,
-            ...(generationReview.outputRole === undefined ? {} : { outputRole: generationReview.outputRole }),
-            ...(referencePrompts === null ? {} : { referencePrompts }),
-          });
-        }
-      );
-      if (submitResult === 'rejected') {
-        setGenerationReviewIssueMessageKey('conversation.creativeStudio.errors.invalidRoute');
-        return;
-      }
-      if (submitResult === 'not_submitted') return;
-      setGenerationReview(null);
-    },
-    [generationBlocked, generationReview, project, readiness, studioJobs, studioModels]
-  );
-
-  const dismissExcludedReferenceRequests = useCallback(async (): Promise<void> => {
-    if (referenceNotice?.kind !== 'excluded') return;
-    const requestIds = referenceNotice.requestIds;
-    const dismissed = requestIds.length === 0 || (await studioJobs.dismissReferenceRequests(requestIds));
-    if (!dismissed) return;
-    requestIds.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-    setReferenceNotice(null);
-  }, [referenceNotice, studioJobs]);
-
-  useEffect(() => {
-    const staleIntent = studioJobs.staleIntent;
-    if (staleIntent?.operation !== 'submit_scenes' || project === null) return;
-    setGenerationReview((current) => {
-      if (current === null) return null;
-      const currentById = new Map(current.scenes.map((scene) => [scene.id, scene]));
-      const availableRoutes =
-        studioModels.catalog === null ? current.availableRoutes : catalogEntries(studioModels.catalog);
-      return {
-        ...current,
-        catalogVersion: studioModels.catalog?.catalogVersion ?? staleIntent.catalogVersion,
-        availableRoutes,
-        projectId: project.id,
-        projectRevision: project.revision,
-        scenes: staleIntent.sceneIds.flatMap((sceneId) => {
-          const scene = project.scenes[sceneId];
-          const outputRole = current.outputRole ?? 'take';
-          const route = scene === undefined ? null : projectRouteSnapshot(project, scene, outputRole);
-          const eligible =
-            scene !== undefined &&
-            (outputRole === 'reference' ||
-              canOpenSingleSceneReview(readiness?.sceneStatuses[scene.id], scene.visualPrompt)) &&
-            (current.mode === 'single' || scene.selectedAssetId === null);
-          if (eligible) {
-            return [
-              toReviewScene(
-                project,
-                scene,
-                route,
-                availableRoutes,
-                undefined,
-                outputRole,
-                currentById.get(sceneId)?.referencePrompt
-              ),
-            ];
-          }
-          const previous = currentById.get(sceneId);
-          return previous === undefined
-            ? []
-            : [
-                {
-                  ...previous,
-                  route:
-                    previous.route.status === 'missing'
-                      ? previous.route
-                      : {
-                          status: 'invalid' as const,
-                          snapshot: previous.route.snapshot,
-                          providerName: previous.route.providerName,
-                          integrationLabelKey: previous.route.integrationLabelKey,
-                          silentOutput: previous.route.silentOutput,
-                        },
-                },
-              ];
-        }),
-      };
+    const candidateShotIds = filmRenderBatchShotIds({ project: current, projection });
+    const blockedItems: StudioGenerationCapabilityItemV2[] = [];
+    const shotIds = candidateShotIds.filter((shotId) => {
+      const candidate = selectionGateDraft({ project: current, projection, orderedShotIds: [shotId] });
+      if (candidate === null) return false;
+      const groups = generationBlockGroupsForItems(currentGenerationCapability, shotCapabilityItemsForDraft(candidate));
+      if (groups.length === 0) return true;
+      blockedItems.push(...groups.flatMap((group) => group.items));
+      return false;
     });
-  }, [project, readiness, studioJobs.staleIntent, studioModels.catalog]);
-
-  const handleSelectVariation = useCallback(
-    async (request: StudioSelectVariationRequest): Promise<void> => {
-      if (
-        project === null ||
-        canonicalMutationPending ||
-        variationPendingRef.current ||
-        editor.hasUnsavedSceneDrafts ||
-        editor.conflict !== null ||
-        request.projectId !== project.id
-      ) {
+    const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, blockedItems);
+    if (shotIds.length === 0) {
+      const blockedDraft = selectionGateDraft({
+        project: current,
+        projection,
+        orderedShotIds: candidateShotIds,
+      });
+      if (blockedDraft !== null && disclosureGroups.length > 0) {
+        setActionErrorMessageKey(null);
+        spendGate.open(blockedDraft, undefined, { groups: disclosureGroups, blocksPrepare: true });
         return;
       }
-      const scene = project.scenes[request.sceneId];
-      const asset = project.assets[request.assetId];
-      if (
-        scene === undefined ||
-        asset === undefined ||
-        asset.projectId !== project.id ||
-        asset.sceneId !== scene.id ||
-        asset.mediaKind !== scene.mediaKind ||
-        asset.managedAsset.collection !== 'assets' ||
-        !scene.assetIds.includes(asset.id)
-      ) {
-        return;
-      }
-
-      variationPendingRef.current = true;
-      setVariationPending(true);
-      setVariationIssueMessageKey(null);
-      try {
-        const result = await ipcBridge.creativeStudio.selectAsset.invoke({
-          projectId: project.id,
-          sceneId: scene.id,
-          assetId: asset.id,
-          expectedRevision: project.revision,
-        });
-        if (result.ok === false) {
-          if (result.error.code === 'stale_project') await refetch();
-          setVariationIssueMessageKey(result.error.messageKey);
-          return;
-        }
-        await refetch();
-      } catch {
-        setVariationIssueMessageKey('conversation.creativeStudio.errors.storage');
-      } finally {
-        variationPendingRef.current = false;
-        setVariationPending(false);
-      }
-    },
-    [canonicalMutationPending, editor.conflict, editor.hasUnsavedSceneDrafts, project, refetch]
-  );
-
-  const handleImportReference = useCallback(
-    async (sceneId: string): Promise<void> => {
-      if (
-        !Object.hasOwn(editorRef.current.project?.scenes ?? {}, sceneId) ||
-        editor.conflict !== null ||
-        editor.drafting ||
-        editor.mutationPending ||
-        studioJobs.mutationPending ||
-        variationPending ||
-        referenceImportSceneId !== null ||
-        referenceImportSceneIdRef.current !== null
-      ) {
-        return;
-      }
-
-      referenceImportSceneIdRef.current = sceneId;
-      setReferenceImportSceneId(sceneId);
-      setReferenceImportIssue(null);
-      try {
-        if (!(await editorRef.current.flushSceneDraftById(sceneId))) return;
-        const canonical = await refetch();
-        if (canonical === null || !Object.hasOwn(canonical.scenes, sceneId)) {
-          setReferenceImportIssue({
-            sceneId,
-            messageKey: 'conversation.creativeStudio.errors.storage',
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.renderFilmEmpty');
+      return;
+    }
+    const draft = selectionGateDraft({ project: current, projection, orderedShotIds: shotIds });
+    if (draft === null) {
+      setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+      return;
+    }
+    setActionErrorMessageKey(null);
+    spendGate.open(
+      draft,
+      undefined,
+      disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: false }
+    );
+  }, [
+    currentGenerationCapability,
+    generationDraftsBlockReview,
+    projection,
+    setActionErrorMessageKey,
+    spendGate.open,
+    spendGateLocked,
+  ]);
+  const statusBlocksReview = projection === null || !projection.workspaceStatusReady || !projection.chainStatusReady;
+  const beatPanelReviewBlockedMessageKey = generationDraftsBlockReview
+    ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
+    : statusBlocksReview
+      ? 'conversation.creativeStudio.workspace.controls.statusRequired'
+      : routeCatalog === null
+        ? 'conversation.creativeStudio.workspace.controls.routeCatalogRequired'
+        : null;
+  const handoffReviewBlockedMessageKey = generationDraftsBlockReview
+    ? 'conversation.creativeStudio.workspace.controls.saveBeforeReview'
+    : statusBlocksReview
+      ? 'conversation.creativeStudio.workspace.controls.statusRequired'
+      : routeCatalog === null
+        ? 'conversation.creativeStudio.workspace.controls.routeCatalogRequired'
+        : currentGenerationCapability === null && routeCatalog.image.status !== 'ready'
+          ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+          : null;
+  const beatPanelReviewGraphs = useMemo<BeatPanelReviewGraph[]>(() => {
+    if (project === null || projection === null) return [];
+    return projection.activeShotIds.flatMap((triggerShotId) => {
+      const draft = selectionGateDraft({ project, projection, orderedShotIds: [triggerShotId] });
+      if (draft === null) return [];
+      const choices = [...draft.baseChoices, ...draft.cascadeChoices].flatMap(({ target, purpose }) =>
+        target.kind === 'shot' && (purpose === 'seed_still' || purpose === 'video_take')
+          ? [{ shotId: target.shotId, purpose }]
+          : []
+      );
+      const [firstChoice, ...remainingChoices] = choices;
+      if (firstChoice === undefined) return [];
+      const block =
+        choices.flatMap((item) => {
+          const reason = generationBlockForItem(currentGenerationCapability, {
+            target: { kind: 'shot', shotId: item.shotId },
+            purpose: item.purpose,
           });
-          return;
-        }
-        const result = await ipcBridge.creativeStudio.chooseAndImportReference.invoke({
-          projectId: canonical.id,
-          sceneId,
-          expectedRevision: canonical.revision,
-        });
-        if (result.ok === false) {
-          if (result.error.code === 'stale_project') await refetch();
-          setReferenceImportIssue({ sceneId, messageKey: result.error.messageKey });
-          return;
-        }
-        if (result.data.status === 'imported') await refetch();
-      } catch {
-        setReferenceImportIssue({
-          sceneId,
-          messageKey: 'conversation.creativeStudio.errors.storage',
-        });
-      } finally {
-        if (referenceImportSceneIdRef.current === sceneId) {
-          referenceImportSceneIdRef.current = null;
-        }
-        setReferenceImportSceneId(null);
+          return reason === null ? [] : [{ item, reason }];
+        })[0] ?? null;
+      return [
+        {
+          triggerShotId,
+          choices: [firstChoice, ...remainingChoices],
+          block,
+        },
+      ];
+    });
+  }, [currentGenerationCapability, project, projection]);
+
+  const openBoardSpendGate = useCallback(
+    (
+      buildDraft: (current: StudioRendererProjectV2, exactProjection: WorkspaceProjection) => SpendGateDraft | null
+    ): void => {
+      const current = projectRef.current;
+      if (
+        current === null ||
+        projection === null ||
+        spendGateLocked ||
+        workspacePendingRef.current ||
+        current.id !== projection.projectId ||
+        current.revision !== projection.projectRevision
+      ) {
+        return;
       }
+      if (generationDraftsBlockReview) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+        return;
+      }
+      if (
+        projection.boardPanels.length !== projection.activeShotIds.length ||
+        projection.boardPanels.some(
+          (panel) => panel.freshness === 'status_pending' || panel.activity === 'status_pending'
+        )
+      ) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.statusRequired');
+        return;
+      }
+      if (routeCatalog === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+        return;
+      }
+      if (
+        currentGenerationCapability === null &&
+        (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+      ) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+        return;
+      }
+      const draft = buildDraft(current, projection);
+      if (draft === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const routeIssue = currentGenerationCapability === null ? spendGateRouteIssue(routeCatalog, draft) : null;
+      if (routeIssue !== null) {
+        setActionErrorMessageKey(
+          routeIssue === 'image'
+            ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+            : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
+        );
+        return;
+      }
+      const payableDraft =
+        'baseChoices' in draft && draft.baseChoices.every((choice) => choice.purpose === 'board_still')
+          ? {
+              ...draft,
+              baseChoices: draft.baseChoices.filter(
+                (choice) =>
+                  choice.target.kind === 'shot' &&
+                  generationBlockForItem(currentGenerationCapability, {
+                    target: { kind: 'shot', shotId: choice.target.shotId },
+                    purpose: 'board_still',
+                  }) === null
+              ),
+            }
+          : draft;
+      const disclosureGroups =
+        'baseChoices' in draft && draft.baseChoices.every((choice) => choice.purpose === 'board_still')
+          ? generationBlockGroupsForItems(currentGenerationCapability, shotCapabilityItemsForDraft(draft))
+          : [];
+      if (
+        'baseChoices' in draft &&
+        'baseChoices' in payableDraft &&
+        draft.baseChoices.length > 0 &&
+        payableDraft.baseChoices.length === 0
+      ) {
+        setActionErrorMessageKey(null);
+        spendGate.open(draft, undefined, { groups: disclosureGroups, blocksPrepare: true });
+        return;
+      }
+      setActionErrorMessageKey(null);
+      spendGate.open(
+        payableDraft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: false }
+      );
     },
     [
-      editor.conflict,
-      editor.drafting,
-      editor.mutationPending,
-      refetch,
-      referenceImportSceneId,
-      studioJobs.mutationPending,
-      variationPending,
+      currentGenerationCapability,
+      generationDraftsBlockReview,
+      projection,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
     ]
   );
 
-  const handleAddBriefReference = useCallback(
-    async (role: StudioBriefReferenceRole): Promise<string | null> => {
-      const canonical = canonicalProjectRef.current;
-      const active = canonical === null ? null : resolveActiveStudioBriefReferences(canonical.assets);
-      if (
-        canonical === null ||
-        active === null ||
-        active.length >= STUDIO_MAX_ACTIVE_BRIEF_REFERENCES ||
-        briefReferenceMutationPendingRef.current
-      ) {
-        return null;
-      }
-
-      briefReferenceMutationPendingRef.current = true;
-      setBriefReferenceMutationPending(true);
+  const runWorkspaceCommitAtRevision = useCallback(
+    async (
+      expectedRevision: number,
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>,
+      onCommitted?: () => void
+    ): Promise<number | null> => {
+      const current = projectRef.current;
+      if (current === null || current.revision !== expectedRevision || workspacePendingRef.current) return null;
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
       try {
-        const result = await ipcBridge.creativeStudio.chooseAndImportReference.invoke({
-          projectId: canonical.id,
-          briefReferenceRole: role,
-          expectedRevision: canonical.revision,
-        });
+        const result = await invoke(current);
         if (result.ok === false) {
-          if (result.error.code === 'stale_project') {
-            const refreshed = await refetch();
-            if (refreshed !== null) canonicalProjectRef.current = refreshed;
-          }
-          setBriefReferenceIssueMessageKey(result.error.messageKey);
+          setActionErrorMessageKey(result.error.messageKey);
           return null;
         }
-        if (result.data.status === 'cancelled') return null;
-        setBriefReferenceIssueMessageKey(null);
-        const refreshed = await refetch();
-        if (refreshed !== null) canonicalProjectRef.current = refreshed;
-        return result.data.asset.id;
+        onCommitted?.();
+        const refreshed = await refetchProjectWorkspace();
+        if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return null;
+        }
+        projectRef.current = refreshed;
+        if (projectRef.current?.revision !== result.data.projectRevision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return null;
+        }
+        return result.data.projectRevision;
       } catch {
-        setBriefReferenceIssueMessageKey('conversation.creativeStudio.briefReferences.importError');
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         return null;
       } finally {
-        briefReferenceMutationPendingRef.current = false;
-        setBriefReferenceMutationPending(false);
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
       }
     },
-    [refetch]
+    [refetchProjectWorkspace, setActionErrorMessageKey]
   );
 
-  const handleRemoveBriefReference = useCallback(
-    async (assetId: string): Promise<boolean> => {
-      const canonical = canonicalProjectRef.current;
-      const active = canonical === null ? null : resolveActiveStudioBriefReferences(canonical.assets);
-      if (
-        canonical === null ||
-        active === null ||
-        !active.some((asset) => asset.id === assetId) ||
-        briefReferenceMutationPendingRef.current
-      ) {
-        return false;
-      }
+  const runWorkspaceCommit = useCallback(
+    async (
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>,
+      onCommitted?: () => void
+    ): Promise<boolean> => {
+      const expectedRevision = projectRef.current?.revision;
+      return (
+        expectedRevision !== undefined &&
+        (await runWorkspaceCommitAtRevision(expectedRevision, invoke, onCommitted)) !== null
+      );
+    },
+    [runWorkspaceCommitAtRevision]
+  );
 
-      briefReferenceMutationPendingRef.current = true;
-      setBriefReferenceMutationPending(true);
-      setBriefReferenceIssueMessageKey(null);
+  const runJobRecovery = useCallback(
+    async (
+      jobId: string,
+      isAuthorized: (job: StudioRendererJobV2, project: StudioRendererProjectV2) => boolean,
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererJobV2>>,
+      options: { refreshBeforeInvoke?: boolean } = {}
+    ): Promise<boolean> => {
+      const authorizedJob = (authority: StudioRendererProjectV2): StudioRendererJobV2 | null => {
+        if (!Object.hasOwn(authority.jobs, jobId)) return null;
+        const candidate = authority.jobs[jobId];
+        const ownerHasJob =
+          candidate?.target.kind === 'shot'
+            ? Object.hasOwn(authority.shots, candidate.target.shotId) &&
+              authority.shots[candidate.target.shotId]?.jobIds.includes(candidate.id)
+            : candidate?.target.kind === 'reference'
+              ? Object.hasOwn(authority.references, candidate.target.referenceId) &&
+                authority.references[candidate.target.referenceId]?.jobIds.includes(candidate.id)
+              : false;
+        return candidate?.id === jobId &&
+          candidate.projectId === authority.id &&
+          ownerHasJob &&
+          isAuthorized(candidate, authority)
+          ? candidate
+          : null;
+      };
+      let current = projectRef.current;
+      let job = current === null ? null : authorizedJob(current);
+      if (current === null || job === null || workspacePendingRef.current) return false;
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
       try {
-        const result = await ipcBridge.creativeStudio.detachBriefReference.invoke({
-          projectId: canonical.id,
-          assetId,
-          expectedRevision: canonical.revision,
-        });
-        if (result.ok === false) {
-          if (result.error.code === 'stale_project') {
-            const refreshed = await refetch();
-            if (refreshed !== null) canonicalProjectRef.current = refreshed;
+        if (options.refreshBeforeInvoke === true) {
+          const refreshedAuthority = await refetchProjectWorkspace();
+          if (
+            refreshedAuthority === null ||
+            refreshedAuthority.id !== current.id ||
+            refreshedAuthority.revision < current.revision
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
           }
-          setBriefReferenceIssueMessageKey(result.error.messageKey);
+          projectRef.current = refreshedAuthority;
+          const refreshedJob = authorizedJob(refreshedAuthority);
+          if (refreshedJob === null) return false;
+          current = refreshedAuthority;
+          job = refreshedJob;
+        }
+        const result = await invoke(current);
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
           return false;
         }
-        const refreshed = await refetch();
-        if (refreshed !== null) canonicalProjectRef.current = refreshed;
+        if (
+          result.data.id !== job.id ||
+          result.data.projectId !== current.id ||
+          JSON.stringify(result.data.target) !== JSON.stringify(job.target)
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        const refreshed = await refetchProjectWorkspace();
+        if (refreshed === null || refreshed.id !== current.id || refreshed.revision <= current.revision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        const refreshedJob = Object.hasOwn(refreshed.jobs, job.id) ? refreshed.jobs[job.id] : undefined;
+        if (
+          refreshedJob === undefined ||
+          refreshedJob.id !== result.data.id ||
+          refreshedJob.projectId !== current.id ||
+          JSON.stringify(refreshedJob.target) !== JSON.stringify(job.target)
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        projectRef.current = refreshed;
+        if (projectRef.current?.id !== refreshed.id || projectRef.current.revision !== refreshed.revision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
         return true;
       } catch {
-        setBriefReferenceIssueMessageKey('conversation.creativeStudio.errors.storage');
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         return false;
       } finally {
-        briefReferenceMutationPendingRef.current = false;
-        setBriefReferenceMutationPending(false);
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
       }
     },
-    [refetch]
+    [refetchProjectWorkspace, setActionErrorMessageKey]
   );
 
-  const handleExportAssets = useCallback(async (): Promise<void> => {
-    if (exportBlocked || exportPending || project === null || readiness?.selectedAssetCount === 0) return;
-    setExportIssueMessageKey(null);
-    setExportPending(true);
-    try {
-      const result = await ipcBridge.creativeStudio.chooseAndExportAssets.invoke({
-        projectId: project.id,
-        includeReferences: exportIncludeReferences,
-      });
-      if (result.ok === false) {
-        setExportIssueMessageKey(result.error.messageKey);
-      } else if (result.data.status === 'exported') {
-        setExportedFolderName(result.data.folderName);
-        setExportMissingSceneIds(result.data.missingSceneIds);
-      } else {
-        setExportVisible(false);
+  const runReferenceJobRecovery = useCallback(
+    async (
+      referenceId: string,
+      jobId: string,
+      isAuthorized: (job: StudioRendererJobV2) => boolean,
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererJobV2>>
+    ): Promise<boolean> => {
+      const current = projectRef.current;
+      const reference =
+        current !== null && Object.hasOwn(current.references, referenceId)
+          ? current.references[referenceId]
+          : undefined;
+      if (
+        current === null ||
+        reference?.id !== referenceId ||
+        !reference.jobIds.includes(jobId) ||
+        current.referenceOrder.filter((candidateId) => candidateId === referenceId).length !== 1 ||
+        pendingReferenceId !== null ||
+        workspacePendingRef.current ||
+        spendGateLocked
+      ) {
+        return false;
       }
-    } catch {
-      setExportIssueMessageKey('conversation.creativeStudio.export.failed');
-    } finally {
-      setExportPending(false);
-    }
-  }, [exportBlocked, exportIncludeReferences, exportPending, project, readiness?.selectedAssetCount]);
-
-  const openExport = useCallback((): void => {
-    if (exportBlocked || readiness?.selectedAssetCount === 0 || project === null) return;
-    setExportIncludeReferences(false);
-    setExportedFolderName(null);
-    setExportMissingSceneIds([]);
-    setExportIssueMessageKey(null);
-    setExportLatestRender(null);
-    setExportLatestRenderReady(false);
-    setExportVisible(true);
-    void ipcBridge.creativeStudio.getLatestRender
-      .invoke({ projectId: project.id })
-      .then((result) => {
-        if (result.ok === false) {
-          setExportIssueMessageKey('conversation.creativeStudio.export.latestRenderUnavailable');
-          return;
-        }
-        setExportLatestRender(result.data);
-        setExportLatestRenderReady(true);
-      })
-      .catch(() => setExportIssueMessageKey('conversation.creativeStudio.export.latestRenderUnavailable'));
-  }, [exportBlocked, project, readiness?.selectedAssetCount]);
+      setPendingReferenceId(referenceId);
+      try {
+        const recovered = await runJobRecovery(
+          jobId,
+          (job, authority) => {
+            const exactReference = Object.hasOwn(authority.references, referenceId)
+              ? authority.references[referenceId]
+              : undefined;
+            return (
+              exactReference?.id === referenceId &&
+              exactReference.jobIds.includes(job.id) &&
+              authority.referenceOrder.filter((candidateId) => candidateId === referenceId).length === 1 &&
+              job.target.kind === 'reference' &&
+              job.target.referenceId === referenceId &&
+              job.purpose === 'reference_image' &&
+              isAuthorized(job)
+            );
+          },
+          invoke
+        );
+        if (recovered) await refetchReferences();
+        return recovered;
+      } finally {
+        setPendingReferenceId((pendingId) => (pendingId === referenceId ? null : pendingId));
+      }
+    },
+    [pendingReferenceId, refetchReferences, runJobRecovery, spendGateLocked]
+  );
 
   /**
-   * Lands focus on the advisory that explains a refused view transition.
+   * A project is created with both route ids null, so a finished script would otherwise meet a
+   * Render button that does nothing until someone finds the Brief form. Bind one route of each kind
+   * the first time this project has both a record and a catalogue.
    *
-   * Scoped to the work panel, not the document: the Director pane renders before it and has
-   * `role="alert"` spans of its own — an over-length composer, a conversation that could not be
-   * created — plus whatever the mounted conversation surface raises. A document-wide lookup takes
-   * the first alert in order, which is one of those, and drops the user on an unrelated message
-   * instead of the reason their transition was blocked. Worse when the pane is collapsed: those
-   * spans are `visibility: hidden`, where `focus()` does nothing at all and the recovery is lost.
+   * Once per project per session: if the commit fails we do not retry, because a loop that rewrites
+   * on every render is worse than a project the user binds by hand.
    */
-  const focusRecoveryAlert = useCallback((): void => {
-    requestAnimationFrame(() => {
-      const alert = document.querySelector<HTMLElement>('[data-studio-work-panel] [role="alert"]');
-      if (alert === null) return;
-      alert.tabIndex = -1;
-      alert.focus();
+  /**
+   * A Studio route needs a connection binding, not just a configured provider, and until one exists
+   * the catalogue is empty — so the effect below has nothing to bind and a finished script has
+   * nothing to render with. The only way through was a visit to Settings, which the product should
+   * not require of someone who has already configured a provider.
+   *
+   * Each attempt is a live validation probe, so the plan is budgeted and we stop as soon as a kind
+   * is satisfied. Runs once per session, and never reconsiders a binding someone chose.
+   */
+  const provisionedConnectionsRef = useRef(false);
+  useEffect(() => {
+    if (routeCatalog === null || provisionedConnectionsRef.current) return;
+    // Same reason: the pass ends in a set_routes, so it must not race the attach either.
+    if (project === null || project.briefConversationId == null) return;
+    if (routeCatalog.image.options.length > 0 || routeCatalog.video.options.length > 0) return;
+    provisionedConnectionsRef.current = true;
+    void (async () => {
+      try {
+        await provisionStudioConnections();
+      } catch {
+        // Provisioning is a convenience over a catalogue that may not exist yet. A failure leaves
+        // the user exactly where they were — binding a model in Settings — and must never take the
+        // workspace down with it. Swallowed deliberately, but not silently inside the loop below:
+        // everything that can fail is inside this one boundary.
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+      }
+    })();
+
+    async function provisionStudioConnections(): Promise<void> {
+      const [candidates, inventory] = await Promise.all([
+        ipcBridge.creativeStudio.listConnectionCandidates.invoke(),
+        ipcBridge.creativeStudio.listConnections.invoke(),
+      ]);
+      if (candidates.ok === false || inventory.ok === false) return;
+      const plan = planStudioConnections({
+        candidates: candidates.data,
+        integrations: inventory.data.integrations,
+        existing: inventory.data.connections,
+      });
+      const satisfied = new Set<string>();
+      for (const attempt of plan) {
+        if (satisfied.has(attempt.kind)) continue;
+        const request = {
+          providerId: attempt.providerId,
+          integrationId: attempt.integrationId,
+          model: attempt.model,
+        };
+        const validation = await ipcBridge.creativeStudio.validateConnection.invoke(request);
+        if (validation.ok === false) continue;
+        const saved = await ipcBridge.creativeStudio.saveConnection.invoke(request);
+        if (saved.ok) satisfied.add(attempt.kind);
+      }
+      // Refresh the shared catalogue, not just our own read. Without this the workspace keeps its
+      // pre-provisioning snapshot, a bound route resolves to nothing, and the Brief reports a
+      // working route as "Unavailable" until the user finds Refresh routes for themselves.
+      await refetchRoutes();
+      if (!satisfied.has('video')) {
+        // Partial success is the dangerous case: seed stills render, the film never can, and
+        // without this the user only finds out at the gate as "the estimate could not be
+        // prepared" — with nothing naming the route.
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
+      }
+      if (satisfied.size === 0) return;
+      // Bind from a freshly read catalogue rather than waiting for the shared one to refresh, so a
+      // project is generable on the same pass that made it possible.
+      const current = projectRef.current;
+      if (current === null) return;
+      const refreshed = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: current.id });
+      if (refreshed.ok === false) return;
+      const picked = pickDefaultRoutes([...refreshed.data.image.options, ...refreshed.data.video.options]);
+      if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+      await runWorkspaceCommit((project) =>
+        ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+        })
+      );
+    }
+  }, [project, refetchRoutes, routeCatalog, runWorkspaceCommit, setActionErrorMessageKey]);
+
+  const autoBoundProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (project === null || routeCatalog === null) return;
+    // Never write while the Director is binding: its bind carries an expected revision, and a
+    // set_routes landing in between fails it as "the project changed elsewhere".
+    if (project.briefConversationId == null) return;
+    if (project.imageRouteId !== null || project.videoRouteId !== null) return;
+    if (autoBoundProjectRef.current === project.id) return;
+    autoBoundProjectRef.current = project.id;
+    void (async () => {
+      // Read the catalogue fresh rather than trusting the workspace's snapshot. The snapshot can
+      // predate a connection saved moments earlier, and binding from it silently drops a whole kind
+      // — which is how a project ended up with an image route and no video one.
+      const current = projectRef.current;
+      if (current === null) return;
+      const refreshed = await ipcBridge.creativeStudio.listRoutes.invoke({ projectId: current.id });
+      if (refreshed.ok === false) return;
+      const picked = pickDefaultRoutes([...refreshed.data.image.options, ...refreshed.data.video.options]);
+      if (picked.imageRouteId === null && picked.videoRouteId === null) return;
+      await runWorkspaceCommit((project) =>
+        ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+          projectId: project.id,
+          expectedRevision: project.revision,
+          operations: [{ kind: 'set_routes', imageRouteId: picked.imageRouteId, videoRouteId: picked.videoRouteId }],
+        })
+      );
+      // And refresh the shared catalogue, or the Brief reports the route it just bound as
+      // "Unavailable" until the user finds Refresh routes for themselves.
+      await refetchRoutes();
+    })();
+  }, [project, refetchRoutes, routeCatalog, runWorkspaceCommit]);
+
+  const runWorkspaceExclusive = useCallback(
+    async <Result,>(action: () => Promise<Result>): Promise<Result | null> => {
+      if (workspacePendingRef.current) return null;
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      try {
+        return await action();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        return null;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [setActionErrorMessageKey]
+  );
+
+  const mutations = useMemo<WorkspaceMutationCallbacks>(
+    () => ({
+      editProject: async (changes, authority) => {
+        if (authority === undefined) {
+          return runWorkspaceCommit((current) =>
+            ipcBridge.creativeStudio.editProject.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              changes,
+            })
+          );
+        }
+        const current = projectRef.current;
+        if (current === null || current.id !== authority.projectId || current.revision !== authority.expectedRevision) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+          return false;
+        }
+        return (
+          (await runWorkspaceCommitAtRevision(authority.expectedRevision, (expected) =>
+            ipcBridge.creativeStudio.editProject.invoke({
+              projectId: expected.id,
+              expectedRevision: expected.revision,
+              changes,
+            })
+          )) !== null
+        );
+      },
+      applyAuthoring: async (operations) => {
+        if (containsUnavailableHardCutOperation(operations)) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.chain.hardCutUnavailable');
+          return false;
+        }
+        return runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations,
+          })
+        );
+      },
+      saveFilmSetup: async ({ projectId, expectedRevision, projectChanges, authoringOperations }) => {
+        const failed = { projectSettingsSaved: false, authoringSaved: false };
+        const startingProject = projectRef.current;
+        if (
+          startingProject === null ||
+          startingProject.id !== projectId ||
+          startingProject.revision !== expectedRevision ||
+          workspacePendingRef.current
+        ) {
+          return failed;
+        }
+
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setActionErrorMessageKey(null);
+        let authority = startingProject;
+        let projectSettingsSaved = projectChanges === null;
+        try {
+          if (projectChanges !== null) {
+            const result = await ipcBridge.creativeStudio.editProject.invoke({
+              projectId,
+              expectedRevision,
+              changes: projectChanges,
+            });
+            if (result.ok === false) {
+              setActionErrorMessageKey(result.error.messageKey);
+              return failed;
+            }
+            const refreshed = await refetchProjectWorkspace();
+            if (
+              refreshed === null ||
+              refreshed.id !== projectId ||
+              refreshed.revision !== result.data.projectRevision ||
+              refreshed.revision <= expectedRevision ||
+              (projectChanges.aspectRatio !== undefined && refreshed.aspectRatio !== projectChanges.aspectRatio) ||
+              (projectChanges.resolution !== undefined && refreshed.resolution !== projectChanges.resolution)
+            ) {
+              setActionErrorMessageKey(
+                refreshed?.id === projectId && refreshed.revision > result.data.projectRevision
+                  ? 'conversation.creativeStudio.workspace.controls.draftConflict'
+                  : 'conversation.creativeStudio.workspace.errors.storage'
+              );
+              return failed;
+            }
+            projectRef.current = refreshed;
+            authority = refreshed;
+            projectSettingsSaved = true;
+          }
+
+          if (authoringOperations.length === 0) {
+            return { projectSettingsSaved, authoringSaved: true };
+          }
+          const current = projectRef.current;
+          if (current === null || current.id !== authority.id || current.revision !== authority.revision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          const result = await ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: authoringOperations,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          const refreshed = await refetchProjectWorkspace();
+          if (
+            refreshed === null ||
+            refreshed.id !== current.id ||
+            refreshed.revision !== result.data.projectRevision ||
+            refreshed.revision <= current.revision ||
+            authoringOperations.some((operation) => {
+              switch (operation.kind) {
+                case 'set_brief':
+                  return refreshed.brief !== operation.brief;
+                case 'set_routes':
+                  return (
+                    refreshed.imageRouteId !== operation.imageRouteId ||
+                    refreshed.videoRouteId !== operation.videoRouteId
+                  );
+                case 'set_spend_policy':
+                  return JSON.stringify(refreshed.spendPolicy) !== JSON.stringify(operation.policy);
+              }
+            })
+          ) {
+            setActionErrorMessageKey(
+              refreshed?.id === current.id && refreshed.revision > result.data.projectRevision
+                ? 'conversation.creativeStudio.workspace.controls.draftConflict'
+                : 'conversation.creativeStudio.workspace.errors.storage'
+            );
+            return { projectSettingsSaved, authoringSaved: false };
+          }
+          projectRef.current = refreshed;
+          return { projectSettingsSaved, authoringSaved: true };
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return { projectSettingsSaved, authoringSaved: false };
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+        }
+      },
+      setRules: async (update, adoptionKey) =>
+        (await runWorkspaceExclusive(async () => {
+          ruleAdoptionErrorGenerationsRef.current.delete(adoptionKey);
+          const current = projectRef.current;
+          if (current === null) return false;
+          const rules = update(current.rules);
+          if (rules === null) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.draftConflict');
+            return false;
+          }
+          if (hasAdoptedRuleDrafts(current, rules)) return true;
+          let result: Awaited<ReturnType<typeof ipcBridge.creativeStudio.setRules.invoke>>;
+          try {
+            result = await ipcBridge.creativeStudio.setRules.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              rules,
+            });
+          } catch {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          let refreshed: StudioRendererProjectV2 | null;
+          try {
+            refreshed = await refetchProjectWorkspace();
+          } catch {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          if (
+            refreshed === null ||
+            refreshed.id !== current.id ||
+            refreshed.revision !== result.data.projectRevision ||
+            !hasAdoptedRuleDrafts(refreshed, rules)
+          ) {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          projectRef.current = refreshed;
+          if (projectRef.current?.id !== current.id || projectRef.current.revision !== result.data.projectRevision) {
+            reportRuleAdoptionUnconfirmed(adoptionKey);
+            return false;
+          }
+          return true;
+        })) ?? false,
+      acknowledgeRuleAdoption,
+      refreshRoutes: refetchRoutes,
+      undo: async (entryId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.undoLast.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            entryId,
+          })
+        ),
+      retryConditioning: async (dependentShotId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.retryConditioningFrame.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            dependentShotId,
+          })
+        ),
+      cancelWaiting: async (dependentShotId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.cancelWaitingCascade.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            dependentShotId,
+          })
+        ),
+    }),
+    [
+      acknowledgeRuleAdoption,
+      refetchProjectWorkspace,
+      refetchRoutes,
+      reportRuleAdoptionUnconfirmed,
+      runWorkspaceCommit,
+      runWorkspaceCommitAtRevision,
+      runWorkspaceExclusive,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const focusDirectorForReviewedRequest = useCallback(
+    (_beatId: string): void => {
+      const revealed = workspaceShellRef.current?.revealDirector({ projectId, view: activeView }) ?? false;
+      if (!revealed) return;
+      directorDraftRequestSequenceRef.current += 1;
+      setDirectorDraftRequest({
+        requestId: directorDraftRequestSequenceRef.current,
+        projectId,
+        prompt: t('conversation.creativeStudio.workspace.beatPanel.directorRequestHint'),
+      });
+      setActionErrorMessageKey(null);
+    },
+    [activeView, projectId, setActionErrorMessageKey, t]
+  );
+
+  const openContinuityReview = useCallback(
+    (shotId: string, hardCut: boolean): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        current.id !== currentProjection.projectId ||
+        current.revision !== currentProjection.projectRevision ||
+        beatPanelReviewBlockedMessageKey !== null ||
+        spendGateLocked ||
+        workspacePendingRef.current
+      ) {
+        if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+        return;
+      }
+      const shotMatches = currentProjection.activeBeats.flatMap((beat) =>
+        beat.shots.filter((shot) => shot.id === shotId)
+      );
+      if (shotMatches.length !== 1 || shotMatches[0]!.seedAuthorizationLock !== null) {
+        setActionErrorMessageKey(
+          shotMatches.length === 1
+            ? 'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked'
+            : 'conversation.creativeStudio.workspace.controls.selectionNotPayable'
+        );
+        return;
+      }
+      const draft = continuityGateDraft({ project: current, projection: currentProjection, shotId, hardCut });
+      if (draft === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const routeIssue =
+        currentGenerationCapability !== null || routeCatalog === null ? null : spendGateRouteIssue(routeCatalog, draft);
+      if (routeIssue !== null) {
+        setActionErrorMessageKey(
+          routeIssue === 'image'
+            ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+            : routeIssue === 'video'
+              ? 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
+              : 'conversation.creativeStudio.workspace.gate.errors.routesUnavailable'
+        );
+        return;
+      }
+      const capabilityItems = continuityCapabilityItemsForDraft(current, draft);
+      if (capabilityItems === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const disclosureGroups = generationBlockGroupsForItems(currentGenerationCapability, capabilityItems);
+      setActionErrorMessageKey(null);
+      spendGate.open(
+        draft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
+    },
+    [
+      beatPanelReviewBlockedMessageKey,
+      currentGenerationCapability,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
+  );
+
+  const cancelAndQueueRejoinReview = useCallback(
+    async (shotId: string): Promise<boolean> => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        current.id !== currentProjection.projectId ||
+        current.revision !== currentProjection.projectRevision ||
+        beatPanelReviewBlockedMessageKey !== null ||
+        spendGateLocked ||
+        workspacePendingRef.current
+      ) {
+        if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+        return false;
+      }
+      const matches = currentProjection.activeBeats.flatMap((beat) =>
+        beat.shots.flatMap((shot, shotIndex) => (shot.id === shotId ? [{ shot, shotIndex }] : []))
+      );
+      const cascadeRows = currentProjection.cascadeProgress.filter((row) => row.dependentShotId === shotId);
+      const match = matches.length === 1 ? matches[0]! : null;
+      const cascade = cascadeRows.length === 1 ? cascadeRows[0]! : null;
+      if (
+        match === null ||
+        match.shotIndex === 0 ||
+        match.shot.chainBreak !== 'hard_cut' ||
+        match.shot.seedAuthorizationLock?.waitingReason !== 'choose_seed' ||
+        match.shot.seedAuthorizationLock.canCancelWaiting !== true ||
+        cascade?.upstreamShotId !== shotId ||
+        cascade.waitingReason !== 'choose_seed' ||
+        cascade.canCancelWaiting !== true
+      ) {
+        return false;
+      }
+
+      workspacePendingRef.current = true;
+      setWorkspacePending(true);
+      setActionErrorMessageKey(null);
+      let cancellationCommitted = false;
+      try {
+        const result = await ipcBridge.creativeStudio.cancelWaitingCascade.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          dependentShotId: shotId,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return false;
+        }
+        cancellationCommitted = true;
+        const refreshed = await refetchProjectWorkspace();
+        if (
+          refreshed === null ||
+          refreshed.id !== current.id ||
+          refreshed.revision !== result.data.projectRevision ||
+          refreshed.revision <= current.revision
+        ) {
+          setActionErrorMessageKey(
+            'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+          );
+          return false;
+        }
+        projectRef.current = refreshed;
+        if (!(await refetchRoutes())) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+          return false;
+        }
+        setPendingRejoinReview({
+          projectId: refreshed.id,
+          projectRevision: refreshed.revision,
+          shotId,
+        });
+        return true;
+      } catch {
+        setActionErrorMessageKey(
+          cancellationCommitted
+            ? 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+            : 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown'
+        );
+        return false;
+      } finally {
+        workspacePendingRef.current = false;
+        setWorkspacePending(false);
+      }
+    },
+    [
+      beatPanelReviewBlockedMessageKey,
+      refetchProjectWorkspace,
+      refetchRoutes,
+      setActionErrorMessageKey,
+      spendGateLocked,
+    ]
+  );
+
+  useEffect(() => {
+    if (pendingRejoinReview === null || workspacePending) return;
+    if (
+      project === null ||
+      projection === null ||
+      project.id !== pendingRejoinReview.projectId ||
+      projection.projectId !== pendingRejoinReview.projectId
+    ) {
+      setPendingRejoinReview(null);
+      return;
+    }
+    if (
+      project.revision < pendingRejoinReview.projectRevision ||
+      projection.projectRevision < pendingRejoinReview.projectRevision ||
+      !projection.workspaceStatusReady ||
+      !projection.chainStatusReady ||
+      currentGenerationCapability === null ||
+      !generationCapabilityIsCurrent(project, currentGenerationCapability)
+    ) {
+      return;
+    }
+    const terminalRows = projection.cascadeProgress.filter(
+      (row) =>
+        row.dependentShotId === pendingRejoinReview.shotId &&
+        row.upstreamShotId === pendingRejoinReview.shotId &&
+        row.waitingReason === 'cancelled'
+    );
+    const shotMatches = projection.activeBeats.flatMap((beat) =>
+      beat.shots.filter((shot) => shot.id === pendingRejoinReview.shotId && shot.chainBreak === 'hard_cut')
+    );
+    setPendingRejoinReview(null);
+    if (
+      project.revision !== pendingRejoinReview.projectRevision ||
+      projection.projectRevision !== pendingRejoinReview.projectRevision ||
+      terminalRows.length !== 1 ||
+      shotMatches.length !== 1
+    ) {
+      setActionErrorMessageKey(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+      );
+      return;
+    }
+    openContinuityReview(pendingRejoinReview.shotId, false);
+  }, [
+    currentGenerationCapability,
+    openContinuityReview,
+    pendingRejoinReview,
+    project,
+    projection,
+    setActionErrorMessageKey,
+    workspacePending,
+  ]);
+
+  const beatPanelActions = useMemo<BeatPanelActions>(
+    () => ({
+      saveBeat: async (beatId, changes) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'edit_beat', beatId, changes }],
+          })
+        ),
+      saveShot: async (updates) => {
+        const shotIds = new Set(updates.map(({ shotId }) => shotId));
+        if (updates.length > STUDIO_MAX_MUTATION_OPERATIONS || shotIds.size !== updates.length) return false;
+        return runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: updates.map(({ shotId, changes }) => ({ kind: 'edit_shot', shotId, changes })),
+          })
+        );
+      },
+      setSeedStill: async (shotId, assetId) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          !currentProjection.workspaceStatusReady
+        ) {
+          return false;
+        }
+        const matches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter((shot) => shot.id === shotId)
+        );
+        if (matches.length !== 1) return false;
+        const projectedShot = matches[0]!;
+        if (!projectedShot.seedAuthorityStatusReady) return false;
+        if (
+          projectedShot.seedAuthorizationLock !== null &&
+          (assetId === null || !projectedShot.seedAuthorizationLock.compatibleAssetIds.includes(assetId))
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return false;
+        }
+        return runWorkspaceCommit((authority) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: authority.id,
+            expectedRevision: authority.revision,
+            operations: [{ kind: 'set_seed_still', shotId, assetId }],
+          })
+        );
+      },
+      dismissSeedStill: async (shotId, assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'dismiss_seed_still', shotId, assetId }],
+          })
+        ),
+      trimShot: async (shotId, trimInSeconds, trimOutSeconds) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'trim_shot', shotId, trimInSeconds, trimOutSeconds }],
+          })
+        ),
+      reorderShots: async (beatId, shotOrder) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'reorder_shots', beatId, shotOrder: [...shotOrder] }],
+          })
+        ),
+      importSeedStill: async (shotId): Promise<BeatPanelImportResult> => {
+        const current = projectRef.current;
+        if (current === null || workspacePendingRef.current) return 'failed';
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setActionErrorMessageKey(null);
+        try {
+          const result = await ipcBridge.creativeStudio.importSeedStill.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            shotId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return 'failed';
+          }
+          if (result.data.status === 'cancelled') return 'cancelled';
+          const refreshed = await refetchProjectWorkspace();
+          if (refreshed === null || refreshed.revision < result.data.projectRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return 'failed';
+          }
+          projectRef.current = refreshed;
+          return 'imported';
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return 'failed';
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+        }
+      },
+      persistCapturedPoster: async (input) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision
+        ) {
+          return false;
+        }
+        const matches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter(
+            (shot) =>
+              shot.id === input.shotId &&
+              shot.currentPicture?.assetId === input.videoAssetId &&
+              shot.currentPicture.posterAssetId === null
+          )
+        );
+        if (matches.length !== 1) return false;
+        try {
+          const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
+            projectId: current.id,
+            ...input,
+          });
+          if (result.ok === false) return false;
+          const refreshed = await refetchProjectWorkspace();
+          return refreshed?.id === current.id && refreshed.revision >= current.revision;
+        } catch {
+          return false;
+        }
+      },
+      parkShot: async (shotId, onCommitted) =>
+        runWorkspaceCommit(
+          (current) =>
+            ipcBridge.creativeStudio.parkShot.invoke({
+              projectId: current.id,
+              expectedRevision: current.revision,
+              shotId,
+            }),
+          onCommitted
+        ),
+      parkBeat: async (beatId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.parkBeat.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            beatId,
+          })
+        ),
+      reviewShot: (shotId, choices) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          beatPanelReviewBlockedMessageKey !== null ||
+          spendGateLocked
+        ) {
+          if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+          return;
+        }
+        const shotMatches = currentProjection.activeBeats.flatMap((beat) =>
+          beat.shots.filter((shot) => shot.id === shotId)
+        );
+        if (shotMatches.length !== 1 || shotMatches[0]!.seedAuthorizationLock !== null) {
+          setActionErrorMessageKey(
+            shotMatches.length === 1
+              ? 'conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked'
+              : 'conversation.creativeStudio.workspace.controls.selectionNotPayable'
+          );
+          return;
+        }
+        const defaultDraft = selectionGateDraft({
+          project: current,
+          projection: currentProjection,
+          orderedShotIds: [shotId],
+        });
+        if (defaultDraft === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        const expectedChoices = [...defaultDraft.baseChoices, ...defaultDraft.cascadeChoices];
+        const lockedShotIds = new Set(
+          currentProjection.activeBeats.flatMap((beat) =>
+            beat.shots.flatMap((shot) => (shot.seedAuthorizationLock === null ? [] : [shot.id]))
+          )
+        );
+        if (
+          expectedChoices.some((choice) => choice.target.kind === 'shot' && lockedShotIds.has(choice.target.shotId))
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return;
+        }
+        if (
+          choices.length !== expectedChoices.length ||
+          choices.some((choice, index) => {
+            const expected = expectedChoices[index];
+            return (
+              expected === undefined ||
+              Reflect.ownKeys(choice).length !== 2 ||
+              !Object.hasOwn(choice, 'shotId') ||
+              !Object.hasOwn(choice, 'purpose') ||
+              expected.target.kind !== 'shot' ||
+              choice.shotId !== expected.target.shotId ||
+              choice.purpose !== expected.purpose
+            );
+          })
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        const draft = defaultDraft;
+        if (
+          currentGenerationCapability === null &&
+          draft.baseChoices.some((choice) => choice.purpose === 'seed_still') &&
+          routeCatalog?.image.status !== 'ready'
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+          return;
+        }
+        if (
+          currentGenerationCapability === null &&
+          draft.baseChoices.some((choice) => choice.purpose === 'video_take') &&
+          routeCatalog?.video.status !== 'ready'
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.videoRouteBlocked');
+          return;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          shotCapabilityItemsForDraft(draft)
+        );
+        setActionErrorMessageKey(null);
+        spendGate.open(
+          draft,
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+      },
+      reviewSeedStill: (shotId) => {
+        const current = projectRef.current;
+        const currentProjection = projectionRef.current;
+        if (
+          current === null ||
+          currentProjection === null ||
+          current.id !== currentProjection.projectId ||
+          current.revision !== currentProjection.projectRevision ||
+          beatPanelReviewBlockedMessageKey !== null ||
+          spendGateLocked
+        ) {
+          if (beatPanelReviewBlockedMessageKey !== null) setActionErrorMessageKey(beatPanelReviewBlockedMessageKey);
+          return;
+        }
+        const projectedShot = currentProjection.activeBeats
+          .flatMap((beat) => beat.shots)
+          .find((shot) => shot.id === shotId);
+        if (projectedShot?.seedAuthorizationLock) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked');
+          return;
+        }
+        const draft = seedRegenerationGateDraft({ project: current, projection: currentProjection, shotId });
+        if (draft === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        if (
+          currentGenerationCapability === null &&
+          (routeCatalog?.image.status !== 'ready' || routeCatalog.video.status !== 'ready')
+        ) {
+          setActionErrorMessageKey(
+            routeCatalog?.image.status !== 'ready'
+              ? 'conversation.creativeStudio.workspace.controls.imageRouteBlocked'
+              : 'conversation.creativeStudio.workspace.controls.videoRouteBlocked'
+          );
+          return;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          shotCapabilityItemsForDraft(draft)
+        );
+        setActionErrorMessageKey(null);
+        spendGate.open(
+          draft,
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+      },
+      reviewContinuity: openContinuityReview,
+      reviewReferences: (shotId) => openReferenceFocus({ shotIds: [shotId] }),
+      resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
+        if (block.code === 'reference_binding') {
+          openReferenceFocus({ shotIds: [shotId] });
+          return;
+        }
+        if (block.code === 'catalog_unloaded' || block.code === 'health') return;
+        if (block.code === 'needs_setup') {
+          navigate('/settings/model');
+          return;
+        }
+        setBriefRouteFocusRole(block.role);
+        setBriefDialogRequest((request) => request + 1);
+        void refetchRoutes();
+      },
+      retryGenerationJob: async (jobId, acknowledgePossibleDuplicateCharge) =>
+        runJobRecovery(
+          jobId,
+          (job) =>
+            (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
+            job.status === 'needs_attention' &&
+            job.canRetry &&
+            acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (current) =>
+            ipcBridge.creativeStudio.retryJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+              acknowledgePossibleDuplicateCharge,
+            })
+        ),
+      cancelGenerationJob: async (jobId) =>
+        runJobRecovery(
+          jobId,
+          (job) =>
+            (job.purpose === 'seed_still' || job.purpose === 'video_take') &&
+            (job.status === 'waiting_for_conditioning' ||
+              job.status === 'queued_local' ||
+              job.status === 'submitting' ||
+              job.status === 'queued_remote' ||
+              job.status === 'running' ||
+              job.status === 'needs_attention') &&
+            job.canCancel,
+          (current) =>
+            ipcBridge.creativeStudio.cancelJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        ),
+      retryConditioning: mutations.retryConditioning,
+      cancelWaiting: mutations.cancelWaiting,
+      cancelAndReviewRejoin: cancelAndQueueRejoinReview,
+      requestResplit: focusDirectorForReviewedRequest,
+    }),
+    [
+      beatPanelReviewBlockedMessageKey,
+      cancelAndQueueRejoinReview,
+      currentGenerationCapability,
+      focusDirectorForReviewedRequest,
+      mutations,
+      navigate,
+      openContinuityReview,
+      openReferenceFocus,
+      projection,
+      refetchProjectWorkspace,
+      routeCatalog,
+      runJobRecovery,
+      runWorkspaceCommit,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
+  );
+
+  const stopBoardJobs = useCallback((): void => {
+    const current = projectRef.current;
+    if (
+      current === null ||
+      projection === null ||
+      spendGateLocked ||
+      workspacePendingRef.current ||
+      projection.projectId !== current.id ||
+      projection.projectRevision !== current.revision
+    ) {
+      return;
+    }
+    const seenJobs = new Set<string>();
+    const candidates = projection.boardPanels
+      .flatMap((panel): BoardStopCandidate[] => {
+        if (
+          panel.latestJobId === null ||
+          (panel.activity !== 'queued' && panel.activity !== 'drawing') ||
+          seenJobs.has(panel.latestJobId)
+        ) {
+          return [];
+        }
+        seenJobs.add(panel.latestJobId);
+        return [{ shotId: panel.shotId, jobId: panel.latestJobId }];
+      })
+      .slice(0, STUDIO_MAX_SHOTS_PER_PROJECT);
+    if (candidates.length === 0) return;
+
+    void runWorkspaceExclusive(async () => {
+      let failureMessageKey: string | null = null;
+      for (const candidate of candidates) {
+        const authority = projectRef.current;
+        if (authority === null) break;
+        const job = exactLatestCancellableBoardJob(authority, candidate);
+        if (job === null) continue;
+
+        let result: Awaited<ReturnType<typeof ipcBridge.creativeStudio.cancelJob.invoke>> | null = null;
+        try {
+          result = await ipcBridge.creativeStudio.cancelJob.invoke({
+            projectId: authority.id,
+            jobId: job.id,
+            expectedRevision: authority.revision,
+          });
+        } catch {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+        }
+
+        const refreshed = await refetchProjectWorkspace();
+        if (refreshed === null || refreshed.id !== authority.id || refreshed.revision < authority.revision) {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+          break;
+        }
+        projectRef.current = refreshed;
+        if (result === null) continue;
+        if (result.ok === false) {
+          failureMessageKey ??= result.error.messageKey;
+          continue;
+        }
+        const returnedJob = result.data;
+        const refreshedJob = Object.hasOwn(refreshed.jobs, job.id) ? refreshed.jobs[job.id] : undefined;
+        const validSubmittingOutcome =
+          job.status === 'submitting' &&
+          returnedJob.status === 'needs_attention' &&
+          returnedJob.error?.code === 'submission_unknown';
+        if (
+          refreshed.revision <= authority.revision ||
+          returnedJob.id !== job.id ||
+          returnedJob.projectId !== authority.id ||
+          JSON.stringify(returnedJob.target) !== JSON.stringify(job.target) ||
+          returnedJob.purpose !== 'board_still' ||
+          (returnedJob.status !== 'cancelled' && !validSubmittingOutcome) ||
+          refreshedJob?.id !== returnedJob.id ||
+          refreshedJob.projectId !== returnedJob.projectId ||
+          JSON.stringify(refreshedJob.target) !== JSON.stringify(returnedJob.target) ||
+          refreshedJob.purpose !== 'board_still' ||
+          refreshedJob.status !== returnedJob.status
+        ) {
+          failureMessageKey ??= 'conversation.creativeStudio.workspace.errors.storage';
+        }
+      }
+      if (failureMessageKey !== null) setActionErrorMessageKey(failureMessageKey);
     });
+  }, [projection, refetchProjectWorkspace, runWorkspaceExclusive, setActionErrorMessageKey, spendGateLocked]);
+
+  const boardProductionActions = useMemo<Omit<BoardActions, 'restoreBeat' | 'restoreShot' | 'reorderBin'>>(
+    () => ({
+      drawNext: () =>
+        openBoardSpendGate((current, exactProjection) =>
+          boardGateDraft({
+            project: current,
+            projection: exactProjection,
+          })
+        ),
+      drawBeat: (beatId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
+          if (beat?.id !== beatId || current.beatOrder.filter((activeBeatId) => activeBeatId === beatId).length !== 1) {
+            return null;
+          }
+          const panelsByShotId = new Map(exactProjection.boardPanels.map((panel) => [panel.shotId, panel]));
+          const missingShotIds = beat.shotOrder.filter((shotId) => {
+            const panel = panelsByShotId.get(shotId);
+            return (
+              panel?.freshness === 'missing' &&
+              BOARD_DRAW_PANEL_ACTIVITIES.has(panel.activity) &&
+              panel.recovery?.canRetryDownload !== true
+            );
+          });
+          return boardSelectionGateDraft({
+            project: current,
+            projection: exactProjection,
+            orderedShotIds: missingShotIds,
+          });
+        }),
+      redrawShot: (shotId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const panel = exactProjection.boardPanels.find((candidate) => candidate.shotId === shotId);
+          return panel === undefined || panel.assetId === null
+            ? null
+            : boardSelectionGateDraft({
+                project: current,
+                projection: exactProjection,
+                orderedShotIds: [shotId],
+              });
+        }),
+      redrawBeat: (beatId) =>
+        openBoardSpendGate((current, exactProjection) => {
+          const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
+          if (beat?.id !== beatId || current.beatOrder.filter((activeBeatId) => activeBeatId === beatId).length !== 1) {
+            return null;
+          }
+          const panelsByShotId = new Map(exactProjection.boardPanels.map((panel) => [panel.shotId, panel]));
+          if (beat.shotOrder.some((shotId) => panelsByShotId.get(shotId)?.assetId == null)) return null;
+          return boardSelectionGateDraft({
+            project: current,
+            projection: exactProjection,
+            orderedShotIds: beat.shotOrder,
+          });
+        }),
+      promotePanel: (shotId, boardAssetId) => {
+        const current = projectRef.current;
+        if (
+          current === null ||
+          projection === null ||
+          spendGateLocked ||
+          workspacePendingRef.current ||
+          current.id !== projection.projectId ||
+          current.revision !== projection.projectRevision
+        ) {
+          return;
+        }
+        if (generationDraftsBlockReview) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+          return;
+        }
+        if (!projection.workspaceStatusReady || !projection.chainStatusReady) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.statusRequired');
+          return;
+        }
+        const plan = boardPromotionGatePlan({ project: current, projection, shotId, boardAssetId });
+        if (plan === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+          return;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          plan.impact.currentTakeShotIds.map((currentTakeShotId) => ({
+            target: { kind: 'shot' as const, shotId: currentTakeShotId },
+            purpose: 'video_take' as const,
+          }))
+        );
+        setActionErrorMessageKey(null);
+        spendGate.open(
+          plan.draft,
+          {
+            ...plan.impact,
+            paidRouteReady:
+              disclosureGroups.length === 0 &&
+              (currentGenerationCapability !== null ||
+                (current.videoRouteId !== null && routeCatalog !== null && routeCatalog.video.status === 'ready')),
+          },
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+      },
+      retryJob: (jobId, acknowledgePossibleDuplicateCharge) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) =>
+            job.purpose === 'board_still' &&
+            job.status === 'needs_attention' &&
+            job.canRetry &&
+            acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (current) =>
+            ipcBridge.creativeStudio.retryJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+              acknowledgePossibleDuplicateCharge,
+            })
+        );
+      },
+      retryDownload: (jobId) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) =>
+            job.purpose === 'board_still' &&
+            job.status === 'failed' &&
+            job.error?.code === 'download_failed' &&
+            job.canRetryDownload,
+          (current) =>
+            ipcBridge.creativeStudio.retryDownload.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        );
+      },
+      cancelJob: (jobId) => {
+        if (spendGateLocked) return;
+        void runJobRecovery(
+          jobId,
+          (job) => job.purpose === 'board_still' && job.status === 'needs_attention' && job.canCancel,
+          (current) =>
+            ipcBridge.creativeStudio.cancelJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        );
+      },
+      stop: stopBoardJobs,
+    }),
+    [
+      generationDraftsBlockReview,
+      currentGenerationCapability,
+      openBoardSpendGate,
+      projection,
+      routeCatalog,
+      runJobRecovery,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+      stopBoardJobs,
+    ]
+  );
+
+  const boardActions = useMemo<BoardActions>(
+    () => ({
+      ...boardProductionActions,
+      restoreBeat: async (beatId, beforeBeatId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.restoreBeat.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            beatId,
+            beforeBeatId,
+          })
+        ),
+      restoreShot: async (shotId, beforeShotId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.restoreShot.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            shotId,
+            beforeShotId,
+          })
+        ),
+      reorderBin: async (bin) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.reorderBin.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            bin: bin.map(cloneBinItem),
+          })
+        ),
+    }),
+    [boardProductionActions, runWorkspaceCommit]
+  );
+
+  const cutActions = useMemo<CutActions>(
+    () => ({
+      reorderBeats: async (beatOrder) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            operations: [{ kind: 'reorder_beats', beatOrder: [...beatOrder] }],
+          })
+        ),
+      importBedAudio: async (): Promise<CutImportResult> =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          if (current === null) return 'failed';
+          const result = await ipcBridge.creativeStudio.importBedAudio.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return 'failed';
+          }
+          if (result.data.status === 'cancelled') return 'cancelled';
+          const refreshed = await refetchProjectWorkspace();
+          if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return 'failed';
+          }
+          projectRef.current = refreshed;
+          return 'imported';
+        })) ?? 'failed',
+      setBed: async (assetId) =>
+        runWorkspaceCommit((current) =>
+          ipcBridge.creativeStudio.setBed.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            assetId,
+          })
+        ),
+      detachBedAudio: async (assetId) =>
+        (await runWorkspaceExclusive(async () => {
+          const current = projectRef.current;
+          if (current === null || current.bedAssetId === assetId) return false;
+          const result = await ipcBridge.creativeStudio.detachBedAudio.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            assetId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          const refreshed = await refetchProjectWorkspace();
+          if (refreshed === null || refreshed.revision !== result.data.projectRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          return true;
+        })) ?? false,
+    }),
+    [refetchProjectWorkspace, runWorkspaceCommit, runWorkspaceExclusive, setActionErrorMessageKey]
+  );
+
+  const createEditorFolder = useCallback(async (): Promise<
+    { ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }
+  > => {
+    const completed = await runWorkspaceExclusive(async () => {
+      const current = projectRef.current;
+      const catalog = exportCatalogRef.current;
+      if (current === null || catalog === null) {
+        return {
+          ok: false as const,
+          messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.catalogUnavailable',
+        };
+      }
+      const result = await ipcBridge.creativeStudio.createExport.invoke({
+        projectId: current.id,
+        expectedRevision: current.revision,
+        expectedCatalogRevision: catalog.revision,
+        shape: 'editor_folder',
+      });
+      if (result.ok === false) {
+        const messageKey =
+          result.error.code === 'stale_project'
+            ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleAuthority'
+            : result.error.code === 'stale_export_catalog'
+              ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog'
+              : result.error.code === 'invalid_payload'
+                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.invalidMedia'
+                : result.error.code === 'storage_error'
+                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
+                  : result.error.code === 'busy'
+                    ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
+                    : result.error.messageKey;
+        return { ok: false as const, messageKey };
+      }
+      installExportCatalog(result.data);
+      return { ok: true as const, catalog: result.data };
+    });
+    return (
+      completed ?? {
+        ok: false,
+        messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+      }
+    );
+  }, [installExportCatalog, runWorkspaceExclusive]);
+
+  const revealEditorFolder = useCallback(
+    async (artifactId: string): Promise<{ ok: true } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (
+          current === null ||
+          catalog === null ||
+          catalog.artifacts.filter((artifact) => artifact.id === artifactId && artifact.shape === 'editor_folder')
+            .length !== 1
+        ) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.revealExport.invoke({
+          projectId: current.id,
+          expectedCatalogRevision: catalog.revision,
+          artifactId,
+        });
+        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        return { ok: true as const };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+        }
+      );
+    },
+    [runWorkspaceExclusive]
+  );
+
+  const createFilm = useCallback(
+    async (input: {
+      renderId: string;
+      transition: { kind: 'cut' } | { kind: 'dissolve'; seconds: number };
+      trimTails: boolean;
+    }): Promise<{ ok: true; catalog: StudioRendererExportCatalogV2 } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (current === null || catalog === null) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.catalogUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.createExport.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          expectedCatalogRevision: catalog.revision,
+          shape: 'film',
+          ...input,
+        });
+        if (result.ok === false) {
+          const messageKey =
+            result.error.code === 'stale_project'
+              ? 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'
+              : result.error.code === 'stale_export_catalog'
+                ? 'conversation.creativeStudio.workspace.filmExport.errors.staleCatalog'
+                : result.error.code === 'ffmpeg_unavailable' || result.error.code === 'unsupported_capabilities'
+                  ? 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'
+                  : result.error.code === 'render_failed' || result.error.code === 'storage_error'
+                    ? 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'
+                    : result.error.code === 'cancelled'
+                      ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
+                      : result.error.code === 'invalid_payload'
+                        ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
+                        : result.error.code === 'busy'
+                          ? 'conversation.creativeStudio.workspace.filmExport.errors.busy'
+                          : result.error.messageKey;
+          return { ok: false as const, messageKey };
+        }
+        installExportCatalog(result.data);
+        return { ok: true as const, catalog: result.data };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.busy',
+        }
+      );
+    },
+    [installExportCatalog, runWorkspaceExclusive]
+  );
+
+  const getFilmExportStatus = useCallback(async () => {
+    try {
+      const result = await ipcBridge.creativeStudio.getFilmExportStatus.invoke({ projectId });
+      if (!result.ok) return null;
+      if (result.data.status === 'terminal' && result.data.result.projectId !== projectId) return null;
+      return result.data;
+    } catch {
+      return null;
+    }
+  }, [projectId]);
+
+  const cancelFilmExport = useCallback(
+    async (renderId: string): Promise<boolean> => {
+      try {
+        const result = await ipcBridge.creativeStudio.cancelFilmExport.invoke({ projectId, renderId });
+        return result.ok && result.data.status === 'cancelled';
+      } catch {
+        return false;
+      }
+    },
+    [projectId]
+  );
+
+  const acknowledgeFilmExport = useCallback(
+    async (renderId: string): Promise<'acknowledged' | 'not_found' | null> => {
+      try {
+        const result = await ipcBridge.creativeStudio.acknowledgeFilmExport.invoke({ projectId, renderId });
+        return result.ok ? result.data.status : null;
+      } catch {
+        return null;
+      }
+    },
+    [projectId]
+  );
+
+  const revealFilm = useCallback(
+    async (artifactId: string): Promise<{ ok: true } | { ok: false; messageKey: string }> => {
+      const completed = await runWorkspaceExclusive(async () => {
+        const current = projectRef.current;
+        const catalog = exportCatalogRef.current;
+        if (
+          current === null ||
+          catalog === null ||
+          catalog.artifacts.filter((artifact) => artifact.id === artifactId && artifact.shape === 'film').length !== 1
+        ) {
+          return {
+            ok: false as const,
+            messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
+          };
+        }
+        const result = await ipcBridge.creativeStudio.revealExport.invoke({
+          projectId: current.id,
+          expectedCatalogRevision: catalog.revision,
+          artifactId,
+        });
+        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        return { ok: true as const };
+      });
+      return (
+        completed ?? {
+          ok: false,
+          messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.busy',
+        }
+      );
+    },
+    [runWorkspaceExclusive]
+  );
+
+  const referenceActions = useMemo<ReferencesViewActions & TableReferenceBindingActions>(
+    () => ({
+      addBackground: async ({ label, prompt }): Promise<boolean> => {
+        const current = projectRef.current;
+        const trimmedLabel = label.trim();
+        const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          current.referenceOrder.length >= STUDIO_MAX_PROJECT_REFERENCES ||
+          trimmedLabel.length === 0 ||
+          trimmedLabel.length > STUDIO_MAX_REFERENCE_LABEL_LENGTH ||
+          trimmedPrompt.length === 0 ||
+          trimmedPrompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH ||
+          current.referenceOrder.some((referenceId) => {
+            const reference = Object.hasOwn(current.references, referenceId)
+              ? current.references[referenceId]
+              : undefined;
+            return reference?.kind === 'background' && reference.label === trimmedLabel;
+          }) ||
+          workspacePendingRef.current ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const previousReferenceOrder = [...current.referenceOrder];
+        const committed = await runWorkspaceCommit((latest) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: latest.id,
+            expectedRevision: latest.revision,
+            operations: [
+              {
+                kind: 'amend_reference_plan',
+                additions: [{ kind: 'background', label: trimmedLabel, prompt: trimmedPrompt }],
+              },
+            ],
+          })
+        );
+        if (!committed) return false;
+        const refreshed = projectRef.current;
+        const appendedReferenceId = refreshed?.referenceOrder[previousReferenceOrder.length];
+        const appendedReference =
+          refreshed !== null &&
+          appendedReferenceId !== undefined &&
+          Object.hasOwn(refreshed.references, appendedReferenceId)
+            ? refreshed.references[appendedReferenceId]
+            : undefined;
+        if (
+          refreshed === null ||
+          refreshed.referenceOrder.length !== previousReferenceOrder.length + 1 ||
+          previousReferenceOrder.some((referenceId, index) => refreshed.referenceOrder[index] !== referenceId) ||
+          appendedReference?.kind !== 'background' ||
+          appendedReference.label !== trimmedLabel ||
+          appendedReference.prompt !== trimmedPrompt ||
+          appendedReference.approvedAssetId !== null
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        }
+        return true;
+      },
+      updateDetails: async (referenceId, { label, prompt }): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        const trimmedLabel = typeof label === 'string' ? label.trim() : '';
+        const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          reference?.id !== referenceId ||
+          trimmedLabel.length === 0 ||
+          trimmedLabel.length > STUDIO_MAX_REFERENCE_LABEL_LENGTH ||
+          trimmedPrompt.length === 0 ||
+          trimmedPrompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH ||
+          current.referenceOrder.some((candidateId) => {
+            const candidate = Object.hasOwn(current.references, candidateId)
+              ? current.references[candidateId]
+              : undefined;
+            return (
+              candidate?.id !== referenceId && candidate?.kind === reference.kind && candidate.label === trimmedLabel
+            );
+          }) ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const operations: StudioRendererAuthoringOperationV2[] = [];
+        if (trimmedLabel !== reference.label) {
+          operations.push({ kind: 'set_reference_label', referenceId, label: trimmedLabel });
+        }
+        if (trimmedPrompt !== reference.prompt) {
+          operations.push({ kind: 'set_reference_prompt', referenceId, prompt: trimmedPrompt });
+        }
+        if (operations.length === 0) return true;
+        setPendingReferenceId(referenceId);
+        try {
+          const committed = await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations,
+            })
+          );
+          if (!committed) return false;
+          const refreshed = projectRef.current;
+          const updated =
+            refreshed !== null && Object.hasOwn(refreshed.references, referenceId)
+              ? refreshed.references[referenceId]
+              : undefined;
+          return updated?.label === trimmedLabel && updated.prompt === trimmedPrompt;
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
+      selectImage: async (referenceId, assetId): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          reference?.id !== referenceId ||
+          reference.approvedAssetId === assetId ||
+          !reference.supersededAssetIds.includes(assetId) ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null
+        ) {
+          return false;
+        }
+        setPendingReferenceId(referenceId);
+        try {
+          const committed = await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations: [{ kind: 'select_reference_image', referenceId, assetId }],
+            })
+          );
+          if (!committed) return false;
+          const refreshed = projectRef.current;
+          return (
+            refreshed !== null &&
+            Object.hasOwn(refreshed.references, referenceId) &&
+            refreshed.references[referenceId]?.approvedAssetId === assetId
+          );
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
+      removeImage: async (referenceId, assetId): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          reference?.id !== referenceId ||
+          reference.approvedAssetId !== assetId ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const visibleAssetIds = [...new Set([assetId, ...reference.supersededAssetIds])].toSorted((left, right) => {
+          const leftAsset = Object.hasOwn(current.assets, left) ? current.assets[left] : undefined;
+          const rightAsset = Object.hasOwn(current.assets, right) ? current.assets[right] : undefined;
+          const byCreatedAt = (leftAsset?.createdAt ?? '').localeCompare(rightAsset?.createdAt ?? '');
+          return byCreatedAt === 0 ? left.localeCompare(right) : byCreatedAt;
+        });
+        const removedIndex = visibleAssetIds.indexOf(assetId);
+        if (removedIndex < 0) return false;
+        const remainingAssetIds = visibleAssetIds.filter((candidateId) => candidateId !== assetId);
+        const expectedApprovedAssetId =
+          remainingAssetIds.length === 0
+            ? null
+            : remainingAssetIds[Math.min(Math.max(0, removedIndex - 1), remainingAssetIds.length - 1)]!;
+        const expectedSupersededAssetIds =
+          expectedApprovedAssetId === null
+            ? []
+            : remainingAssetIds.filter((candidateId) => candidateId !== expectedApprovedAssetId);
+        const referenceJobIdsBefore = [...reference.jobIds];
+        const referenceAssetsBefore = Object.fromEntries(
+          Object.entries(current.assets).filter(([, candidate]) => candidate.projectReferenceId === referenceId)
+        );
+        const referenceJobsBefore = Object.fromEntries(
+          reference.jobIds.flatMap((jobId) =>
+            Object.hasOwn(current.jobs, jobId) ? ([[jobId, current.jobs[jobId]]] as const) : []
+          )
+        );
+        const bindingsBefore = Object.fromEntries(
+          Object.entries(current.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+        );
+        setPendingReferenceId(referenceId);
+        try {
+          const committed = await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations: [{ kind: 'remove_reference_image', referenceId, assetId }],
+            })
+          );
+          if (!committed) return false;
+          const refreshed = projectRef.current;
+          if (refreshed === null || !Object.hasOwn(refreshed.references, referenceId)) return false;
+          const updated = refreshed.references[referenceId];
+          return (
+            updated?.id === referenceId &&
+            updated.approvedAssetId === expectedApprovedAssetId &&
+            JSON.stringify(updated.supersededAssetIds) === JSON.stringify(expectedSupersededAssetIds) &&
+            JSON.stringify(updated.jobIds) === JSON.stringify(referenceJobIdsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.assets).filter(([, candidate]) => candidate.projectReferenceId === referenceId)
+              )
+            ) === JSON.stringify(referenceAssetsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                referenceJobIdsBefore.flatMap((jobId) =>
+                  Object.hasOwn(refreshed.jobs, jobId) ? ([[jobId, refreshed.jobs[jobId]]] as const) : []
+                )
+              )
+            ) === JSON.stringify(referenceJobsBefore) &&
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+              )
+            ) === JSON.stringify(bindingsBefore)
+          );
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
+      importPhoto: async (referenceId): Promise<boolean> => {
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          current.referencePlanStatus !== 'planned' ||
+          reference?.id !== referenceId ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        const existingAssets = structuredClone(current.assets);
+        const existingJobs = structuredClone(current.jobs);
+        const bindingsBefore = Object.fromEntries(
+          Object.entries(current.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+        );
+        const approvalsBefore = Object.fromEntries(
+          current.referenceOrder.map((candidateId) => [
+            candidateId,
+            Object.hasOwn(current.references, candidateId)
+              ? current.references[candidateId]?.approvedAssetId
+              : undefined,
+          ])
+        );
+        const referenceJobIdsBefore = [...reference.jobIds];
+        const priorApprovedAssetId = reference.approvedAssetId;
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setPendingReferenceId(referenceId);
+        setActionErrorMessageKey(null);
+        try {
+          const result = await ipcBridge.creativeStudio.importReferenceImage.invoke({
+            projectId: current.id,
+            expectedRevision: current.revision,
+            referenceId,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            return false;
+          }
+          if (result.data.status === 'cancelled') return false;
+          const refreshed = await refetchProjectWorkspace();
+          const updatedReference =
+            refreshed !== null && Object.hasOwn(refreshed.references, referenceId)
+              ? refreshed.references[referenceId]
+              : undefined;
+          const importedAsset =
+            refreshed !== null && Object.hasOwn(refreshed.assets, result.data.assetId)
+              ? refreshed.assets[result.data.assetId]
+              : undefined;
+          const preservedAssets = Object.entries(existingAssets).every(
+            ([assetId, asset]) =>
+              refreshed !== null &&
+              Object.hasOwn(refreshed.assets, assetId) &&
+              JSON.stringify(refreshed.assets[assetId]) === JSON.stringify(asset)
+          );
+          const preservedApprovals = Object.entries(approvalsBefore).every(
+            ([candidateId, approval]) =>
+              candidateId === referenceId ||
+              (refreshed !== null &&
+                Object.hasOwn(refreshed.references, candidateId) &&
+                refreshed.references[candidateId]?.approvedAssetId === approval)
+          );
+          if (
+            refreshed === null ||
+            refreshed.revision < result.data.projectRevision ||
+            updatedReference?.approvedAssetId !== result.data.assetId ||
+            (priorApprovedAssetId !== null && !updatedReference.supersededAssetIds.includes(priorApprovedAssetId)) ||
+            JSON.stringify(updatedReference.jobIds) !== JSON.stringify(referenceJobIdsBefore) ||
+            importedAsset?.projectReferenceId !== referenceId ||
+            importedAsset.shotId !== null ||
+            importedAsset.mediaKind !== 'image' ||
+            importedAsset.managedAsset.collection !== 'imports' ||
+            importedAsset.producerJobId !== null ||
+            importedAsset.compositionDigest !== null ||
+            !preservedAssets ||
+            JSON.stringify(refreshed.jobs) !== JSON.stringify(existingJobs) ||
+            JSON.stringify(
+              Object.fromEntries(
+                Object.entries(refreshed.shots).map(([shotId, shot]) => [shotId, shot.referenceBinding])
+              )
+            ) !== JSON.stringify(bindingsBefore) ||
+            !preservedApprovals
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          return true;
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+          setPendingReferenceId(null);
+        }
+      },
+      regenerate: async (referenceId, prompt): Promise<boolean> => {
+        const trimmedPrompt = typeof prompt === 'string' ? prompt.trim() : '';
+        let current = projectRef.current;
+        let reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          current === null ||
+          reference?.id !== referenceId ||
+          trimmedPrompt.length === 0 ||
+          trimmedPrompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        if (reference.prompt !== trimmedPrompt) {
+          setPendingReferenceId(referenceId);
+          try {
+            if (
+              !(await runWorkspaceCommit((latest) =>
+                ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+                  projectId: latest.id,
+                  expectedRevision: latest.revision,
+                  operations: [{ kind: 'set_reference_prompt', referenceId, prompt: trimmedPrompt }],
+                })
+              ))
+            ) {
+              return false;
+            }
+          } finally {
+            setPendingReferenceId(null);
+          }
+          current = projectRef.current;
+          reference =
+            current !== null && Object.hasOwn(current.references, referenceId)
+              ? current.references[referenceId]
+              : undefined;
+          if (current === null || reference?.prompt !== trimmedPrompt) return false;
+        }
+        const candidateJob =
+          current === null || reference?.id !== referenceId
+            ? undefined
+            : [...reference.jobIds]
+                .toReversed()
+                .map((jobId) => (Object.hasOwn(current.jobs, jobId) ? current.jobs[jobId] : undefined))
+                .find(
+                  (job) =>
+                    job?.target.kind === 'reference' &&
+                    job.target.referenceId === referenceId &&
+                    job.purpose === 'reference_image'
+                );
+        const generationAlreadyRequested =
+          referenceRequests.some((request) => request.referenceIds.includes(referenceId)) ||
+          referenceGenerationHandoffs.some(
+            (handoff) => handoff.status === 'awaiting_spend' && handoff.referenceIds.includes(referenceId)
+          );
+        if (
+          current === null ||
+          reference?.id !== referenceId ||
+          !current.referenceOrder.includes(referenceId) ||
+          workspacePendingRef.current ||
+          pendingReferenceId !== null ||
+          candidateJob?.status === 'queued_local' ||
+          candidateJob?.status === 'submitting' ||
+          candidateJob?.status === 'queued_remote' ||
+          candidateJob?.status === 'running' ||
+          candidateJob?.status === 'needs_attention' ||
+          candidateJob?.canRetryDownload === true
+        ) {
+          return false;
+        }
+        if (generationAlreadyRequested) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.gate.errors.pricing.inFlight');
+          return false;
+        }
+        if (generationDraftsBlockReview) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+          return false;
+        }
+        if (routeCatalog === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+          return false;
+        }
+        if (
+          currentGenerationCapability === null &&
+          (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+          return false;
+        }
+        if (
+          reference.kind === 'background' &&
+          current.referenceOrder.some((candidateId) => {
+            const candidate = Object.hasOwn(current.references, candidateId)
+              ? current.references[candidateId]
+              : undefined;
+            return candidate?.kind === 'character' && candidate.approvedAssetId === null;
+          })
+        ) {
+          setActionErrorMessageKey(
+            'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.charactersRequired'
+          );
+          return false;
+        }
+        const disclosureGroups = generationBlockGroupsForItems(
+          currentGenerationCapability,
+          referenceCapabilityItems([reference.id])
+        );
+        setActionErrorMessageKey(null);
+        spendGate.open(
+          { projectId: current.id, expectedRevision: current.revision, referenceIds: [reference.id] },
+          undefined,
+          disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+        );
+        return true;
+      },
+      retryJob: async (referenceId, jobId, acknowledgePossibleDuplicateCharge): Promise<boolean> =>
+        runReferenceJobRecovery(
+          referenceId,
+          jobId,
+          (job) =>
+            job.status === 'needs_attention' &&
+            job.canRetry &&
+            acknowledgePossibleDuplicateCharge === (job.error?.code === 'submission_unknown'),
+          (current) =>
+            ipcBridge.creativeStudio.retryJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+              acknowledgePossibleDuplicateCharge,
+            })
+        ),
+      retryDownload: async (referenceId, jobId): Promise<boolean> =>
+        runReferenceJobRecovery(
+          referenceId,
+          jobId,
+          (job) => job.status === 'failed' && job.error?.code === 'download_failed' && job.canRetryDownload,
+          (current) =>
+            ipcBridge.creativeStudio.retryDownload.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        ),
+      retryBlockingDownload: async (claim): Promise<boolean> => {
+        const { referenceId, assetId, jobId } = claim;
+        const current = projectRef.current;
+        const reference =
+          current !== null && Object.hasOwn(current.references, referenceId)
+            ? current.references[referenceId]
+            : undefined;
+        if (
+          claim.kind !== 'download_recovery' ||
+          claim.recoveryAction !== 'retry_download' ||
+          claim.status !== 'failed' ||
+          referenceId.length === 0 ||
+          assetId.length === 0 ||
+          jobId.length === 0 ||
+          current === null ||
+          reference?.id !== referenceId ||
+          reference.approvedAssetId !== assetId ||
+          current.referenceOrder.filter((candidateId) => candidateId === referenceId).length !== 1 ||
+          pendingReferenceId !== null ||
+          workspacePendingRef.current ||
+          spendGateLocked
+        ) {
+          return false;
+        }
+        setPendingReferenceId(referenceId);
+        try {
+          return await runJobRecovery(
+            jobId,
+            (job, authority) => {
+              const exactReference = Object.hasOwn(authority.references, referenceId)
+                ? authority.references[referenceId]
+                : undefined;
+              const exactAsset = Object.hasOwn(authority.assets, assetId) ? authority.assets[assetId] : undefined;
+              const exactRetryBlocker = deriveReferenceRemovalBlockers(authority, referenceId).some(
+                (blocker) =>
+                  blocker.kind === 'download_recovery' &&
+                  blocker.recoveryAction === 'retry_download' &&
+                  blocker.jobId === job.id &&
+                  blocker.createdAt === claim.createdAt &&
+                  blocker.purpose === claim.purpose &&
+                  blocker.shotId === claim.shotId
+              );
+              return (
+                exactReference?.id === referenceId &&
+                exactReference.approvedAssetId === assetId &&
+                authority.referenceOrder.filter((candidateId) => candidateId === referenceId).length === 1 &&
+                exactAsset?.id === assetId &&
+                exactAsset.projectId === authority.id &&
+                exactAsset.projectReferenceId === referenceId &&
+                exactAsset.shotId === null &&
+                exactAsset.mediaKind === 'image' &&
+                job.createdAt === claim.createdAt &&
+                job.purpose === claim.purpose &&
+                exactRetryBlocker &&
+                job.status === 'failed' &&
+                job.error?.code === 'download_failed' &&
+                job.canRetryDownload &&
+                job.composition.inputs.referenceInputs.some(
+                  (input) =>
+                    input.referenceId === referenceId && input.assetId === assetId && input.sha256 === exactAsset.sha256
+                )
+              );
+            },
+            (latest) =>
+              ipcBridge.creativeStudio.retryDownload.invoke({
+                projectId: latest.id,
+                jobId,
+                expectedRevision: latest.revision,
+              }),
+            { refreshBeforeInvoke: true }
+          );
+        } finally {
+          setPendingReferenceId((pendingId) => (pendingId === referenceId ? null : pendingId));
+        }
+      },
+      reviewRetainedShot: async (claim): Promise<boolean> => {
+        const exactReviewClaimExists = (authority: StudioRendererProjectV2): boolean => {
+          const matches = deriveReferenceRemovalBlockers(authority, claim.referenceId).filter((blocker) => {
+            if (
+              blocker.kind !== 'download_recovery' ||
+              blocker.recoveryAction !== 'restore_shot' ||
+              blocker.referenceId !== claim.referenceId ||
+              blocker.assetId !== claim.assetId ||
+              blocker.jobId !== claim.jobId ||
+              blocker.createdAt !== claim.createdAt ||
+              blocker.purpose !== claim.purpose ||
+              blocker.shotId !== claim.shotId ||
+              blocker.retainedOwner.kind !== claim.retainedOwner.kind ||
+              blocker.retainedOwner.beatId !== claim.retainedOwner.beatId ||
+              blocker.retainedOwner.reason !== claim.retainedOwner.reason
+            ) {
+              return false;
+            }
+            return (
+              blocker.retainedOwner.kind === 'beat' ||
+              (claim.retainedOwner.kind === 'shot' && blocker.retainedOwner.shotId === claim.retainedOwner.shotId)
+            );
+          });
+          return matches.length === 1;
+        };
+        const current = projectRef.current;
+        if (
+          claim.kind !== 'download_recovery' ||
+          claim.recoveryAction !== 'restore_shot' ||
+          claim.status !== 'failed' ||
+          claim.referenceId.length === 0 ||
+          claim.assetId.length === 0 ||
+          claim.jobId.length === 0 ||
+          claim.shotId === null ||
+          current === null ||
+          current.id !== projectId ||
+          workspacePendingRef.current ||
+          !exactReviewClaimExists(current)
+        ) {
+          return false;
+        }
+        workspacePendingRef.current = true;
+        setWorkspacePending(true);
+        setActionErrorMessageKey(null);
+        try {
+          const refreshed = await refetchProjectWorkspace();
+          if (refreshed === null || refreshed.id !== current.id || refreshed.revision < current.revision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            return false;
+          }
+          projectRef.current = refreshed;
+          if (!exactReviewClaimExists(refreshed)) return false;
+          chooseStudioView('board');
+          return true;
+        } catch {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+          return false;
+        } finally {
+          workspacePendingRef.current = false;
+          setWorkspacePending(false);
+        }
+      },
+      cancelJob: async (referenceId, jobId): Promise<boolean> =>
+        runReferenceJobRecovery(
+          referenceId,
+          jobId,
+          (job) => job.canCancel,
+          (current) =>
+            ipcBridge.creativeStudio.cancelJob.invoke({
+              projectId: current.id,
+              jobId,
+              expectedRevision: current.revision,
+            })
+        ),
+      openBindings: (): void => {
+        chooseStudioView('table');
+      },
+      saveBinding: async (shotId, characterReferenceIds, backgroundReferenceId): Promise<boolean> => {
+        const current = projectRef.current;
+        const shot = current !== null && Object.hasOwn(current.shots, shotId) ? current.shots[shotId] : undefined;
+        if (
+          current === null ||
+          shot?.id !== shotId ||
+          pendingReferenceId !== null ||
+          spendGateLocked ||
+          new Set(characterReferenceIds).size !== characterReferenceIds.length
+        ) {
+          return false;
+        }
+        setPendingReferenceId(shotId);
+        try {
+          return await runWorkspaceCommit((latest) =>
+            ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+              projectId: latest.id,
+              expectedRevision: latest.revision,
+              operations: [
+                {
+                  kind: 'set_shot_reference_binding',
+                  shotId,
+                  characterReferenceIds: [...characterReferenceIds],
+                  backgroundReferenceId,
+                },
+              ],
+            })
+          );
+        } finally {
+          setPendingReferenceId(null);
+        }
+      },
+    }),
+    [
+      currentGenerationCapability,
+      chooseStudioView,
+      generationDraftsBlockReview,
+      pendingReferenceId,
+      projectId,
+      referenceGenerationHandoffs,
+      referenceRequests,
+      refetchProjectWorkspace,
+      routeCatalog,
+      runJobRecovery,
+      runReferenceJobRecovery,
+      runWorkspaceCommit,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
+  );
+
+  const saveAllDrafts = useCallback(async (): Promise<boolean> => {
+    if (drafts.staleRevision) return false;
+    const startingProject = projectRef.current;
+    if (startingProject === null || workspacePendingRef.current) return false;
+    let expectedRevision = startingProject.revision;
+    const currentForChain = (): StudioRendererProjectV2 | null => {
+      const current = projectRef.current;
+      return current?.revision === expectedRevision ? current : null;
+    };
+    const runChainedCommit = async (
+      invoke: (current: StudioRendererProjectV2) => Promise<StudioCommandResult<StudioRendererProjectCommitResultV2>>
+    ): Promise<boolean> => {
+      const committedRevision = await runWorkspaceCommitAtRevision(expectedRevision, invoke);
+      if (committedRevision === null) return false;
+      expectedRevision = committedRevision;
+      return true;
+    };
+    const dirty = new Set(drafts.dirtyKeys);
+    const hasBlockedShapeDraft =
+      projection?.requestShapeLocked === true &&
+      (dirty.has('settings.aspectRatio') || dirty.has('settings.resolution'));
+    const settingsKeys = ['settings.aspectRatio', 'settings.resolution'];
+    if (settingsKeys.some((key) => dirty.has(key))) {
+      const current = currentForChain();
+      if (current === null) return false;
+      const submittedSettings = Object.fromEntries(settingsKeys.map((key) => [key, drafts.value(key)]));
+      const requestShape = projection?.requestShapeLocked
+        ? {}
+        : {
+            aspectRatio: drafts.value('settings.aspectRatio') as StudioRendererProjectV2['aspectRatio'],
+            resolution: drafts.value('settings.resolution') as StudioRendererProjectV2['resolution'],
+          };
+      const aspectRatioChanged =
+        requestShape.aspectRatio !== undefined && requestShape.aspectRatio !== current.aspectRatio;
+      const resolutionChanged = requestShape.resolution !== undefined && requestShape.resolution !== current.resolution;
+      const changes: Parameters<WorkspaceMutationCallbacks['editProject']>[0] | null =
+        aspectRatioChanged && resolutionChanged
+          ? {
+              aspectRatio: requestShape.aspectRatio!,
+              resolution: requestShape.resolution!,
+            }
+          : aspectRatioChanged
+            ? { aspectRatio: requestShape.aspectRatio! }
+            : resolutionChanged
+              ? { resolution: requestShape.resolution! }
+              : null;
+      if (
+        changes !== null &&
+        !(await runChainedCommit((authority) =>
+          ipcBridge.creativeStudio.editProject.invoke({
+            projectId: authority.id,
+            expectedRevision: authority.revision,
+            changes,
+          })
+        ))
+      ) {
+        return false;
+      }
+      if (projection?.requestShapeLocked !== true) {
+        ['settings.aspectRatio', 'settings.resolution'].forEach((key) =>
+          drafts.resetIfValue(key, submittedSettings[key] as WorkspaceDraftValue)
+        );
+      }
+    }
+
+    const authoringKeys = [
+      'brief.text',
+      'brief.imageRouteId',
+      'brief.videoRouteId',
+      'brief.spendCurrency',
+      'brief.spendMajorUnits',
+    ];
+    if (authoringKeys.some((key) => dirty.has(key))) {
+      const current = currentForChain();
+      if (current === null) return false;
+      const submittedAuthoring = Object.fromEntries(authoringKeys.map((key) => [key, drafts.value(key)]));
+      const operations: StudioRendererAuthoringOperationV2[] = [];
+      const brief = String(drafts.value('brief.text') ?? '');
+      const imageRouteId = String(drafts.value('brief.imageRouteId') ?? '') || null;
+      const videoRouteId = String(drafts.value('brief.videoRouteId') ?? '') || null;
+      if (brief !== current.brief) operations.push({ kind: 'set_brief', brief });
+      if (imageRouteId !== current.imageRouteId || videoRouteId !== current.videoRouteId) {
+        operations.push({ kind: 'set_routes', imageRouteId, videoRouteId });
+      }
+      const currency = String(drafts.value('brief.spendCurrency') ?? '')
+        .trim()
+        .toUpperCase();
+      const major = String(drafts.value('brief.spendMajorUnits') ?? '').trim();
+      const minorUnits = major.length === 0 ? null : majorUnitsToMinorUnits(major);
+      if (minorUnits === null && major.length > 0) return false;
+      const policy = major.length === 0 ? null : { currency, maxPerBatchMinorUnits: minorUnits as number };
+      if (policy !== null && !/^[A-Z]{3}$/.test(policy.currency)) return false;
+      if (JSON.stringify(policy) !== JSON.stringify(current.spendPolicy)) {
+        operations.push({ kind: 'set_spend_policy', policy });
+      }
+      if (
+        operations.length > 0 &&
+        !(await runChainedCommit((authority) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: authority.id,
+            expectedRevision: authority.revision,
+            operations,
+          })
+        ))
+      ) {
+        return false;
+      }
+      authoringKeys.forEach((key) => drafts.resetIfValue(key, submittedAuthoring[key] as WorkspaceDraftValue));
+    }
+
+    type SubmittedOperation = {
+      operation: StudioRendererAuthoringOperationV2;
+      values: [key: string, value: WorkspaceDraftValue][];
+    };
+    const submittedOperations: SubmittedOperation[] = [];
+    const current = currentForChain();
+    if (current === null) return false;
+    for (const beatId of current.beatOrder) {
+      const beat = Object.hasOwn(current.beats, beatId) ? current.beats[beatId] : undefined;
+      if (beat?.id !== beatId) continue;
+      const values: SubmittedOperation['values'] = [];
+      const changes: Partial<Pick<typeof beat, 'story'>> = {};
+      const key = beatDraftKey(beatId);
+      if (dirty.has(key)) {
+        const value = drafts.value(key);
+        if (typeof value !== 'string') return false;
+        values.push([key, value]);
+        if (value !== beat.story) changes.story = value;
+      }
+      if (values.length > 0) {
+        if (Object.keys(changes).length === 0) {
+          values.forEach(([key, value]) => drafts.resetIfValue(key, value));
+        } else {
+          submittedOperations.push({
+            operation: { kind: 'edit_beat', beatId, changes } as StudioRendererAuthoringOperationV2,
+            values,
+          });
+        }
+      }
+      for (const shotId of beat.shotOrder) {
+        const shot = Object.hasOwn(current.shots, shotId) ? current.shots[shotId] : undefined;
+        if (shot?.id !== shotId) continue;
+        const shotValues: SubmittedOperation['values'] = [];
+        const shotChanges: Partial<Pick<typeof shot, 'shootingScript' | 'durationSeconds'>> = {};
+        for (const field of ['shootingScript', 'durationSeconds'] as const) {
+          const key = shotDraftKey(shotId, field);
+          if (!dirty.has(key)) continue;
+          const value = drafts.value(key);
+          if (
+            (field === 'durationSeconds' && !Number.isSafeInteger(value)) ||
+            (field !== 'durationSeconds' && typeof value !== 'string')
+          ) {
+            return false;
+          }
+          shotValues.push([key, value as WorkspaceDraftValue]);
+          if (value !== shot[field]) Object.assign(shotChanges, { [field]: value });
+        }
+        if (shotValues.length === 0) continue;
+        if (Object.keys(shotChanges).length === 0) {
+          shotValues.forEach(([key, value]) => drafts.resetIfValue(key, value));
+          continue;
+        }
+        submittedOperations.push({
+          operation: { kind: 'edit_shot', shotId, changes: shotChanges } as StudioRendererAuthoringOperationV2,
+          values: shotValues,
+        });
+      }
+    }
+    for (let offset = 0; offset < submittedOperations.length; offset += STUDIO_MAX_MUTATION_OPERATIONS) {
+      const batch = submittedOperations.slice(offset, offset + STUDIO_MAX_MUTATION_OPERATIONS);
+      if (
+        !(await runChainedCommit((authority) =>
+          ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
+            projectId: authority.id,
+            expectedRevision: authority.revision,
+            operations: batch.map(({ operation }) => operation),
+          })
+        ))
+      ) {
+        return false;
+      }
+      for (const { values } of batch) {
+        values.forEach(([key, value]) => drafts.resetIfValue(key, value));
+      }
+    }
+    return !hasBlockedShapeDraft;
+  }, [drafts, projection?.requestShapeLocked, runWorkspaceCommitAtRevision]);
+
+  const flushAllWorkspaceDrafts = useCallback(
+    async (): Promise<boolean> =>
+      ruleDraftDirtyCount === 0 && inactiveWorkspaceDraftDirtyCount === 0 && saveAllDrafts(),
+    [inactiveWorkspaceDraftDirtyCount, ruleDraftDirtyCount, saveAllDrafts]
+  );
+  const closeDirtyDraftCount = drafts.dirtyCount + ruleDraftDirtyCount + inactiveWorkspaceDraftDirtyCount;
+
+  useLayoutEffect(() => {
+    if (project === null) {
+      onCloseContractChange(null);
+      return;
+    }
+    onCloseContractChange({ dirtyDraftCount: closeDirtyDraftCount, saveAll: flushAllWorkspaceDrafts });
+    return () => onCloseContractChange(null);
+  }, [closeDirtyDraftCount, flushAllWorkspaceDrafts, onCloseContractChange, project]);
+
+  const proposalDraftBlocker = useCallback((candidate: StudioRendererProposalV2): 'workspace' | 'rules' | null => {
+    const current = proposalDraftAuthorityRef.current;
+    if (candidate.payload.kind === 'mutation_batch') return current.workspaceDirtyCount > 0 ? 'workspace' : null;
+    if (candidate.payload.kind === 'pin_rule') return current.activeRuleDirtyCount > 0 ? 'rules' : null;
+    return null;
   }, []);
 
-  const requestTransition = useCallback(
-    (transition: StudioViewTransition): void => {
+  const proposalAuthorityVerified = useCallback(
+    (candidate: StudioRendererProposalV2): boolean =>
+      !proposalRefreshing &&
+      project !== null &&
+      proposalErrorMessageKey === null &&
+      proposalCatalog !== null &&
+      proposalCatalog.projectId === project.id &&
+      proposalCatalog.projectRevision === project.revision &&
+      proposalCatalog.proposals.find((proposal) => proposal.id === candidate.id) === candidate,
+    [project, proposalCatalog, proposalErrorMessageKey, proposalRefreshing]
+  );
+
+  const proposalAuthorityState = useCallback(
+    (candidate: StudioRendererProposalV2): StudioProposalAuthorityState => {
+      if (proposalRefreshing) return 'refreshing';
+      if (!proposalAuthorityVerified(candidate)) {
+        return 'unavailable';
+      }
+      return candidate.review.status;
+    },
+    [proposalAuthorityVerified, proposalRefreshing]
+  );
+
+  const refreshProposalAuthority = useCallback(async (): Promise<StudioProposalAuthoritySnapshot | null> => {
+    const refreshedProject = await refetchProjectWorkspace();
+    if (refreshedProject === null) return null;
+    projectRef.current = refreshedProject;
+    const catalog = await refetchProposals();
+    if (
+      catalog === null ||
+      catalog.projectId !== refreshedProject.id ||
+      catalog.projectRevision !== refreshedProject.revision
+    ) {
+      return null;
+    }
+    return { project: refreshedProject, catalog };
+  }, [refetchProjectWorkspace, refetchProposals]);
+
+  const performProposalDecision = useCallback(
+    async (
+      decision: 'accept' | 'reject',
+      target: StudioRendererProposalV2,
+      authority: StudioProposalAuthoritySnapshot,
+      draftErrorMode: 'card' | 'chat' = 'card'
+    ): Promise<boolean> => {
+      if (decision === 'accept') {
+        if (target.payload.kind === 'paid_recovery') {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
+          return false;
+        }
+        if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
+          setActionErrorMessageKey(
+            target.review.status === 'stale'
+              ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+              : 'conversation.creativeStudio.workspace.proposals.reviewUnavailable'
+          );
+          return false;
+        }
+        // Refreshing authority is asynchronous. Read the live draft fence at the final synchronous
+        // boundary immediately before invoking Main so a draft created during refresh cannot be
+        // accepted over.
+        const draftBlocker = proposalDraftBlocker(target);
+        if (draftBlocker !== null) {
+          setActionErrorMessageKey(
+            draftErrorMode === 'chat'
+              ? 'conversation.creativeStudio.workspace.proposals.chatDirty'
+              : draftBlocker === 'workspace'
+                ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
+                : 'conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst'
+          );
+          return false;
+        }
+        const result = await ipcBridge.creativeStudio.acceptProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          await refreshProposalAuthority();
+          return false;
+        }
+      } else {
+        const result = await ipcBridge.creativeStudio.rejectProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          await refreshProposalAuthority();
+          return false;
+        }
+      }
+      await refreshProposalAuthority();
+      return true;
+    },
+    [proposalDraftBlocker, refreshProposalAuthority, setActionErrorMessageKey]
+  );
+
+  const decideProposalFromCard = useCallback(
+    async (decision: 'accept' | 'reject', proposalId: string): Promise<boolean> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return false;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return false;
+        }
+        const target = authority.catalog.proposals.find(
+          (candidate) => candidate.id === proposalId && candidate.status === 'pending'
+        );
+        if (target === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return false;
+        }
+        return await performProposalDecision(decision, target, authority);
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        await refreshProposalAuthority();
+        return false;
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      performProposalDecision,
+      refreshProposalAuthority,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const decideProposalFromDirectorChat = useCallback(
+    async (intent: DirectorProposalChatIntent): Promise<void> => {
+      const token = beginReviewedAction(
+        intent.proposalId === null ? null : { kind: 'proposal', id: intent.proposalId }
+      );
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      try {
+        setActionErrorMessageKey(null);
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const pending = authority.catalog.proposals.filter((candidate) => candidate.status === 'pending');
+        const eligiblePending =
+          intent.decision === 'accept'
+            ? pending.filter((candidate) => candidate.payload.kind !== 'paid_recovery')
+            : pending;
+        const ready = eligiblePending.filter(
+          (candidate) => candidate.review.status === 'ready' && candidate.baseRevision === authority.project.revision
+        );
+        const target =
+          intent.proposalId === null
+            ? ready.length === 1
+              ? ready[0]
+              : undefined
+            : pending.find((candidate) => candidate.id === intent.proposalId);
+        if (intent.proposalId === null && ready.length === 0) {
+          setActionErrorMessageKey(
+            pending.length === 0
+              ? 'conversation.creativeStudio.workspace.proposals.chatNoPending'
+              : intent.decision === 'accept' &&
+                  pending.some(
+                    (candidate) =>
+                      candidate.payload.kind === 'paid_recovery' &&
+                      candidate.review.status === 'ready' &&
+                      candidate.baseRevision === authority.project.revision
+                  )
+                ? 'conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly'
+                : pending.some((candidate) => candidate.review.status === 'stale')
+                  ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+                  : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
+          );
+          return;
+        }
+        if (intent.proposalId === null && ready.length > 1) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatMultiplePending');
+          return;
+        }
+        if (target === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        if (intent.decision === 'accept' && target.payload.kind === 'paid_recovery') {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.paidRecovery.cardOnly');
+          return;
+        }
+        if (!retargetReviewedAction(token, { kind: 'proposal', id: target.id })) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+          return;
+        }
+        if (
+          intent.decision === 'accept' &&
+          (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision)
+        ) {
+          setActionErrorMessageKey(
+            target.review.status === 'stale'
+              ? 'conversation.creativeStudio.workspace.proposals.chatStale'
+              : 'conversation.creativeStudio.workspace.proposals.chatUnavailable'
+          );
+          return;
+        }
+        const succeeded = await performProposalDecision(intent.decision, target, authority, 'chat');
+        if (succeeded) {
+          setActionErrorMessageKey(
+            intent.decision === 'accept'
+              ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
+              : 'conversation.creativeStudio.workspace.proposals.chatRejected'
+          );
+        }
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        await refreshProposalAuthority();
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      performProposalDecision,
+      refreshProposalAuthority,
+      retargetReviewedAction,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const queueUpdatedProposalDraft = useCallback(
+    (proposalId: string): void => {
+      directorDraftRequestSequenceRef.current += 1;
+      setDirectorDraftRequest({
+        requestId: directorDraftRequestSequenceRef.current,
+        projectId,
+        prompt: t('conversation.creativeStudio.workspace.proposals.reproposalPrompt', { proposalId }),
+      });
+      workspaceShellRef.current?.revealDirector({ projectId, view: activeView });
+    },
+    [activeView, projectId, t]
+  );
+
+  const requestUpdatedProposal = useCallback(
+    async (proposalId: string, saveWorkspaceDrafts: boolean): Promise<void> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const visibleTarget = proposals.find(
+          (candidate) =>
+            candidate.id === proposalId && candidate.projectId === projectId && candidate.status === 'pending'
+        );
+        if (visibleTarget === undefined) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        if (saveWorkspaceDrafts) {
+          if (visibleTarget.payload.kind !== 'mutation_batch') return;
+          if (!(await saveAllDrafts())) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.saveBeforeApply');
+            return;
+          }
+        }
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const exactPending = authority.catalog.proposals.some(
+          (candidate) => candidate.id === proposalId && candidate.status === 'pending'
+        );
+        if (!exactPending) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        queueUpdatedProposalDraft(proposalId);
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      projectId,
+      proposals,
+      queueUpdatedProposalDraft,
+      refreshProposalAuthority,
+      saveAllDrafts,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const reviewRuleDrafts = useCallback((): void => {
+    setBriefDialogRequest((request) => request + 1);
+  }, []);
+
+  const consumeDirectorDraftRequest = useCallback((requestId: number): void => {
+    setDirectorDraftRequest((current) => (current?.requestId === requestId ? null : current));
+  }, []);
+
+  const acceptProposalFromCard = useCallback(
+    async (proposalId: string): Promise<void> => {
+      await decideProposalFromCard('accept', proposalId);
+    },
+    [decideProposalFromCard]
+  );
+  const rejectProposalFromCard = useCallback(
+    async (proposalId: string): Promise<void> => {
+      await decideProposalFromCard('reject', proposalId);
+    },
+    [decideProposalFromCard]
+  );
+
+  const paidRecoveryQuote = useCallback(
+    (candidate: StudioRendererProposalV2): StudioPaidRecoveryQuoteSummaryV2 | null =>
+      candidate.payload.kind === 'paid_recovery' ? (paidRecoveryQuotes[candidate.id] ?? candidate.payload.quote) : null,
+    [paidRecoveryQuotes]
+  );
+
+  const paidRecoveryStatusMessageKey = useCallback(
+    (candidate: StudioRendererProposalV2): string | null => paidRecoveryStatusMessageKeys[candidate.id] ?? null,
+    [paidRecoveryStatusMessageKeys]
+  );
+
+  const actOnPaidRecoveryProposal = useCallback(
+    async (proposalId: string): Promise<void> => {
+      const token = beginReviewedAction({ kind: 'proposal', id: proposalId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const authority = await refreshProposalAuthority();
+        if (authority === null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+          return;
+        }
+        const target = authority.catalog.proposals.find(
+          (candidate) =>
+            candidate.id === proposalId && candidate.status === 'pending' && candidate.payload.kind === 'paid_recovery'
+        );
+        if (
+          target === undefined ||
+          target.payload.kind !== 'paid_recovery' ||
+          target.review.status !== 'ready' ||
+          target.baseRevision !== authority.project.revision
+        ) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
+          return;
+        }
+        const currentQuote = paidRecoveryQuotes[target.id] ?? target.payload.quote;
+        const refreshQuote = async (): Promise<void> => {
+          const refreshed = await ipcBridge.creativeStudio.preparePaidRecoveryProposal.invoke({
+            projectId: authority.project.id,
+            proposalId: target.id,
+          });
+          if (refreshed.ok === false) {
+            setActionErrorMessageKey(refreshed.error.messageKey);
+            await refreshProposalAuthority();
+            return;
+          }
+          if (refreshed.data.projectRevision !== target.baseRevision) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.authorityUnavailable');
+            await refreshProposalAuthority();
+            return;
+          }
+          setPaidRecoveryQuotes((current) => ({ ...current, [target.id]: refreshed.data }));
+          setPaidRecoveryStatusMessageKeys((current) => ({
+            ...current,
+            [target.id]: 'conversation.creativeStudio.workspace.proposals.paidRecovery.refreshed',
+          }));
+        };
+        if (Date.parse(currentQuote.expiresAt) <= Date.now()) {
+          await refreshQuote();
+          return;
+        }
+        const result = await ipcBridge.creativeStudio.confirmPaidRecoveryProposal.invoke({
+          projectId: authority.project.id,
+          proposalId: target.id,
+          quoteId: currentQuote.quoteId,
+          expectedRevision: target.baseRevision,
+        });
+        if (result.ok === false) {
+          if (result.error.code === 'quote_not_found') {
+            await refreshQuote();
+            return;
+          }
+          setActionErrorMessageKey(result.error.messageKey);
+          await refreshProposalAuthority();
+          return;
+        }
+        setPaidRecoveryQuotes((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        setPaidRecoveryStatusMessageKeys((current) => {
+          const next = { ...current };
+          delete next[target.id];
+          return next;
+        });
+        await refreshProposalAuthority();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+        await refreshProposalAuthority();
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [beginReviewedAction, finishReviewedAction, paidRecoveryQuotes, refreshProposalAuthority, setActionErrorMessageKey]
+  );
+
+  const reviewHandoff = useCallback(
+    (handoff: StudioRendererReferenceGenerationHandoffV2, ownedActionToken?: number): void => {
+      const activeAction = reviewedActionRef.current;
+      if (activeAction !== null && activeAction.token !== ownedActionToken) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      const current = projectRef.current;
+      if (current === null) return;
+      if (generationDraftsBlockReview) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+        return;
+      }
+      if (statusBlocksReview || projection === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.statusRequired');
+        return;
+      }
+      if (routeCatalog === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+        return;
+      }
+      if (currentGenerationCapability === null && routeCatalog.image.status !== 'ready') {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+        return;
+      }
+      const draft = handoffGateDraft(current, projection, handoff);
+      if (draft === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const disclosureGroups = generationBlockGroupsForItems(
+        currentGenerationCapability,
+        referenceCapabilityItems(draft.referenceIds)
+      );
+      spendGate.open(
+        draft,
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
+    },
+    [
+      currentGenerationCapability,
+      generationDraftsBlockReview,
+      projection,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      statusBlocksReview,
+    ]
+  );
+
+  const decideReferences = useCallback(
+    async (requestId: string, outcome: StudioReferenceDecisionIntent): Promise<void> => {
+      if (project === null) return;
+      const token = beginReviewedAction({ kind: 'reference_request', id: requestId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
+      try {
+        const result = await ipcBridge.creativeStudio.decideReferenceRequest.invoke({
+          projectId,
+          requestId,
+          expectedRevision: project.revision,
+          outcome,
+        });
+        if (result.ok === false) {
+          setActionErrorMessageKey(result.error.messageKey);
+          return;
+        }
+        if (result.data.outcome.kind === 'generation_gate') {
+          reviewHandoff(
+            {
+              handoffId: result.data.outcome.handoffId,
+              requestId: result.data.requestId,
+              referenceIds: [...result.data.outcome.referenceIds],
+              decidedAt: result.data.decidedAt,
+              status: 'awaiting_spend',
+              counts: { queued: 0, running: 0, succeeded: 0, failed: 0 },
+              resultAssetIds: [],
+              failedReferenceIds: [],
+              completedAt: null,
+            },
+            token
+          );
+        }
+        await refetchReferences();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+      } finally {
+        finishReviewedAction(token);
+      }
+    },
+    [
+      beginReviewedAction,
+      finishReviewedAction,
+      project,
+      projectId,
+      refetchReferences,
+      reviewHandoff,
+      setActionErrorMessageKey,
+    ]
+  );
+
+  const reviewGeneratedReferences = useCallback(
+    (handoff: StudioRendererReferenceGenerationHandoffV2): void => {
+      if (reviewedActionRef.current !== null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      const current = projectRef.current;
       if (
-        project === null ||
-        transitionBlocked ||
-        pendingTransitionRef.current !== null ||
-        (transition.view === routeView && transition.state === undefined)
+        current === null ||
+        (handoff.status !== 'succeeded' && handoff.status !== 'partially_failed' && handoff.status !== 'failed')
       ) {
         return;
       }
-      pendingTransitionRef.current = transition;
-      setPendingTransition(transition);
-      setTransitionReady(false);
-      setTransitionIssueMessageKey(null);
-      void (async (): Promise<void> => {
-        const clearPendingTransition = (): void => {
-          pendingTransitionRef.current = null;
-          setPendingTransition(null);
-          setTransitionReady(false);
-        };
-        const projectSaved = await editorRef.current.flushProjectDraft();
-        if (!projectSaved || editorRef.current.conflict !== null) {
-          clearPendingTransition();
-          focusRecoveryAlert();
-          return;
-        }
-
-        for (let round = 0; round < 3; round += 1) {
-          const result = await editorRef.current.flushAllSceneDrafts();
-          if (result.failed.length > 0 || editorRef.current.conflict !== null) {
-            clearPendingTransition();
-            focusRecoveryAlert();
-            return;
-          }
-          if (result.dirtied.length === 0) {
-            setTransitionReady(true);
-            return;
-          }
-        }
-
-        clearPendingTransition();
-        setTransitionIssueMessageKey('conversation.creativeStudio.transition.savingBlocked');
-        focusRecoveryAlert();
-      })();
+      const referenceIds = handoff.referenceIds.filter((referenceId) => {
+        const reference = Object.hasOwn(current.references, referenceId) ? current.references[referenceId] : undefined;
+        return reference?.id === referenceId;
+      });
+      const generatedAssetIds = handoff.resultAssetIds.filter((assetId) =>
+        referenceIds.some((referenceId) => {
+          const reference = current.references[referenceId];
+          return reference?.approvedAssetId === assetId || reference?.supersededAssetIds.includes(assetId);
+        })
+      );
+      openReferenceFocus({ referenceIds, assetIds: generatedAssetIds });
     },
-    [focusRecoveryAlert, project, routeView, transitionBlocked]
+    [openReferenceFocus, setActionErrorMessageKey]
   );
 
-  useEffect(() => {
-    if (project === null || pendingTransition === null || !transitionReady) return;
-    const transition = pendingTransition;
-    rememberStudioView(project.id, transition.view);
-    navigate(studioViewPath(project.id, transition.view), {
-      state: transition.state ?? null,
-    });
-    pendingTransitionRef.current = null;
-    setPendingTransition(null);
-    setTransitionReady(false);
-  }, [navigate, pendingTransition, project, transitionReady]);
-
-  const clearWriteFocusIntent = useCallback((): void => {
-    if (parseWriteFocusIntent(location.state) === null) return;
-    navigate(location.pathname, { replace: true, state: null });
-  }, [location.pathname, location.state, navigate]);
-
-  const openModelSettings = useCallback((): void => {
-    setTimeout(() => navigate('/settings/model'), 0);
-  }, [navigate]);
-
-  const focusEngineRole = useCallback((role: StudioMediaKind): void => setPendingEngineFocusRole(role), []);
-
-  useEffect(() => {
-    if (pendingEngineFocusRole === null || generationReview !== null) return;
-    let frame = 0;
-    const focusPendingRole = (): void => {
-      const selector = `[data-engine-role="${pendingEngineFocusRole}"]`;
-      const briefScope = document.querySelector<HTMLElement>('[data-studio-engine-scope="brief"]');
-      const activePhase = document.querySelector<HTMLElement>('[data-studio-phase-shell]');
-      const roleSlot =
-        briefScope?.querySelector<HTMLElement>(selector) ?? activePhase?.querySelector<HTMLElement>(selector);
-      if (roleSlot === null || roleSlot === undefined) {
-        setBriefOpen(true);
-        frame = requestAnimationFrame(focusPendingRole);
+  const reviewShotBinding = useCallback(
+    (shotId: string): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        currentProjection.projectId !== current.id ||
+        currentProjection.projectRevision !== current.revision ||
+        !currentProjection.activeShotIds.includes(shotId) ||
+        !Object.hasOwn(current.shots, shotId) ||
+        current.shots[shotId]?.id !== shotId
+      ) {
         return;
       }
-      const target = roleSlot.querySelector<HTMLElement>('button:not([disabled])') ?? roleSlot;
-      target.focus({ preventScroll: true });
-      if (document.activeElement === target) {
-        setPendingEngineFocusRole(null);
+      openReferenceFocus({ shotIds: [shotId] });
+    },
+    [openReferenceFocus]
+  );
+
+  const retryFailedReferences = useCallback(
+    (handoff: StudioRendererReferenceGenerationHandoffV2): void => {
+      const current = projectRef.current;
+      if (
+        current === null ||
+        reviewedActionRef.current !== null ||
+        (handoff.status !== 'partially_failed' && handoff.status !== 'failed') ||
+        handoff.failedReferenceIds.length === 0 ||
+        generationDraftsBlockReview ||
+        workspacePendingRef.current ||
+        spendGateLocked
+      ) {
+        if (generationDraftsBlockReview) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.saveBeforeReview');
+        } else if (reviewedActionRef.current !== null) {
+          setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        }
         return;
       }
-      frame = requestAnimationFrame(focusPendingRole);
-    };
-    frame = requestAnimationFrame(focusPendingRole);
-    return () => cancelAnimationFrame(frame);
-  }, [generationReview, pendingEngineFocusRole]);
+      if (routeCatalog === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.routeCatalogRequired');
+        return;
+      }
+      if (
+        currentGenerationCapability === null &&
+        (current.imageRouteId === null || routeCatalog.image.status !== 'ready')
+      ) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.imageRouteBlocked');
+        return;
+      }
+      const retryIds = handoff.failedReferenceIds.filter((referenceId) => {
+        const reference = Object.hasOwn(current.references, referenceId) ? current.references[referenceId] : undefined;
+        const job =
+          reference?.id !== referenceId
+            ? undefined
+            : [...reference.jobIds]
+                .toReversed()
+                .map((jobId) => (Object.hasOwn(current.jobs, jobId) ? current.jobs[jobId] : undefined))
+                .find(
+                  (candidate) =>
+                    candidate?.target.kind === 'reference' &&
+                    candidate.target.referenceId === referenceId &&
+                    candidate.purpose === 'reference_image'
+                );
+        const paidRetryableStatus =
+          job?.status === 'cancelled' ||
+          (job?.status === 'failed' &&
+            job.error !== null &&
+            job.error.code !== 'download_failed' &&
+            job.error.code !== 'dependency_failed');
+        const hasExactRetryAuthority =
+          reference?.id === referenceId &&
+          job !== undefined &&
+          reference.jobIds.includes(job.id) &&
+          current.referenceOrder.filter((candidateId) => candidateId === referenceId).length === 1 &&
+          job.projectId === current.id &&
+          job.target.kind === 'reference' &&
+          job.target.referenceId === referenceId &&
+          job.purpose === 'reference_image' &&
+          paidRetryableStatus;
+        return hasExactRetryAuthority;
+      });
+      if (retryIds.length !== handoff.failedReferenceIds.length) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.controls.selectionNotPayable');
+        return;
+      }
+      const disclosureGroups = generationBlockGroupsForItems(
+        currentGenerationCapability,
+        referenceCapabilityItems(retryIds)
+      );
+      setActionErrorMessageKey(null);
+      spendGate.open(
+        { projectId: current.id, expectedRevision: current.revision, referenceIds: retryIds },
+        undefined,
+        disclosureGroups.length === 0 ? undefined : { groups: disclosureGroups, blocksPrepare: true }
+      );
+    },
+    [
+      currentGenerationCapability,
+      generationDraftsBlockReview,
+      routeCatalog,
+      setActionErrorMessageKey,
+      spendGate.open,
+      spendGateLocked,
+    ]
+  );
 
-  const closeExportAndOpenProduce = useCallback((): void => {
-    if (exportPending) return;
-    setPostModalTransition({ view: 'board' });
-    setExportVisible(false);
-    setExportIncludeReferences(false);
-    setExportedFolderName(null);
-    setExportMissingSceneIds([]);
-    setExportIssueMessageKey(null);
-  }, [exportPending]);
-
-  const setBriefRules = useCallback(
-    async (rules: StudioBriefRuleDraft[]): Promise<boolean> => {
-      if (project === null) return false;
-      setRulesPending(true);
-      setRulesErrorMessageKey(null);
+  const dismissHandoff = useCallback(
+    async (handoff: StudioRendererReferenceGenerationHandoffV2): Promise<void> => {
+      const current = projectRef.current;
+      if (current === null) return;
+      const token = beginReviewedAction({ kind: 'handoff', id: handoff.handoffId });
+      if (token === null) {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatDecisionBusy');
+        return;
+      }
+      setActionErrorMessageKey(null);
       try {
-        const result = await ipcBridge.creativeStudio.setBriefRules.invoke({
-          projectId: project.id,
-          expectedRevision: project.revision,
-          rules,
+        const result = await ipcBridge.creativeStudio.dismissReferenceGenerationHandoff.invoke({
+          projectId: current.id,
+          expectedRevision: current.revision,
+          handoffId: handoff.handoffId,
         });
         if (result.ok === false) {
-          setRulesErrorMessageKey(result.error.messageKey);
-          return false;
+          setActionErrorMessageKey(result.error.messageKey);
+          return;
         }
-        // Adopt the bumped revision before returning, so the drawer's NEXT write CASes against the
-        // revision this one produced. `refetch` is the handle the page already destructures at :271
-        // and already passes to useStoryboardEditor, useStudioJobs and useStudioModels for exactly
-        // this purpose; it reloads `loadedProject`, which flows back through
-        // `newestProject(studioJobs.project, editor.project, loadedProject)` at :281.
-        //
-        // There is no `applyProject` to call: `adoptProject` is private to useStoryboardEditor
-        // (:494) and is not on `UseStoryboardEditorResult`, `creativeStudio.updateProject.invoke` is
-        // only ever called from inside that hook (:1249, :1386) and never from this page, and
-        // `useStudioProject` exposes only `refetch` (useStudioProject.ts:180-188). Do not widen the
-        // editor hook's API to satisfy a call that was never needed.
-        //
-        // `setBriefRules` also goes through main's `notify` (creativeStudioService.ts:979-982), which
-        // fires `onProjectUpdated` → `creativeStudio.projectUpdated.emit` → `useStudioJobs`'s
-        // subscription (useStudioJobs.ts:392) → the same `refetch`. That path would adopt eventually;
-        // awaiting here makes it deterministic instead, which is what add-then-remove in one drawer
-        // session needs.
-        await refetch();
-        return true;
+        await refetchReferences();
+      } catch {
+        setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
       } finally {
-        setRulesPending(false);
+        finishReviewedAction(token);
       }
     },
-    [project, refetch]
+    [beginReviewedAction, finishReviewedAction, refetchReferences, setActionErrorMessageKey]
   );
 
-  const undoBriefRules = useCallback(async (): Promise<boolean> => {
-    if (project === null) return false;
-    setRulesPending(true);
-    setRulesErrorMessageKey(null);
-    try {
-      const result = await ipcBridge.creativeStudio.undoBriefRules.invoke({ projectId: project.id });
-      if (result.ok === false) {
-        setRulesErrorMessageKey(result.error.messageKey);
-        return false;
-      }
-      await refetch();
-      return true;
-    } finally {
-      setRulesPending(false);
-    }
-  }, [project, refetch]);
-
-  useEffect(() => {
-    if (postModalTransition === null || exportVisible) return;
-    const transition = postModalTransition;
-    setPostModalTransition(null);
-    requestTransition(transition);
-  }, [exportVisible, postModalTransition, requestTransition]);
-
-  if (loading) {
+  if (loadState === 'loading' || loadState === 'idle') {
     return (
       <div className={styles.centered}>
-        <Spin tip={t('conversation.creativeStudio.project.loading')} />
+        <Spin tip={t('conversation.creativeStudio.workspace.project.loading')} />
       </div>
     );
   }
 
-  if (errorMessageKey && !project) {
-    return (
-      <div role='alert' className={styles.centered}>
-        {t(errorMessageKey)}
-      </div>
-    );
-  }
-
-  if (notFound || !project) {
+  if (loadState === 'unsupported') {
     return (
       <div className={styles.centered}>
-        <p>{t('conversation.creativeStudio.project.notFound')}</p>
-        <Button type='primary' onClick={() => navigate('/studio')}>
-          {t('conversation.creativeStudio.library.openProject')}
-        </Button>
+        <p>{t('conversation.creativeStudio.workspace.project.unsupportedPrototype')}</p>
+        <Link to='/studio'>{t('conversation.creativeStudio.workspace.project.backToLibrary')}</Link>
       </div>
     );
   }
 
-  if (readiness === null) return null;
+  if (loadState === 'not_found') {
+    return (
+      <div className={styles.centered}>
+        <p>{t('conversation.creativeStudio.workspace.project.notFound')}</p>
+        <Link to='/studio'>{t('conversation.creativeStudio.workspace.project.backToLibrary')}</Link>
+      </div>
+    );
+  }
 
-  const activeView = routeView ?? resolveStudioEntryView(project.id);
-  const projectUpdateIssue =
-    editor.conflict?.operation === 'update_project'
-      ? editor.conflict.messageKey
-      : editor.error?.operation === 'update_project'
-        ? editor.error.messageKey
-        : null;
-  const shellIssueMessageKey =
-    transitionIssueMessageKey ??
-    errorMessageKey ??
-    variationIssueMessageKey ??
-    referenceImportIssue?.messageKey ??
-    (briefOpen ? null : projectUpdateIssue);
-  const advisory: StudioPhaseControllers['advisory'] =
-    shellIssueMessageKey !== null
-      ? { messageKey: shellIssueMessageKey, anchor: 'shell' }
-      : // Cut-time concern with no Table render site since the pacing bar was
-        // removed, so it rides the shell advisory slot instead of vanishing silently.
-        activeView === 'table' && readiness.durationDeltaSeconds !== 0
-        ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'shell' }
-        : activeView === 'board' && readiness.readySceneIds.length === 0
-          ? { messageKey: 'conversation.creativeStudio.review.noReadyScenes', anchor: 'batch' }
-          : activeView === 'board' && readiness.durationDeltaSeconds !== 0
-            ? { messageKey: 'conversation.creativeStudio.review.durationMismatch', anchor: 'batch' }
-            : null;
-  const controller: StudioPhaseControllers = {
-    project,
-    proposals,
-    readiness,
-    editor,
-    models: studioModels,
-    jobs: studioJobs,
-    render: studioRender,
-    selectedAsset,
-    posterAsset,
-    selectedReferenceAsset,
-    writeFocusIntent,
-    advisory,
-    mutationPending:
-      canonicalMutationPending || referenceImportSceneId !== null || generationReviewRefreshing || exportPending,
-    generationReviewOpen: generationReview !== null,
-    requestTransition,
-    openBrief: () => setBriefOpen(true),
-    openRules: () => setRulesOpen(true),
-    acceptProposal: (request) => ipcBridge.creativeStudio.acceptProposal.invoke(request),
-    rejectProposal: (request) => ipcBridge.creativeStudio.rejectProposal.invoke(request),
-    openDraftReview: () => setDraftModalVisible(true),
-    openSingleGenerationReview: openSingleReview,
-    openBatchGenerationReview: openBatchReview,
-    focusEngineRole,
-    openExport,
-    refreshProject: refetch,
-    openModelSettings,
-    importReference: handleImportReference,
-    selectVariation: handleSelectVariation,
-    clearWriteFocusIntent,
-    openDuplicateChargeConfirmation: setDuplicateChargeJobId,
-  };
-  // Undefined rather than an always-rendered component, so the pane can drop its separator and
-  // padding entirely when nothing is pending instead of showing an empty bordered strip.
-  const directorProposals =
-    pendingDirectorProposals(proposals).length > 0 ? (
-      <DirectorProposals
-        project={project}
-        proposals={proposals}
-        editor={editor}
-        acceptProposal={controller.acceptProposal}
-        rejectProposal={controller.rejectProposal}
-      />
-    ) : undefined;
-  const referenceAdvisory =
-    referenceNotice?.kind === 'excluded' ? (
-      <Alert
-        type='warning'
-        content={
-          <div data-testid='reference-exclusion-notice'>
-            <p className='m-0'>{t('conversation.creativeStudio.reference.excludedNoneReady')}</p>
-            <ul className='mb-0 mt-6px pl-18px'>
-              {referenceNotice.scenes.map((scene) => (
-                <li key={scene.id}>
-                  <span>{scene.title}</span>
-                  <span> — {t(scene.reasonMessageKey)}</span>
-                </li>
-              ))}
-            </ul>
-            <Button
-              className='mt-8px'
-              type='text'
-              status='danger'
-              loading={studioJobs.mutationPending}
-              onClick={() => void dismissExcludedReferenceRequests()}
-            >
-              {t('conversation.creativeStudio.reference.discardExcludedRequests')}
-            </Button>
-          </div>
-        }
-      />
-    ) : referenceNotice?.kind === 'dismiss_failed' ? (
-      <Alert type='error' content={t('conversation.creativeStudio.reference.dismissFailed')} />
-    ) : undefined;
+  if (project === null) {
+    return (
+      <div className={styles.centered}>
+        <p role='alert'>{t(errorMessageKey ?? 'conversation.creativeStudio.workspace.errors.storage')}</p>
+        <Link to='/studio'>{t('conversation.creativeStudio.workspace.project.backToLibrary')}</Link>
+      </div>
+    );
+  }
+
+  const directorReviewCard = (
+    cardProposals: DirectorProposalsProps['proposals'],
+    cardReferenceRequests: DirectorProposalsProps['referenceRequests'],
+    cardHandoffs: DirectorProposalsProps['referenceGenerationHandoffs'],
+    cardProposalErrorMessageKey: string | null = null,
+    cardReferenceErrorMessageKey: string | null = null
+  ): React.ReactNode => (
+    <DirectorProposals
+      project={project}
+      proposals={cardProposals}
+      referenceRequests={cardReferenceRequests}
+      referenceGenerationHandoffs={cardHandoffs}
+      pendingAction={pendingReviewedAction}
+      actionsLocked={reviewedActionLocked}
+      proposalAuthorityState={proposalAuthorityState}
+      proposalAuthorityVerified={proposalAuthorityVerified}
+      proposalDraftBlocker={proposalDraftBlocker}
+      proposalErrorMessageKey={cardProposalErrorMessageKey}
+      referenceErrorMessageKey={cardReferenceErrorMessageKey}
+      onAcceptProposal={acceptProposalFromCard}
+      onRejectProposal={rejectProposalFromCard}
+      paidRecoveryQuote={paidRecoveryQuote}
+      paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey}
+      onPaidRecoveryAction={actOnPaidRecoveryProposal}
+      onRequestUpdatedProposal={requestUpdatedProposal}
+      onReviewRuleDrafts={reviewRuleDrafts}
+      onEditProposalShots={openProposalShotEditor}
+      onGenerateReferences={(requestId) => decideReferences(requestId, { kind: 'generation_gate' })}
+      onRejectReferences={(requestId) => decideReferences(requestId, { kind: 'rejected' })}
+      onReviewHandoff={reviewHandoff}
+      onReviewReferences={reviewGeneratedReferences}
+      onRetryFailedReferences={retryFailedReferences}
+      onDismissHandoff={dismissHandoff}
+      gateLocked={spendGateLocked}
+      reviewBlockedMessageKey={handoffReviewBlockedMessageKey}
+    />
+  );
+  const proposalInbox = directorReviewCard(proposals, [], [], proposalErrorMessageKey);
+  const reviewedDirectorOutputs: WorkspaceReviewedOutput[] = [
+    ...referenceRequests.map((request) => ({
+      id: `reference-request-${request.id}`,
+      createdAt: Date.parse(request.createdAt),
+      content: directorReviewCard([], [request], []),
+    })),
+    ...referenceGenerationHandoffs.map((handoff) => ({
+      id: `reference-handoff-${handoff.handoffId}`,
+      createdAt: Date.parse(handoff.decidedAt),
+      content: directorReviewCard([], [], [handoff]),
+    })),
+    ...(referenceErrorMessageKey === null
+      ? []
+      : [
+          {
+            id: 'reference-error',
+            createdAt: Date.parse(project.updatedAt),
+            content: directorReviewCard([], [], [], null, referenceErrorMessageKey),
+          },
+        ]),
+  ];
 
   return (
-    <section aria-label={t('conversation.creativeStudio.project.title')} className={styles.projectShell}>
-      <BriefConversationProvider project={project}>
-        <StudioShell director={<DirectorPane proposals={directorProposals} />} projectId={project.id}>
-          <StudioPhaseShell
-            activeView={activeView}
-            controller={controller}
-            navigationDisabled={transitionBlocked || pendingTransition !== null}
-            notice={referenceAdvisory}
-            onBack={() => navigate('/studio')}
-          />
-        </StudioShell>
-        <StudioGenerationReview
-          reports={breachReports}
-          onAsked={() => setGenerationReview(null)}
-          visible={generationReview !== null}
-          mode={generationReview?.mode ?? 'single'}
-          scenes={generationReview?.scenes ?? []}
-          ruleBreachesBySceneId={ruleBreachesBySceneId}
-          excludedScenes={generationReview?.excludedScenes}
-          aspectRatio={project.aspectRatio}
-          resolution={project.resolution}
-          targetDurationSeconds={project.targetDurationSeconds}
-          selectedDurationSeconds={
-            generationReview?.scenes.reduce((total, scene) => total + scene.durationSeconds, 0) ?? 0
-          }
-          projectDurationSeconds={project.sceneOrder.reduce((total, sceneId) => {
-            const scene = project.scenes[sceneId];
-            return scene?.id === sceneId ? total + scene.durationSeconds : total;
-          }, 0)}
-          submitting={studioJobs.mutationPending || generationReviewRefreshing}
-          submissionBlocked={
-            generationBlocked ||
-            (studioJobs.issue?.operation === 'submit_scenes' && studioJobs.issue.code === 'invalid_route')
-          }
-          errorMessageKey={
-            studioJobs.issue?.operation === 'submit_scenes'
-              ? studioJobs.issue.messageKey
-              : generationReviewIssueMessageKey
-          }
-          onCancel={async () => {
-            if (!studioJobs.mutationPending && !generationReviewRefreshing && !generationReviewRefreshingRef.current) {
-              const requestIds = generationReview?.referenceRequestIds;
-              if (generationReview?.referenceRequestsRequireConfirmation === true) {
-                requestIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-                studioJobs.clearIssue();
-                studioJobs.clearStaleIntent();
-                setGenerationReviewIssueMessageKey(null);
-                setGenerationReview(null);
-                return;
-              }
-              const dismissed =
-                requestIds === undefined ||
-                requestIds.length === 0 ||
-                (await studioJobs.dismissReferenceRequests(requestIds));
-              const suppressedIds = dismissed
-                ? requestIds
-                : (generationReview?.referenceRequests?.map(({ id: requestId }) => requestId) ?? requestIds);
-              suppressedIds?.forEach((requestId) => suppressedReferenceRequestIdsRef.current.add(requestId));
-              if (dismissed) studioJobs.clearIssue();
-              studioJobs.clearStaleIntent();
-              setGenerationReviewIssueMessageKey(null);
-              setGenerationReview(null);
-              if (!dismissed) setReferenceNotice({ kind: 'dismiss_failed' });
-            }
-          }}
-          onSetEngines={(role) => {
-            if (
-              generationReview?.referenceRequestIds !== undefined &&
-              generationReview.referenceRequests !== undefined
-            ) {
-              const requestById = new Map(generationReview.referenceRequests.map((request) => [request.id, request]));
-              const includedRequests = generationReview.referenceRequestIds.map((requestId) =>
-                requestById.get(requestId)
-              );
-              if (includedRequests.length > 0 && includedRequests.every((request) => request !== undefined)) {
-                deferredReferenceReviewsRef.current.push({
-                  requests: includedRequests,
-                  sceneIds: generationReview.scenes.map(({ id }) => id),
-                });
-              }
-            }
-            studioJobs.clearIssue();
-            studioJobs.clearStaleIntent();
-            setGenerationReviewIssueMessageKey(null);
-            setGenerationReview(null);
-            focusEngineRole(role);
-          }}
-          onConfirm={confirmGeneration}
-        />
-      </BriefConversationProvider>
-      <StoryboardDraftModal
-        visible={draftModalVisible}
+    <>
+      <WorkspaceShell
+        ref={workspaceShellRef}
         project={project}
-        storyboard={studioModels.catalog?.storyboard ?? null}
-        catalogLoading={studioModels.loading}
-        catalogErrorMessageKey={draftErrorMessageKey}
-        selectionPending={studioModels.pendingRole === 'storyboard'}
-        draftConflict={draftConflict !== null}
-        drafting={editor.drafting}
-        onCancel={() => setDraftModalVisible(false)}
-        proposeStoryboard={handleDraftStoryboard}
-        onDiscardDraftConflict={editor.discardConflict}
-        onContinueManual={() => setDraftModalVisible(false)}
-        onOpenSettings={() => setTimeout(() => navigate('/settings/model'), 0)}
-        onRefreshCatalog={studioModels.refresh}
-        onSelectStoryboardModel={(selection) => studioModels.updateSelection({ role: 'storyboard', selection })}
-      />
-      <StudioBriefDrawer
-        visible={briefOpen}
-        controller={{
-          ...controller,
-          briefReferenceMutationPending,
-          briefReferenceIssueMessageKey,
-          addBriefReference: handleAddBriefReference,
-          removeBriefReference: handleRemoveBriefReference,
-        }}
-        onClose={() => setBriefOpen(false)}
-      />
-      {project !== null && (
-        <StudioRulesDrawer
-          visible={rulesOpen}
-          project={project}
-          pending={rulesPending}
-          errorMessageKey={rulesErrorMessageKey}
-          onClose={() => setRulesOpen(false)}
-          onSetRules={setBriefRules}
-          onUndoRules={undoBriefRules}
-        />
-      )}
-      <StudioExportModal
-        visible={exportVisible}
-        project={project}
-        selectedAssetCount={readiness.selectedAssetCount}
-        pending={exportPending}
-        includeReferences={exportIncludeReferences}
-        exportedFolderName={exportedFolderName}
-        missingSceneIds={exportMissingSceneIds}
-        issueMessageKey={exportIssueMessageKey}
-        latestRender={exportLatestRender}
-        latestRenderReady={exportLatestRenderReady}
-        onCancel={() => setExportVisible(false)}
-        onConfirm={() => void handleExportAssets()}
-        onIncludeReferencesChange={setExportIncludeReferences}
-        onOpenProduce={closeExportAndOpenProduce}
-      />
-      <Modal
-        visible={duplicateChargeJobId !== null}
-        wrapClassName={styles.modalSurface}
-        title={t('conversation.creativeStudio.jobs.retryChargeTitle')}
-        closable={!studioJobs.mutationPending}
-        maskClosable={!studioJobs.mutationPending}
-        escToExit={!studioJobs.mutationPending}
-        onCancel={() => {
-          if (!studioJobs.mutationPending) setDuplicateChargeJobId(null);
-        }}
-        footer={
-          <div className='flex flex-wrap justify-end gap-8px'>
-            <Button disabled={studioJobs.mutationPending} onClick={() => setDuplicateChargeJobId(null)}>
-              {t('conversation.creativeStudio.review.cancel')}
-            </Button>
-            <Button
-              type='primary'
-              loading={studioJobs.mutationPending}
-              onClick={() => {
-                const jobId = duplicateChargeJobId;
-                if (jobId === null || studioJobs.mutationPending) return;
-                void studioJobs.retryJob(jobId, true).then((retried) => {
-                  if (retried) setDuplicateChargeJobId(null);
-                });
-              }}
-            >
-              {t('conversation.creativeStudio.jobs.retryChargeConfirm')}
-            </Button>
-          </div>
+        onDirectorProposalIntent={decideProposalFromDirectorChat}
+        directorDraftRequest={directorDraftRequest}
+        onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
+        proposalInbox={proposalInbox}
+        activeView={activeView}
+        viewReadiness={viewReadiness}
+        projectStatusPending={projectStatusPending}
+        onChooseView={chooseStudioView}
+        stats={projection === null || projectStatusPending ? undefined : buildStudioBarStats(projection, projectStatus)}
+        renderAction={
+          <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>
+            {t('conversation.creativeStudio.workspace.controls.renderFilm')}
+          </Button>
         }
+        renamePending={workspacePending}
+        onRenameProject={(name, authority) => mutations.editProject({ name }, authority)}
+        projectMenu={
+          projection === null ? undefined : (
+            <WorkspaceProjectMenu
+              project={project}
+              projection={projection}
+              routeCatalog={routeCatalog}
+              generationCapability={currentGenerationCapability}
+              exportCatalog={exportCatalog}
+              filmExportCapability={filmExportCapability}
+              createEditorFolder={createEditorFolder}
+              revealEditorFolder={revealEditorFolder}
+              createFilm={createFilm}
+              getFilmExportStatus={getFilmExportStatus}
+              refreshExports={refetchExports}
+              cancelFilmExport={cancelFilmExport}
+              acknowledgeFilmExport={acknowledgeFilmExport}
+              revealFilm={revealFilm}
+              detachBedAudio={cutActions.detachBedAudio}
+              drafts={drafts}
+              pending={workspacePending}
+              errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+              mutations={mutations}
+              briefDialogRequest={briefDialogRequest}
+              briefRouteFocusRole={briefRouteFocusRole}
+              onRuleDraftDirtyCountChange={setRuleDraftDirtyCount}
+              onActiveRuleDraftDirtyCountChange={setActiveRuleDraftDirtyCount}
+            />
+          )
+        }
+        notice={
+          activeView === 'references' ||
+          (actionErrorMessageKey === null && workspaceErrorMessageKey === null && routeErrorMessageKey === null)
+            ? undefined
+            : t(actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey!)
+        }
+        reviewedOutputs={reviewedDirectorOutputs}
       >
-        <p>{t('conversation.creativeStudio.jobs.retryChargeBody')}</p>
-        {studioJobs.issue?.jobId === duplicateChargeJobId && (
-          <div role='alert' className={styles.projectAlert}>
-            {t(studioJobs.issue.messageKey)}
-          </div>
+        {projection === null || activeView === null ? null : (
+          <StudioPlaybackAudioProvider projectId={project.id}>
+            <StudioShotAudioAnalysisProvider
+              projectId={project.id}
+              projectRevision={project.revision}
+              shots={projection.activeBeats.flatMap((beat) =>
+                beat.shots.flatMap((shot) =>
+                  shot.currentPicture === null ? [] : [{ shotId: shot.id, assetId: shot.currentPicture.assetId }]
+                )
+              )}
+            >
+              <WorkspaceControls
+                activeView={activeView}
+                boardActions={boardActions}
+                cutActions={cutActions}
+                project={project}
+                projectStatus={projectStatus}
+                projectStatusPending={projectStatusPending}
+                projection={projection}
+                drafts={drafts}
+                pending={workspacePending}
+                gateLocked={spendGateLocked}
+                imageRouteReady={
+                  currentGenerationCapability !== null ||
+                  (project.imageRouteId !== null && routeCatalog?.image.status === 'ready')
+                }
+                errorMessageKey={actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey}
+                mutations={mutations}
+                beatPanelActions={beatPanelActions}
+                beatPanelReviewGraphs={beatPanelReviewGraphs}
+                beatPanelReviewBlockedMessageKey={beatPanelReviewBlockedMessageKey}
+                referenceActions={referenceActions}
+                referenceMaxConditioningImages={
+                  routeCatalog?.image.selectedRoute?.constraints.maxConditioningImages ?? null
+                }
+                referencePendingId={pendingReferenceId}
+                referenceErrorMessageKey={
+                  activeView === 'references'
+                    ? (actionErrorMessageKey ?? workspaceErrorMessageKey ?? routeErrorMessageKey)
+                    : null
+                }
+                referenceFocusIntent={referenceFocusIntent}
+                onReferenceFocusIntentConsumed={consumeReferenceFocusIntent}
+                shotEditFocusIntent={shotEditFocusIntent}
+                onShotEditFocusIntentConsumed={consumeShotEditFocusIntent}
+                onReviewShotReferenceBinding={reviewShotBinding}
+              />
+            </StudioShotAudioAnalysisProvider>
+          </StudioPlaybackAudioProvider>
         )}
-      </Modal>
-    </section>
+      </WorkspaceShell>
+      <SpendGateModal
+        state={spendGate.state}
+        close={spendGate.close}
+        promoteOnly={spendGate.promoteOnly}
+        prepare={spendGate.prepare}
+        selectOption={spendGate.selectOption}
+        confirm={spendGate.confirm}
+        onEditRoutes={editSpendGateRoutes}
+        onReviewShotBinding={reviewShotBinding}
+        projectReferences={project.referenceOrder.flatMap((referenceId) => {
+          const reference = Object.hasOwn(project.references, referenceId)
+            ? project.references[referenceId]
+            : undefined;
+          return reference?.id === referenceId
+            ? [{ id: reference.id, kind: reference.kind, label: reference.label }]
+            : [];
+        })}
+      />
+    </>
   );
 };
 
 const StudioPage: React.FC = () => {
-  const { id, view } = useParams<{ id: string; view?: string }>();
+  const { id, view } = useParams<{ id?: string; view?: string }>();
   const routeView = parseStudioView(view);
-
-  // The library is a document — it scrolls the page and sits inside its margins. A project is a
-  // frame: it fills the viewport so the Director's composer stays on screen, and hands scrolling
-  // to the work panel. One element serves both, so the frame is a modifier rather than the default.
+  const projectCloseContractRef = useRef<StudioCloseContract | null>(null);
+  const updateProjectCloseContract = useCallback((contract: StudioCloseContract | null): void => {
+    projectCloseContractRef.current = contract;
+  }, []);
+  const resolveCloseContract = useCallback(
+    (): StudioCloseContract =>
+      projectCloseContractRef.current ?? {
+        dirtyDraftCount: countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts(),
+        saveAll: async () => countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts() === 0,
+      },
+    []
+  );
   return (
-    <main className={id ? `${styles.page} ${styles.pageProject}` : styles.page}>
-      {id ? <StudioProjectShell key={id} routeView={routeView} /> : <StudioLibrary />}
-    </main>
+    <>
+      <StudioCloseResponse resolve={resolveCloseContract} />
+      <div className={`${styles.page} ${id ? styles.pageProject : ''}`} data-studio-workspace>
+        {id && view !== undefined && routeView === null ? (
+          <Navigate replace to={studioProjectPath(id)} />
+        ) : id ? (
+          <StudioProjectPage
+            key={id}
+            projectId={id}
+            routeView={routeView}
+            onCloseContractChange={updateProjectCloseContract}
+          />
+        ) : (
+          <StudioLibrary />
+        )}
+      </div>
+    </>
   );
 };
 

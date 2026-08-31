@@ -12,9 +12,12 @@ import type {
   StudioMediaKind,
   StudioProviderAdapterId,
   StudioResolution,
+  StudioRouteConstraints,
   StudioRouteIssue,
   StudioRouteValidation,
 } from '@/common/types/project/creativeStudioTypes';
+
+export { isValidProviderJobId } from '@/common/types/project/creativeStudioTypes';
 
 /** Main-process-only reference material resolved by the managed Studio media store. */
 export type ResolvedProviderInput = {
@@ -35,6 +38,8 @@ export type StudioGenerationRequest = {
 };
 
 export type ResolvedStudioGenerationRequest = StudioGenerationRequest & {
+  /** Main-owned, durable route authority re-proved before a paid submission. */
+  routeConstraints?: Readonly<StudioRouteConstraints>;
   firstFrame?: ResolvedProviderInput;
   conditioningImages?: readonly ResolvedProviderInput[];
   conditioningImageLimit?: number;
@@ -48,6 +53,12 @@ export type { NormalizedStudioGenerationParameters, StudioRouteIssue, StudioRout
 
 export type SanitizedProviderErrorCode =
   | 'auth'
+  /** A spend limit the user can act on — a balance or a per-key cap, not a broken request. */
+  | 'quota'
+  /** The provider rejected the request definitively. Never an outcome we could not determine. */
+  | 'invalid_request'
+  /** The provider's bounded safety classifier rejected the supplied media. */
+  | 'content_rejected'
   | 'rate_limited'
   | 'provider_unavailable'
   | 'timeout'
@@ -118,13 +129,6 @@ export type ProviderFetch = (
     redirect?: RequestRedirect;
   }
 ) => Promise<ProviderHttpResponse>;
-
-/**
- * Bounds remote IDs to URL-unreserved opaque tokens before they are retained or
- * interpolated into provider routes. URL, path, query, and fragment syntax is rejected.
- */
-export const isValidProviderJobId = (value: string): boolean =>
-  value.length <= 512 && /^[A-Za-z0-9][A-Za-z0-9._~-]*$/.test(value);
 
 export class ProviderDeadlineError extends Error {
   constructor() {

@@ -878,29 +878,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "مراجع پروژه",
-      "inheritanceDescription": "هر تصویر مرجع جدید از همه تصاویر فعال بازیگران و ظاهر این پروژه استفاده می‌کند.",
-      "castHeading": "بازیگران",
-      "lookHeading": "ظاهر",
-      "castEmpty": "هنوز مرجعی برای بازیگران وجود ندارد.",
-      "lookEmpty": "هنوز مرجعی برای ظاهر وجود ندارد.",
-      "addCast": "افزودن مرجع بازیگر",
-      "addLook": "افزودن مرجع ظاهر",
-      "activeCount": "{{count}} مرجع فعال",
-      "activeCount_one": "{{count}} مرجع فعال",
-      "activeCount_other": "{{count}} مرجع فعال",
-      "limitReached": "این پروژه از قبل ۶ مرجع فعال دارد. پیش از افزودن مرجع جدید، یکی را حذف کنید.",
-      "removeFromBrief": "حذف از بریف",
-      "removeAccessible": "حذف {{label}} از بریف",
-      "previewAccessible": "مرجع {{role}}: {{label}}",
-      "engineCapacityNone": "این موتور تصویر هنوز برای تصاویر مرجع اعتبارسنجی نشده است. تنظیمات مدل را باز کنید و دوباره آن را اعتبارسنجی کنید.",
-      "engineMenuCapacityNone": "بدون تصویر مرجع",
-      "engineCapacityMaximum": "حداکثر {{count}} تصویر مرجع",
-      "engineCapacityMaximum_one": "حداکثر {{count}} تصویر مرجع",
-      "engineCapacityMaximum_other": "حداکثر {{count}} تصویر مرجع",
-      "capacityMismatch": "شما {{count}} مرجع فعال دارید، اما این موتور تصویر از {{maximum}} مرجع پشتیبانی می‌کند. تا زمانی که مراجع را حذف نکنید یا موتور را تغییر ندهید یا دوباره اعتبارسنجی نکنید، تولید تصاویر مرجع جدید مسدود می‌ماند.",
-      "importError": "مرجع افزوده نشد. دوباره تلاش کنید."
+    "workspace": {
+      "views": {
+        "references": "مرجع‌ها"
+      },
+      "start": {
+        "title": "از کارگردان شروع کنید",
+        "description": "کارگردان نخستین طرح را بر اساس شرح پروژه آماده می‌کند. وقتی آماده شد، آن را اینجا بازبینی کنید."
+      },
+      "notReady": {
+        "references": "تا وقتی کارگردان مرجع‌ها را برنامه‌ریزی نکرده، چیزی برای بازبینی نیست.",
+        "table": "تا وقتی کارگردان استوری‌بورد را آماده نکرده، چیزی برای چیدمان نیست.",
+        "board": "تا وقتی جدول آماده نشده، چیزی برای تولید نیست.",
+        "cut": "تا وقتی تولید شروع نشده، چیزی برای تدوین نیست."
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "تصاویر مرجع اصلی",
+          "intro": "برای هر شخصیت و مکان تکرارشونده یک تصویر فعلی بسازید. این تصاویر تا زمانی که برداشت دیگری را انتخاب کنید مرجع اصلی می‌مانند.",
+          "progress": "{{current}} از {{total}} فعلی",
+          "bindShots": "اتصال شات‌ها",
+          "characterRule": "ابتدا شخصیت‌ها",
+          "placeRule": "سپس مکان‌های تکرارشونده",
+          "addCharacter": "افزودن شخصیت",
+          "addCharacterUnavailable": "هویت شخصیت از طرح مرجع تأییدشدهٔ کارگردان می‌آید.",
+          "places": "مکان‌ها",
+          "addPlace": "افزودن مکان",
+          "kind": {
+            "character": "شخصیت",
+            "background": "مکان"
+          },
+          "nameLabel": "نام {{kind}}",
+          "meta": {
+            "character": "شخصیت · {{count}} عکس",
+            "background": "مکان · {{count}} عکس"
+          },
+          "status": {
+            "noPhoto": "بدون عکس",
+            "current": "فعلی تنظیم شد",
+            "generating": "در حال تولید"
+          },
+          "duplicateName": "این نام برای این نوع مرجع قبلاً استفاده شده است.",
+          "emptyPhoto": "تولید اولین عکس",
+          "currentHandle": "{{handle}} · فعلی",
+          "currentReference": "مرجع اصلی فعلی",
+          "download": "دانلود {{handle}}",
+          "choosePhoto": "تنظیم {{handle}} به‌عنوان فعلی",
+          "addPhoto": "تولید عکس دیگر",
+          "photoCount": "{{count}} عکس",
+          "promptLabel": "پرامپت برای {{label}}",
+          "promptPlaceholder": {
+            "character": "هویت ثابت، پوشش و ویژگی‌های بصری را توصیف کنید.",
+            "background": "مکان تکرارشونده و ویژگی‌های بصری ثابت آن را توصیف کنید."
+          },
+          "action": {
+            "generate": "تولید",
+            "generateAnother": "تولید یکی دیگر",
+            "generateAgain": "تولید دوباره",
+            "cancelRun": "لغو اجرا"
+          },
+          "tag": {
+            "running": "در حال اجرا",
+            "edited": "پرامپت ویرایش شد"
+          },
+          "importPhoto": "وارد کردن عکس",
+          "removePhoto": "حذف {{handle}}",
+          "removePhotoLocked": "این عکس به‌دلیل کار حل‌نشده قفل است. پیش از حذف، موانع زیر را بررسی کنید.",
+          "removalBlocker": {
+            "activeReferenceJob": "کار {{purpose}} با شناسهٔ {{jobId}} برای این مرجع هنوز حل نشده است. عکس فعلی تا رسیدن کار به وضعیت پایانی قفل می‌ماند.",
+            "activeAssetConsumer": "{{purpose}} برای Beat {{beatPosition}}، Shot {{shotPosition}} دقیقاً از این عکس استفاده می‌کند. تا حل شدن کار، عکس قفل می‌ماند.",
+            "activeAssetConsumerRetained": "{{purpose}} برای Shot نگه‌داری‌شدهٔ {{shotId}} دقیقاً از این عکس استفاده می‌کند. تا حل شدن کار، عکس قفل می‌ماند.",
+            "activeAssetConsumerOther": "کار {{purpose}} با شناسهٔ {{jobId}} دقیقاً از این عکس استفاده می‌کند. تا حل شدن کار، عکس قفل می‌ماند.",
+            "downloadRecovery": "{{purpose}} برای Beat {{beatPosition}}، Shot {{shotPosition}} در ارائه‌دهنده پایان یافت، اما نتیجه دانلود نشد. اینجا دوباره تلاش کنید؛ عکس تا موفقیت بازیابی قفل می‌ماند.",
+            "downloadRecoveryRetainedShot": "{{purpose}} برای Shot نگه‌داری‌شدهٔ {{shotId}} در ارائه‌دهنده پایان یافت، اما نتیجه دانلود نشد. Shot را از سطل Board بازیابی کنید تا روند بازیابی را بررسی کنید؛ عکس تا موفقیت بازیابی قفل می‌ماند.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} برای Shot {{shotId}} در Beat نگه‌داری‌شدهٔ {{beatId}} در ارائه‌دهنده پایان یافت، اما نتیجه دانلود نشد. Beat را از سطل Board بازیابی کنید تا روند بازیابی را بررسی کنید؛ عکس تا موفقیت بازیابی قفل می‌ماند.",
+            "downloadRecoveryOther": "کار {{purpose}} با شناسهٔ {{jobId}} در ارائه‌دهنده پایان یافت، اما نتیجه دانلود نشد. اینجا دوباره تلاش کنید؛ عکس تا موفقیت بازیابی قفل می‌ماند.",
+            "invalidAuthority": "داده‌های مرجع عکس فعلی ناسازگار است. پروژه را دوباره بارگیری و این مرجع را بررسی کنید، سپس دوباره برای حذف تلاش کنید.",
+            "reviewInBoard": "بررسی در Board"
+          }
+        },
+        "description": "ابتدا تصویر مرجع اصلی شخصیت‌ها و سپس تصویر پس‌زمینه‌های تکرارشونده را تولید کنید. پیش از تولید بورد یا فریم نخست، مرجع‌های فعلی را دقیقاً به هر نما متصل کنید.",
+        "generationScope": "دامنهٔ تولید",
+        "characters": {
+          "title": "شخصیت‌ها",
+          "description": "برای هر شخصیت نام‌دار یک تصویر مرجع اصلی فعلی تولید کنید.",
+          "empty": "این داستان شخصیت نام‌داری ندارد. اکنون می‌توان پس‌زمینه‌ها را بررسی کرد."
+        },
+        "backgrounds": {
+          "title": "پس‌زمینه‌ها",
+          "description": "مکان‌های تکرارشونده‌ای را تولید کنید که یکپارچگی بصری فیلم را حفظ می‌کنند.",
+          "charactersRequired": "پیش از بررسی پس‌زمینه‌ها همهٔ شخصیت‌ها را تولید کنید.",
+          "empty": "هیچ پس‌زمینهٔ تکرارشونده‌ای لازم نیست.",
+          "add": "افزودن پس‌زمینه",
+          "addTitle": "افزودن پس‌زمینهٔ تکرارشونده",
+          "nameLabel": "نام پس‌زمینه",
+          "promptLabel": "پرامپت تولید",
+          "duplicate": "پس‌زمینه‌ای با این نام از قبل وجود دارد.",
+          "cancel": "لغو",
+          "confirm": "افزودن پس‌زمینه"
+        },
+        "previewPending": "هنوز تصویر مرجع تولید نشده است.",
+        "previewAlt": "تصویر مرجع فعلی برای {{label}}",
+        "status": {
+          "idle": "تولید نشده",
+          "queued": "در صف",
+          "running": "در حال تولید",
+          "succeeded": "تولید شد",
+          "failed": "تولید ناموفق بود",
+          "current": "فعلی"
+        },
+        "regenerate": "تولید دوباره",
+        "chooseGenerated": "انتخاب تصویر تولیدشده",
+        "regeneratePromptLabel": "پرامپت تولید",
+        "regenerateCancel": "لغو",
+        "reviewGeneration": "بررسی هزینهٔ تولید",
+        "generatedHistory": "تصاویر تولیدشده",
+        "historyClose": "بستن",
+        "historyPreviewAlt": "تصویر مرجع تولیدشده برای {{label}}",
+        "historyCurrent": "تصویر فعلی",
+        "historyChoose": "انتخاب این تصویر",
+        "currentProgress": "{{current}} از {{total}} مرجع تولید شده",
+        "bindings": {
+          "title": "اتصال‌های Shot",
+          "description": "شخصیت‌ها و پس‌زمینهٔ فعلی و دقیق را که هر Shot برای پنل Board و فریم نخست استفاده می‌کند انتخاب کنید.",
+          "empty": "Shot فعالی برای اتصال وجود ندارد.",
+          "shot": "Shot {{position}}",
+          "unassigned": "برای این Shot هنوز تصمیم مرجع ثبت نشده است.",
+          "invalid": "این اتصال ذخیره‌شده دیگر معتبر نیست. مراجع فعلی را انتخاب و دوباره ذخیره کنید.",
+          "capacity": "در مجموع شخصیت‌ها و پس‌زمینه {{count}} مرجع انتخاب شده، اما ظرفیت مشترک مسیر تصویر {{limit}} است.",
+          "capacityUsage": "{{count}} / {{limit}} جایگاه مشترک مرجع تصویر استفاده شده (شخصیت‌ها + پس‌زمینه)",
+          "characters": "شخصیت‌ها",
+          "background": "پس‌زمینه",
+          "save": "ذخیرهٔ اتصال",
+          "progress": "{{ready}} از {{total}} Shot متصل"
+        }
+      },
+      "references": {
+        "referenceCount": "برای {{total}} مورد مرجع درخواست شد"
+      },
+      "handoffs": {
+        "referenceCount": "این تحویل شامل {{total}} مرجع است",
+        "progress": "در صف {{queued}} · در حال اجرا {{running}} · موفق {{succeeded}} · ناموفق {{failed}}",
+        "reviewReferences": "بررسی مرجع‌ها",
+        "retryFailed": "تلاش دوباره برای مرجع‌های ناموفق",
+        "awaiting_spend": "در انتظار بازبینی هزینه",
+        "running": "تولید مراجع در حال اجراست.",
+        "succeeded": "همهٔ مراجع درخواستی تولید شدند.",
+        "partially_failed": "بخشی از مراجع تولید شد؛ موارد ناموفق را جداگانه دوباره امتحان کنید.",
+        "failed": "تولید مراجع ناموفق بود. تلاش خودکاری انجام نمی‌شود.",
+        "dismissed": "بدون هزینه بسته شد"
+      },
+      "table": {
+        "reorder": {
+          "label": "کنش‌های مرتب‌سازی {{title}}",
+          "dragHandle": "مرتب‌سازی مجدد {{title}} در جایگاه {{position}}",
+          "moveEarlier": "انتقال {{title}} به قبل",
+          "moveLater": "انتقال {{title}} به بعد",
+          "announcement": "{{title}} از جایگاه {{from}} به {{to}} از {{total}} منتقل شد.",
+          "failed": "ترتیب Beatها تغییر نکرد."
+        },
+        "authoring": {
+          "label": "نگارش و بازیابی داستان",
+          "coverageGap": "{{count}} از {{total}} Beat هیچ Shoti ندارند",
+          "coverageGap_one": "{{count}} از {{total}} Beat هیچ Shoti ندارد",
+          "coverageGap_other": "{{count}} از {{total}} Beat هیچ Shoti ندارند",
+          "unscriptedWarning": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارند",
+          "unscriptedWarning_one": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارد",
+          "unscriptedWarning_other": "{{count}} Shot فیلم‌نامهٔ تصویربرداری ندارند",
+          "askDirector": "پرسش از کارگردان",
+          "addBeat": "افزودن Beat",
+          "addShot": "افزودن Shot",
+          "addShotForBeat": "افزودن Shot به {{title}}",
+          "unassignedReferenceNote": "Shot ساخته‌شده به‌صورت دستی با ارجاع‌های تخصیص‌نیافته آغاز می‌شود و پیش از تولید پولی باید بازبینی شود."
+        },
+        "columns": {
+          "length": "مجموع",
+          "panel": "پنل",
+          "story": "داستان"
+        },
+        "plannedPending": "جمع برنامه‌ریزی‌شده موجود نیست",
+        "panel": {
+          "openDetails": "باز کردن پنل‌های بورد برای {{title}}",
+          "closeDetails": "بستن پنل‌های بورد برای {{title}}",
+          "cardLabel": "شات {{position}}: {{status}}",
+          "shotDetails": "جزئیات شات {{position}}",
+          "head": "آغاز زنجیره",
+          "status": {
+            "missing": "طراحی نشده",
+            "current": "فعلی",
+            "stale": "قدیمی",
+            "statusPending": "وضعیت در انتظار",
+            "queued": "در صف",
+            "drawing": "در حال طراحی",
+            "needsAttention": "نیازمند توجه",
+            "failed": "ناموفق",
+            "cancelled": "لغوشده"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "وضعیت در دسترس نیست",
+        "blockers": "{{count}} مانع",
+        "blockers_one": "{{count}} مانع",
+        "blockers_other": "{{count}} مانع"
+      },
+      "library": {
+        "subtitle": "داستان‌ها را در قالب ضرب‌آهنگ و شات برنامه‌ریزی کنید، سپس تصویر فعلی هر شات را بازبینی کنید.",
+        "pictureCount": "{{count}} تصویر آماده",
+        "pictureCount_one": "{{count}} تصویر آماده",
+        "pictureCount_other": "{{count}} تصویر آماده",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "وضعیت پروژه در دسترس نیست",
+          "stage": {
+            "brief": "شرح پروژه",
+            "engines": "موتورها",
+            "references": "مرجع‌ها",
+            "storyboard": "استوری‌بورد",
+            "bindings": "پیوندها",
+            "production": "تولید",
+            "cut": "تدوین"
+          },
+          "progress": {
+            "ready": "آماده",
+            "needsWork": "نیازمند کار",
+            "references": "{{current}} از {{total}} مرجع تأییدشده",
+            "shots": "{{current}} از {{total}} شات"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "کنترل‌های بورد کارگردان",
+          "progress": "{{drawn}} از {{total}} پنل طراحی شده",
+          "progressLabel": "میزان تکمیل بورد",
+          "staleCount": "{{count}} مورد قدیمی",
+          "busyCount": "{{count}} مورد در حال انجام",
+          "stop": "توقف طراحی",
+          "stopNote": "توقف، در صورت امکان درخواست لغو می‌کند. پنل‌های تکمیل‌شده و هزینه‌های ایجادشده باقی می‌مانند.",
+          "drawNext": "طراحی دستهٔ بعدی ({{count}})"
+        },
+        "panel": {
+          "beatActions": "کنترل‌های بورد کارگردان · {{title}}",
+          "drawMissing": "طراحی موارد باقی‌مانده ({{count}})",
+          "redrawBeat": "طراحی دوبارهٔ بیت · پولی",
+          "cardLabel": "شات {{position}}: {{status}}",
+          "redrawShot": "طراحی دوبارهٔ شات {{position}} · پولی",
+          "useAsFirstFrame": "استفاده از پنل شات {{position}} به‌عنوان فریم اول",
+          "status": {
+            "missing": "طراحی نشده",
+            "current": "فعلی",
+            "stale": "قدیمی",
+            "statusPending": "وضعیت در انتظار",
+            "queued": "در صف",
+            "drawing": "در حال طراحی",
+            "needsAttention": "نیازمند توجه",
+            "failed": "ناموفق",
+            "cancelled": "لغوشده"
+          }
+        },
+        "statusUnavailable": "ترتیب فعلی Board ناقص یا مبهم است. پیش از بررسی کاشی‌های Shot، پروژه را تازه‌سازی کنید.",
+        "renderedCount": "{{count}} از {{total}} رندر شده",
+        "staleCount": "{{count}} Shot قدیمی",
+        "staleCount_one": "{{count}} Shot قدیمی",
+        "staleCount_other": "{{count}} Shot قدیمی",
+        "inFlightCount": "{{count}} Shot در صف یا در حال رندر",
+        "inFlightCount_one": "{{count}} Shot در صف یا در حال رندر",
+        "inFlightCount_other": "{{count}} Shot در صف یا در حال رندر",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}، Shot {{shot}}",
+          "listLabel": "Shotهای {{title}}",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "ویدیوی فعلی Shot",
+          "stale": "قدیمی",
+          "chainHead": "ابتدای زنجیره",
+          "chainAfter": "پس از {{beat}}.{{shot}}",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "جزئیات موانع برای این بازبینی پروژه در دسترس نیست.",
+          "blocker": {
+            "heading": "مسدودشده به‌دلیل",
+            "referenceBindingTable": "اتصال مراجع باید پیش از تولید در Table اصلاح شود.",
+            "reviewOnTable": "بررسی مراجع در Table",
+            "cause": {
+              "routeInventoryUnavailable": "فهرست موتورهای تولید در دسترس نیست.",
+              "routeNotSelected": "هیچ موتور تولیدی انتخاب نشده است.",
+              "routeSetupRequired": "موتور انتخاب‌شده نیاز به راه‌اندازی دارد.",
+              "routeUnavailable": "موتور انتخاب‌شده در دسترس نیست.",
+              "routeRetired": "موتور انتخاب‌شده بازنشسته شده است.",
+              "routeIncompatibleFrame": "موتور با این فریم سازگار نیست.",
+              "routeFirstFrameUnsupported": "موتور از این فریم نخست پشتیبانی نمی‌کند.",
+              "routeDurationUnsupported": "موتور از مدت این Shot پشتیبانی نمی‌کند.",
+              "referencePlanInvalid": "طرح مراجع نیاز به بررسی دارد.",
+              "referenceGenerationRequired": "باید یک تصویر مرجع تولید شود.",
+              "referenceApprovalRequired": "یک تصویر مرجع به تأیید انسانی نیاز دارد.",
+              "referenceGenerationFailed": "تولید مرجع ناموفق بود.",
+              "referenceBindingUnassigned": "مراجع تخصیص داده نشده‌اند.",
+              "referenceBindingUnknownReference": "اتصال به مرجعی ناشناخته اشاره می‌کند.",
+              "referenceBindingWrongKind": "اتصال از نوع مرجع نادرست استفاده می‌کند.",
+              "referenceBindingUnapprovedReference": "اتصال از مرجعی تأییدنشده استفاده می‌کند.",
+              "referenceBindingMissingAsset": "یک تصویر مرجع متصل‌شده مفقود است.",
+              "referenceBindingCapacityExceeded": "اتصال از ظرفیت مرجع موتور فراتر می‌رود.",
+              "seedSelectionRequired": "باید یک فریم نخست انتخاب شود.",
+              "seedGenerationRequired": "باید یک فریم نخست ساخته شود.",
+              "conditioningFrameRequired": "باید یک فریم از Shot پیشین استخراج شود.",
+              "extractionFailed": "استخراج فریم پیشین ناموفق بود.",
+              "dependencyFailed": "یک Shot بالادستی ناموفق بود.",
+              "generationInvalidRequest": "درخواست تولید نامعتبر است.",
+              "generationContentRejected": "ارائه‌دهنده محتوا را رد کرد.",
+              "generationAuth": "ارائه‌دهنده احراز هویت را رد کرد.",
+              "generationQuota": "سهمیهٔ ارائه‌دهنده تمام شده است.",
+              "generationRateLimited": "ارائه‌دهنده نرخ درخواست‌ها را محدود کرده است.",
+              "generationProviderUnavailable": "ارائه‌دهندهٔ تولید در دسترس نیست.",
+              "generationTimeout": "مهلت تولید تمام شد.",
+              "generationPollDeadline": "تولید پیش از پایان مهلت نظرسنجی تمام نشد.",
+              "generationNoOutput": "تولید بدون خروجی قابل‌استفاده تمام شد.",
+              "generationVariationGrid": "خروجی یک شبکهٔ تغییرات است و نیاز به بررسی دارد.",
+              "generationSubmissionUnknown": "ارائه‌دهنده ارسال را تأیید نکرد.",
+              "generationDownloadFailed": "رسانهٔ تولیدشده قابل دانلود نبود.",
+              "generationUnsupported": "این درخواست تولید پشتیبانی نمی‌شود.",
+              "generationUnknown": "تولید به دلیلی ناشناخته ناموفق بود.",
+              "cutInvalidMedia": "تصویر فعلی برای Cut نامعتبر است.",
+              "cutBedTooShort": "بستر صوتی از Cut کوتاه‌تر است."
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "پیش‌نمایش فیلم",
+          "beatBadge": "ضرب‌آهنگ {{position}} · {{title}}",
+          "slate": "اسلیت · بدون پوشش",
+          "slateHold": "در تدوین به‌مدت {{clock}} باقی می‌ماند",
+          "videoLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · نمای {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "ضرب‌آهنگ {{beatPosition}} · {{beatTitle}} · اسلیت · بدون پوشش",
+          "noMedia": "پیش‌نمایشی از فیلم در دسترس نیست.",
+          "awaitingPictureOne": "ضرب‌آهنگ {{beatPosition}}، نمای {{shotPosition}} هنوز تصویر فعلی ندارد.",
+          "awaitingPictureMany": "{{count}} نما هنوز تصویر فعلی ندارند.",
+          "mediaError": "این پیش‌نمایش بارگیری نشد.",
+          "play": "پخش فیلم",
+          "pause": "توقف موقت فیلم",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "فقط تصویر — بستر صوتی در اینجا بی‌صدا است",
+          "shotAudioOnly": "فقط صدای نما — بستر موسیقی در این پیش‌نمایش وجود ندارد",
+          "controlsLabel": "کنترل‌های پخش فیلم",
+          "seekLabel": "نوار پیمایش فیلم",
+          "previousJoin": "اتصال قبلی",
+          "nextJoin": "اتصال بعدی",
+          "loopJoin": "تکرار اتصال",
+          "buffering": "در حال بارگیری فریم پیش‌نمایش"
+        },
+        "exports": {
+          "editorFolderDescription": "تصاویر فعلی شات‌ها، اسلیت‌های هدف، داده‌های خط زمانی و بستر صوتی اختیاری به ترتیب فیلم."
+        },
+        "film": {
+          "under": "{{clock}} کمتر",
+          "over": "{{clock}} بیشتر"
+        },
+        "openBeat": "باز کردن ضرب‌آهنگ",
+        "bed": {
+          "silentPreview": "در پیش‌نمایش بی‌صدا · هنگام خروجی اعمال می‌شود",
+          "extent": "از 0:00 · گسترهٔ {{seconds}} ثانیه"
+        },
+        "slate": {
+          "openBeat": "باز کردن ضرب‌آهنگ بدون پوشش"
+        }
+      },
+      "proposals": {
+        "proposalId": "شناسه پیشنهاد",
+        "mutationCount": "{{count}} ویرایش پیشنهادی",
+        "mutationCount_one": "{{count}} ویرایش پیشنهادی",
+        "mutationCount_other": "{{count}} ویرایش پیشنهادی",
+        "terminalCount": "{{count}} پیشنهاد کارگردان قابل پذیرش نیست",
+        "terminalCount_one": "{{count}} پیشنهاد کارگردان قابل پذیرش نیست",
+        "terminalCount_other": "{{count}} پیشنهاد کارگردان قابل پذیرش نیست",
+        "showTerminal": "بررسی پیشنهادهای پیشین",
+        "hideTerminal": "پنهان کردن پیشنهادهای پیشین",
+        "reviewDetails": "بررسی جزئیات پیشنهاد",
+        "before": "قبل",
+        "after": "بعد",
+        "ownerBeat": "بیت مالک",
+        "reviewUnavailable": "این پیشنهاد با اطمینان قابل بررسی نبود و نمی‌توان آن را پذیرفت.",
+        "refusal": {
+          "applyCoverage": "پوشش نمی‌تواند این نماهای تثبیت‌شده را جایگزین کند. در عوض فیلم‌نامهٔ تصویربرداری آن‌ها را مستقیماً ویرایش کنید.",
+          "applyCoverageFixedWork": "پوشش نمی‌تواند نماهایی را که از قبل دارای کار هستند جایگزین کند. دلیل‌های تثبیت را بررسی و نماهای متأثر را مستقیماً ویرایش کنید.",
+          "editShotsDirectly": "ویرایش مستقیم این نماها",
+          "reason": {
+            "beat_capacity_reached": "پروژه به سقف تعداد بیت‌ها رسیده است.",
+            "beat_shot_capacity_reached": "این بیت به سقف تعداد نماها رسیده است.",
+            "project_shot_capacity_reached": "پروژه به سقف تعداد نماها رسیده است.",
+            "invalid_shot_duration": "مدت یکی از نماهای پیشنهادی خارج از محدودهٔ مجاز است.",
+            "dependency_blocked": "کار موجود این تغییر پیشنهادی را مسدود می‌کند.",
+            "identity_collision": "یکی از شناسه‌های پیشنهادی از قبل استفاده شده است.",
+            "invalid_operation": "این تغییر پیشنهادی برای پروژهٔ فعلی معتبر نیست.",
+            "undo_conflict": "این پیشنهاد با ویرایش‌های بعدی تعارض دارد.",
+            "validation_failed": "پروژهٔ حاصل اعتبارسنجی را با موفقیت نگذرانْد."
+          },
+          "fixedReason": {
+            "owned_asset": "رسانهٔ ذخیره‌شدهٔ نما",
+            "owned_job": "سابقهٔ تولید",
+            "video_asset": "ویدیوی فعلی",
+            "seed_still": "فریم نخست انتخاب‌شده",
+            "conditioning_frame": "فریم پیوستگی",
+            "conditioning_input": "ورودی شرطی‌سازی پایین‌دست",
+            "shooting_script": "فیلم‌نامهٔ تصویربرداری موجود"
+          }
+        },
+        "refreshing": "در حال بررسی این پیشنهاد با پروژهٔ فعلی…",
+        "authorityUnavailable": "اعتبار پیشنهاد قابل تأیید نبود. پیشنهاد همچنان در انتظار می‌ماند و اقدامات آن در دسترس نیست.",
+        "requestUpdated": "آماده‌سازی پیشنهاد به‌روز",
+        "saveAndRequestUpdated": "ذخیره و آماده‌سازی پیشنهاد به‌روز",
+        "reviewRuleDrafts": "بازبینی پیش‌نویس‌های قانون",
+        "reviewRuleDraftsFirst": "پیش از پذیرش این پیشنهاد قانون، پیش‌نویس قانون محلی را بازبینی یا حذف کنید.",
+        "reproposalPrompt": "لطفاً پیشنهاد {{proposalId}} را با studio_get_proposal بررسی کنید، سپس read_storyboard را فراخوانی کرده و پیشنهادی تازه بر اساس بازبینی فعلی بنویسید. پیشنهاد اصلی را اعمال یا بی‌صدا بازپایه‌گذاری نکنید.",
+        "chatDecisionBusy": "یک اقدام بازبینی‌شدهٔ دیگر هنوز در حال انجام است.",
+        "chatDirty": "پیش از تأیید این پیشنهاد، پیش‌نویس‌های متعارض با آن را ذخیره یا بازنشانی کنید.",
+        "chatNoPending": "هیچ پیشنهاد در انتظار کارگردان برای اقدام وجود ندارد.",
+        "chatMultiplePending": "بیش از یک پیشنهاد فعلی کارگردان آماده است. از /approve PROPOSAL_ID یا /reject PROPOSAL_ID با شناسهٔ کامل استفاده کنید.",
+        "chatProposalNotFound": "آن پیشنهاد دقیق دیگر در انتظار نیست.",
+        "chatUnavailable": "اکنون هیچ پیشنهاد در انتظار کارگردان آماده نیست. برای بازبینی یا درخواست نسخهٔ به‌روز از کارت آن استفاده کنید.",
+        "chatStale": "این پیشنهاد دیگر با بازبینی فعلی پروژه مطابقت ندارد.",
+        "chatAccepted": "پیشنهاد پذیرفته شد.",
+        "chatRejected": "پیشنهاد رد شد.",
+        "reviewStale": "این بازبینی از نسخهٔ {{baseRevision}} ساخته شده، اما پروژه اکنون نسخهٔ {{currentRevision}} است.",
+        "noChanges": "این پیشنهاد هیچ تغییر معنایی ایجاد نمی‌کند.",
+        "paidRecovery": {
+          "heading": "بازیابی پولی",
+          "explanation": "کارگردان بازیابی‌ای یافته است که به تولید تازه نیاز دارد. پیش از هزینه، کار دقیق و قیمت را بررسی کنید.",
+          "blockedBy": "مسدودشده به‌دلیل",
+          "affectedWork": "کار تحت‌تأثیر",
+          "price": "هزینهٔ برآوردی",
+          "priceRange": "{{lower}} تا {{upper}}",
+          "generations": "دامنهٔ تولید",
+          "generationCount": "{{count}} مورد تولید",
+          "includesCascade": "شامل کار وابسته",
+          "expires": "این قیمت در {{expiresAt}} منقضی می‌شود.",
+          "expired": "این قیمت ذخیره‌شده منقضی شده است. پیش از تأیید آن را تازه کنید.",
+          "confirm": "تأیید و پرداخت",
+          "refresh": "تازه‌سازی قیمت",
+          "refreshed": "قیمت تازه شد. آن را بررسی کنید و سپس برای پرداخت دوباره تأیید کنید.",
+          "cardOnly": "بازیابی پولی فقط پس از بررسی قیمت فعلی از کارت پیشنهاد قابل تأیید است.",
+          "location": {
+            "project": "پروژه",
+            "cut": "تدوین",
+            "route": "مسیر {{route}}",
+            "reference": "مرجع · {{reference}}",
+            "shot": "{{beat}} · نما {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "پروژه",
+          "reference": "مرجع",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "افزوده شد",
+          "edited": "ویرایش شد",
+          "removed": "حذف شد",
+          "reordered": "بازچینی شد"
+        },
+        "placementValue": {
+          "active": "فعال",
+          "bin": "Bin",
+          "removed": "حذف‌شده"
+        },
+        "field": {
+          "name": "نام",
+          "brief": "شرح",
+          "rules": "قواعد",
+          "aspectRatio": "نسبت تصویر",
+          "resolution": "وضوح",
+          "targetDurationSeconds": "مدت هدف",
+          "boardStyle": "سبک Board",
+          "prompt": "پرامپت",
+          "title": "عنوان",
+          "story": "داستان",
+          "targetSeconds": "هدف Beat",
+          "shootingScript": "فیلمنامهٔ فیلم‌برداری",
+          "durationSeconds": "مدت",
+          "chainBreak": "پیوستگی",
+          "placement": "جایگاه",
+          "order": "ترتیب"
+        }
+      },
+      "playbackAudio": {
+        "label": "صدای پخش",
+        "mute": "بی‌صدا کردن",
+        "unmute": "باصدا کردن",
+        "volume": "بلندی صدای پخش: {{percent}}٪",
+        "shotStatus": {
+          "analyzing": "در حال تحلیل صدای نما…",
+          "audible": "صدای قابل شنیدن",
+          "effectivelySilent": "عملاً بی‌صدا",
+          "noAudioStream": "جریان صوتی ندارد",
+          "unavailable": "تحلیل صدا در دسترس نیست"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "فریم نخست {{stillIndex}} برای شات {{shotIndex}}",
+          "previewAlt": "پیش‌نمایش · {{label}}",
+          "effective": "فریم نخست فعلی",
+          "pinnedBadge": "سنجاق‌شده",
+          "authorizationLocked": "کار ویدیویی مجاز، فریم نخست این شات را قفل کرده است. گزینه‌های واردشده ذخیره می‌مانند، اما نمی‌توانند بذر موجود در برآورد بازبینی‌شده را جایگزین کنند.",
+          "authorizationIncompatible": "برای کار مجاز در دسترس نیست"
+        },
+        "firstFrames": {
+          "title": "فریم‌های نخست",
+          "shotChip": "نما {{shot}}",
+          "on": "فعال",
+          "status": {
+            "notReady": "آماده نیست",
+            "ready": "آماده رندر",
+            "rendering": "در حال رندر",
+            "rendered": "رندر شده"
+          },
+          "frameLabel": "فریم {{index}}",
+          "origin": {
+            "generated": "تولیدشده",
+            "imported": "واردشده",
+            "board": "استوری‌بورد",
+            "inherited": "از نمای {{shot}}"
+          },
+          "current": "فعلی",
+          "unavailable": "در دسترس نیست",
+          "previewAlt": "پیش‌نمایش · {{label}}",
+          "openFrame": "باز کردن تمام‌صفحه {{label}}",
+          "pinned": "به‌عنوان فریم نخست سنجاق شد",
+          "pin": "سنجاق به‌عنوان فریم نخست",
+          "firstFrameChanged": "فریم نخست تغییر کرد · دوباره اجرا نشده",
+          "promptChanged": "ویرایش شد · هنوز اجرا نشده",
+          "import": "وارد کردن فریم نخست",
+          "empty": "فریم نخست واجد شرایطی نیست",
+          "currentPicture": "تصویر فعلی",
+          "pictureEmpty": "هنوز تصویری نیست",
+          "pictureAlt": "تصویر فعلی نمای {{shot}}",
+          "sendLastFrame": "ارسال آخرین فریم به نمای {{shot}}",
+          "cancelRun": "لغو اجرا",
+          "generateShot": "تولید نمای {{shot}}",
+          "generateAgain": "تولید دوباره",
+          "promptLabel": "پرامپت نما",
+          "regenerate": "تولید دوباره",
+          "menu": {
+            "download": "دانلود",
+            "copyPrompt": "کپی پرامپت",
+            "remove": "حذف"
+          },
+          "viewer": {
+            "currentFirstFrame": "فریم نخست فعلی",
+            "counter": "{{current}} از {{total}}",
+            "previous": "قبلی",
+            "next": "بعدی"
+          }
+        },
+        "picture": {
+          "title": "تصویر فعلی",
+          "label": "تصویر فعلی برای شات {{index}}",
+          "empty": "هنوز چیزی رندر نشده است",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} ثانیه منبع",
+          "unavailable": "تصویر فعلی در دسترس نیست",
+          "videoPreview": "پخش‌کننده · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "تولید دوباره",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "تولید دوباره"
+        },
+        "lift": {
+          "shot": "انتقال به سطل زباله",
+          "shotTitle": "نمای {{index}} به سطل زباله منتقل شود؟",
+          "shotBodyNoStale": "محتوای ساخته‌شده و پولی همراه این نما می‌ماند. به سطل زباله منتقل شود؟",
+          "shotBodyStale": "محتوای ساخته‌شده و پولی همراه این نما می‌ماند. انتقال آن به سطل زباله، {{shots}} را قدیمی می‌کند.",
+          "confirmShot": "انتقال به سطل زباله",
+          "beat": "انتقال به سطل زباله",
+          "beatTitle": "این ضرب‌آهنگ به سطل زباله منتقل شود؟",
+          "beatBodyNoStale": "همهٔ نماها و همهٔ محتوای ساخته‌شده و پولی همراه این ضرب‌آهنگ می‌مانند. به سطل زباله منتقل شود؟",
+          "beatBodyStale": "همهٔ نماها و همهٔ محتوای ساخته‌شده و پولی همراه این ضرب‌آهنگ می‌مانند. انتقال آن به سطل زباله، {{shots}} را قدیمی می‌کند.",
+          "confirmBeat": "انتقال به سطل زباله"
+        },
+        "beatFieldsLabel": "داستان Beat",
+        "fieldGuidance": {
+          "story": "داستان · هدف روایی و پیشروی این Beat"
+        },
+        "fields": {
+          "story": "داستان",
+          "shootingScript": "فیلمنامهٔ فیلم‌برداری",
+          "shootingScriptFor": "فیلمنامهٔ فیلم‌برداری Shot {{index}}"
+        },
+        "chain": {
+          "hardCutState": "هارد کات · آغاز از فریم نخست",
+          "hardCutUnavailable": "تغییر هارد کات موقتاً امکان‌پذیر نیست. ابتدا باید برآورد رسانهٔ جایگزینِ موردنیاز بازبینی شود.",
+          "reviewSever": "بازبینی هارد کات…",
+          "reviewRejoin": "بازبینی اتصال دوباره…",
+          "reviewSeverDescription": "هارد کات باعث می‌شود نمای {{shot}} از یک فریم نخست واجد شرایط آغاز شود و در صورت نیاز فریم تازه‌ای ساخته شود. با تأیید، این نما و همهٔ نماهای پیوستهٔ بعدی تا هارد کات بعدی جایگزین می‌شوند.",
+          "reviewRejoinDescription": "با اتصال دوبارهٔ نمای {{shot}}، انتخاب فریم نخست آن پاک می‌شود و آخرین فریمِ برش‌خوردهٔ نمای {{previous}} به کار می‌رود. پس از تأیید، استخراج رایگان فریم ممکن است پیش از ارسال این نما و نماهای پیوستهٔ بعدی تا هارد کات بعدی تکمیل شود.",
+          "segmentHead": "سر زنجیره · از فریم نخست شروع می‌شود",
+          "continuous": "از آخرین فریم نمای {{position}} ادامه می‌یابد"
+        },
+        "coverage": {
+          "trimGuidance": "لبه · برش · رایگان",
+          "boundaryGuidance": "مرز · نیازمند رندر مجدد",
+          "segmentState": {
+            "noPicture": "بدون تصویر",
+            "queued": "در صف",
+            "nextUp": "نوبت بعدی",
+            "waitingOnShot": "در انتظار نمای {{position}}",
+            "waitingOnFrame": "در انتظار فریم تداوم",
+            "rendering": "در حال رندر",
+            "renderingProgress": "در حال رندر · {{progress}}٪",
+            "renderingStill": "در حال رندر · نمایش فریم نخست",
+            "rendered": "رندر شد",
+            "untouched": "بدون تغییر",
+            "needsRerender": "نیازمند رندر مجدد",
+            "staleStillPlays": "قدیمی · همچنان قابل پخش",
+            "failedNotBilled": "ناموفق · بدون هزینه",
+            "neverDispatched": "هرگز ارسال نشد",
+            "shotKept": "نمای {{position}} · حفظ شد",
+            "statusPending": "وضعیت در دسترس نیست",
+            "needsAttention": "نیازمند توجه"
+          },
+          "boundaryFrame": {
+            "empty": "مرز پس از نمای {{position}} · در انتظار فریم تداوم",
+            "ready": "مرز پس از نمای {{position}} · فریم تداوم آماده است",
+            "gone": "مرز پس از نمای {{position}} · فریم تداوم موجود نیست",
+            "stale": "مرز پس از نمای {{position}} · فریم تداوم قدیمی است"
+          },
+          "seekGuidance": "نوار · پیمایش · رایگان",
+          "seekLane": "نوار پیمایش ضرب‌آهنگ",
+          "seekValue": "{{current}} از {{total}}"
+        },
+        "preview": {
+          "label": "پیش‌نمایش ضرب‌آهنگ",
+          "noMedia": "پیش‌نمایش ضرب‌آهنگ در دسترس نیست",
+          "mediaError": "پیش‌نمایش تصویر فعلی ممکن نشد.",
+          "videoLabel": "ویدیوی نمای {{position}} · {{shootingScript}}",
+          "slateLabel": "اسلیت برنامه‌ریزی نمای {{position}} · {{shootingScript}}",
+          "slate": "اسلیت برنامه‌ریزی",
+          "slateHold": "نمایش به‌مدت {{clock}}",
+          "play": "پخش ضرب‌آهنگ",
+          "pause": "توقف موقت ضرب‌آهنگ",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "فقط تصویر",
+          "controlsLabel": "کنترل‌های پخش ضرب‌آهنگ",
+          "previousJoin": "اتصال قبلی",
+          "nextJoin": "اتصال بعدی",
+          "loopJoin": "تکرار نزدیک‌ترین اتصال",
+          "keyboardGuidance": "فاصله: پخش · پیکان‌ها: پیمایش · [ ]: اتصال‌ها · L: تکرار"
+        },
+        "directorRequestHint": "از کارگردان خلاق یک پیشنهاد بازتقسیمِ بازبینی‌شده بخواهید.",
+        "recovery": {
+          "cancelAndReviewRejoin": "لغو و بازبینی اتصال دوباره",
+          "cancelAndReviewRejoinTitle": "کار مجاز لغو و اتصال دوباره بازبینی شود؟",
+          "cancelAndReviewRejoinBody": "فقط کار ویدیویی منتظر که هنوز ارسال نشده لغو می‌شود. رسانه‌های تکمیل‌شده و سابقهٔ مجوز حفظ می‌شوند. پیش از تولید جایگزین باید برآورد تازهٔ اتصال دوباره بازبینی شود.",
+          "cancelAndReviewRejoinConfirm": "لغو و بازبینی اتصال دوباره",
+          "cancelAndReviewRejoinUnconfirmed": "کار منتظر لغو شد، اما فضای کاری تازه‌شده تأیید نشد. پیش از بازبینی اتصال دوباره، فضا را تازه‌سازی کنید.",
+          "cancelAndReviewRejoinOutcomeUnknown": "نتیجهٔ لغو تأیید نشد. پیش از بازبینی اتصال دوباره، فضای کاری را تازه‌سازی کنید."
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "تنظیمات فیلم",
+        "videoAudioCapability": {
+          "silentOnly": "این موتور کلیپ‌های بی‌صدا تولید می‌کند.",
+          "audioCapable": "این موتور می‌تواند صدا تولید کند؛ صدای نمای نهایی جداگانه تحلیل می‌شود."
+        },
+        "undoLabel": {
+          "promote_board_panel": "استفاده از پنل به‌عنوان فریم اول",
+          "set_reference_plan": "برنامهٔ مراجع",
+          "amend_reference_plan": "افزودن پس‌زمینه",
+          "set_reference_label": "نام مرجع",
+          "set_reference_prompt": "پرامپت مرجع",
+          "select_reference_image": "تصویر مرجع فعلی",
+          "remove_reference_image": "حذف تصویر مرجع",
+          "dismiss_seed_still": "کنار گذاشتن فریم نخست",
+          "select_video_take": "انتخاب برداشت ویدیو",
+          "remove_video_take": "حذف برداشت",
+          "set_shot_reference_binding": "اتصال مرجع Shot"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "پنل بورد",
+          "reference_image": "تصویر مرجع"
+        },
+        "promotion": {
+          "title": "استفاده از پنل به‌عنوان فریم اول",
+          "summary": "پنل فعلی بورد برای شات {{shotId}} را به فریم اول ارتقا دهید. این کار مرز پیوستگی شات را تغییر نمی‌دهد.",
+          "impactNone": "هیچ تصویر فعلی به این فریم وابسته نیست.",
+          "impactIntro": "تصویرهای فعلی که قابل پخش می‌مانند اما قدیمی می‌شوند: {{count}}",
+          "impactItem": "تصویر فعلی شات {{shotId}}",
+          "optionsLabel": "نحوهٔ رسیدگی به تصویرهای فعلی را انتخاب کنید",
+          "promoteOnly": "فقط ارتقا — تصویرهای قدیمی و قابل پخش را نگه دارید",
+          "freePrice": "$0",
+          "promoteAndRerender": "ارتقا و بازبینی دقیق کار رندر دوباره",
+          "priceAfterReview": "قیمت در مرحلهٔ بعد نمایش داده می‌شود",
+          "promoteOnlyAction": "ارتقا با هزینهٔ $0",
+          "reviewPaidAction": "بازبینی قیمت رندر دوباره",
+          "paidUnavailable": "این بخش تصویرهای فعلی بیش از حدی برای یک تأیید پولی دارد. گزینهٔ فقط ارتقا همچنان در دسترس است.",
+          "headline": "ارتقا + رندر دوبارهٔ برداشت‌ها ({{count}}) · {{cost}}",
+          "requiredWork": "رندرهای دوبارهٔ فهرست‌شده دقیقاً همان تصویرهای فعلی هستند که با این ارتقا قدیمی می‌شوند. پوششِ موجودنبودن لحاظ نشده است.",
+          "confirm": "تأیید ارتقا + رندر دوبارهٔ برداشت‌ها ({{count}}) · {{cost}}",
+          "promoted": "پنل ارتقا یافت. تصویرهای موجود قابل پخش می‌مانند و قدیمی علامت‌گذاری می‌شوند.",
+          "promoting": "در حال ارتقای پنل…",
+          "confirmed": "پنل ارتقا یافت و رندر دوباره برای تصویرهای تأییدشده آغاز شد.",
+          "close": "بستن"
+        },
+        "headline_one": "{{count}} تولید · {{cost}}",
+        "headline_other": "{{count}} تولید · {{cost}}",
+        "confirm_one": "تأیید {{count}} تولید · {{cost}}",
+        "confirm_other": "تأیید {{count}} تولید · {{cost}}",
+        "hideBreakdown": "پنهان کردن هر تولید",
+        "showBreakdown": "نمایش هر تولید",
+        "conditioningFrameAlt": "فریم شرطی برای {{shot}}",
+        "routeShared": "همه از طریق {{model}}",
+        "group": {
+          "required": "الزامی"
+        },
+        "continuity": {
+          "severTitle": "بازبینی هارد کات",
+          "rejoinTitle": "بازبینی اتصال دوباره",
+          "severSummary": "این برآورد، این نما را به ابتدای زنجیره تبدیل می‌کند، یک فریم نخست واجد شرایط را دوباره به کار می‌برد یا در صورت نیاز می‌سازد و همهٔ ویدیوهای تحت‌تأثیر را تا هارد کات بعدی جایگزین می‌کند.",
+          "rejoinSummary": "این برآورد، انتخاب فریم نخست این نما را پاک می‌کند و آن را به فریم قبلیِ منطبق با برش متصل می‌کند. پس از تأیید، استخراج رایگان فریم ممکن است پیش از ارسال ویدیوهای جایگزین تا هارد کات بعدی تکمیل شود.",
+          "severHeadline": "هارد کات · {{count}} تولید الزامی · {{cost}}",
+          "severHeadline_one": "هارد کات · {{count}} تولید الزامی · {{cost}}",
+          "severHeadline_other": "هارد کات · {{count}} تولید الزامی · {{cost}}",
+          "rejoinHeadline": "اتصال دوباره · {{count}} تولید الزامی · {{cost}}",
+          "rejoinHeadline_one": "اتصال دوباره · {{count}} تولید الزامی · {{cost}}",
+          "rejoinHeadline_other": "اتصال دوباره · {{count}} تولید الزامی · {{cost}}",
+          "requiredWork": "تمام کارهای جایگزینی فهرست‌شده برای این تغییر زنجیره الزامی‌اند.",
+          "confirmSever": "تأیید هارد کات + {{count}} تولید · {{cost}}",
+          "confirmSever_one": "تأیید هارد کات + {{count}} تولید · {{cost}}",
+          "confirmSever_other": "تأیید هارد کات + {{count}} تولید · {{cost}}",
+          "confirmRejoin": "تأیید اتصال دوباره + {{count}} تولید · {{cost}}",
+          "confirmRejoin_one": "تأیید اتصال دوباره + {{count}} تولید · {{cost}}",
+          "confirmRejoin_other": "تأیید اتصال دوباره + {{count}} تولید · {{cost}}",
+          "close": "بستن — زنجیره بدون تغییر بماند",
+          "severConfirmed": "هارد کات تأیید شد. برای مشاهده پیشرفت فریم نخست و جایگزینی یا هر بازیابی لازم، شات را بررسی کنید.",
+          "rejoinConfirmed": "اتصال دوباره تأیید شد. برای مشاهده پیشرفت استخراج فریم و جایگزینی یا هر بازیابی لازم، شات را بررسی کنید."
+        },
+        "errors": {
+          "routesUnavailable": "پیش از آماده‌سازی این برآورد، مسیرهای آمادهٔ تصویر و ویدیو را در تنظیمات فیلم انتخاب کنید.",
+          "pricing": {
+            "invalidQuote": "داده‌های برآورد از نظر داخلی سازگار نبودند. چیزی ارسال نشد.",
+            "inactiveShot": "یکی از نماهای انتخاب‌شده دیگر فعال نیست. پروژه را تازه‌سازی و دوباره آماده کنید.",
+            "inFlight": "یکی از تولیدهای انتخاب‌شده از قبل در حال اجراست. تا پایان آن صبر کنید یا انتخاب را تغییر دهید.",
+            "duplicateShotPurpose": "یک تولید بیش از یک بار انتخاب شده است. انتخاب را بررسی و دوباره آماده کنید.",
+            "invalidDependency": "وابستگی ادامه دیگر معتبر نیست. پروژه را تازه‌سازی و دوباره آماده کنید.",
+            "invalidPrepareRequest": "انتخاب تولید را نمی‌توان با ایمنی آماده کرد. آن را بررسی و دوباره آماده کنید.",
+            "invalidReference": "یکی از مرجع‌های انتخاب‌شده دیگر برای این تولید معتبر نیست. مرجع دیگری انتخاب کنید.",
+            "missingShootingScript": "پیش از تولید رسانه، فیلم‌نامهٔ تصویربرداری این Shot را بنویسید.",
+            "missingConditioning": "یک برداشت ویدیویی فریم نخست یا فریم پیشین واجد شرایط ندارد. تصویر لازم را اضافه یا انتخاب کنید.",
+            "unsafeTotal": "مجموع برآورد را نمی‌توان با ایمنی نمایش داد. انتخاب را کاهش دهید؛ چیزی ارسال نشد."
+          }
+        },
+        "reviewShotBinding": "بازبینی اتصال Shot",
+        "readout": {
+          "prompt": "پرامپت دقیق",
+          "rendersAs": "تنظیمات رندر",
+          "sourceRevision": "نسخهٔ منبع",
+          "source": "منبع",
+          "story": "داستان",
+          "shootingScript": "فیلمنامهٔ فیلم‌برداری",
+          "referencePrompt": "توضیح مرجع",
+          "references": "مراجع حل‌شده",
+          "noReferences": "بدون ورودی مستقیم مرجع",
+          "referenceFact": "{{kind}} · {{referenceId}} ← {{assetId}}"
+        },
+        "referenceGridRetry": "اگر مدل شبکهٔ گونه‌ها برگرداند، هر مرجع یک‌بار به‌طور خودکار دوباره امتحان می‌شود. هزینهٔ تلاش‌های نخست {{lower}} است؛ بیشینهٔ هزینه با تلاش‌های دوباره {{upper}} است."
+      },
+      "editorFolderExport": {
+        "action": "خروجی پوشهٔ تدوین…",
+        "actionWithSlates": "خروجی پوشهٔ تدوین · {{count}} اسلیت…",
+        "exporting": "در حال خروجی… رسانه‌ای تولید نمی‌شود و هزینه‌ای مصرف نخواهد شد.",
+        "reveal": "نمایش در Finder",
+        "dismiss": "بستن",
+        "none": "هیچ‌کدام",
+        "successFacts": "{{bytes}} بایت · {{count}} فایل",
+        "successSlates": "شمارهٔ Shotهای اسلیت: {{shots}}",
+        "successQuarantine": "خروجی‌های قدیمی کنار گذاشته‌شده: {{count}}",
+        "disabled": {
+          "no_beats": "پیش از خروجی یک Beat اضافه کنید",
+          "duration_pending": "مدت همهٔ Beatهای خالی را تعیین کنید",
+          "invalid_media": "رسانهٔ انتخابی قدیمی یا نامعتبر را اصلاح کنید",
+          "bed_too_short": "یک بستر صوتی به‌اندازهٔ خط زمانی انتخاب کنید",
+          "mutationActive": "تا پایان تغییر فعلی فضای کار صبر کنید",
+          "exportRunning": "خروجی پوشهٔ تدوین در حال اجراست",
+          "catalogUnavailable": "ذخیره‌سازی خروجی پوشهٔ تدوین در دسترس نیست"
+        },
+        "errors": {
+          "catalogUnavailable": "فهرست خروجی در دسترس نیست. پروژه را دوباره بارگذاری کنید.",
+          "staleAuthority": "پروژه تغییر کرده است. پیش از برون‌بری دوباره، پروژهٔ فعلی را بررسی کنید.",
+          "staleCatalog": "فهرست خروجی تغییر کرده است. پیش از تلاش دوباره، تاریخچهٔ برون‌بری را دوباره بارگیری کنید.",
+          "invalidMedia": "رسانهٔ انتخابی قدیمی، غیرمرجع یا نامعتبر است. نمای Cut را بررسی کنید.",
+          "mediaUnavailable": "فایل رسانهٔ انتخابی تأیید نشد. هیچ خروجی ناقصی منتشر نشده است.",
+          "busy": "Creative Studio در حال تکمیل عملیات دیگری است. پس از پایان دوباره تلاش کنید.",
+          "artifactUnavailable": "این خروجی دیگر در فهرست فعال نیست. پروژه را دوباره بارگذاری کنید.",
+          "resultConflict": "پیش از تأیید نتیجه، فهرست تازه‌تری رسید. دوباره بارگذاری و بررسی کنید."
+        }
+      },
+      "filmExport": {
+        "action": "برون‌بری فیلم…",
+        "actionWithSlates": "برون‌بری فیلم · {{count}} اسلیت…",
+        "actionWithSlates_one": "برون‌بری فیلم · {{count}} اسلیت…",
+        "actionWithSlates_other": "برون‌بری فیلم · {{count}} اسلیت…",
+        "cancel": "لغو برون‌بری",
+        "cut": "برش مستقیم",
+        "description": "از برش فعلی یک MP4 آمادهٔ تدوین می‌سازد. نماهای بدون پوشش به اسلیت سیاه زمان‌دار تبدیل می‌شوند.",
+        "disabled": {
+          "no_beats": "پیش از برون‌بری یک Beat بیفزایید",
+          "duration_pending": "برای هر Beat خالی مدت تعیین کنید",
+          "invalid_media": "رسانهٔ قدیمی یا نامعتبر را رفع کنید",
+          "bed_too_short": "بستر صوتی کافی انتخاب کنید",
+          "mutationActive": "تغییر فعلی را تمام کنید",
+          "exportRunning": "برون‌بری فیلم در حال اجراست",
+          "catalogUnavailable": "ذخیره‌سازی برون‌بری در دسترس نیست"
+        },
+        "dismiss": "بستن",
+        "dissolve": "دیزالو",
+        "errors": {
+          "catalogUnavailable": "فهرست برون‌بری در دسترس نیست. پروژه را دوباره بارگیری کنید.",
+          "staleAuthority": "پروژه تغییر کرده است. هیچ فیلم قدیمی منتشر نشد؛ پیش از برون‌بری دوباره، پروژهٔ فعلی را بررسی کنید.",
+          "staleCatalog": "فهرست برون‌بری تغییر کرده است. هیچ فیلم قدیمی منتشر نشد؛ پیش از تلاش دوباره، تاریخچهٔ برون‌بری را دوباره بارگیری کنید.",
+          "unavailable": "برون‌بری فیلم به FFmpeg نیاز دارد و FFmpeg روی این دستگاه پیدا نشد. آن را نصب کنید یا FFMPEG_PATH را روی نسخه‌ای که از پیش دارید تنظیم کنید، سپس پروژه را دوباره باز کنید.",
+          "renderFailed": "رندر محلی تأیید نشد؛ برون‌بری ناقص منتشر نشد.",
+          "cancelled": "برون‌بری لغو شد؛ رسانهٔ پروژه تغییر نکرد.",
+          "invalidMedia": "برش شامل رسانهٔ قدیمی، غیرمرجع یا نامعتبر است.",
+          "busy": "Creative Studio در حال پایان عملیات دیگری است.",
+          "artifactUnavailable": "فیلم دیگر در فهرست فعال نیست.",
+          "resultConflict": "پیش از تأیید فیلم فهرست تازه‌تری رسید."
+        },
+        "export": "برون‌بری فیلم",
+        "noSpend": "این کار روی دستگاه خود شما اجرا می‌شود؛ رسانه‌ای تولید نمی‌شود و هزینه‌ای مصرف نخواهد شد.",
+        "phase": {
+          "preparing": "آماده‌سازی رسانهٔ دقیق منبع…",
+          "analyzing": "تحلیل رسانه و انتهای آرام…",
+          "rendering": "رندر محلی فیلم…",
+          "publishing": "اعتبارسنجی و انتشار فیلم…"
+        },
+        "reveal": "نمایش در Finder",
+        "successFacts": "{{nominal}} ثانیه تألیف · {{rendered}} ثانیه برون‌بری · {{count}} انتها کوتاه شد",
+        "successFacts_one": "{{nominal}} ثانیه تألیف · {{rendered}} ثانیه برون‌بری · {{count}} انتها کوتاه شد",
+        "successFacts_other": "{{nominal}} ثانیه تألیف · {{rendered}} ثانیه برون‌بری · {{count}} انتها کوتاه شد",
+        "successQuarantine": "برون‌بری‌های قدیمی فیلم کنار گذاشته‌شده: {{count}}",
+        "successQuarantine_one": "برون‌بری‌های قدیمی فیلم کنار گذاشته‌شده: {{count}}",
+        "successQuarantine_other": "برون‌بری‌های قدیمی فیلم کنار گذاشته‌شده: {{count}}",
+        "title": "برون‌بری فیلم",
+        "transition": "گذار",
+        "trimTails": "کوتاه‌کردن انتهای ثابت هر نما",
+        "trimTailsHelp": "فقط روی فایل برون‌بری‌شده اثر می‌گذارد و چیزی در پروژه تغییر نمی‌کند. آخرین نما با طول کامل خود می‌ماند."
+      }
     },
     "rules": {
       "open": "قوانین",
@@ -950,11 +1819,7 @@
     "close": {
       "saveAndClose": "ذخیره و بستن",
       "discard": "نادیده گرفتن تغییرات و بستن",
-      "cancel": "لغو",
-      "unsavedMessage": "{{count}} صحنه ویرایش ذخیره‌نشده دارند. پیش از بستن ذخیره شوند؟",
-      "unsavedMessage_one": "{{count}} صحنه ویرایش ذخیره‌نشده دارد. پیش از بستن ذخیره شود؟",
-      "unsavedMessage_other": "{{count}} صحنه ویرایش ذخیره‌نشده دارند. پیش از بستن ذخیره شوند؟",
-      "unavailableMessage": "استودیوی خلاقیت پاسخ نداد. بستن در این لحظه ممکن است ویرایش‌های ذخیره‌نشدهٔ صحنه‌ها را از بین ببرد."
+      "cancel": "لغو"
     },
     "phase": {
       "nav": {
@@ -1257,103 +2122,6 @@
       "durationSeconds_other": "{{seconds}} ثانیه",
       "selected": "صحنه انتخاب‌شده"
     },
-    "inspector": {
-      "title": "هدایت صحنه",
-      "sectionsLabel": "بخش‌های ویرایش صحنه",
-      "directionTab": "بصری",
-      "scriptTab": "متن",
-      "titleLabel": "عنوان صحنه",
-      "purposeLabel": "هدف صحنه",
-      "purposePlaceholder": "این صحنه باید به چه چیزی برسد؟",
-      "visualPromptLabel": "دستور بصری",
-      "visualPromptPlaceholder": "نما، سوژه، محیط، نورپردازی و حرکت را توصیف کنید.",
-      "narrationLabel": "روایت",
-      "onScreenTextLabel": "متن روی تصویر",
-      "mediaKindLabel": "نوع خروجی",
-      "durationLabel": "مدت صحنه بر حسب ثانیه",
-      "invalidDuration": "یک عدد صحیح بین 1 تا 60 ثانیه وارد کنید.",
-      "saving": "در حال ذخیره صحنه...",
-      "saved": "صحنه ذخیره شد",
-      "saveFailed": "صحنه ذخیره نشد.",
-      "unsavedChanges": "تغییرات ذخیره‌نشده شما نگه داشته شده‌اند."
-    },
-    "draft": {
-      "title": "ساخت پیش‌نویس استوری‌بورد",
-      "body": "WePrompt صحنه‌ها، روایت، متن روی تصویر و زمان‌بندی را برای بازبینی شما پیشنهاد می‌کند.",
-      "checking": "در حال بررسی مدل استوری‌بورد انتخاب‌شده...",
-      "ready": "آماده تهیه پیش‌نویس",
-      "setupRequired": "برای پیش‌نویس با هوش مصنوعی یک مدل استوری‌بورد انتخاب و پیکربندی کنید.",
-      "unavailable": "تهیه پیش‌نویس استوری‌بورد اکنون در دسترس نیست.",
-      "providerLabel": "ارائه‌دهنده استوری‌بورد",
-      "modelLabel": "مدل استوری‌بورد",
-      "chargeNotice": "پیش‌نویس از مدل انتخاب‌شده پروژه استفاده می‌کند و ممکن است هزینه ارائه‌دهنده داشته باشد.",
-      "replaceTitle": "استوری‌بورد فعلی جایگزین شود؟",
-      "replaceBody": "تهیه دوباره پیش‌نویس تنها پس از دریافت یک پیشنهاد معتبر، همه صحنه‌های فعلی را جایگزین می‌کند.",
-      "confirm": "ساخت پیش‌نویس استوری‌بورد",
-      "cancel": "انصراف",
-      "configureModel": "باز کردن تنظیمات مدل",
-      "manualFallback": "ادامه ویرایش دستی",
-      "failed": "پیش‌نویس استوری‌بورد ساخته نشد. صحنه‌های فعلی تغییر نکردند."
-    },
-    "conditioning": {
-      "inputsTitle": "ورودی‌های این تصویر ثابت",
-      "role": { "cast": "بازیگران", "look": "ظاهر" },
-      "maximum": "این موتور حداکثر {{count}} مرجع بریف را می‌پذیرد.",
-      "unsupported": "این موتور تصویر نمی‌تواند از مراجع فعال بریف استفاده کند. موتور دیگری انتخاب کنید یا آن‌ها را از بریف حذف کنید.",
-      "overflow": "این موتور تصویر حداکثر {{maximum}} مرجع بریف می‌پذیرد، اما {{count}} مرجع فعال است.",
-      "malformed": "مراجع بریف تغییر کرده‌اند یا نامعتبرند. پیش از تولید، بازبینی را تازه کنید.",
-      "reviewChanged": "مراجع بریف یا موتور تصویر تغییر کرده است. پیش از تولید، ورودی‌های تازه‌شده را بررسی کنید.",
-      "plateOutOfDate": "این فریم نخست با مراجع بریف، نسبت تصویر یا وضوح متفاوت ساخته شده است. همچنان می‌توانید این کلیپ را رندر کنید."
-    },
-    "reference": {
-      "generate": "ایجاد مرجع",
-      "dialogTitle": "ایجاد تصویر مرجع",
-      "promptLabel": "پرامپت مرجع",
-      "reviewTag": "تصویر مرجع",
-      "excludedSummary": "برخی صحنه‌های درخواستی چون آماده نیستند در این تأیید گنجانده نشده‌اند:",
-      "excludedNoneReady": "هیچ‌یک از صحنه‌های درخواستی برای تولید تصویر مرجع آماده نیستند:",
-      "discardExcludedRequests": "این درخواست‌ها کنار گذاشته شوند",
-      "excludedUnavailable": "صحنه دیگر در دسترس نیست",
-      "excludedPromptUnusable": "پرامپت تصویری صحنه نمی‌تواند یک تصویر مرجع را توصیف کند",
-      "dismissFailed": "صف درخواست‌ها به‌روزرسانی نشد. پنجره بازبینی بسته شد؛ بعداً دوباره تلاش کنید."
-    },
-    "review": {
-      "generateReadyScenes": "تولید {{count}} صحنه آماده",
-      "generateReadyScenes_one": "تولید {{count}} صحنه آماده",
-      "generateReadyScenes_other": "تولید {{count}} صحنه آماده",
-      "noReadyScenes": "هیچ صحنه‌ای برای تولید آماده نیست.",
-      "generateScene": "تولید صحنه",
-      "regenerateScene": "تولید نسخه متفاوت",
-      "title": "بازبینی تولید",
-      "sceneCount": "{{count}} صحنه انتخاب شده",
-      "videoSeconds": "{{seconds}} ثانیه ویدیوی درخواستی",
-      "selectedDurationFull": "مدت انتخاب‌شده: {{seconds}} ثانیه",
-      "selectedDurationFull_one": "مدت انتخاب‌شده: {{seconds}} ثانیه",
-      "selectedDurationFull_other": "مدت انتخاب‌شده: {{seconds}} ثانیه",
-      "targetDurationFull": "مدت هدف: {{seconds}} ثانیه",
-      "targetDurationFull_one": "مدت هدف: {{seconds}} ثانیه",
-      "targetDurationFull_other": "مدت هدف: {{seconds}} ثانیه",
-      "providerLabel": "ارائه‌دهنده",
-      "modelLabel": "مدل",
-      "aspectRatio": "نسبت تصویر",
-      "resolution": "وضوح",
-      "watermarkOff": "نشان آب غیرفعال است",
-      "audioOff": "خروجی بی‌صدا؛ تولید صدا غیرفعال است",
-      "missingRoute": "حداقل یک صحنه موتور ندارد.",
-      "invalidRoute": "حداقل یکی از موتورهای انتخابی نامعتبر است.",
-      "durationMismatch": "زمان استوری‌بورد با هدف پروژه برابر نیست.",
-      "chargeNotice": "تولید از حساب ارائه‌دهنده انتخابی شما استفاده می‌کند و ممکن است هزینه داشته باشد.",
-      "confirm": "تأیید و تولید",
-      "cancel": "انصراف",
-      "disabledMissingRoutes": "{{count}} نما موتور ندارد. برای تنظیم موتور این پنجره را ببندید.",
-      "disabledMissingRoutes_one": "{{count}} نما موتور ندارد. برای تنظیم موتور این پنجره را ببندید.",
-      "disabledMissingRoutes_other": "{{count}} نما موتور ندارد. برای تنظیم موتور این پنجره را ببندید.",
-      "setEngines": "بستن و تنظیم موتورها",
-      "excludedFirstFrame": "{{count}} نما در این ساخت نیست — این موتور نمی‌تواند از یک فریم شروع کند.",
-      "excludedFirstFrame_one": "{{count}} نما در این ساخت نیست — این موتور نمی‌تواند از یک فریم شروع کند.",
-      "excludedFirstFrame_other": "{{count}} نما در این ساخت نیست — این موتور نمی‌تواند از یک فریم شروع کند.",
-      "audioOn": "این رندر شامل صدای تولیدشده است؛ موتورهای بی‌صدا، در صورت وجود، بی‌صدا می‌مانند."
-    },
     "jobs": {
       "progress": "{{percent}}٪ تکمیل",
       "cancel": "لغو کار",
@@ -1363,8 +2131,8 @@
       "retryConfirmationConfirm": "تأیید و تلاش دوباره",
       "retryDownload": "تلاش دوباره برای بارگیری",
       "retryChargeTitle": "با احتمال هزینه تکراری دوباره تلاش شود؟",
-      "retryChargeBody": "نتیجه ارسال قبلی نامعلوم است. تلاش دوباره ممکن است هزینه دیگری از ارائه‌دهنده ایجاد کند.",
-      "retryChargeConfirm": "پذیرش و تلاش دوباره",
+      "retryChargeBody": "نتیجه ارسال قبلی نامعلوم است. جایگزینی ممکن است هزینه دیگری از ارائه‌دهنده ایجاد کند. ادامه دادن فقط یک برآورد جدید را فعال می‌کند و هنوز کاری ارسال نمی‌شود.",
+      "retryChargeConfirm": "پذیرش و بررسی برآورد",
       "status": {
         "queuedLocal": "در انتظار ارسال",
         "submitting": "در حال ارسال",
@@ -1377,6 +2145,7 @@
       },
       "errors": {
         "invalidRequest": "درخواست تولید نامعتبر است.",
+        "contentRejected": "ارائه‌دهنده تصویر آغازین را رد کرد. پیش از تلاش دوباره، قاب‌بندی را تغییر دهید یا تصویر ثابت را دوباره تولید کنید.",
         "auth": "ارائه‌دهنده اطلاعات ورود را رد کرد.",
         "quota": "سهمیه حساب ارائه‌دهنده کافی نیست.",
         "rateLimited": "محدودیت نرخ ارائه‌دهنده فعال شد. بعداً دوباره تلاش کنید.",
@@ -1387,7 +2156,9 @@
         "submissionUnknown": "نتیجه ارسال نامعلوم است. پیش از تلاش دوباره، هشدار هزینه تکراری را بررسی کنید.",
         "downloadFailed": "تولید کامل شد، اما خروجی بارگیری نشد.",
         "unsupported": "این ارائه‌دهنده از عملیات درخواستی پشتیبانی نمی‌کند.",
-        "unknown": "کار تولید به دلیل نامعلومی شکست خورد."
+        "seedStillVariationGrid": "تصویر تولیدشده دارای شبکه‌ای چندبخشی از گونه‌هاست و نمی‌توان از آن به‌عنوان فریم نخست فعلی یا مرجع استفاده کرد.",
+        "unknown": "کار تولید به دلیل نامعلومی شکست خورد.",
+        "referenceVariationGridRepeated": "مدل دوباره یک شبکهٔ چندبخشی از گونه‌ها برگرداند. «وارد کردن عکس» راه مطمئن برای تنظیم این مرجع است."
       }
     },
     "preview": {
@@ -1451,15 +2222,20 @@
     "errors": {
       "featureDisabled": "Creative Studio در این نسخه غیرفعال است.",
       "invalidPayload": "درخواست شامل اطلاعات نامعتبر یا ناقص است.",
+      "mutationRefused": "این تغییر در وضعیت فعلی پروژه قابل اعمال نیست. پروژه را بررسی کنید و دوباره تلاش کنید.",
+      "pricingRefused": "برآورد پیش از ارسال رد شد. چیزی ارسال نشد.",
       "projectNotFound": "این پروژه استودیوی خلاقیت دیگر وجود ندارد.",
       "storyboardExists": "این پروژه از قبل استوری‌بورد دارد. پیش از تهیه دوباره پیش‌نویس، جایگزینی را تأیید کنید.",
       "staleProject": "پروژه در جای دیگری تغییر کرده است. پیش از تلاش دوباره آن را تازه‌سازی کنید.",
+      "staleExportCatalog": "فهرست برون‌بری تغییر کرده است. پیش از تلاش دوباره، تاریخچهٔ برون‌بری را تازه‌سازی کنید.",
       "planningUnavailable": "تهیه پیش‌نویس استوری‌بورد در دسترس نیست. می‌توانید ویرایش دستی را ادامه دهید.",
       "invalidRoute": "موتور تولید انتخابی نامعتبر یا در دسترس نیست.",
       "cancellationRefused": "ارائه‌دهنده دیگر نمی‌تواند این کار در حال اجرا را لغو کند.",
       "duplicateChargeAcknowledgementRequired": "پیش از تلاش دوباره، احتمال هزینه تکراری ارائه‌دهنده را بپذیرید.",
       "busy": "این پروژه کار تولید فعال دارد.",
       "provider": "ارائه‌دهنده نتوانست درخواست را کامل کند.",
+      "runtimeInactive": "تولید در Creative Studio آماده نیست. یک پروژهٔ پشتیبانی‌شده را باز یا ایجاد کنید و دوباره امتحان کنید.",
+      "projectQuarantined": "Creative Studio نتوانست شروع شود، زیرا پروژهٔ {{projectId}} به بازیابی نیاز دارد. برای بررسی آن، کتابخانهٔ Studio را باز کنید.",
       "storage": "استودیوی خلاقیت نتوانست داده‌های محلی را به‌روزرسانی کند.",
       "ruleBreach": "یک قانون پیش از کسر هرگونه هزینه، تولید را مسدود کرد. برای دیدن مواردی که باید تغییر کنند، بخش «قوانین» را باز کنید."
     },
@@ -1530,43 +2306,13 @@
         "frame": "این موتور نمی‌تواند {{ratio}} بسازد.",
         "resolution": "این موتور نمی‌تواند با وضوح {{resolution}} بسازد.",
         "duration": "این موتور نمی‌تواند نمایی به طول {{seconds}} ثانیه بسازد.",
-        "firstFrame": "این موتور نمی‌تواند از یک تصویر مرجع شروع کند.",
+        "firstFrame": "این موتور نمی‌تواند از فریم اول بازبینی‌شده شروع کند.",
         "catalogUnloaded": "فهرست موتورها هنوز بارگذاری نشده است.",
         "aria": "ساخت ممکن نیست. {{reason}}",
         "actionSetEngines": "تنظیم موتورها",
         "actionRemoveReference": "حذف مرجع",
-        "actionShorten": "کوتاه کردن این نما"
+        "actionShorten": "تنظیم طول نما"
       }
-    },
-    "brief": {
-      "conversationTitle": "گفت‌وگوی بریف",
-      "danglingNotice": "گفت‌وگوی بریف این پروژه دیگر در دسترس نیست.",
-      "danglingStartFresh": "شروع گفت‌وگوی جدید",
-      "proposalTitle": "فیلمنامه پیشنهادی",
-      "proposalMeta": "بر اساس بازبینی {{revision}} · {{createdAt}}",
-      "proposalSummary": "{{added}} افزوده · {{removed}} حذف · {{changed}} تغییرکرده",
-      "proposalSceneChange": "نمای {{position}}: {{fields}}",
-      "proposalFieldSeparator": "، ",
-      "proposalNoChanges": "بدون تغییر در فیلمنامه فعلی",
-      "proposalDiffUnavailable": "خلاصه تغییرات در دسترس نیست — فیلمنامه پس از تهیه این پیشنهاد تغییر کرده است",
-      "proposalField": {
-        "title": "عنوان",
-        "purpose": "هدف",
-        "visualPrompt": "دستور بصری",
-        "narration": "روایت",
-        "onScreenText": "متن روی تصویر",
-        "mediaKind": "نوع خروجی",
-        "durationSeconds": "مدت",
-        "referenceAssetId": "تصویر مرجع"
-      },
-      "proposalAccept": "پذیرش فیلمنامه",
-      "proposalReject": "رد کردن",
-      "proposalAccepted": "فیلمنامه اعمال شد",
-      "proposalRejected": "رد شد",
-      "proposalExpired": "منقضی شد",
-      "proposalStale": "در زمان انتظار این پیشنهاد، فیلمنامه تغییر کرده است. درخواست بازنویسی کنید.",
-      "proposalRepropose": "درخواست بازنویسی",
-      "proposalFlushRefused": "ویرایش‌های ذخیره‌نشده شما ذخیره نشد، بنابراین پیشنهاد اعمال نشد. ویرایش‌ها را اصلاح کنید و دوباره تلاش کنید."
     },
     "shell": {
       "showDirector": "نمایش کارگردان خلاق",

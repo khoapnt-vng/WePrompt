@@ -1,0 +1,224 @@
+.root {
+  display: grid;
+  gap: 16px;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.root label {
+  display: grid;
+  gap: 6px;
+}
+
+.projectMenuTrigger {
+  flex: 0 0 auto;
+}
+
+.editorFolderExportStatus {
+  position: fixed;
+  z-index: 1001;
+  inset-block-start: 64px;
+  inset-inline-end: 20px;
+  inline-size: min(440px, calc(100vw - 40px));
+  box-shadow: 0 10px 30px var(--color-fill-3);
+}
+
+.editorFolderExportStatusContent {
+  display: grid;
+  min-inline-size: 0;
+  gap: 6px;
+  overflow-wrap: anywhere;
+}
+
+.editorFolderExportStatusActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-block-start: 4px;
+}
+
+.projectModal {
+  inline-size: min(760px, calc(100vw - 32px));
+}
+
+.modalBody {
+  display: grid;
+  min-inline-size: 0;
+  gap: 18px;
+}
+
+.modalBody label,
+.ruleEditor label,
+.ruleAddForm label {
+  display: grid;
+  gap: 6px;
+}
+
+/* Arco renders Checkbox and Radio as <label>, so the stacked field-label rule
+   above also catches them and pushes the control onto its own row. Restore the
+   inline layout Arco ships. Switch is a <button> and is unaffected. */
+.modalBody :global(.arco-checkbox),
+.modalBody :global(.arco-radio),
+.ruleEditor :global(.arco-checkbox),
+.ruleEditor :global(.arco-radio),
+.ruleAddForm :global(.arco-checkbox),
+.ruleAddForm :global(.arco-radio) {
+  display: inline-block;
+}
+
+.modalSection {
+  display: grid;
+  min-inline-size: 0;
+  gap: 12px;
+}
+
+.modalSection + .modalSection {
+  border-block-start: 1px solid var(--color-border-2);
+  padding-block-start: 18px;
+}
+
+.modalSection h3,
+.ruleText,
+.ruleTerms,
+.ruleDescription {
+  margin: 0;
+}
+
+.ruleDescription,
+.ruleTerms {
+  color: var(--color-text-3);
+}
+
+/* Secondary note under a form control. The inline offset lines it up with the
+   control's label rather than its box: 14px Arco checkbox mask plus its 8px gap. */
+.fieldHint {
+  margin: 4px 0 0 22px;
+  color: var(--color-text-3);
+  font-size: 12px;
+}
+
+.ruleList,
+.ruleLegend {
+  display: grid;
+  min-inline-size: 0;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ruleCard {
+  display: grid;
+  min-inline-size: 0;
+  gap: 10px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding: 12px;
+  background: var(--color-bg-2);
+}
+
+.ruleMeta,
+.ruleLegend li {
+  display: flex;
+  min-inline-size: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.ruleScope {
+  text-transform: uppercase;
+}
+
+.ruleText {
+  color: var(--text-primary);
+}
+
+.ruleEditor,
+.ruleAddForm {
+  display: grid;
+  min-inline-size: 0;
+  gap: 8px;
+}
+
+.ruleAddForm {
+  border-block-start: 1px solid var(--color-border-2);
+  padding-block-start: 16px;
+}
+
+.ruleError {
+  color: var(--color-danger-6);
+  font-size: 12px;
+}
+
+.actions,
+.sectionHeading,
+.choiceRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actionGroup {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.actions,
+.sectionHeading {
+  justify-content: space-between;
+  margin-top: 12px;
+}
+
+.sectionHeading h3 {
+  margin: 0;
+}
+
+.shotList {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shotList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.shotList label {
+  display: flex;
+  align-items: center;
+}
+
+.choiceRow {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) 90px minmax(160px, 1fr);
+  margin-bottom: 8px;
+}
+
+.srOnly {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@media (max-width: 720px) {
+  .choiceRow {
+    grid-template-columns: 1fr;
+  }
+}

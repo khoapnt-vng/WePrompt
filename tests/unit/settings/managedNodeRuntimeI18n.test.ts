@@ -111,4 +111,41 @@ describe('managed node runtime settings copy', () => {
       expect(startupDirectory.diagnosticsReportFailed).toBeTruthy();
     }
   });
+
+  it('defines neutral generic backend startup copy with diagnostics parity in every common locale', () => {
+    const english = loadCommonLocale('en-US');
+    const englishGenericFailure = (english.backendStartup as Record<string, unknown>).genericFailure as Record<
+      string,
+      string
+    >;
+    const expectedKeys = [
+      'description',
+      'diagnosticsReportFailed',
+      'diagnosticsReportSuccess',
+      'diagnosticsSent',
+      'sendDiagnostics',
+      'title',
+    ];
+
+    expect(englishGenericFailure.description).toBe(
+      'WePrompt could not complete local startup. Restart WePrompt. If the issue continues, save the diagnostic package for support.'
+    );
+
+    for (const language of settingsLanguages()) {
+      const common = loadCommonLocale(language);
+      const backendStartup = common.backendStartup as Record<string, unknown>;
+      const genericFailure = backendStartup.genericFailure as Record<string, string>;
+      const incompleteInstallation = backendStartup.incompleteInstallation as Record<string, string>;
+
+      expect(Object.keys(genericFailure).toSorted(), language).toEqual(expectedKeys);
+      for (const key of expectedKeys) expect(genericFailure[key], `${language}:${key}`).toBeTruthy();
+      for (const key of ['sendDiagnostics', 'diagnosticsSent', 'diagnosticsReportSuccess', 'diagnosticsReportFailed']) {
+        expect(genericFailure[key], `${language}:${key}`).toBe(incompleteInstallation[key]);
+      }
+      if (language !== 'en-US') {
+        expect(genericFailure.title, language).not.toBe(englishGenericFailure.title);
+        expect(genericFailure.description, language).not.toBe(englishGenericFailure.description);
+      }
+    }
+  });
 });

@@ -884,31 +884,898 @@
     }
   },
   "creativeStudio": {
-    "briefReferences": {
-      "title": "Referências do projeto",
-      "inheritanceDescription": "Cada nova imagem de referência usa todas as imagens ativas de Elenco e Visual deste projeto.",
-      "castHeading": "Elenco",
-      "lookHeading": "Visual",
-      "castEmpty": "Ainda não há referências de elenco.",
-      "lookEmpty": "Ainda não há referências de visual.",
-      "addCast": "Adicionar referência de elenco",
-      "addLook": "Adicionar referência de visual",
-      "activeCount": "{{count}} referências ativas",
-      "activeCount_one": "{{count}} referência ativa",
-      "activeCount_many": "{{count}} referências ativas",
-      "activeCount_other": "{{count}} referências ativas",
-      "limitReached": "Este projeto já tem 6 referências ativas. Remova uma antes de adicionar outra.",
-      "removeFromBrief": "Remover do Brief",
-      "removeAccessible": "Remover {{label}} do Brief",
-      "previewAccessible": "Referência de {{role}}: {{label}}",
-      "engineCapacityNone": "Este mecanismo de imagem ainda não foi validado para imagens de referência. Abra as Configurações de modelo e valide-o novamente.",
-      "engineMenuCapacityNone": "Sem imagens de referência",
-      "engineCapacityMaximum": "Até {{count}} imagens de referência",
-      "engineCapacityMaximum_one": "Até {{count}} imagem de referência",
-      "engineCapacityMaximum_many": "Até {{count}} imagens de referência",
-      "engineCapacityMaximum_other": "Até {{count}} imagens de referência",
-      "capacityMismatch": "Você tem {{count}} referências ativas, mas este mecanismo de imagem aceita {{maximum}}. A geração de novas imagens de referência fica bloqueada até você remover referências ou trocar ou revalidar o mecanismo.",
-      "importError": "Não foi possível adicionar a referência. Tente novamente."
+    "workspace": {
+      "views": {
+        "references": "Referências"
+      },
+      "start": {
+        "title": "Comece pelo Diretor",
+        "description": "O Diretor criará o primeiro plano a partir do seu briefing. Quando estiver pronto, revise-o aqui."
+      },
+      "notReady": {
+        "references": "Não há nada para revisar até o Diretor planejar as referências.",
+        "table": "Não há nada para organizar até o Diretor criar o storyboard.",
+        "board": "Não há nada para produzir até a Tabela estar pronta.",
+        "cut": "Não há nada para editar até a produção começar."
+      },
+      "referenceWorkflow": {
+        "panel": {
+          "canonicalImages": "Imagens canônicas",
+          "intro": "Crie uma imagem atual para cada personagem e lugar recorrente. Essas imagens permanecem canônicas até você escolher outra tomada.",
+          "progress": "{{current}} de {{total}} atuais",
+          "bindShots": "Vincular tomadas",
+          "characterRule": "Personagens primeiro",
+          "placeRule": "Depois, lugares recorrentes",
+          "addCharacter": "Adicionar personagem",
+          "addCharacterUnavailable": "A identidade do personagem vem do plano de referências aprovado pelo Diretor.",
+          "places": "Lugares",
+          "addPlace": "Adicionar lugar",
+          "kind": {
+            "character": "personagem",
+            "background": "lugar"
+          },
+          "nameLabel": "Nome de {{kind}}",
+          "meta": {
+            "character": "Personagem · {{count}} fotos",
+            "background": "Lugar · {{count}} fotos"
+          },
+          "status": {
+            "noPhoto": "SEM FOTO",
+            "current": "ATUAL DEFINIDA",
+            "generating": "GERANDO"
+          },
+          "duplicateName": "Esse nome já é usado para este tipo de referência.",
+          "emptyPhoto": "Gerar primeira foto",
+          "currentHandle": "{{handle}} · Atual",
+          "currentReference": "Referência canônica atual",
+          "download": "Baixar {{handle}}",
+          "choosePhoto": "Definir {{handle}} como atual",
+          "addPhoto": "Gerar outra foto",
+          "photoCount": "{{count}} fotos",
+          "promptLabel": "Prompt para {{label}}",
+          "promptPlaceholder": {
+            "character": "Descreva identidade, figurino e traços visuais estáveis.",
+            "background": "Descreva o lugar recorrente e seus traços visuais estáveis."
+          },
+          "action": {
+            "generate": "Gerar",
+            "generateAnother": "Gerar outra",
+            "generateAgain": "Gerar novamente",
+            "cancelRun": "Cancelar execução"
+          },
+          "tag": {
+            "running": "Em execução",
+            "edited": "Prompt editado"
+          },
+          "importPhoto": "Importar foto",
+          "removePhoto": "Remover {{handle}}",
+          "removePhotoLocked": "Esta foto está bloqueada por um trabalho não resolvido. Revise os bloqueios abaixo antes de removê-la.",
+          "removalBlocker": {
+            "activeReferenceJob": "O trabalho de {{purpose}} ({{jobId}}) desta referência ainda não foi resolvido. A foto atual permanece bloqueada até o trabalho chegar a um estado terminal.",
+            "activeAssetConsumer": "{{purpose}} do Beat {{beatPosition}}, Shot {{shotPosition}} usa exatamente esta foto. Ela permanece bloqueada enquanto o trabalho não for resolvido.",
+            "activeAssetConsumerRetained": "{{purpose}} do Shot preservado {{shotId}} usa exatamente esta foto. Ela permanece bloqueada enquanto o trabalho não for resolvido.",
+            "activeAssetConsumerOther": "O trabalho de {{purpose}} ({{jobId}}) usa exatamente esta foto. Ela permanece bloqueada enquanto o trabalho não for resolvido.",
+            "downloadRecovery": "{{purpose}} do Beat {{beatPosition}}, Shot {{shotPosition}} terminou no provedor, mas o resultado não foi baixado. Tente novamente aqui; a foto permanece bloqueada até a recuperação ter sucesso.",
+            "downloadRecoveryRetainedShot": "{{purpose}} do Shot preservado {{shotId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Shot da Lixeira do Board para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} do Shot {{shotId}} dentro do Beat preservado {{beatId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Beat da Lixeira do Board para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
+            "downloadRecoveryOther": "O trabalho de {{purpose}} ({{jobId}}) terminou no provedor, mas o resultado não foi baixado. Tente novamente aqui; a foto permanece bloqueada até a recuperação ter sucesso.",
+            "invalidAuthority": "Os dados de referência da foto atual estão inconsistentes. Recarregue o projeto e revise esta referência antes de tentar removê-la novamente.",
+            "reviewInBoard": "Revisar no Board"
+          }
+        },
+        "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar o Board ou o primeiro quadro.",
+        "generationScope": "Escopo da geração",
+        "characters": {
+          "title": "Personagens",
+          "description": "Gere uma imagem canônica atual para cada personagem com nome.",
+          "empty": "Esta história não tem personagens com nome. Os cenários já podem ser revisados."
+        },
+        "backgrounds": {
+          "title": "Cenários",
+          "description": "Gere os locais recorrentes que mantêm a consistência visual do filme.",
+          "charactersRequired": "Gere todos os personagens antes de revisar os cenários.",
+          "empty": "Nenhum cenário recorrente é necessário.",
+          "add": "Adicionar cenário",
+          "addTitle": "Adicionar cenário recorrente",
+          "nameLabel": "Nome do cenário",
+          "promptLabel": "Prompt de geração",
+          "duplicate": "Já existe um cenário com esse nome.",
+          "cancel": "Cancelar",
+          "confirm": "Adicionar cenário"
+        },
+        "previewPending": "Ainda não foi gerada uma imagem de referência.",
+        "previewAlt": "Imagem de referência atual para {{label}}",
+        "status": {
+          "idle": "Não gerado",
+          "queued": "Na fila",
+          "running": "Gerando",
+          "succeeded": "Gerado",
+          "failed": "Falha na geração",
+          "current": "Atual"
+        },
+        "regenerate": "Gerar novamente",
+        "chooseGenerated": "Escolher imagem gerada",
+        "regeneratePromptLabel": "Prompt de geração",
+        "regenerateCancel": "Cancelar",
+        "reviewGeneration": "Revisar custo de geração",
+        "generatedHistory": "Imagens geradas",
+        "historyClose": "Fechar",
+        "historyPreviewAlt": "Imagem de referência gerada para {{label}}",
+        "historyCurrent": "Imagem atual",
+        "historyChoose": "Escolher esta imagem",
+        "currentProgress": "{{current}} de {{total}} referências geradas",
+        "bindings": {
+          "title": "Vínculos dos Shots",
+          "description": "Escolha os personagens e o fundo atuais exatos usados por cada Shot no painel do Board e no primeiro quadro.",
+          "empty": "Não há Shots ativos para vincular.",
+          "shot": "Shot {{position}}",
+          "unassigned": "Este Shot ainda não tem uma decisão de referências.",
+          "invalid": "Este vínculo salvo não é mais válido. Escolha as referências atuais e salve novamente.",
+          "capacity": "Há {{count}} referências selecionadas entre personagens e fundo, mas o orçamento compartilhado da rota de imagem aceita {{limit}}.",
+          "capacityUsage": "{{count}} / {{limit}} espaços compartilhados de referência usados (personagens + fundo)",
+          "characters": "Personagens",
+          "background": "Fundo",
+          "save": "Salvar vínculo",
+          "progress": "{{ready}} de {{total}} Shots vinculados"
+        }
+      },
+      "references": {
+        "referenceCount": "Referências solicitadas para {{total}} itens"
+      },
+      "handoffs": {
+        "referenceCount": "Esta transferência contém {{total}} referências",
+        "progress": "Na fila {{queued}} · Em execução {{running}} · Sucesso {{succeeded}} · Falha {{failed}}",
+        "reviewReferences": "Revisar referências",
+        "retryFailed": "Tentar novamente as referências com falha",
+        "awaiting_spend": "Aguardando revisão de gastos",
+        "running": "A geração de referências está em andamento.",
+        "succeeded": "Todas as referências solicitadas foram geradas.",
+        "partially_failed": "Algumas referências foram geradas; tente novamente apenas as que falharam.",
+        "failed": "A geração de referências falhou. Nada será repetido automaticamente.",
+        "dismissed": "Descartado sem gastar"
+      },
+      "table": {
+        "reorder": {
+          "label": "Ações para reordenar {{title}}",
+          "dragHandle": "Reordenar {{title}} na posição {{position}}",
+          "moveEarlier": "Mover {{title}} para antes",
+          "moveLater": "Mover {{title}} para depois",
+          "announcement": "{{title}} foi movido da posição {{from}} para {{to}} de {{total}}.",
+          "failed": "A ordem dos Beats não foi alterada."
+        },
+        "authoring": {
+          "label": "Autoria e recuperação da história",
+          "coverageGap": "{{count}} de {{total}} Beats não têm Shots",
+          "coverageGap_one": "{{count}} de {{total}} Beats não tem Shots",
+          "coverageGap_other": "{{count}} de {{total}} Beats não têm Shots",
+          "unscriptedWarning": "{{count}} Shots não têm roteiro de filmagem",
+          "unscriptedWarning_one": "{{count}} Shot não tem roteiro de filmagem",
+          "unscriptedWarning_other": "{{count}} Shots não têm roteiro de filmagem",
+          "askDirector": "Perguntar ao Director",
+          "addBeat": "Adicionar Beat",
+          "addShot": "Adicionar Shot",
+          "addShotForBeat": "Adicionar Shot a {{title}}",
+          "unassignedReferenceNote": "Um Shot criado manualmente começa com referências não atribuídas e precisa de revisão antes da geração paga."
+        },
+        "columns": {
+          "length": "Soma",
+          "panel": "Painel",
+          "story": "História"
+        },
+        "plannedPending": "Sem soma planejada",
+        "panel": {
+          "openDetails": "Abrir painéis do Board de {{title}}",
+          "closeDetails": "Fechar painéis do Board de {{title}}",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "shotDetails": "Detalhes do Shot {{position}}",
+          "head": "Início da cadeia",
+          "status": {
+            "missing": "Não desenhado",
+            "current": "Atual",
+            "stale": "Desatualizado",
+            "statusPending": "Status pendente",
+            "queued": "Na fila",
+            "drawing": "Desenhando",
+            "needsAttention": "Requer atenção",
+            "failed": "Falhou",
+            "cancelled": "Cancelado"
+          }
+        }
+      },
+      "project": {
+        "statusUnavailable": "Status indisponível",
+        "blockers": "{{count}} bloqueios",
+        "blockers_one": "{{count}} bloqueio",
+        "blockers_other": "{{count}} bloqueios"
+      },
+      "library": {
+        "subtitle": "Planeje histórias como Beats e planos e depois revise a imagem atual de cada plano.",
+        "pictureCount": "{{count}} imagens prontas",
+        "pictureCount_one": "{{count}} imagem pronta",
+        "pictureCount_other": "{{count}} imagens prontas",
+        "projectStatus": {
+          "summary": "{{stage}} · {{progress}} · {{blockers}}",
+          "unavailable": "Status do projeto indisponível",
+          "stage": {
+            "brief": "Briefing",
+            "engines": "Engines",
+            "references": "Referências",
+            "storyboard": "Storyboard",
+            "bindings": "Vínculos",
+            "production": "Produção",
+            "cut": "Edição"
+          },
+          "progress": {
+            "ready": "Pronto",
+            "needsWork": "Precisa de ajustes",
+            "references": "{{current}} de {{total}} referências aprovadas",
+            "shots": "{{current}} de {{total}} planos"
+          }
+        }
+      },
+      "board": {
+        "controls": {
+          "label": "Controles do Board do Diretor",
+          "progress": "{{drawn}} de {{total}} painéis desenhados",
+          "progressLabel": "Conclusão do Board",
+          "staleCount": "{{count}} desatualizados",
+          "busyCount": "{{count}} em andamento",
+          "stop": "Parar desenho",
+          "stopNote": "Parar solicita o cancelamento quando possível. Os painéis concluídos e as cobranças já incorridas permanecem.",
+          "drawNext": "Desenhar próximo lote ({{count}})"
+        },
+        "panel": {
+          "beatActions": "Controles do Board do Diretor · {{title}}",
+          "drawMissing": "Desenhar ausentes ({{count}})",
+          "redrawBeat": "Redesenhar Beat · pago",
+          "cardLabel": "Shot {{position}}: {{status}}",
+          "redrawShot": "Redesenhar Shot {{position}} · pago",
+          "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
+          "status": {
+            "missing": "Não desenhado",
+            "current": "Atual",
+            "stale": "Desatualizado",
+            "statusPending": "Status pendente",
+            "queued": "Na fila",
+            "drawing": "Desenhando",
+            "needsAttention": "Requer atenção",
+            "failed": "Falhou",
+            "cancelled": "Cancelado"
+          }
+        },
+        "statusUnavailable": "A ordem atual do Board está incompleta ou ambígua. Atualize o projeto antes de revisar os cartões de Shot.",
+        "renderedCount": "{{count}} de {{total}} renderizados",
+        "staleCount": "{{count}} Shots desatualizados",
+        "staleCount_one": "{{count}} Shot desatualizado",
+        "staleCount_other": "{{count}} Shots desatualizados",
+        "inFlightCount": "{{count}} Shots na fila ou sendo renderizados",
+        "inFlightCount_one": "{{count}} Shot na fila ou sendo renderizado",
+        "inFlightCount_other": "{{count}} Shots na fila ou sendo renderizados",
+        "shot": {
+          "ariaLabel": "Beat {{beat}}, Shot {{shot}}",
+          "listLabel": "Shots em {{title}}",
+          "position": "{{beat}}.{{shot}}",
+          "videoPreview": "Vídeo atual do Shot",
+          "stale": "Desatualizado",
+          "chainHead": "Início da cadeia",
+          "chainAfter": "Depois de {{beat}}.{{shot}}",
+          "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
+          "statusUnavailable": "Os detalhes dos bloqueios não estão disponíveis para esta revisão do projeto.",
+          "blocker": {
+            "heading": "Bloqueado por",
+            "referenceBindingTable": "A vinculação de referências precisa ser corrigida na Table antes da geração.",
+            "reviewOnTable": "Revisar referências na Table",
+            "cause": {
+              "routeInventoryUnavailable": "A lista de mecanismos não está disponível.",
+              "routeNotSelected": "Nenhum mecanismo de geração foi selecionado.",
+              "routeSetupRequired": "O mecanismo selecionado precisa ser configurado.",
+              "routeUnavailable": "O mecanismo selecionado não está disponível.",
+              "routeRetired": "O mecanismo selecionado foi descontinuado.",
+              "routeIncompatibleFrame": "O mecanismo é incompatível com este quadro.",
+              "routeFirstFrameUnsupported": "O mecanismo não aceita este primeiro quadro.",
+              "routeDurationUnsupported": "O mecanismo não aceita esta duração do Shot.",
+              "referencePlanInvalid": "O plano de referências precisa ser revisado.",
+              "referenceGenerationRequired": "Uma imagem de referência precisa ser gerada.",
+              "referenceApprovalRequired": "Uma imagem de referência precisa de aprovação humana.",
+              "referenceGenerationFailed": "A geração da referência falhou.",
+              "referenceBindingUnassigned": "As referências não estão atribuídas.",
+              "referenceBindingUnknownReference": "A vinculação indica uma referência desconhecida.",
+              "referenceBindingWrongKind": "A vinculação usa o tipo errado de referência.",
+              "referenceBindingUnapprovedReference": "A vinculação usa uma referência não aprovada.",
+              "referenceBindingMissingAsset": "Uma imagem de referência vinculada está ausente.",
+              "referenceBindingCapacityExceeded": "A vinculação excede a capacidade de referências do mecanismo.",
+              "seedSelectionRequired": "Um primeiro quadro precisa ser selecionado.",
+              "seedGenerationRequired": "Um primeiro quadro precisa ser criado.",
+              "conditioningFrameRequired": "Um quadro do Shot anterior precisa ser extraído.",
+              "extractionFailed": "A extração do quadro anterior falhou.",
+              "dependencyFailed": "Um Shot anterior do qual este depende falhou.",
+              "generationInvalidRequest": "A solicitação de geração é inválida.",
+              "generationContentRejected": "O provedor rejeitou o conteúdo.",
+              "generationAuth": "O provedor rejeitou a autenticação.",
+              "generationQuota": "A cota do provedor se esgotou.",
+              "generationRateLimited": "O provedor está limitando a taxa de solicitações.",
+              "generationProviderUnavailable": "O provedor de geração não está disponível.",
+              "generationTimeout": "A geração excedeu o tempo limite.",
+              "generationPollDeadline": "A geração não terminou antes do prazo de consulta.",
+              "generationNoOutput": "A geração terminou sem uma saída utilizável.",
+              "generationVariationGrid": "A saída é uma grade de variações e precisa ser revisada.",
+              "generationSubmissionUnknown": "O provedor não confirmou o envio.",
+              "generationDownloadFailed": "Não foi possível baixar a mídia gerada.",
+              "generationUnsupported": "Esta solicitação de geração não é compatível.",
+              "generationUnknown": "A geração falhou por um motivo desconhecido.",
+              "cutInvalidMedia": "A imagem atual é inválida para o Cut.",
+              "cutBedTooShort": "A faixa de áudio é mais curta que o Cut."
+            }
+          }
+        }
+      },
+      "cut": {
+        "preview": {
+          "label": "Prévia do filme",
+          "beatBadge": "Beat {{position}} · {{title}}",
+          "slate": "Cartela · Sem cobertura",
+          "slateHold": "Permanece por {{clock}} no corte",
+          "videoLabel": "Beat {{beatPosition}} · {{beatTitle}} · Plano {{shotPosition}} · {{shotTitle}}",
+          "slateLabel": "Beat {{beatPosition}} · {{beatTitle}} · Cartela · Sem cobertura",
+          "noMedia": "Nenhuma prévia do filme está disponível.",
+          "awaitingPictureOne": "O Beat {{beatPosition}}, plano {{shotPosition}}, ainda não tem uma imagem atual.",
+          "awaitingPictureMany": "{{count}} planos ainda não têm uma imagem atual.",
+          "mediaError": "Não foi possível carregar esta prévia.",
+          "play": "Reproduzir filme",
+          "pause": "Pausar filme",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Somente imagem — a trilha de áudio está silenciada aqui",
+          "shotAudioOnly": "Somente o áudio do plano — a trilha musical não está incluída nesta prévia",
+          "controlsLabel": "Controles de reprodução do filme",
+          "seekLabel": "Trilho de busca do filme",
+          "previousJoin": "Junção anterior",
+          "nextJoin": "Próxima junção",
+          "loopJoin": "Repetir junção",
+          "buffering": "Carregando quadro da prévia"
+        },
+        "exports": {
+          "editorFolderDescription": "Imagens atuais dos planos, claquetes de destino, dados da linha do tempo e a faixa opcional na ordem do filme."
+        },
+        "film": {
+          "under": "{{clock}} abaixo",
+          "over": "{{clock}} acima"
+        },
+        "openBeat": "Abrir beat",
+        "bed": {
+          "silentPreview": "Sem som na prévia · aplicado na exportação",
+          "extent": "A partir de 0:00 · extensão de {{seconds}}s"
+        },
+        "slate": {
+          "openBeat": "Abrir beat sem cobertura"
+        }
+      },
+      "proposals": {
+        "proposalId": "ID da proposta",
+        "mutationCount": "{{count}} edições propostas",
+        "mutationCount_one": "{{count}} edição proposta",
+        "mutationCount_other": "{{count}} edições propostas",
+        "terminalCount": "Não é possível aceitar {{count}} propostas do Diretor",
+        "terminalCount_one": "Não é possível aceitar {{count}} proposta do Diretor",
+        "terminalCount_other": "Não é possível aceitar {{count}} propostas do Diretor",
+        "showTerminal": "Revisar propostas anteriores",
+        "hideTerminal": "Ocultar propostas anteriores",
+        "reviewDetails": "Revisar detalhes da proposta",
+        "before": "Antes",
+        "after": "Depois",
+        "ownerBeat": "Beat responsável",
+        "reviewUnavailable": "Não foi possível revisar esta proposta com segurança, então ela não pode ser aceita.",
+        "refusal": {
+          "applyCoverage": "A cobertura não pode substituir estes planos fixados. Edite diretamente os roteiros de filmagem deles.",
+          "applyCoverageFixedWork": "A cobertura não pode substituir planos que já contêm trabalho. Revise os motivos de fixação e edite diretamente os planos afetados.",
+          "editShotsDirectly": "Editar estes planos diretamente",
+          "reason": {
+            "beat_capacity_reached": "O projeto atingiu o limite de Beats.",
+            "beat_shot_capacity_reached": "Este Beat atingiu o limite de planos.",
+            "project_shot_capacity_reached": "O projeto atingiu o limite de planos.",
+            "invalid_shot_duration": "A duração de um plano proposto está fora do intervalo permitido.",
+            "dependency_blocked": "O trabalho existente bloqueia esta alteração proposta.",
+            "identity_collision": "Uma identidade proposta já está em uso.",
+            "invalid_operation": "Esta alteração proposta não é válida para o projeto atual.",
+            "undo_conflict": "Esta proposta entra em conflito com edições posteriores.",
+            "validation_failed": "O projeto resultante não passou na validação."
+          },
+          "fixedReason": {
+            "owned_asset": "mídia de plano armazenada",
+            "owned_job": "histórico de geração",
+            "video_asset": "vídeo atual",
+            "seed_still": "primeiro quadro selecionado",
+            "conditioning_frame": "quadro de continuidade",
+            "conditioning_input": "entrada de condicionamento posterior",
+            "shooting_script": "roteiro de filmagem existente"
+          }
+        },
+        "refreshing": "Verificando esta proposta com o projeto atual…",
+        "authorityUnavailable": "Não foi possível verificar a autoridade da proposta. Ela continua pendente e suas ações estão indisponíveis.",
+        "requestUpdated": "Preparar proposta atualizada",
+        "saveAndRequestUpdated": "Salvar e preparar proposta atualizada",
+        "reviewRuleDrafts": "Revisar rascunhos de regras",
+        "reviewRuleDraftsFirst": "Revise ou descarte o rascunho de regra local antes de aceitar esta proposta de regra.",
+        "reproposalPrompt": "Inspecione a proposta {{proposalId}} com studio_get_proposal, depois chame read_storyboard e redija uma nova proposta para a revisão atual. Não aplique nem faça rebase silencioso da proposta original.",
+        "chatDecisionBusy": "Outra ação revisada ainda está em andamento.",
+        "chatDirty": "Salve ou redefina os rascunhos que entram em conflito com esta proposta antes de aprová-la.",
+        "chatNoPending": "Não há proposta pendente do Diretor para processar.",
+        "chatMultiplePending": "Há mais de uma proposta atual do Diretor pronta. Use /approve PROPOSAL_ID ou /reject PROPOSAL_ID com o ID completo.",
+        "chatProposalNotFound": "Essa proposta exata não está mais pendente.",
+        "chatUnavailable": "Nenhuma proposta pendente do Diretor está pronta agora. Use o cartão para revisá-la ou solicitar uma proposta atualizada.",
+        "chatStale": "Esta proposta não corresponde mais à revisão atual do projeto.",
+        "chatAccepted": "Proposta aceita.",
+        "chatRejected": "Proposta rejeitada.",
+        "reviewStale": "Esta revisão foi derivada da revisão {{baseRevision}}, mas o projeto agora está na revisão {{currentRevision}}.",
+        "noChanges": "Esta proposta não faz nenhuma alteração semântica.",
+        "paidRecovery": {
+          "heading": "Recuperação paga",
+          "explanation": "O Director encontrou uma recuperação que exige nova geração. Revise o trabalho afetado e o preço antes de gastar.",
+          "blockedBy": "Bloqueado por",
+          "affectedWork": "Trabalho afetado",
+          "price": "Custo estimado",
+          "priceRange": "{{lower}}–{{upper}}",
+          "generations": "Escopo de geração",
+          "generationCount": "{{count}} itens de geração",
+          "includesCascade": "inclui trabalho dependente",
+          "expires": "Este preço expira em {{expiresAt}}.",
+          "expired": "Este preço salvo expirou. Atualize-o antes de confirmar.",
+          "confirm": "Confirmar e gastar",
+          "refresh": "Atualizar preço",
+          "refreshed": "Preço atualizado. Revise-o e confirme novamente para gastar.",
+          "cardOnly": "A recuperação paga só pode ser confirmada no cartão da proposta após a revisão do preço atual.",
+          "location": {
+            "project": "Projeto",
+            "cut": "Corte",
+            "route": "Rota {{route}}",
+            "reference": "Referência · {{reference}}",
+            "shot": "{{beat}} · Plano {{shot}}"
+          }
+        },
+        "subject": {
+          "project": "Projeto",
+          "reference": "Referência",
+          "beat": "Beat",
+          "shot": "Shot"
+        },
+        "change": {
+          "added": "Adicionado",
+          "edited": "Editado",
+          "removed": "Removido",
+          "reordered": "Reordenado"
+        },
+        "placementValue": {
+          "active": "Ativo",
+          "bin": "Arquivo",
+          "removed": "Removido"
+        },
+        "field": {
+          "name": "Nome",
+          "brief": "Briefing",
+          "rules": "Regras",
+          "aspectRatio": "Proporção",
+          "resolution": "Resolução",
+          "targetDurationSeconds": "Duração alvo",
+          "boardStyle": "Estilo do Board",
+          "prompt": "Prompt",
+          "title": "Título",
+          "story": "História",
+          "targetSeconds": "Meta do Beat",
+          "shootingScript": "Roteiro de filmagem",
+          "durationSeconds": "Duração",
+          "chainBreak": "Continuidade",
+          "placement": "Posição",
+          "order": "Ordem"
+        }
+      },
+      "playbackAudio": {
+        "label": "Som da reprodução",
+        "mute": "Desativar som",
+        "unmute": "Ativar som",
+        "volume": "Volume da reprodução: {{percent}}%",
+        "shotStatus": {
+          "analyzing": "Analisando o áudio do plano…",
+          "audible": "Som audível",
+          "effectivelySilent": "Praticamente sem som",
+          "noAudioStream": "Sem fluxo de áudio",
+          "unavailable": "Análise de áudio indisponível"
+        }
+      },
+      "shotStatus": {
+        "notReady": "Not ready",
+        "ready": "Ready to render",
+        "queued": "Queued",
+        "rendering": "Rendering",
+        "rendered": "Rendered",
+        "failed": "Failed",
+        "latestAttemptFailed": "Latest attempt failed"
+      },
+      "beatPanel": {
+        "seeds": {
+          "stillLabel": "Primeiro quadro {{stillIndex}} do plano {{shotIndex}}",
+          "previewAlt": "Prévia · {{label}}",
+          "effective": "Primeiro quadro atual",
+          "pinnedBadge": "Fixada",
+          "authorizationLocked": "O trabalho de vídeo autorizado bloqueou o primeiro quadro deste plano. Os candidatos importados continuam armazenados, mas não podem substituir a imagem-semente da cotação revisada.",
+          "authorizationIncompatible": "Indisponível para o trabalho autorizado"
+        },
+        "firstFrames": {
+          "title": "Primeiros quadros",
+          "shotChip": "Plano {{shot}}",
+          "on": "Ativo",
+          "status": {
+            "notReady": "Não pronto",
+            "ready": "Pronto para renderizar",
+            "rendering": "Renderizando",
+            "rendered": "Renderizado"
+          },
+          "frameLabel": "Quadro {{index}}",
+          "origin": {
+            "generated": "Gerado",
+            "imported": "Importado",
+            "board": "Storyboard",
+            "inherited": "Do plano {{shot}}"
+          },
+          "current": "Atual",
+          "unavailable": "Indisponível",
+          "previewAlt": "Prévia · {{label}}",
+          "openFrame": "Abrir {{label}} em tela cheia",
+          "pinned": "Fixado como primeiro quadro",
+          "pin": "Fixar como primeiro quadro",
+          "firstFrameChanged": "Primeiro quadro alterado · Não reexecutado",
+          "promptChanged": "Editado · Ainda não executado",
+          "import": "Importar primeiro quadro",
+          "empty": "Nenhum primeiro quadro elegível",
+          "currentPicture": "Imagem atual",
+          "pictureEmpty": "Ainda não há imagem",
+          "pictureAlt": "Imagem atual do plano {{shot}}",
+          "sendLastFrame": "Enviar o último quadro ao plano {{shot}}",
+          "cancelRun": "Cancelar execução",
+          "generateShot": "Gerar plano {{shot}}",
+          "generateAgain": "Gerar novamente",
+          "promptLabel": "Prompt do plano",
+          "regenerate": "Gerar novamente",
+          "menu": {
+            "download": "Baixar",
+            "copyPrompt": "Copiar prompt",
+            "remove": "Remover"
+          },
+          "viewer": {
+            "currentFirstFrame": "Primeiro quadro atual",
+            "counter": "{{current}} de {{total}}",
+            "previous": "Anterior",
+            "next": "Próximo"
+          }
+        },
+        "picture": {
+          "title": "Imagem atual",
+          "label": "Imagem atual da tomada {{index}}",
+          "empty": "Nada renderizado ainda",
+          "sourceDuration": "{{seconds, number(maximumFractionDigits: 0; useGrouping: false)}} segundos de origem",
+          "unavailable": "Imagem atual indisponível",
+          "videoPreview": "Player · {{label}}"
+        },
+        "composer": {
+          "framesSet": "Frames · {{count}} set",
+          "start": "Start",
+          "end": "End",
+          "references": "Refs",
+          "startPreview": "Current start frame",
+          "fromShot": "From Shot {{shot}}",
+          "endUnavailable": "Needs an engine with end-frame support",
+          "referencesBudget": "Refs {{count}} / {{limit}}",
+          "promptPlaceholder": "Describe this shot, or reference a frame with @…",
+          "action": {
+            "generate": "Generate Shot {{shot}}",
+            "regenerate": "Gerar novamente",
+            "cancelRun": "Cancel run",
+            "removeFromChain": "Remove from chain",
+            "tryAgain": "Try again",
+            "fixStartFrame": "Fix start frame — free"
+          },
+          "tag": {
+            "notCharged": "Nothing was charged",
+            "startFrameFailed": "Start frame failed · Recovery is free"
+          },
+          "footnote": {
+            "startRequired": "A start frame is required before the Shot can run",
+            "startArrives": "Start frame arrives when the previous Shot finishes",
+            "promptAsFired": "Running with the prompt as fired · Edits apply next run",
+            "lastFrameStartsNext": "Its last frame is now Shot {{next}}’s start frame",
+            "engineFailed": "The engine returned nothing · The chain stopped here",
+            "startFrameFailed": "Start-frame preparation failed · The chain stopped here"
+          },
+          "chain": {
+            "rule": "Each Shot starts on the last frame of the one before",
+            "runningRule": "Running in order · Each Shot starts on the last frame before it",
+            "generate": "Generate all {{count}} · chained",
+            "stop": "Stop the chain"
+          }
+        },
+        "generation": {
+          "renderVideo": "Gerar novamente"
+        },
+        "lift": {
+          "shot": "Mover para a Lixeira",
+          "shotTitle": "Mover o plano {{index}} para a Lixeira?",
+          "shotBodyNoStale": "Todo o conteúdo criado e pago permanece com este plano. Movê-lo para a Lixeira?",
+          "shotBodyStale": "Todo o conteúdo criado e pago permanece com este plano. Ao movê-lo para a Lixeira, o seguinte conteúdo fica desatualizado: {{shots}}.",
+          "confirmShot": "Mover para a Lixeira",
+          "beat": "Mover para a Lixeira",
+          "beatTitle": "Mover este Beat para a Lixeira?",
+          "beatBodyNoStale": "Todos os planos e todo o conteúdo criado e pago permanecem com este Beat. Movê-lo para a Lixeira?",
+          "beatBodyStale": "Todos os planos e todo o conteúdo criado e pago permanecem com este Beat. Ao movê-lo para a Lixeira, o seguinte conteúdo fica desatualizado: {{shots}}.",
+          "confirmBeat": "Mover para a Lixeira"
+        },
+        "beatFieldsLabel": "História do Beat",
+        "fieldGuidance": {
+          "story": "História · Propósito narrativo e progressão deste Beat"
+        },
+        "fields": {
+          "story": "História",
+          "shootingScript": "Roteiro de filmagem",
+          "shootingScriptFor": "Roteiro de filmagem do Shot {{index}}"
+        },
+        "chain": {
+          "hardCutState": "Corte seco · Começa com o primeiro quadro",
+          "hardCutUnavailable": "As alterações no corte seco estão temporariamente indisponíveis. Primeiro, é necessário revisar a estimativa da mídia de substituição necessária.",
+          "reviewSever": "Revisar corte seco…",
+          "reviewRejoin": "Revisar reconexão…",
+          "reviewSeverDescription": "Um corte seco faz a Tomada {{shot}} começar com um primeiro quadro válido e cria um se necessário. A confirmação substitui esta Tomada e todas as Tomadas contínuas seguintes até o próximo corte seco.",
+          "reviewRejoinDescription": "Ao reconectar a Tomada {{shot}}, sua seleção de primeiro quadro é removida e o último quadro da Tomada {{previous}}, ajustado ao corte, é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas contínuas seguintes até o próximo corte seco.",
+          "segmentHead": "Início da cadeia · Começa no primeiro quadro",
+          "continuous": "Continua do último quadro do Plano {{position}}"
+        },
+        "coverage": {
+          "trimGuidance": "Borda · Corte · Grátis",
+          "boundaryGuidance": "Limite · Exige nova renderização",
+          "segmentState": {
+            "noPicture": "Sem imagem",
+            "queued": "Na fila",
+            "nextUp": "Próximo",
+            "waitingOnShot": "Aguardando o plano {{position}}",
+            "waitingOnFrame": "Aguardando o quadro de continuidade",
+            "rendering": "Renderizando",
+            "renderingProgress": "Renderizando · {{progress}}%",
+            "renderingStill": "Renderizando · Exibindo o primeiro quadro",
+            "rendered": "Renderizado",
+            "untouched": "Intocado",
+            "needsRerender": "Precisa renderizar novamente",
+            "staleStillPlays": "Desatualizado · Ainda reproduz",
+            "failedNotBilled": "Falhou · Não cobrado",
+            "neverDispatched": "Nunca enviado",
+            "shotKept": "Plano {{position}} · Mantido",
+            "statusPending": "Status indisponível",
+            "needsAttention": "Requer atenção"
+          },
+          "boundaryFrame": {
+            "empty": "Limite após o plano {{position}} · Aguardando o quadro de continuidade",
+            "ready": "Limite após o plano {{position}} · Quadro de continuidade pronto",
+            "gone": "Limite após o plano {{position}} · Quadro de continuidade ausente",
+            "stale": "Limite após o plano {{position}} · Quadro de continuidade desatualizado"
+          },
+          "seekGuidance": "Trilho · Busca · Grátis",
+          "seekLane": "Trilho de busca do beat",
+          "seekValue": "{{current}} de {{total}}"
+        },
+        "preview": {
+          "label": "Prévia do beat",
+          "noMedia": "Prévia do beat indisponível",
+          "mediaError": "Não foi possível visualizar a imagem atual.",
+          "videoLabel": "Vídeo do plano {{position}} · {{shootingScript}}",
+          "slateLabel": "Cartela de planejamento do plano {{position}} · {{shootingScript}}",
+          "slate": "Cartela de planejamento",
+          "slateHold": "Manter por {{clock}}",
+          "play": "Reproduzir beat",
+          "pause": "Pausar beat",
+          "position": "{{current}} / {{total}}",
+          "pictureOnly": "Somente imagem",
+          "controlsLabel": "Controles de reprodução do beat",
+          "previousJoin": "Junção anterior",
+          "nextJoin": "Próxima junção",
+          "loopJoin": "Repetir a junção mais próxima",
+          "keyboardGuidance": "Espaço reproduz · Setas buscam · [ ] junções · L repete"
+        },
+        "directorRequestHint": "Peça ao Diretor Criativo uma proposta revisada para redistribuir os Shots.",
+        "recovery": {
+          "cancelAndReviewRejoin": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinTitle": "Cancelar o trabalho autorizado e revisar a reconexão?",
+          "cancelAndReviewRejoinBody": "Isso cancela apenas o trabalho de vídeo em espera que ainda não foi enviado. A mídia concluída e o histórico de autorização permanecem. Uma nova estimativa de reconexão deve ser revisada antes da geração substituta.",
+          "cancelAndReviewRejoinConfirm": "Cancelar e revisar reconexão",
+          "cancelAndReviewRejoinUnconfirmed": "O trabalho em espera foi cancelado, mas não foi possível confirmar o espaço de trabalho atualizado. Atualize antes de revisar a reconexão.",
+          "cancelAndReviewRejoinOutcomeUnknown": "Não foi possível confirmar o resultado do cancelamento. Atualize o espaço de trabalho antes de revisar a reconexão."
+        }
+      },
+      "controls": {
+        "briefAndRulesTitle": "Configuração do filme",
+        "videoAudioCapability": {
+          "silentOnly": "Este mecanismo produz clipes sem som.",
+          "audioCapable": "Este mecanismo pode gerar som; o áudio do plano finalizado é analisado separadamente."
+        },
+        "undoLabel": {
+          "promote_board_panel": "Usar painel como primeiro quadro",
+          "set_reference_plan": "plano de referências",
+          "amend_reference_plan": "adicionar cenário",
+          "set_reference_label": "nome da referência",
+          "set_reference_prompt": "prompt da referência",
+          "select_reference_image": "imagem de referência atual",
+          "remove_reference_image": "remover imagem de referência",
+          "dismiss_seed_still": "descartar primeiro quadro",
+          "select_video_take": "selecionar tomada de vídeo",
+          "remove_video_take": "remover tomada",
+          "set_shot_reference_binding": "vínculo de referências do Shot"
+        }
+      },
+      "gate": {
+        "purpose": {
+          "board_still": "Painel do Board",
+          "reference_image": "Imagem de referência"
+        },
+        "promotion": {
+          "title": "Usar painel como primeiro quadro",
+          "summary": "Promova o painel atual do Board do Shot {{shotId}} a primeiro quadro. Isso não altera o limite de continuidade do Shot.",
+          "impactNone": "Nenhuma imagem atual depende deste quadro.",
+          "impactIntro": "Imagens atuais que continuarão reproduzíveis, mas ficarão desatualizadas: {{count}}",
+          "impactItem": "Imagem atual do Shot {{shotId}}",
+          "optionsLabel": "Escolha como tratar as imagens atuais",
+          "promoteOnly": "Apenas promover — manter imagens reproduzíveis e desatualizadas",
+          "freePrice": "$0",
+          "promoteAndRerender": "Promover e revisar o trabalho exato de nova renderização",
+          "priceAfterReview": "Preço exibido a seguir",
+          "promoteOnlyAction": "Promover por $0",
+          "reviewPaidAction": "Revisar preço da nova renderização",
+          "paidUnavailable": "Este segmento tem imagens atuais demais para uma única confirmação paga. A opção de apenas promover continua disponível.",
+          "headline": "Promover + renderizar takes novamente ({{count}}) · {{cost}}",
+          "requiredWork": "As novas renderizações listadas são exatamente as imagens atuais que esta promoção torna desatualizadas. A cobertura ausente não está incluída.",
+          "confirm": "Confirmar promoção + renderizar takes novamente ({{count}}) · {{cost}}",
+          "promoted": "Painel promovido. As imagens existentes continuam reproduzíveis e são marcadas como desatualizadas.",
+          "promoting": "Promovendo painel…",
+          "confirmed": "Painel promovido e nova renderização iniciada para as imagens confirmadas.",
+          "close": "Fechar"
+        },
+        "headline_one": "{{count}} geração · {{cost}}",
+        "headline_other": "{{count}} gerações · {{cost}}",
+        "confirm_one": "Confirmar {{count}} geração · {{cost}}",
+        "confirm_other": "Confirmar {{count}} gerações · {{cost}}",
+        "hideBreakdown": "Ocultar cada geração",
+        "showBreakdown": "Mostrar cada geração",
+        "conditioningFrameAlt": "Quadro de condicionamento de {{shot}}",
+        "routeShared": "Tudo por {{model}}",
+        "group": {
+          "required": "Obrigatório"
+        },
+        "continuity": {
+          "severTitle": "Revisar corte seco",
+          "rejoinTitle": "Revisar reconexão",
+          "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza um primeiro quadro válido ou cria um se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
+          "rejoinSummary": "Esta estimativa remove a seleção de primeiro quadro desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
+          "severHeadline": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
+          "severHeadline_one": "Corte seco · {{count}} geração obrigatória · {{cost}}",
+          "severHeadline_other": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
+          "rejoinHeadline": "Reconexão · {{count}} gerações obrigatórias · {{cost}}",
+          "rejoinHeadline_one": "Reconexão · {{count}} geração obrigatória · {{cost}}",
+          "rejoinHeadline_other": "Reconexão · {{count}} gerações obrigatórias · {{cost}}",
+          "requiredWork": "Todo o trabalho de substituição listado é obrigatório para esta alteração de cadeia.",
+          "confirmSever": "Confirmar corte seco + {{count}} gerações · {{cost}}",
+          "confirmSever_one": "Confirmar corte seco + {{count}} geração · {{cost}}",
+          "confirmSever_other": "Confirmar corte seco + {{count}} gerações · {{cost}}",
+          "confirmRejoin": "Confirmar reconexão + {{count}} gerações · {{cost}}",
+          "confirmRejoin_one": "Confirmar reconexão + {{count}} geração · {{cost}}",
+          "confirmRejoin_other": "Confirmar reconexão + {{count}} gerações · {{cost}}",
+          "close": "Fechar — manter a cadeia inalterada",
+          "severConfirmed": "Corte seco confirmado. Verifique no plano o progresso do primeiro quadro e da substituição ou qualquer recuperação necessária.",
+          "rejoinConfirmed": "Reconexão confirmada. Verifique no plano o progresso da extração do quadro e da substituição ou qualquer recuperação necessária."
+        },
+        "errors": {
+          "routesUnavailable": "Escolha rotas de imagem e vídeo prontas em Configuração do filme antes de preparar esta estimativa.",
+          "pricing": {
+            "invalidQuote": "Os dados da estimativa estavam internamente inconsistentes. Nada foi enviado.",
+            "inactiveShot": "Uma tomada selecionada não está mais ativa. Atualize o projeto e prepare novamente.",
+            "inFlight": "Uma geração selecionada já está em andamento. Aguarde a conclusão ou altere a seleção.",
+            "duplicateShotPurpose": "A mesma geração foi selecionada mais de uma vez. Revise a seleção e prepare novamente.",
+            "invalidDependency": "A dependência da continuação não é mais válida. Atualize o projeto e prepare novamente.",
+            "invalidPrepareRequest": "Não foi possível preparar a seleção de geração com segurança. Revise-a e prepare novamente.",
+            "invalidReference": "Uma referência selecionada não é mais válida para esta geração. Escolha outra referência.",
+            "missingShootingScript": "Escreva o roteiro de filmagem deste Shot antes de gerar mídia.",
+            "missingConditioning": "Uma tomada de vídeo não tem um primeiro quadro nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
+            "unsafeTotal": "Não foi possível representar com segurança o total da estimativa. Reduza a seleção; nada foi enviado."
+          }
+        },
+        "reviewShotBinding": "Revisar vínculo do Shot",
+        "readout": {
+          "prompt": "Prompt exato",
+          "rendersAs": "Renderiza como",
+          "sourceRevision": "Revisão da fonte",
+          "source": "Fonte",
+          "story": "História",
+          "shootingScript": "Roteiro de filmagem",
+          "referencePrompt": "Descrição da referência",
+          "references": "Referências resolvidas",
+          "noReferences": "Sem entradas diretas de referência",
+          "referenceFact": "{{kind}} · {{referenceId}} → {{assetId}}"
+        },
+        "referenceGridRetry": "Se o modelo retornar uma grade de variações, cada referência poderá ser tentada novamente uma vez de forma automática. As primeiras tentativas custam {{lower}}; o máximo com novas tentativas é {{upper}}."
+      },
+      "editorFolderExport": {
+        "action": "Exportar pasta para edição…",
+        "actionWithSlates": "Exportar pasta para edição · {{count}} slates…",
+        "exporting": "Exportando… Nenhuma mídia será gerada e nada será gasto.",
+        "reveal": "Mostrar no Finder",
+        "dismiss": "Fechar",
+        "none": "nenhum",
+        "successFacts": "{{bytes}} bytes · {{count}} arquivos",
+        "successSlates": "Números de Shot com slate: {{shots}}",
+        "successQuarantine": "Exportações antigas movidas: {{count}}",
+        "disabled": {
+          "no_beats": "Adicione um Beat antes de exportar",
+          "duration_pending": "Defina a duração de cada Beat vazio",
+          "invalid_media": "Resolva a mídia selecionada desatualizada ou inválida",
+          "bed_too_short": "Escolha uma cama de áudio longa o bastante para a linha do tempo",
+          "mutationActive": "Aguarde a alteração atual do espaço de trabalho",
+          "exportRunning": "Uma pasta para edição já está sendo exportada",
+          "catalogUnavailable": "O armazenamento da exportação não está disponível"
+        },
+        "errors": {
+          "catalogUnavailable": "O catálogo de exportação está indisponível. Recarregue o projeto.",
+          "staleAuthority": "O projeto mudou. Revise o projeto atual antes de exportar novamente.",
+          "staleCatalog": "O catálogo de exportação mudou. Recarregue o histórico de exportações antes de tentar novamente.",
+          "invalidMedia": "A mídia selecionada está desatualizada, não canônica ou inválida. Revise o Cut.",
+          "mediaUnavailable": "Não foi possível verificar a mídia selecionada. Nenhuma exportação parcial foi publicada.",
+          "busy": "O Creative Studio está concluindo outra operação. Tente novamente depois.",
+          "artifactUnavailable": "Essa exportação não está mais no catálogo ativo. Recarregue o projeto.",
+          "resultConflict": "Um catálogo mais recente chegou antes da confirmação. Recarregue e revise."
+        }
+      },
+      "filmExport": {
+        "action": "Exportar filme…",
+        "actionWithSlates": "Exportar filme · {{count}} slates…",
+        "actionWithSlates_one": "Exportar filme · {{count}} slate…",
+        "actionWithSlates_other": "Exportar filme · {{count}} slates…",
+        "cancel": "Cancelar exportação",
+        "cut": "Cortes secos",
+        "description": "Cria um MP4 pronto para edição a partir do corte atual. Planos sem cobertura viram cartelas pretas temporizadas.",
+        "disabled": {
+          "no_beats": "Adicione um Beat antes de exportar",
+          "duration_pending": "Defina a duração de cada Beat vazio",
+          "invalid_media": "Resolva mídias obsoletas ou inválidas",
+          "bed_too_short": "Escolha uma cama de áudio longa o suficiente",
+          "mutationActive": "Conclua a alteração atual antes de exportar",
+          "exportRunning": "Uma exportação já está em andamento",
+          "catalogUnavailable": "O armazenamento de exportação não está disponível"
+        },
+        "dismiss": "Fechar",
+        "dissolve": "Dissolvência cruzada",
+        "errors": {
+          "catalogUnavailable": "O catálogo de exportação não está disponível. Recarregue o projeto.",
+          "staleAuthority": "O projeto mudou. Nenhum filme obsoleto foi publicado. Revise o projeto atual antes de exportar novamente.",
+          "staleCatalog": "O catálogo de exportação mudou. Nenhum filme obsoleto foi publicado. Recarregue o histórico de exportações antes de tentar novamente.",
+          "unavailable": "A exportação de filme precisa do FFmpeg, que não foi encontrado neste dispositivo. Instale-o ou defina FFMPEG_PATH apontando para uma cópia que você já tenha e reabra o projeto.",
+          "renderFailed": "A renderização local não pôde ser verificada. Nenhuma exportação parcial foi publicada.",
+          "cancelled": "A exportação foi cancelada. A mídia do projeto não mudou.",
+          "invalidMedia": "O corte contém mídia obsoleta, não canônica ou inválida.",
+          "busy": "O Creative Studio está concluindo outra operação.",
+          "artifactUnavailable": "O filme não está mais no catálogo ativo.",
+          "resultConflict": "Um catálogo mais novo chegou antes da confirmação do filme."
+        },
+        "export": "Exportar filme",
+        "noSpend": "Isso é executado na sua máquina. Nenhuma mídia será gerada e nada será gasto.",
+        "phase": {
+          "preparing": "Preparando a mídia exata…",
+          "analyzing": "Analisando mídia e caudas silenciosas…",
+          "rendering": "Renderizando o filme localmente…",
+          "publishing": "Verificando e publicando o filme…"
+        },
+        "reveal": "Mostrar no Finder",
+        "successFacts": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} caudas aparadas",
+        "successFacts_one": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} cauda aparada",
+        "successFacts_other": "{{nominal}} s autorados · {{rendered}} s exportados · {{count}} caudas aparadas",
+        "successQuarantine": "Exportações de filme antigas movidas: {{count}}",
+        "successQuarantine_one": "Exportações de filme antigas movidas: {{count}}",
+        "successQuarantine_other": "Exportações de filme antigas movidas: {{count}}",
+        "title": "Exportar filme",
+        "transition": "Transição",
+        "trimTails": "Aparar caudas estáticas de cada plano",
+        "trimTailsHelp": "Afeta apenas o arquivo exportado, nunca o projeto. O último plano mantém a duração completa."
+      }
     },
     "rules": {
       "open": "Regras",
@@ -958,12 +1825,7 @@
     "close": {
       "saveAndClose": "Salvar e fechar",
       "discard": "Descartar e fechar",
-      "cancel": "Cancelar",
-      "unsavedMessage": "{{count}} cenas têm edições não salvas. Deseja salvá-las antes de fechar?",
-      "unsavedMessage_one": "{{count}} cena tem edições não salvas. Deseja salvá-la antes de fechar?",
-      "unsavedMessage_many": "{{count}} cenas têm edições não salvas. Deseja salvá-las antes de fechar?",
-      "unsavedMessage_other": "{{count}} cenas têm edições não salvas. Deseja salvá-las antes de fechar?",
-      "unavailableMessage": "O Estúdio Criativo não respondeu. Fechar agora pode descartar edições de cena não salvas."
+      "cancel": "Cancelar"
     },
     "phase": {
       "nav": {
@@ -1277,108 +2139,6 @@
       "durationSeconds_other": "{{seconds}} segundos",
       "selected": "Cena selecionada"
     },
-    "inspector": {
-      "title": "Direção da cena",
-      "sectionsLabel": "Seções de edição da cena",
-      "directionTab": "Visual",
-      "scriptTab": "Roteiro",
-      "titleLabel": "Título da cena",
-      "purposeLabel": "Objetivo da cena",
-      "purposePlaceholder": "O que esta cena deve alcançar?",
-      "visualPromptLabel": "Prompt visual",
-      "visualPromptPlaceholder": "Descreva o plano, o tema, o cenário, a iluminação e o movimento.",
-      "narrationLabel": "Narração",
-      "onScreenTextLabel": "Texto na tela",
-      "mediaKindLabel": "Tipo de saída",
-      "durationLabel": "Duração da cena em segundos",
-      "invalidDuration": "Digite um número inteiro de 1 a 60 segundos.",
-      "saving": "Salvando cena...",
-      "saved": "Cena salva",
-      "saveFailed": "Não foi possível salvar a cena.",
-      "unsavedChanges": "Suas alterações não salvas foram preservadas."
-    },
-    "draft": {
-      "title": "Criar um rascunho do storyboard",
-      "body": "O WePrompt vai propor cenas, narração, texto na tela e duração para você revisar.",
-      "checking": "Verificando o modelo de storyboard selecionado...",
-      "ready": "Pronto para criar o rascunho",
-      "setupRequired": "Selecione e configure um modelo de storyboard para criar com IA.",
-      "unavailable": "A criação do rascunho do storyboard está indisponível no momento.",
-      "providerLabel": "Provedor do storyboard",
-      "modelLabel": "Modelo de storyboard",
-      "chargeNotice": "O rascunho usa o modelo selecionado no projeto e pode gerar cobranças do provedor.",
-      "replaceTitle": "Substituir o storyboard atual?",
-      "replaceBody": "Criar outro rascunho só substitui todas as cenas atuais após o retorno de uma proposta válida.",
-      "confirm": "Criar rascunho",
-      "cancel": "Cancelar",
-      "configureModel": "Abrir configurações do modelo",
-      "manualFallback": "Continuar com a edição manual",
-      "failed": "Não foi possível criar um rascunho do storyboard. Suas cenas atuais não foram alteradas."
-    },
-    "conditioning": {
-      "inputsTitle": "Entradas para esta imagem estática",
-      "role": { "cast": "Elenco", "look": "Visual" },
-      "maximum": "Este mecanismo aceita até {{count}} referências do briefing.",
-      "unsupported": "Este mecanismo de imagem não pode usar referências ativas do briefing. Escolha outro mecanismo ou remova-as do briefing.",
-      "overflow": "Este mecanismo de imagem aceita no máximo {{maximum}} referências do briefing, mas há {{count}} ativas.",
-      "malformed": "As referências do briefing mudaram ou são inválidas. Atualize a revisão antes de gerar.",
-      "reviewChanged": "As referências do briefing ou o mecanismo de imagem mudaram. Revise as entradas atualizadas antes de gerar.",
-      "plateOutOfDate": "Este primeiro quadro foi criado com outras referências do briefing, outra proporção ou resolução. Você ainda pode renderizar este clipe."
-    },
-    "reference": {
-      "generate": "Gerar referência",
-      "dialogTitle": "Gerar uma imagem de referência",
-      "promptLabel": "Prompt de referência",
-      "reviewTag": "Referência",
-      "excludedSummary": "Algumas cenas solicitadas não estão incluídas nesta aprovação porque ainda não estão prontas:",
-      "excludedNoneReady": "Nenhuma das cenas solicitadas está pronta para gerar uma referência:",
-      "discardExcludedRequests": "Descartar estas solicitações",
-      "excludedUnavailable": "A cena não está mais disponível",
-      "excludedPromptUnusable": "O prompt visual da cena não pode descrever uma imagem de referência",
-      "dismissFailed": "Não foi possível atualizar a fila de solicitações. A revisão foi fechada; tente novamente mais tarde."
-    },
-    "review": {
-      "generateReadyScenes": "Gerar {{count}} cenas prontas",
-      "generateReadyScenes_one": "Gerar {{count}} cena pronta",
-      "generateReadyScenes_many": "Gerar {{count}} cenas prontas",
-      "generateReadyScenes_other": "Gerar {{count}} cenas prontas",
-      "noReadyScenes": "Nenhuma cena está pronta para geração.",
-      "generateScene": "Gerar cena",
-      "regenerateScene": "Gerar outra variação",
-      "title": "Revisar geração",
-      "sceneCount": "{{count}} cenas selecionadas",
-      "videoSeconds": "{{seconds}} segundos de vídeo solicitados",
-      "selectedDurationFull": "Duração selecionada: {{seconds}} segundos",
-      "selectedDurationFull_one": "Duração selecionada: {{seconds}} segundo",
-      "selectedDurationFull_many": "Duração selecionada: {{seconds}} segundos",
-      "selectedDurationFull_other": "Duração selecionada: {{seconds}} segundos",
-      "targetDurationFull": "Duração alvo: {{seconds}} segundos",
-      "targetDurationFull_one": "Duração alvo: {{seconds}} segundo",
-      "targetDurationFull_many": "Duração alvo: {{seconds}} segundos",
-      "targetDurationFull_other": "Duração alvo: {{seconds}} segundos",
-      "providerLabel": "Provedor",
-      "modelLabel": "Modelo",
-      "aspectRatio": "Proporção",
-      "resolution": "Resolução",
-      "watermarkOff": "Marca-d'água desativada",
-      "audioOff": "Saída sem som; geração de áudio desativada",
-      "missingRoute": "Pelo menos uma cena não tem mecanismo.",
-      "invalidRoute": "Pelo menos um mecanismo selecionado é inválido.",
-      "durationMismatch": "A duração do storyboard não corresponde ao objetivo do projeto.",
-      "chargeNotice": "A geração usa a conta do provedor selecionado e pode gerar cobranças.",
-      "confirm": "Confirmar e gerar",
-      "cancel": "Cancelar",
-      "disabledMissingRoutes": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
-      "disabledMissingRoutes_one": "{{count}} tomada não tem mecanismo. Feche para definir um.",
-      "disabledMissingRoutes_many": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
-      "disabledMissingRoutes_other": "{{count}} tomadas não têm mecanismo. Feche para definir um.",
-      "setEngines": "Fechar e definir mecanismos",
-      "excludedFirstFrame": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
-      "excludedFirstFrame_one": "{{count}} tomada não está nesta renderização — este mecanismo não pode começar a partir de um quadro.",
-      "excludedFirstFrame_many": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
-      "excludedFirstFrame_other": "{{count}} tomadas não estão nesta renderização — este mecanismo não pode começar a partir de um quadro.",
-      "audioOn": "Esta renderização inclui áudio gerado; mecanismos silenciosos, se houver, permanecem sem som."
-    },
     "jobs": {
       "progress": "{{percent}}% concluído",
       "cancel": "Cancelar trabalho",
@@ -1388,8 +2148,8 @@
       "retryConfirmationConfirm": "Confirmar e tentar novamente",
       "retryDownload": "Tentar baixar novamente",
       "retryChargeTitle": "Tentar novamente com possível cobrança duplicada?",
-      "retryChargeBody": "O resultado do envio anterior é desconhecido. Tentar novamente pode gerar outra cobrança do provedor.",
-      "retryChargeConfirm": "Reconhecer e tentar novamente",
+      "retryChargeBody": "O resultado do envio anterior é desconhecido. Uma substituição pode gerar outra cobrança do provedor. Continuar apenas libera uma nova estimativa; nenhum trabalho é enviado ainda.",
+      "retryChargeConfirm": "Reconhecer e revisar a estimativa",
       "status": {
         "queuedLocal": "Aguardando envio",
         "submitting": "Enviando",
@@ -1402,6 +2162,7 @@
       },
       "errors": {
         "invalidRequest": "A solicitação de geração é inválida.",
+        "contentRejected": "O provedor recusou a imagem inicial. Reenquadre ou gere novamente a imagem estática antes de tentar de novo.",
         "auth": "O provedor rejeitou as credenciais.",
         "quota": "A conta do provedor não tem cota suficiente.",
         "rateLimited": "O limite de solicitações do provedor foi atingido. Tente novamente mais tarde.",
@@ -1412,7 +2173,9 @@
         "submissionUnknown": "O resultado do envio é desconhecido. Revise o aviso de cobrança duplicada antes de tentar novamente.",
         "downloadFailed": "A geração foi concluída, mas não foi possível baixar a saída.",
         "unsupported": "Este provedor não aceita a operação solicitada.",
-        "unknown": "O trabalho de geração falhou por um motivo desconhecido."
+        "seedStillVariationGrid": "A imagem gerada contém uma grade de variações com vários painéis e não pode ser usada como primeiro quadro atual nem como referência.",
+        "unknown": "O trabalho de geração falhou por um motivo desconhecido.",
+        "referenceVariationGridRepeated": "O modelo retornou outra grade de variações com vários painéis. Importar foto é a forma confiável de definir esta referência."
       }
     },
     "preview": {
@@ -1481,15 +2244,20 @@
     "errors": {
       "featureDisabled": "O Creative Studio está desativado nesta compilação.",
       "invalidPayload": "A solicitação contém informações inválidas ou incompletas.",
+      "mutationRefused": "Esta alteração não pode ser aplicada ao projeto no estado atual. Revise o projeto e tente novamente.",
+      "pricingRefused": "A estimativa foi recusada antes do envio. Nada foi enviado.",
       "projectNotFound": "O projeto do Creative Studio não existe mais.",
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",
       "staleProject": "O projeto foi alterado em outro lugar. Atualize-o antes de tentar novamente.",
+      "staleExportCatalog": "O catálogo de exportação mudou. Atualize o histórico de exportações antes de tentar novamente.",
       "planningUnavailable": "A criação do rascunho do storyboard está indisponível. Você pode continuar editando manualmente.",
       "invalidRoute": "O mecanismo de geração selecionado é inválido ou está indisponível.",
       "cancellationRefused": "O provedor não pode mais cancelar este trabalho em execução.",
       "duplicateChargeAcknowledgementRequired": "Reconheça a possível cobrança duplicada do provedor antes de tentar novamente.",
       "busy": "Este projeto tem trabalhos de geração ativos.",
       "provider": "O provedor não conseguiu concluir a solicitação.",
+      "runtimeInactive": "A geração do Creative Studio não está pronta. Abra ou crie um projeto compatível e tente novamente.",
+      "projectQuarantined": "O Creative Studio não pôde iniciar porque o projeto {{projectId}} precisa de recuperação. Abra a biblioteca do Studio para revisá-lo.",
       "storage": "O Creative Studio não conseguiu atualizar seus dados locais.",
       "ruleBreach": "Uma regra bloqueou a geração antes de qualquer cobrança. Abra Regras para ver o que precisa ser alterado."
     },
@@ -1561,43 +2329,13 @@
         "frame": "Este mecanismo não consegue criar {{ratio}}.",
         "resolution": "Este mecanismo não consegue criar {{resolution}}.",
         "duration": "Este mecanismo não consegue criar uma tomada de {{seconds}} s.",
-        "firstFrame": "Este mecanismo não consegue começar com uma imagem de referência.",
+        "firstFrame": "Este mecanismo não consegue começar pelo primeiro quadro revisado.",
         "catalogUnloaded": "A lista de mecanismos ainda não foi carregada.",
         "aria": "Não é possível renderizar. {{reason}}",
         "actionSetEngines": "Definir mecanismos",
         "actionRemoveReference": "Remover a referência",
-        "actionShorten": "Encurtar esta tomada"
+        "actionShorten": "Ajustar a duração da tomada"
       }
-    },
-    "brief": {
-      "conversationTitle": "Conversa do briefing",
-      "danglingNotice": "A conversa de briefing deste projeto não está mais disponível.",
-      "danglingStartFresh": "Iniciar uma nova conversa",
-      "proposalTitle": "Roteiro proposto",
-      "proposalMeta": "Com base na revisão {{revision}} · {{createdAt}}",
-      "proposalSummary": "Adições: {{added}} · remoções: {{removed}} · alterações: {{changed}}",
-      "proposalSceneChange": "Tomada {{position}}: {{fields}}",
-      "proposalFieldSeparator": ", ",
-      "proposalNoChanges": "Nenhuma alteração no roteiro atual",
-      "proposalDiffUnavailable": "Resumo das alterações indisponível — o roteiro mudou depois que esta proposta foi elaborada",
-      "proposalField": {
-        "title": "título",
-        "purpose": "objetivo",
-        "visualPrompt": "prompt visual",
-        "narration": "narração",
-        "onScreenText": "texto na tela",
-        "mediaKind": "tipo de saída",
-        "durationSeconds": "duração",
-        "referenceAssetId": "imagem de referência"
-      },
-      "proposalAccept": "Aceitar roteiro",
-      "proposalReject": "Rejeitar",
-      "proposalAccepted": "Roteiro aplicado",
-      "proposalRejected": "Rejeitado",
-      "proposalExpired": "Expirado",
-      "proposalStale": "O roteiro mudou enquanto esta proposta aguardava. Peça uma nova versão.",
-      "proposalRepropose": "Pedir nova versão",
-      "proposalFlushRefused": "Não foi possível salvar suas edições não salvas, por isso a proposta não foi aplicada. Corrija as edições e tente novamente."
     },
     "shell": {
       "showDirector": "Mostrar o Creative Director",

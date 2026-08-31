@@ -15,11 +15,12 @@ import {
 
 const CONVERSATION_ID = '22222222-2222-4222-8222-222222222222';
 const OTHER_CONVERSATION_ID = '33333333-3333-4333-8333-333333333333';
+const SHORT_CONVERSATION_ID = 'd0921953';
 const PRINCIPAL_ID = 'desktop-local-principal';
 const TEAM_USER_ID = 'system_default_user';
 
-const conversation = (type: string = 'aionrs', workspace: unknown = '/workspace') => ({
-  id: CONVERSATION_ID,
+const conversation = (type: string = 'aionrs', workspace: unknown = '/workspace', id: string = CONVERSATION_ID) => ({
+  id,
   type,
   extra: { workspace },
 });
@@ -86,6 +87,28 @@ describe('PresentationScopeResolver', () => {
       ok: true,
       scope: 'team',
     });
+  });
+
+  it('canonicalizes a backend conversation id across lookup, record, and team authority', async () => {
+    const getConversation = vi.fn(async () =>
+      conversation('aionrs', '/workspace', SHORT_CONVERSATION_ID.toUpperCase())
+    );
+    const harness = createHarness({
+      getConversation,
+      listTeams: async () => [team([SHORT_CONVERSATION_ID.toUpperCase()])],
+    });
+
+    await expect(
+      harness.resolver.resolve({ conversationId: SHORT_CONVERSATION_ID.toUpperCase(), principalId: PRINCIPAL_ID })
+    ).resolves.toEqual({
+      ok: true,
+      conversationId: SHORT_CONVERSATION_ID,
+      principalId: PRINCIPAL_ID,
+      scope: 'team',
+      runtime: 'aionrs',
+      workspace: '/workspace',
+    });
+    expect(getConversation).toHaveBeenCalledWith({ conversationId: SHORT_CONVERSATION_ID });
   });
 
   it('accepts the unambiguous legacy agents transport alias as authoritative membership', async () => {

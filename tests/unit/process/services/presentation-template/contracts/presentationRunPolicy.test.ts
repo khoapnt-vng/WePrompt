@@ -17,6 +17,10 @@ import {
   PRESENTATION_RUN_DISPATCH_STATUSES,
   PRESENTATION_RUN_LIMITS as LEGACY_PRESENTATION_RUN_LIMITS,
 } from '@/common/config/constants';
+import {
+  PRESENTATION_CONVERSATION_ID_PATTERN,
+  normalizePresentationConversationId,
+} from '@/common/types/office/presentationConversationId';
 import { PRESENTATION_RUN_LIMITS } from '@/common/types/office/presentationRunPolicy';
 import type { PresentationRunFailure, PresentationRunFailureCode } from '@/common/types/office/presentationRun';
 
@@ -32,6 +36,11 @@ const presentationRunPolicyFile = resolve(
   process.cwd(),
   'tests/unit/process/services/presentation-template/contracts/presentationRunPolicy.test.ts'
 );
+
+const presentationConversationIdSchema = z
+  .string()
+  .regex(PRESENTATION_CONVERSATION_ID_PATTERN)
+  .transform((value): string => normalizePresentationConversationId(value)!);
 
 const compilePolicyFixture = (source: (moduleSpecifiers: { policy: string; types: string }) => string): string => {
   const fixtureDirectory = mkdtempSync(join(tmpdir(), 'presentation-run-policy-'));
@@ -155,6 +164,9 @@ export const PRESENTATION_RUN_FAILURE_POLICY = {
 const strictDetails = {
   runId: z.object({ runId: z.string() }).strict(),
   grantId: z.object({ grantId: z.string().optional() }).strict(),
+  replayedGrant: z
+    .object({ grantId: z.string().optional(), queueUnboundAtRevoke: z.literal(true).optional() })
+    .strict(),
 };
 
 const failureEnvelope = <
@@ -236,7 +248,6 @@ export const presentationRunFailureSchema = z.union([
     z.enum([
       'SOURCE_GRANT_INVALID',
       'SOURCE_GRANT_FOREIGN',
-      'SOURCE_GRANT_REPLAYED',
       'SOURCE_TAMPERED',
       'SOURCE_LIMIT_EXCEEDED',
       'SOURCE_FORMAT_UNSUPPORTED',
@@ -244,6 +255,21 @@ export const presentationRunFailureSchema = z.union([
     false,
     z.literal('grant_validation'),
     strictDetails.grantId
+  ),
+  // A replayed grant carries one detail the rest of grant_validation does not: whether the queue
+  // was already unbound when the revoke landed. Mirrors PresentationRunFailure, which split this
+  // code out of the group for exactly that reason.
+  failureEnvelope(
+    z.literal('SOURCE_GRANT_REPLAYED'),
+    false,
+    z.literal('grant_validation'),
+    z.object({ grantId: z.string().optional(), queueUnboundAtRevoke: z.literal(true).optional() }).strict()
+  ),
+  failureEnvelope(
+    z.literal('SOURCE_GRANT_REPLAYED'),
+    false,
+    z.literal('grant_validation'),
+    strictDetails.replayedGrant
   ),
   failureEnvelope(
     z.literal('SOURCE_GRANT_EXPIRED'),
@@ -388,7 +414,7 @@ export const presentationRunPublicSchema = z.union([
 
 export const recoverablePresentationRunsRequestSchema = z
   .object({
-    conversation_id: z.string().uuid(),
+    conversation_id: presentationConversationIdSchema,
     cursor: z.string().min(1).optional(),
     limit: z
       .number()
@@ -400,6 +426,9 @@ export const recoverablePresentationRunsRequestSchema = z
   .strict();
 
 describe('managed presentation schema type coupling', () => {
+  // This assertion creates and checks a second TypeScript program synchronously. It takes about one
+  // second in isolation but can exceed Vitest's 10-second default when the full instrumented suite
+  // contends for the compiler; the compiler still has a finite 30-second failure bound.
   it('keeps failure, public-run, and recovery schemas bidirectionally equivalent to production types', () => {
     const diagnostics = compilePolicyFixture(
       ({ policy, types }) => `
@@ -501,7 +530,7 @@ describe('managed presentation schema type coupling', () => {
     );
 
     expect(diagnostics).toBe('');
-  });
+  }, 30_000);
 });
 
 describe('managed presentation failure policy', () => {
@@ -801,7 +830,7 @@ describe('managed presentation recovery contract', () => {
   const cursorPayloadSchema = z
     .object({
       version: z.literal(1),
-      conversationId: z.string().uuid(),
+      conversationId: presentationConversationIdSchema,
       updatedAt: z.string().datetime(),
       runId: z.string().uuid(),
     })
@@ -903,6 +932,9 @@ describe('managed presentation recovery contract', () => {
   });
 
   it('defaults the limit to 20 and accepts the exact 1 and 20 boundaries', () => {
+    expect(recoverablePresentationRunsRequestSchema.parse({ conversation_id: 'D0921953' })).toMatchObject({
+      conversation_id: 'd0921953',
+    });
     expect(recoverablePresentationRunsRequestSchema.parse({ conversation_id: CONVERSATION_ID }).limit).toBe(20);
     expect(
       recoverablePresentationRunsRequestSchema.safeParse({ conversation_id: CONVERSATION_ID, limit: 1 }).success

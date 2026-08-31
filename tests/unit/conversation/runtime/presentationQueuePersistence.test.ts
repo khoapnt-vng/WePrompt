@@ -13,6 +13,7 @@ import {
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const CONVERSATION_ID = '2be7b8fc-6af5-42b8-aed5-03644735c730';
+const SHORT_CONVERSATION_ID = 'd0921953';
 const QUEUE_ITEM_ID = '37f0a614-3e7f-41b5-87fd-49076fcf078d';
 const SECOND_QUEUE_ITEM_ID = '9ba9e8d0-dbd3-43a3-b12d-a3a04ef50464';
 const CLIENT_REQUEST_ID = 'c9426c09-4352-4c7c-88ca-039bfcaaf0d8';
@@ -21,6 +22,7 @@ const GRANT_ID = '229ca31e-1150-4ad1-ad62-1c3368330adc';
 const RUN_ID = '5a68fccc-7b90-49b4-88f9-d78bb88255ed';
 const NOW = '2026-08-05T00:00:00.000Z';
 const STORAGE_KEY = `presentation-command-queue/v2/${CONVERSATION_ID}`;
+const SHORT_STORAGE_KEY = `presentation-command-queue/v2/${SHORT_CONVERSATION_ID}`;
 
 type SourceRef = {
   grantId: string;
@@ -59,6 +61,8 @@ type QueueController = {
     expectedOwnerRevision: number | null;
   }) => Promise<QueueItem>;
   recoverPersisting: () => Promise<void>;
+  retirePersisting: (queueItemId: string) => Promise<'confirmed' | 'removed'>;
+  removePersistingAfterConfirmedGrantRevocation: (queueItemId: string, grantId: string) => Promise<void>;
   editQueued: (queueItemId: string, updates: { input: string }) => Promise<QueueItem>;
   removeQueued: (queueItemId: string) => Promise<void>;
   claimHead: (queueItemId: string) => Promise<QueueItem>;
@@ -205,6 +209,7 @@ describe('managed presentation queue persistence', () => {
     expect(item.execution).toEqual({ state: 'queued' });
     expect(confirmQueuedSources).toHaveBeenCalledOnce();
     expect(storage.operations).toEqual([
+      `get:presentation-command-queue/v2/${CONVERSATION_ID.toUpperCase()}`,
       `get:${STORAGE_KEY}`,
       `set:${STORAGE_KEY}`,
       `get:${STORAGE_KEY}`,
@@ -212,6 +217,100 @@ describe('managed presentation queue persistence', () => {
       `set:${STORAGE_KEY}`,
       `get:${STORAGE_KEY}`,
     ]);
+  });
+
+  it('canonicalizes a backend conversation id at controller ingress and persists it under one lowercase key', async () => {
+    const storage = new MemoryStorage();
+    const controller = createController(storage, confirmed, SHORT_CONVERSATION_ID.toUpperCase());
+
+    await controller.enqueue(
+      enqueueInput({
+        sourceOwner: { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+      })
+    );
+
+    expect(controller.read().conversationId).toBe(SHORT_CONVERSATION_ID);
+    expect(storage.values.has(SHORT_STORAGE_KEY)).toBe(true);
+    expect(Array.from(storage.values.keys())).toEqual([SHORT_STORAGE_KEY]);
+    expect(createController(storage, confirmed, SHORT_CONVERSATION_ID).read()).toMatchObject({
+      conversationId: SHORT_CONVERSATION_ID,
+      items: [
+        expect.objectContaining({
+          queueItemId: QUEUE_ITEM_ID,
+          clientRequestId: CLIENT_REQUEST_ID,
+          sourceOwner: { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+        }),
+      ],
+    });
+  });
+
+  it('probes the deterministic uppercase legacy UUID key for a canonical caller and migrates it after proof', () => {
+    const storage = new MemoryStorage();
+    const legacyConversationId = CONVERSATION_ID.toUpperCase();
+    const legacyKey = `presentation-command-queue/v2/${legacyConversationId}`;
+    storage.values.set(
+      legacyKey,
+      JSON.stringify({
+        version: 2,
+        conversationId: legacyConversationId,
+        revision: 1,
+        items: [
+          {
+            ...persistedQueueItem(0),
+            sources: [sourceRef()],
+            sourceOwner: { owner_type: 'conversation', conversation_id: legacyConversationId },
+            expectedOwnerRevision: 1,
+            confirmedOwnerRevision: 2,
+          },
+        ],
+      })
+    );
+    storage.values.set('presentation-command-queue/v2/UNRELATED', 'leave-me-alone');
+
+    const state = createController(storage, confirmed, CONVERSATION_ID).read();
+
+    expect(state).toMatchObject({
+      conversationId: CONVERSATION_ID,
+      items: [
+        expect.objectContaining({
+          sourceOwner: { owner_type: 'conversation', conversation_id: CONVERSATION_ID },
+        }),
+      ],
+    });
+    expect(storage.values.has(legacyKey)).toBe(false);
+    expect(JSON.parse(storage.values.get(STORAGE_KEY)!)).toMatchObject({
+      conversationId: CONVERSATION_ID,
+      items: [
+        expect.objectContaining({
+          sourceOwner: { owner_type: 'conversation', conversation_id: CONVERSATION_ID },
+        }),
+      ],
+    });
+    expect(storage.values.get('presentation-command-queue/v2/UNRELATED')).toBe('leave-me-alone');
+  });
+
+  it('rejects non-canonical persisted aliases and never widens durable queue identifiers', async () => {
+    const uppercaseEnvelope = {
+      version: 2,
+      conversationId: SHORT_CONVERSATION_ID.toUpperCase(),
+      revision: 0,
+      items: [],
+    };
+
+    expect(() =>
+      commandQueueModule.decodePresentationCommandQueueState(uppercaseEnvelope, SHORT_CONVERSATION_ID)
+    ).toThrow(/invalid/i);
+    expect(() => createController(new MemoryStorage(), confirmed, '../private')).toThrow(/conversation id/i);
+
+    const controller = createController(new MemoryStorage(), confirmed, SHORT_CONVERSATION_ID);
+    await expect(
+      controller.enqueue(
+        enqueueInput({
+          queueItemId: SHORT_CONVERSATION_ID,
+          sourceOwner: { owner_type: 'conversation', conversation_id: SHORT_CONVERSATION_ID },
+        })
+      )
+    ).rejects.toThrow(/item/i);
   });
 
   it('never calls main when the initial local write throws', async () => {
@@ -589,6 +688,216 @@ describe('managed presentation queue persistence', () => {
       execution: { state: 'queued' },
     });
     expect(confirmQueuedSources).toHaveBeenCalledTimes(2);
+  });
+
+  it('removes an exact persisting item only after an explicit definitive confirmation rejection', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({ ok: false, code: 'SOURCE_TAMPERED' });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).resolves.toBe('removed');
+
+    expect(controller.read().items).toEqual([]);
+    expect(confirmQueuedSources).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves an exact persisting item when retirement confirmation transport is uncertain', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockRejectedValueOnce(new Error('transport unavailable'));
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).rejects.toThrow('transport unavailable');
+
+    expect(controller.read().items).toMatchObject([{ queueItemId: QUEUE_ITEM_ID, execution: { state: 'persisting' } }]);
+  });
+
+  it.each([
+    'FEATURE_DISABLED',
+    'DESKTOP_REQUIRED',
+    'DRAFT_NOT_FOUND',
+    'DRAFT_EXPIRED',
+    'DRAFT_FOREIGN',
+    'SOURCE_GRANT_INVALID',
+    'SOURCE_GRANT_EXPIRED',
+    'SOURCE_GRANT_FOREIGN',
+    'SOURCE_GRANT_REPLAYED',
+    'RUN_NOT_FOUND',
+    'RUN_FORBIDDEN',
+    'SCOPE_UNAVAILABLE',
+    'TEAM_SCOPE_UNSUPPORTED',
+    'PERSISTENCE_FAILED',
+    'INTERNAL_ERROR',
+  ] as const)('preserves an exact persisting item when confirmation returns uncertain %s', async (code) => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({ ok: false, code });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).rejects.toThrow(/uncertain/i);
+
+    expect(controller.read().items).toMatchObject([{ queueItemId: QUEUE_ITEM_ID, execution: { state: 'persisting' } }]);
+  });
+
+  it('removes an exact persisting item after durable proof that its frozen grant was revoked unbound', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'SOURCE_GRANT_REPLAYED',
+        messageKey: 'conversation.presentationRun.errors.SOURCE_GRANT_REPLAYED',
+        retryable: false,
+        state: 'grant_validation',
+        details: { grantId: GRANT_ID, queueUnboundAtRevoke: true },
+      });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).resolves.toBe('removed');
+
+    expect(controller.read().items).toEqual([]);
+    expect(confirmQueuedSources).toHaveBeenCalledTimes(2);
+  });
+
+  it('preserves a persisting item when durable revoke proof names a grant outside its frozen sources', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'SOURCE_GRANT_REPLAYED',
+        messageKey: 'conversation.presentationRun.errors.SOURCE_GRANT_REPLAYED',
+        retryable: false,
+        state: 'grant_validation',
+        details: { grantId: SECOND_QUEUE_ITEM_ID, queueUnboundAtRevoke: true },
+      });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).rejects.toThrow(/uncertain/i);
+
+    expect(controller.read().items).toMatchObject([
+      { queueItemId: QUEUE_ITEM_ID, sources: [{ grantId: GRANT_ID }], execution: { state: 'persisting' } },
+    ]);
+  });
+
+  it('preserves a persisting item when revoke replay names its frozen grant without durable proof', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({
+        ok: false,
+        code: 'SOURCE_GRANT_REPLAYED',
+        messageKey: 'conversation.presentationRun.errors.SOURCE_GRANT_REPLAYED',
+        retryable: false,
+        state: 'grant_validation',
+        details: { grantId: GRANT_ID },
+      });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).rejects.toThrow(/uncertain/i);
+
+    expect(controller.read().items).toMatchObject([
+      { queueItemId: QUEUE_ITEM_ID, sources: [{ grantId: GRANT_ID }], execution: { state: 'persisting' } },
+    ]);
+  });
+
+  it('advances rather than removes a persisting item when retirement confirmation succeeds', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 'already_confirmed',
+        ownerRevision: 2,
+        expiresAt: '2026-08-06T00:00:00.000Z',
+      });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(controller.retirePersisting(QUEUE_ITEM_ID)).resolves.toBe('confirmed');
+
+    expect(controller.read().items).toMatchObject([
+      { queueItemId: QUEUE_ITEM_ID, confirmedOwnerRevision: 2, execution: { state: 'queued' } },
+    ]);
+  });
+
+  it('removes a never-confirmed persisting item after exact proof that its frozen grant was revoked', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi.fn<ConfirmQueuedSources>().mockRejectedValueOnce(new Error('lost IPC reply'));
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(
+      controller.removePersistingAfterConfirmedGrantRevocation(QUEUE_ITEM_ID, GRANT_ID)
+    ).resolves.toBeUndefined();
+
+    expect(controller.read().items).toEqual([]);
+    expect(confirmQueuedSources).toHaveBeenCalledOnce();
+  });
+
+  it('preserves a persisting item when the proven revoked grant is not in its frozen sources', async () => {
+    const storage = new MemoryStorage();
+    const confirmQueuedSources = vi.fn<ConfirmQueuedSources>().mockRejectedValueOnce(new Error('lost IPC reply'));
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+
+    await expect(
+      controller.removePersistingAfterConfirmedGrantRevocation(QUEUE_ITEM_ID, '9ba9e8d0-dbd3-43a3-b12d-a3a04ef50464')
+    ).rejects.toThrow(/revoked grant/i);
+
+    expect(controller.read().items).toMatchObject([
+      { queueItemId: QUEUE_ITEM_ID, sources: [{ grantId: GRANT_ID }], execution: { state: 'persisting' } },
+    ]);
+  });
+
+  it('lets concurrent recovery to queued win over persisting revoke-proof removal', async () => {
+    const storage = new MemoryStorage();
+    let releaseConfirmation: (() => void) | undefined;
+    const confirmation = new Promise<void>((resolve) => {
+      releaseConfirmation = resolve;
+    });
+    const confirmQueuedSources = vi
+      .fn<ConfirmQueuedSources>()
+      .mockRejectedValueOnce(new Error('lost IPC reply'))
+      .mockImplementationOnce(async () => {
+        await confirmation;
+        return {
+          ok: true,
+          status: 'already_confirmed',
+          ownerRevision: 2,
+          expiresAt: '2026-08-06T00:00:00.000Z',
+        };
+      });
+    const controller = createController(storage, confirmQueuedSources);
+    await expect(controller.enqueue(enqueueInput())).rejects.toThrow('lost IPC reply');
+    expect(controller.removePersistingAfterConfirmedGrantRevocation).toBeTypeOf('function');
+
+    const recovery = controller.recoverPersisting();
+    const removal = controller.removePersistingAfterConfirmedGrantRevocation(QUEUE_ITEM_ID, GRANT_ID);
+    releaseConfirmation?.();
+
+    await expect(recovery).resolves.toBeUndefined();
+    await expect(removal).rejects.toThrow(/persisting/i);
+    expect(controller.read().items).toMatchObject([
+      { queueItemId: QUEUE_ITEM_ID, confirmedOwnerRevision: 2, execution: { state: 'queued' } },
+    ]);
   });
 
   it('allows editing and removal only while queued', async () => {

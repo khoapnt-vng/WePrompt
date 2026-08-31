@@ -469,6 +469,15 @@
     "validating": "Validating…",
     "validationSuccess": "Connection validated.",
     "validationFailed": "Connection validation failed.",
+    "validationFailure": {
+      "unsupported": "This model is not supported by the selected integration.",
+      "auth": "The provider rejected these credentials. Check the API key and try again.",
+      "rateLimited": "The provider is rate limiting validation. Wait a moment and try again.",
+      "providerUnavailable": "The provider is temporarily unavailable. Try again later.",
+      "timeout": "Connection validation timed out. Try again.",
+      "invalidResponse": "The provider returned an invalid validation response.",
+      "unknown": "Connection validation failed for an unknown reason."
+    },
     "save": "Save",
     "cancel": "Cancel",
     "silentOutputSupported": "Silent output supported",

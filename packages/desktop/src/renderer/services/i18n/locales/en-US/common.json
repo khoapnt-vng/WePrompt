@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "Could not save the diagnostic package",
       "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Reinstall the latest WePrompt package. If it still happens after reinstalling, check whether security or antivirus software quarantined WePrompt components."
     },
+    "genericFailure": {
+      "title": "Local backend could not start",
+      "description": "WePrompt could not complete local startup. Restart WePrompt. If the issue continues, save the diagnostic package for support.",
+      "sendDiagnostics": "Save diagnostics",
+      "diagnosticsSent": "Diagnostics saved",
+      "diagnosticsReportSuccess": "Diagnostic package saved",
+      "diagnosticsReportFailed": "Could not save the diagnostic package"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt package architecture mismatch",
       "description": "This WePrompt package is for {{packageArch}}, but this Mac is {{deviceArch}}. Get the {{expectedArch}} installer from your approved internal distribution channel, close WePrompt, and install that package.",

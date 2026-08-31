@@ -7,9 +7,14 @@
 import { ipcBridge } from '@/common';
 import type {
   StudioConnectionCandidate,
+  StudioConnectionCandidateModel,
   StudioConnectionIntegration,
+  StudioConnectionIntegrationLabelKey,
   StudioConnectionRecord,
+  StudioConnectionValidationFailureReason,
   StudioConnectionValidationResult,
+  StudioConnectionValidationSuccess,
+  StudioCommandError,
   StudioMediaKind,
   StudioRendererConnectionCapabilities,
   StudioSaveConnectionRequest,
@@ -17,12 +22,21 @@ import type {
 import { Alert, AutoComplete, Button, Modal, Popconfirm, Select, Spin, Tag } from '@arco-design/web-react';
 import { Plus, Refresh } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+
+import { CLOSED_CANDIDATE_MODEL_LABEL_KEYS } from '@/common/types/project/creativeStudioConnectionPlan';
 import { useTranslation } from 'react-i18next';
 
-type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models'>;
+type SafeCandidate = Pick<StudioConnectionCandidate, 'providerId' | 'providerName' | 'models' | 'integrationModels'>;
 type SafeIntegration = StudioConnectionIntegration;
 type SafeBinding = StudioConnectionRecord;
-type SafeValidation = StudioConnectionValidationResult;
+type SafeValidation = StudioConnectionValidationSuccess;
+type SafeValidationAttempt =
+  | { valid: true; validation: SafeValidation }
+  | { valid: false; reason: StudioConnectionValidationFailureReason };
+type SafeSaveAttempt =
+  | { saved: true; binding: SafeBinding }
+  | { saved: false; reason: StudioConnectionValidationFailureReason | null };
+type SafeListFailure = { messageKey: string; projectId: string | null };
 type EditorState = {
   visible: boolean;
   original: SafeBinding | null;
@@ -39,26 +53,126 @@ export type StudioMediaModelsSectionProps = {
 
 export const sanitizeStudioMediaModelCapabilities = (
   capabilities: StudioRendererConnectionCapabilities
-): StudioRendererConnectionCapabilities => ({
-  mediaKinds: [...capabilities.mediaKinds],
-  ...(capabilities.audioModes ? { audioModes: [...capabilities.audioModes] } : {}),
-  ...(capabilities.aspectRatios ? { aspectRatios: [...capabilities.aspectRatios] } : {}),
-  ...(capabilities.resolutions ? { resolutions: [...capabilities.resolutions] } : {}),
-  ...(capabilities.minDurationSeconds === undefined ? {} : { minDurationSeconds: capabilities.minDurationSeconds }),
-  ...(capabilities.maxDurationSeconds === undefined ? {} : { maxDurationSeconds: capabilities.maxDurationSeconds }),
-  ...(capabilities.supportsFirstFrame === undefined ? {} : { supportsFirstFrame: capabilities.supportsFirstFrame }),
-  ...(Number.isInteger(capabilities.maxConditioningImages) &&
-  capabilities.maxConditioningImages !== undefined &&
-  capabilities.maxConditioningImages >= 0 &&
-  capabilities.maxConditioningImages <= 6
-    ? { maxConditioningImages: capabilities.maxConditioningImages }
-    : {}),
+): StudioRendererConnectionCapabilities => {
+  const supportedDurationSeconds = Array.isArray(capabilities.supportedDurationSeconds)
+    ? [...new Set(capabilities.supportedDurationSeconds)]
+        .filter((value): value is number => Number.isInteger(value) && value >= 4 && value <= 15)
+        .toSorted((left, right) => left - right)
+    : [];
+  return {
+    mediaKinds: [...capabilities.mediaKinds],
+    ...(capabilities.audioModes ? { audioModes: [...capabilities.audioModes] } : {}),
+    ...(capabilities.aspectRatios ? { aspectRatios: [...capabilities.aspectRatios] } : {}),
+    ...(capabilities.resolutions ? { resolutions: [...capabilities.resolutions] } : {}),
+    ...(capabilities.minDurationSeconds === undefined ? {} : { minDurationSeconds: capabilities.minDurationSeconds }),
+    ...(capabilities.maxDurationSeconds === undefined ? {} : { maxDurationSeconds: capabilities.maxDurationSeconds }),
+    ...(supportedDurationSeconds.length === 0 ? {} : { supportedDurationSeconds }),
+    ...(capabilities.supportsFirstFrame === undefined ? {} : { supportsFirstFrame: capabilities.supportsFirstFrame }),
+    ...(Number.isInteger(capabilities.maxConditioningImages) &&
+    capabilities.maxConditioningImages !== undefined &&
+    capabilities.maxConditioningImages >= 0 &&
+    capabilities.maxConditioningImages <= 6
+      ? { maxConditioningImages: capabilities.maxConditioningImages }
+      : {}),
+  };
+};
+
+const CONNECTION_VALIDATION_FAILURE_REASONS = [
+  'unsupported',
+  'auth',
+  'rate_limited',
+  'provider_unavailable',
+  'timeout',
+  'invalid_response',
+  'unknown',
+] as const satisfies readonly StudioConnectionValidationFailureReason[];
+const CONNECTION_VALIDATION_FAILURE_REASON_SET: ReadonlySet<unknown> = new Set(CONNECTION_VALIDATION_FAILURE_REASONS);
+const CONNECTION_VALIDATION_FAILURE_KEYS = {
+  unsupported: 'settings.mediaModels.validationFailure.unsupported',
+  auth: 'settings.mediaModels.validationFailure.auth',
+  rate_limited: 'settings.mediaModels.validationFailure.rateLimited',
+  provider_unavailable: 'settings.mediaModels.validationFailure.providerUnavailable',
+  timeout: 'settings.mediaModels.validationFailure.timeout',
+  invalid_response: 'settings.mediaModels.validationFailure.invalidResponse',
+  unknown: 'settings.mediaModels.validationFailure.unknown',
+} as const satisfies Record<StudioConnectionValidationFailureReason, string>;
+
+const sanitizeValidationFailureReason = (value: unknown): StudioConnectionValidationFailureReason =>
+  CONNECTION_VALIDATION_FAILURE_REASON_SET.has(value) ? (value as StudioConnectionValidationFailureReason) : 'unknown';
+
+const safeListFailure = (error: StudioCommandError): SafeListFailure => ({
+  messageKey: error.messageKey,
+  projectId: error.code === 'project_quarantined' ? error.projectId : null,
 });
+
+const CONNECTION_INTEGRATION_LABEL_KEYS = [
+  'imageApi',
+  'bytePlusSeedance',
+  'selfHostedVideoGateway',
+  'openRouterVideo',
+] as const satisfies readonly StudioConnectionIntegrationLabelKey[];
+const CONNECTION_INTEGRATION_LABEL_KEY_SET: ReadonlySet<string> = new Set(CONNECTION_INTEGRATION_LABEL_KEYS);
+
+const CANDIDATE_MODEL_HEALTH_PRIORITY: Record<StudioConnectionCandidateModel['health'], number> = {
+  available: 0,
+  unknown: 1,
+  unavailable: 2,
+};
+
+const isCandidateModelHealth = (value: unknown): value is StudioConnectionCandidateModel['health'] =>
+  value === 'available' || value === 'unknown' || value === 'unavailable';
+
+const isSafeCandidateModelName = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length > 0 &&
+  value.length <= 256 &&
+  value === value.trim() &&
+  !Array.from(value).some((character) => {
+    const codePoint = character.codePointAt(0)!;
+    return (
+      codePoint <= 0x1f || (codePoint >= 0x7f && codePoint <= 0x9f) || (codePoint >= 0xd800 && codePoint <= 0xdfff)
+    );
+  });
+
+const sanitizeCandidateModels = (models: unknown): StudioConnectionCandidateModel[] => {
+  if (!Array.isArray(models)) return [];
+  const byModel = new Map<string, StudioConnectionCandidateModel>();
+  for (const value of models) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const { model, health } = value as Record<string, unknown>;
+    if (!isSafeCandidateModelName(model) || !isCandidateModelHealth(health)) continue;
+    const existing = byModel.get(model);
+    if (!existing || CANDIDATE_MODEL_HEALTH_PRIORITY[health] > CANDIDATE_MODEL_HEALTH_PRIORITY[existing.health]) {
+      byModel.set(model, { model, health });
+    }
+  }
+  return [...byModel.values()].toSorted((left, right) => left.model.localeCompare(right.model));
+};
+
+const sanitizeCandidateIntegrationModels = (rows: unknown): SafeCandidate['integrationModels'] => {
+  if (!Array.isArray(rows)) return [];
+  const byLabel = new Map<StudioConnectionIntegrationLabelKey, unknown[]>();
+  for (const value of rows) {
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) continue;
+    const { integrationLabelKey, models } = value as Record<string, unknown>;
+    if (typeof integrationLabelKey !== 'string' || !CONNECTION_INTEGRATION_LABEL_KEY_SET.has(integrationLabelKey)) {
+      continue;
+    }
+    const labelKey = integrationLabelKey as StudioConnectionIntegrationLabelKey;
+    byLabel.set(labelKey, [...(byLabel.get(labelKey) ?? []), ...(Array.isArray(models) ? models : [])]);
+  }
+  return CONNECTION_INTEGRATION_LABEL_KEYS.flatMap((integrationLabelKey) =>
+    byLabel.has(integrationLabelKey)
+      ? [{ integrationLabelKey, models: sanitizeCandidateModels(byLabel.get(integrationLabelKey)) }]
+      : []
+  );
+};
 
 const sanitizeCandidate = (candidate: StudioConnectionCandidate): SafeCandidate => ({
   providerId: candidate.providerId,
   providerName: candidate.providerName,
-  models: candidate.models.map(({ model, health }) => ({ model, health })),
+  models: sanitizeCandidateModels(candidate.models),
+  integrationModels: sanitizeCandidateIntegrationModels(candidate.integrationModels),
 });
 
 const sanitizeIntegration = (integration: StudioConnectionIntegration): SafeIntegration => ({
@@ -77,7 +191,7 @@ const sanitizeBinding = (binding: StudioConnectionRecord): SafeBinding => ({
   validatedAt: binding.validatedAt,
 });
 
-const sanitizeValidation = (validation: StudioConnectionValidationResult): SafeValidation => ({
+const sanitizeValidation = (validation: StudioConnectionValidationSuccess): SafeValidation => ({
   providerId: validation.providerId,
   integrationId: validation.integrationId,
   labelKey: validation.labelKey,
@@ -129,30 +243,40 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const [validating, setValidating] = useState(false);
   const [saving, setSaving] = useState(false);
   const [busyConnectionIds, setBusyConnectionIds] = useState<readonly string[]>([]);
-  const [listFailed, setListFailed] = useState(false);
+  const [listFailure, setListFailure] = useState<SafeListFailure | null>(null);
   const [mutationFailed, setMutationFailed] = useState(false);
-  const [validationFailed, setValidationFailed] = useState(false);
+  const [editorValidationFailure, setEditorValidationFailure] =
+    useState<StudioConnectionValidationFailureReason | null>(null);
+  const [rowValidationFailure, setRowValidationFailure] = useState<StudioConnectionValidationFailureReason | null>(
+    null
+  );
   const requestSequence = useRef(0);
 
   const refresh = useCallback(async (): Promise<void> => {
     const sequence = ++requestSequence.current;
     setLoading(true);
-    setListFailed(false);
+    setListFailure(null);
     try {
       const [candidateResult, bindingResult] = await Promise.all([
         ipcBridge.creativeStudio.listConnectionCandidates.invoke(),
         ipcBridge.creativeStudio.listConnections.invoke(),
       ]);
       if (sequence !== requestSequence.current) return;
-      if (candidateResult.ok === false || bindingResult.ok === false) {
-        setListFailed(true);
+      if (candidateResult.ok === false) {
+        setListFailure(safeListFailure(candidateResult.error));
+        return;
+      }
+      if (bindingResult.ok === false) {
+        setListFailure(safeListFailure(bindingResult.error));
         return;
       }
       setCandidates(candidateResult.data.map(sanitizeCandidate));
       setIntegrations(bindingResult.data.integrations.map(sanitizeIntegration));
       setBindings(bindingResult.data.connections.map(sanitizeBinding));
     } catch {
-      if (sequence === requestSequence.current) setListFailed(true);
+      if (sequence === requestSequence.current) {
+        setListFailure({ messageKey: 'settings.mediaModels.loadFailed', projectId: null });
+      }
     } finally {
       if (sequence === requestSequence.current) setLoading(false);
     }
@@ -170,22 +294,34 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     [editor.kind, integrations]
   );
   const selectedCandidate = candidates.find((candidate) => candidate.providerId === editor.providerId) ?? null;
-  const modelOptions = selectedCandidate?.models.map(({ model }) => model) ?? [];
+  const selectedIntegration = integrations.find((integration) => integration.integrationId === editor.integrationId);
+  const integrationModels = selectedCandidate?.integrationModels.find(
+    (models) => models.integrationLabelKey === selectedIntegration?.labelKey
+  );
+  const usesClosedCandidateModelSet =
+    selectedIntegration !== undefined && CLOSED_CANDIDATE_MODEL_LABEL_KEYS.has(selectedIntegration.labelKey);
+  const candidateModels =
+    selectedCandidate && selectedIntegration
+      ? (integrationModels?.models ?? (usesClosedCandidateModelSet ? [] : selectedCandidate.models))
+      : [];
+  const modelOptions = candidateModels.map(({ model }) => model);
+  const closedModelIsSelectable = !usesClosedCandidateModelSet || modelOptions.includes(editor.model.trim());
   const request = useMemo<StudioSaveConnectionRequest | null>(() => {
     const normalizedModel = editor.model.trim();
-    if (!editor.providerId || !editor.integrationId || !normalizedModel) return null;
+    if (!editor.providerId || !editor.integrationId || !normalizedModel || !closedModelIsSelectable) return null;
     return {
       providerId: editor.providerId,
       integrationId: editor.integrationId,
       model: normalizedModel,
     };
-  }, [editor.integrationId, editor.model, editor.providerId]);
+  }, [closedModelIsSelectable, editor.integrationId, editor.model, editor.providerId]);
   const validationMatchesRequest = request !== null && validated !== null && tupleMatches(validated, request);
   const busy = validating || saving;
 
   const resetValidation = (): void => {
     setValidated(null);
-    setValidationFailed(false);
+    setEditorValidationFailure(null);
+    setRowValidationFailure(null);
     setMutationFailed(false);
   };
 
@@ -221,17 +357,30 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
   const updateKind = (kind: StudioMediaKind): void => {
     const firstIntegration = integrations.find((integration) => integration.kind === kind);
     if (!firstIntegration) return;
-    setEditor((current) => ({ ...current, kind, integrationId: firstIntegration.integrationId }));
+    setEditor((current) => ({
+      ...current,
+      kind,
+      integrationId: firstIntegration.integrationId,
+      ...(current.kind === kind ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
   const updateProvider = (providerId: string): void => {
-    setEditor((current) => ({ ...current, providerId }));
+    setEditor((current) => ({
+      ...current,
+      providerId,
+      ...(current.providerId === providerId ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
   const updateIntegration = (integrationId: string): void => {
-    setEditor((current) => ({ ...current, integrationId }));
+    setEditor((current) => ({
+      ...current,
+      integrationId,
+      ...(current.integrationId === integrationId ? {} : { model: '' }),
+    }));
     resetValidation();
   };
 
@@ -240,14 +389,20 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     resetValidation();
   };
 
-  const validateRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeValidation | null> => {
+  const validateRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeValidationAttempt> => {
     try {
       const result = await ipcBridge.creativeStudio.validateConnection.invoke(safeRequest);
-      if (result.ok === false) return null;
-      const safeValidation = sanitizeValidation(result.data);
-      return tupleMatches(safeValidation, safeRequest) ? safeValidation : null;
+      if (result.ok === false) return { valid: false, reason: 'unknown' };
+      const validation: StudioConnectionValidationResult = result.data;
+      if (validation.valid === false) {
+        return { valid: false, reason: sanitizeValidationFailureReason(validation.reason) };
+      }
+      const safeValidation = sanitizeValidation(validation.connection);
+      return tupleMatches(safeValidation, safeRequest)
+        ? { valid: true, validation: safeValidation }
+        : { valid: false, reason: 'unknown' };
     } catch {
-      return null;
+      return { valid: false, reason: 'unknown' };
     }
   };
 
@@ -255,22 +410,32 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (!request || busy) return;
     setValidating(true);
     setValidated(null);
-    setValidationFailed(false);
+    setEditorValidationFailure(null);
     setMutationFailed(false);
-    const safeBinding = await validateRequest(request);
-    setValidated(safeBinding);
-    setValidationFailed(safeBinding === null);
+    const validation = await validateRequest(request);
+    setValidated(validation.valid ? validation.validation : null);
+    setEditorValidationFailure(validation.valid === false ? validation.reason : null);
     setValidating(false);
   };
 
-  const saveRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeBinding | null> => {
+  const saveRequest = async (safeRequest: StudioSaveConnectionRequest): Promise<SafeSaveAttempt> => {
     try {
       const result = await ipcBridge.creativeStudio.saveConnection.invoke(safeRequest);
-      if (result.ok === false) return null;
+      if (result.ok === false) {
+        return {
+          saved: false,
+          reason:
+            result.error.code === 'connection_validation_failed'
+              ? sanitizeValidationFailureReason(result.error.reason)
+              : null,
+        };
+      }
       const safeBinding = sanitizeBinding(result.data);
-      return tupleMatches(safeBinding, safeRequest) ? safeBinding : null;
+      return tupleMatches(safeBinding, safeRequest)
+        ? { saved: true, binding: safeBinding }
+        : { saved: false, reason: null };
     } catch {
-      return null;
+      return { saved: false, reason: null };
     }
   };
 
@@ -278,13 +443,15 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (!request || !validationMatchesRequest || busy) return;
     setSaving(true);
     setMutationFailed(false);
-    const saved = await saveRequest(request);
-    if (!saved) {
-      setMutationFailed(true);
+    const save = await saveRequest(request);
+    if (save.saved === false) {
+      if (save.reason === null) setMutationFailed(true);
+      else setEditorValidationFailure(save.reason);
       await refresh();
       setSaving(false);
       return;
     }
+    const saved = save.binding;
 
     const original = editor.original;
     setBindings((current) => replaceCanonicalBinding(current, saved));
@@ -320,18 +487,25 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (busyConnectionIds.includes(binding.bindingId)) return;
     setBusyConnectionIds((current) => [...current, binding.bindingId]);
     setMutationFailed(false);
+    setRowValidationFailure(null);
     const safeRequest: StudioSaveConnectionRequest = {
       providerId: binding.providerId,
       integrationId: binding.integrationId,
       model: binding.model,
     };
     const validation = await validateRequest(safeRequest);
-    const saved = validation ? await saveRequest(safeRequest) : null;
-    if (!saved) {
-      setMutationFailed(true);
+    if (validation.valid === false) {
+      setRowValidationFailure(validation.reason);
+      setBusyConnectionIds((current) => current.filter((id) => id !== binding.bindingId));
+      return;
+    }
+    const save = await saveRequest(safeRequest);
+    if (save.saved === false) {
+      if (save.reason === null) setMutationFailed(true);
+      else setRowValidationFailure(save.reason);
       await refresh();
     } else {
-      setBindings((current) => replaceCanonicalBinding(current, saved));
+      setBindings((current) => replaceCanonicalBinding(current, save.binding));
     }
     setBusyConnectionIds((current) => current.filter((id) => id !== binding.bindingId));
   };
@@ -340,6 +514,7 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     if (busyConnectionIds.includes(bindingId)) return;
     setBusyConnectionIds((current) => [...current, bindingId]);
     setMutationFailed(false);
+    setRowValidationFailure(null);
     try {
       const result = await ipcBridge.creativeStudio.removeConnection.invoke({ bindingId });
       if (result.ok === false || !result.data) {
@@ -386,17 +561,26 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
         </Button>
       </div>
 
-      {listFailed && (
+      {listFailure !== null && (
         <div className='flex flex-col gap-8px'>
-          <Alert type='error' content={t('settings.mediaModels.loadFailed')} />
+          <Alert
+            type='error'
+            content={t(
+              listFailure.messageKey,
+              listFailure.projectId === null ? undefined : { projectId: listFailure.projectId }
+            )}
+          />
           <Button icon={<Refresh />} onClick={() => void refresh()}>
             {t('settings.mediaModels.refresh')}
           </Button>
         </div>
       )}
+      {rowValidationFailure && (
+        <Alert type='error' content={t(CONNECTION_VALIDATION_FAILURE_KEYS[rowValidationFailure])} />
+      )}
       {mutationFailed && <Alert type='error' content={t('settings.mediaModels.validationFailed')} />}
 
-      {listFailed && bindings.length === 0 ? null : loading && bindings.length === 0 ? (
+      {listFailure !== null && bindings.length === 0 ? null : loading && bindings.length === 0 ? (
         <div className='flex min-h-80px items-center justify-center'>
           <Spin />
         </div>
@@ -525,16 +709,33 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
           </div>
           <label className='flex flex-col gap-6px text-12px text-t-secondary'>
             {t('settings.mediaModels.model')}
-            <AutoComplete
-              value={editor.model}
-              data={modelOptions}
-              disabled={!editor.providerId || busy}
-              placeholder={t('settings.mediaModels.modelPlaceholder')}
-              inputProps={{
-                'aria-label': t('settings.mediaModels.model'),
-              }}
-              onChange={updateModel}
-            />
+            {usesClosedCandidateModelSet ? (
+              <Select
+                aria-label={t('settings.mediaModels.model')}
+                value={editor.model || undefined}
+                disabled={!editor.providerId || busy || modelOptions.length === 0}
+                placeholder={t('settings.mediaModels.modelPlaceholder')}
+                showSearch
+                onChange={(value) => updateModel(String(value))}
+              >
+                {modelOptions.map((model) => (
+                  <Select.Option key={model} value={model}>
+                    {model}
+                  </Select.Option>
+                ))}
+              </Select>
+            ) : (
+              <AutoComplete
+                value={editor.model}
+                data={modelOptions}
+                disabled={!editor.providerId || busy}
+                placeholder={t('settings.mediaModels.modelPlaceholder')}
+                inputProps={{
+                  'aria-label': t('settings.mediaModels.model'),
+                }}
+                onChange={updateModel}
+              />
+            )}
           </label>
           <Button long loading={validating} disabled={request === null || busy} onClick={() => void validateEditor()}>
             {t(validating ? 'settings.mediaModels.validating' : 'settings.mediaModels.validate')}
@@ -542,8 +743,8 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
           {validated && validationMatchesRequest && (
             <Alert type='success' content={t('settings.mediaModels.validationSuccess')} />
           )}
-          {!validating && request && validationFailed && (
-            <Alert type='error' content={t('settings.mediaModels.validationFailed')} />
+          {!validating && request && editorValidationFailure && (
+            <Alert type='error' content={t(CONNECTION_VALIDATION_FAILURE_KEYS[editorValidationFailure])} />
           )}
         </div>
       </Modal>

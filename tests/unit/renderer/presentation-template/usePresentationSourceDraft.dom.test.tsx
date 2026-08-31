@@ -49,6 +49,8 @@ vi.mock('@/common', () => ({
 }));
 
 const CONVERSATION_ID = '11111111-1111-4111-8111-111111111111';
+const CASEFUL_CONVERSATION_ID = '2be7b8fc-6af5-42b8-aed5-03644735c730';
+const SHORT_CONVERSATION_ID = 'd0921953';
 const SECOND_CONVERSATION_ID = '66666666-6666-4666-8666-666666666666';
 const DRAFT_ID = '22222222-2222-4222-8222-222222222222';
 const SECOND_DRAFT_ID = '77777777-7777-4777-8777-777777777777';
@@ -147,7 +149,7 @@ describe('usePresentationSourceDraft', () => {
       received = await result.current.hydrate(conversationOwner);
     });
 
-    expect(received).toBe(response);
+    expect(received).toEqual(response);
     expect(getSourceOwnerInvokeMock).toHaveBeenCalledWith({ owner: conversationOwner });
     expect(result.current.owner).toEqual(conversationOwner);
     expect(result.current.ownerRevision).toBe(3);
@@ -160,6 +162,57 @@ describe('usePresentationSourceDraft', () => {
         expectedSha256: 'a'.repeat(64),
       },
     ]);
+  });
+
+  it('canonicalizes an uppercase backend short owner before hydrate and accepts the canonical response', async () => {
+    const uppercaseOwner: PresentationGrantOwner = {
+      owner_type: 'conversation',
+      conversation_id: SHORT_CONVERSATION_ID.toUpperCase(),
+    };
+    const canonicalOwner: PresentationGrantOwner = {
+      owner_type: 'conversation',
+      conversation_id: SHORT_CONVERSATION_ID,
+    };
+    getSourceOwnerInvokeMock.mockResolvedValue({
+      ok: true,
+      owner: canonicalOwner,
+      ownerRevision: 3,
+      grants: [descriptor],
+    });
+    const { result } = renderHook(() => usePresentationSourceDraft());
+
+    await act(async () => {
+      await result.current.hydrate(uppercaseOwner);
+    });
+
+    expect(getSourceOwnerInvokeMock).toHaveBeenCalledWith({ owner: canonicalOwner });
+    expect(result.current.owner).toEqual(canonicalOwner);
+    expect(result.current.ownerRevision).toBe(3);
+    expect(result.current.descriptors).toEqual([descriptor]);
+  });
+
+  it('fails closed when hydrate returns a successful DTO with a malformed conversation owner', async () => {
+    getSourceOwnerInvokeMock.mockResolvedValue({
+      ok: true,
+      owner: { owner_type: 'conversation', conversation_id: '../unsafe' },
+      ownerRevision: 3,
+      grants: [descriptor],
+    } as GetPresentationSourceOwnerResult);
+    const { result } = renderHook(() => usePresentationSourceDraft());
+
+    let received!: GetPresentationSourceOwnerResult;
+    await act(async () => {
+      received = await result.current.hydrate(conversationOwner);
+    });
+
+    expect(received).toMatchObject({
+      ok: false,
+      code: 'INVALID_REQUEST',
+      messageKey: 'conversation.presentationRun.INVALID_REQUEST',
+    });
+    expect(result.current.owner).toBeNull();
+    expect(result.current.ownerRevision).toBeNull();
+    expect(result.current.descriptors).toEqual([]);
   });
 
   it('keeps the latest hydrate owner when an older hydrate resolves last', async () => {
@@ -631,6 +684,76 @@ describe('usePresentationSourceDraft', () => {
     expect(result.current.ownerRevision).toBeNull();
     expect(result.current.descriptors).toEqual([]);
     expect(result.current.sourceRefs).toEqual([]);
+  });
+
+  it('canonicalizes an uppercase legacy UUID at bind ingress before comparing the main response', async () => {
+    createDraftInvokeMock.mockResolvedValue({
+      ok: true,
+      status: 'created',
+      draft: {
+        draftId: DRAFT_ID,
+        revision: 0,
+        expiresAt: '2026-08-04T12:15:00.000Z',
+        grantCount: 0,
+      },
+    });
+    bindDraftInvokeMock.mockResolvedValue({
+      ok: true,
+      status: 'bound',
+      draftId: DRAFT_ID,
+      conversationId: CASEFUL_CONVERSATION_ID,
+      revision: 1,
+      boundAt: '2026-08-04T12:02:00.000Z',
+    });
+    const { result } = renderHook(() => usePresentationSourceDraft());
+
+    await act(async () => {
+      await result.current.createDraft(CLIENT_REQUEST_ID);
+      await result.current.bindDraft(CASEFUL_CONVERSATION_ID.toUpperCase());
+    });
+
+    expect(bindDraftInvokeMock).toHaveBeenCalledWith({
+      draft_id: DRAFT_ID,
+      conversation_id: CASEFUL_CONVERSATION_ID,
+      expected_revision: 0,
+    });
+    expect(result.current.owner).toEqual({
+      owner_type: 'conversation',
+      conversation_id: CASEFUL_CONVERSATION_ID,
+    });
+    expect(result.current.ownerRevision).toBe(1);
+  });
+
+  it('returns no binding authority when main reports success with a malformed conversation id', async () => {
+    createDraftInvokeMock.mockResolvedValue({
+      ok: true,
+      status: 'created',
+      draft: {
+        draftId: DRAFT_ID,
+        revision: 0,
+        expiresAt: '2026-08-04T12:15:00.000Z',
+        grantCount: 0,
+      },
+    });
+    bindDraftInvokeMock.mockResolvedValue({
+      ok: true,
+      status: 'bound',
+      draftId: DRAFT_ID,
+      conversationId: '../unsafe',
+      revision: 1,
+      boundAt: '2026-08-04T12:02:00.000Z',
+    });
+    const { result } = renderHook(() => usePresentationSourceDraft());
+
+    let binding: BindPresentationDraftResult | null = null;
+    await act(async () => {
+      await result.current.createDraft(CLIENT_REQUEST_ID);
+      binding = await result.current.bindDraft(CONVERSATION_ID);
+    });
+
+    expect(binding).toBeNull();
+    expect(result.current.owner).toEqual(draftOwner);
+    expect(result.current.ownerRevision).toBe(0);
   });
 
   it('rehydrates nonempty canonical grants when an existing Guid draft remounts', async () => {

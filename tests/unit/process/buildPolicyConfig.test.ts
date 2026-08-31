@@ -64,7 +64,7 @@ describe('electron-vite internal release policy', () => {
     expect(sentryVitePluginMock).not.toHaveBeenCalled();
     expect(config.main?.build?.sourcemap).toBe(false);
     expect(config.renderer?.build?.sourcemap).toBe(false);
-  });
+  }, 30_000);
 
   it('rejects an ambient Sentry token before plugin construction in an internal release', async () => {
     process.env.WEPROMPT_INTERNAL_RELEASE = '1';

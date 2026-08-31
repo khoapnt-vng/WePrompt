@@ -7,4 +7,3 @@
 export { StudioLibrary } from './StudioLibrary';
 export { Composer, type ComposerProps } from './Composer';
 export { ProjectCard, type ProjectCardProps, formatStudioRelativeTime } from './ProjectCard';
-export { default as StudioEmptyState } from './StudioEmptyState';

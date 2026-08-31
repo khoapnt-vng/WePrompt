@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { CreateStudioProjectInput, StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
+import type { CreateStudioProjectInputV2, StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
 import { Button, Input, Select } from '@arco-design/web-react';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -18,7 +18,7 @@ export type ComposerProps = {
   creating: boolean;
   disabled: boolean;
   errorMessageKey: string | null;
-  onSubmit: (input: CreateStudioProjectInput) => Promise<void>;
+  onSubmit: (input: CreateStudioProjectInputV2) => Promise<void>;
 };
 
 export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMessageKey, onSubmit }) => {
@@ -47,7 +47,7 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
   return (
     <div className={styles.composer}>
       <label id='studio-composer-title' htmlFor='studio-composer-sentence' className={styles.composerLabel}>
-        {t('conversation.creativeStudio.library.composer.label')}
+        {t('conversation.creativeStudio.workspace.library.composer.label')}
       </label>
       <Input.TextArea
         id='studio-composer-sentence'
@@ -57,7 +57,7 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
         rows={1}
         autoSize={{ minRows: 1, maxRows: 6 }}
         className={styles.composerInput}
-        placeholder={t('conversation.creativeStudio.library.composer.placeholder')}
+        placeholder={t('conversation.creativeStudio.workspace.library.composer.placeholder')}
         disabled={disabled}
         onChange={(value) => {
           setSentence(value);
@@ -73,7 +73,7 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
       <div className={styles.composerActions}>
         <div className={styles.guesses}>
           <Select
-            aria-label={t('conversation.creativeStudio.library.composer.aspectRatioLabel')}
+            aria-label={t('conversation.creativeStudio.workspace.library.composer.aspectRatioLabel')}
             className={styles.guessSelect}
             size='small'
             value={aspectRatio}
@@ -87,19 +87,21 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
             ))}
           </Select>
           <Select
-            aria-label={t('conversation.creativeStudio.library.composer.durationLabel')}
+            aria-label={t('conversation.creativeStudio.workspace.library.composer.durationLabel')}
             className={styles.guessSelect}
             size='small'
             value={targetDurationSeconds}
             disabled={disabled}
             renderFormat={(option) =>
-              t('conversation.creativeStudio.library.composer.durationGuess', { seconds: option?.value ?? 18 })
+              t('conversation.creativeStudio.workspace.library.composer.durationGuess', {
+                seconds: option?.value ?? 18,
+              })
             }
             onChange={(value) => setTargetDurationSeconds(Number(value))}
           >
             {DURATION_GUESSES.map((seconds) => (
               <Select.Option key={seconds} value={seconds}>
-                {t('conversation.creativeStudio.library.composer.durationGuess', { seconds })}
+                {t('conversation.creativeStudio.workspace.library.composer.durationGuess', { seconds })}
               </Select.Option>
             ))}
           </Select>
@@ -112,12 +114,12 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
           disabled={disabled}
           onClick={() => void submit()}
         >
-          {t('conversation.creativeStudio.library.composer.submit')}
+          {t('conversation.creativeStudio.workspace.library.composer.submit')}
         </Button>
       </div>
       {(empty || errorMessageKey !== null) && (
         <p id='studio-composer-error' role='alert' className={styles.alert}>
-          {t(empty ? 'conversation.creativeStudio.library.composer.empty' : errorMessageKey!)}
+          {t(empty ? 'conversation.creativeStudio.workspace.library.composer.empty' : errorMessageKey!)}
         </p>
       )}
     </div>

@@ -1,0 +1,245 @@
+# Creative Studio 3 — plan review
+
+Reviewing `8b353ae6e` ("docs(studio): close creative studio 3 plan blockers") and the Gate 1 fix
+series beneath it, against `a78021ca3`. Read-only review; no code or plan changes made.
+
+**Verdict:** one blocking finding, one governance item, and one correction to a ruling of _mine_
+that this amendment overturned correctly. Everything else I checked is sound and should not be
+re-litigated.
+
+---
+
+## 1. BLOCKING — removing `park_shot` leaves every rendered shot permanently unremovable
+
+**Where:** plan lines 647–649, restated as a RED at 868–870.
+
+The amendment deletes `park_shot` and substitutes:
+
+> There is no `park_shot`: the Bin has no shot kind. `delete_shot` is dependency-free only. The
+> author must park eligible takes individually and clear jobs, seed/conditioning, selection,
+> match-to, and other references before deletion.
+
+**That path cannot terminate.** Traced through the amended plan itself:
+
+- `park_take` "clears an eligible take from selection and creates an exact lifted alias" (line 869).
+  Alias semantics — the take remains in `shot.assetIds`.
+- `StudioShot` still carries `assetIds: string[]` (line 255) and takes are still immutable (line 520).
+- The full mutation vocabulary contains **no operation that removes a take from a shot**. There is no
+  `delete_take`, `discard_take`, `detach_take`, or equivalent. `park_take`, `restore_take`,
+  `select_take`, and `add_alternate_take` all preserve shot ownership.
+- `delete_shot` is dependency-free only, and re-split treats "any asset … or other persisted
+  reference" as a fixed point (line 467).
+
+So a shot that has ever produced a take holds an asset dependency that no operation can clear, and
+can never be deleted, parked, or re-split away. Its boundary is frozen for the life of the project.
+The only remedy left is parking the whole beat, which drops every one of that beat's takes out of
+the film.
+
+This is the exact gap `park_shot` was introduced to close — the CS2 design's rule that "a clip with
+assets, jobs, or cut dependencies cannot be deleted" — and it was closed by explicit decision, not
+by oversight.
+
+**Fix, either is sufficient:**
+
+- Restore `park_shot` with a third Bin **reference** kind. A shot item is structurally identical to a
+  beat item, so XOR membership, per-kind maxima, and the canonicality rule all apply unchanged. This
+  is not the value-shaped third kind that was correctly rejected for authored text.
+- Or add an explicit take-removal operation and define what it does to cut, seed, conditioning, and
+  match-to references.
+
+The first needs no new schema shape and matches the product's own "park, do not delete" rule.
+
+---
+
+## 2. GOVERNANCE — the designer's spec was amended without the designer
+
+`8b353ae6e` changes `creative-studio-3-direction-and-answers.md` across eleven content hunks under a
+new "Amended on 2026-08-18 after executable-plan review" header. These are not reflows. They add
+`duration pending` and `seed pending` states, change the `ONE FILE` and bed rulings, rewrite the
+spend section into a `prepare` → `confirm` protocol, and reverse the Bin ruling to "A shot is never a
+Bin item."
+
+The pin was updated correctly — `f4dfd4b7…` verifies against the amended file — so the mechanics were
+handled well. The issue is authority, not hygiene: that document carries the designer's rulings in
+the designer's voice, and it now asserts positions the designer has not seen, including a reversal of
+a decision the product owner approved directly.
+
+The plan's own rule is that the frozen contract may not be reinterpreted "without a spec amendment
+and a new independent contract review." The amendment half was done. This document is the review
+half, and finding 1 says one of the amendments does not hold.
+
+**Recommended:** route the amended direction document back to its author before Task 1C freezes
+against it, and keep engineering-originated changes in the plan rather than in the spec.
+
+---
+
+## 3. CORRECTION TO MY OWN RULING — the conditioning frame is not the poster
+
+This amendment overturns a conclusion I reached and a decision that was taken on the strength of it.
+**Codex is right and I was wrong.**
+
+I argued that because `bytePlusSeedanceAdapter.ts` returns `content.last_frame_url` and the adapter
+contract calls it "a generated video's optional last-frame poster," the conditioning frame and the
+Board poster were one artifact — therefore no fifth collection, and no extraction. On that basis the
+frame-storage decision was taken as "one asset, read by role."
+
+That reasoning holds only for an **untrimmed** shot, and the whole point of the trim model is that
+shots get trimmed. The amendment states it exactly (lines 500–510): the chain input is the frame at
+`take.durationSeconds - (trimOutSeconds ?? 0)`, which for any tail-trimmed shot is **not** the
+provider's last frame. It follows directly from the rule that tail trims break continuity — a rule I
+accepted and then failed to carry into the storage decision.
+
+So `conditioningFrames` as a distinct managed collection is correct, local extraction is genuinely
+required rather than a route-conditional fallback, and the extraction-identity digest over
+`{ shotId, takeAssetId, endpointSeconds }` is a better answer than anything I proposed.
+
+**What this invalidates:** the "One asset, read by role" option chosen during the decision review, and
+the two entries in _Decisions closed_ that rested on it. The amendment has already rewritten both,
+with the reason recorded ("Full-video poster could not represent a tail trim"). No action needed
+beyond knowing the earlier decision was superseded on good grounds.
+
+Note that "read outputs by role, never by position" — the fix to `canonicalVideoPosterV2` indexing
+`outputAssetIds[1]` — survives and is still correct. Only the aliasing conclusion was wrong.
+
+---
+
+## 4. Verified sound — do not re-litigate
+
+- **Gate 1's six fixes are substantive.** `bf6b6043d` implements the Amendment 1 totality rules and
+  goes further than reported: `ownValue` now also checks `Object.hasOwn(descriptor, 'value')`,
+  defending against accessor properties, which the original review never raised.
+- **Removing `remove_bin_item` is an improvement over my vocabulary.** "No generic `remove_bin_item`
+  may orphan the referent" is correct; `restore_beat` and `restore_take` are the right exits, and
+  nothing destructive is needed.
+- **`duration pending` and `seed pending` fill a real hole** I left open — I never said what a null
+  target or a freshly re-split head should do, and treating them as valid authoring states that gate
+  render rather than as malformed data is the better answer.
+- **Route selection, spend authorization, and undo** were all on the undrawn list and now have
+  mechanisms (`set_routes`, `set_spend_policy` with `prepare`/`confirm`, `undo_last` over a bounded
+  persisted journal with internal-only before-fragments).
+- **No internal contradictions.** The superseded rulings were removed rather than left alongside the
+  new ones, and _Decisions closed_ was updated with the reasoning.
+
+---
+
+# Addendum — review of `d384112fb` for handover
+
+Reviewing `d384112fb` ("feat(studio): version director commands for beat and shot") and the four
+commits beneath it, against the plan at the same head. Findings 1 and 3 above are **resolved**; see
+§A4. Line citations in §1–§4 were against `8b353ae6e` and have drifted — the plan is now 3,968 lines.
+
+## A1. WITHDRAWN — head is not red; the failure was machine load
+
+**This finding was wrong and is retracted.** It originally reported the head as red with a
+structurally unsatisfiable latency assertion. Measurement refutes that. The finding is left in place
+rather than deleted so the reasoning error stays visible.
+
+`bun run test` at `d384112fb` did fail once on
+`tests/integration/creative-studio/directorCommandLatency.integration.test.ts:372` —
+`expect(max).toBeLessThanOrEqual(thresholdMs)`, threshold 750ms. Investigating it produced this:
+
+| load average | p50 |  max | threshold | result              |
+| -----------: | --: | ---: | --------: | ------------------- |
+|          ~21 | 602 | 1453 |       750 | fail                |
+|          ~21 | 650 | 3358 |       750 | fail                |
+|           ~2 | 541 |  551 |       750 | pass — 199ms margin |
+|           ~4 | 541 |  572 |       750 | pass — 178ms margin |
+|          ~15 |   — |    — |       750 | pass                |
+
+**The test and its threshold are correct.** On an unloaded machine the distribution is tight and
+low — min 513ms, max 551ms, a 38ms spread — leaving roughly 200ms of headroom under the 750ms
+budget. It passed here at load 15.
+
+**The root cause is ambient load from other processes on the host**, not from the suite. During the
+failing runs the machine carried two other sessions' Electron dev apps, one of them running for
+nearly fifteen hours, with load average at 21. At that level sweep ticks are missed outright and
+end-to-end latency degrades three- to six-fold. The `creative-studio-timing` project group added in
+`d384112fb` isolates the test from _vitest's own_ workers, which is correct and worth keeping, but
+no vitest setting can isolate it from unrelated processes on the box.
+
+**The reasoning error, recorded deliberately.** The withdrawn finding modelled the measurement as a
+processing floor plus a uniformly distributed 0–500ms sweep phase, predicting a worst case of ~860ms
+and a pass probability of 0.05%. The quiet-machine distribution — 38ms of spread, not 500ms —
+disproves it: the test synchronises on the sweep rather than sampling its phase randomly. A fix
+derived from that model (comparing against `SWEEP + (ACK_GRACE − SWEEP) / 2` = 1250ms) was written,
+measured, found to raise the budget 2.3x above what the system actually delivers, and **reverted
+before commit**. It would have been exactly the weakening plan constraint 14 forbids.
+
+**Consequence for handover:** there is no latency blocker. Two operational notes stand in its place —
+wall-clock assertions on this repo cannot be trusted while other sessions run dev apps on the same
+host, and a red result on this test should be re-measured against `uptime` before it is believed.
+
+## A2. WITHDRAWN — the tranche is deliberate, not a missing commit step
+
+**This finding was wrong and is retracted.** It reported Tasks 2–5 as having no terminal `Commit:`
+step and inferred that four tasks' work landed in two commits because execution had no defined
+stopping point. Both halves are wrong. It is left in place rather than deleted so the reading error
+stays visible.
+
+The plan says the opposite, in the frozen contract's opening paragraph:
+
+> Tasks 1C–5 form one atomic schema-2 core tranche because the project shape, reducer, store,
+> pricing authority, and generation lifecycle are one compile-time and durability strongly connected
+> component. Task 1C freezes the names and validators; Tasks 2–5 install their only truthful
+> consumers. Do not commit or publish an intermediate schema-2 shape, add duplicate legacy/final
+> fields, make required paid fields optional, or weaken exact validation merely to obtain an
+> artificial per-task green point. The tranche ends with one full-suite-green commit after Task 5.
+
+It is reinforced in four further places: the Task 1A–1C preamble ("the next commit/review point is
+the full-suite-green Task 5 tranche head"), Task 4 ("include them in the atomic tranche commit; do
+not create an [artificial one]"), Task 5 ("keep the tranche uncommitted until Task 5 wires every
+authorization/job consumer"), and Task 2's note that it performs the Cut-module deletion "inside this
+tranche".
+
+Tasks 2–4 therefore end with **`Checkpoint: run …`** steps by design, and Task 5's terminal step is a
+commit step phrased as prose rather than the `Commit:` label the other tasks use — **"Commit the
+dependency-closed, full-suite-green tranche: `feat(studio): define beat and shot core`."** A
+`grep` for `Commit:` misses it. That is how the finding was manufactured.
+
+**The causation was also backwards.** `39302a957` is titled `feat(studio): define beat and shot
+core` — character-for-character the message the plan specifies for the tranche head. The work landed
+in one commit because the plan requires it to, not because execution drifted. That is compliance.
+
+**Do not act on the withdrawn finding.** Adding per-task commit steps to Tasks 2–5 would force
+precisely what the frozen contract forbids: intermediate schema-2 commits publishing a knowingly
+transitional, half-wired contract to buy an artificial green point.
+
+**What remains true, and is a different point.** Tranche commits are large — `39302a957` and
+`d384112fb` are roughly 16k and 9k insertions — which is hard to review as one unit. The lever for
+that is not splitting the tranche, whose atomicity is load-bearing, but keeping Task 6 and later
+tasks outside the tranche's shadow so they commit on their own. Task 6 already does; it carries a
+normal `Commit:` step and landed separately as `d384112fb`.
+
+## A3. Directory ratchet violated
+
+`service/schema2/` now has **11 direct children** (`chain.ts`, `factories.ts`, `generation/`,
+`index.ts`, `lifecycle.ts`, `mutationIdentity.ts`, `mutations.ts`, `preparedSubmissionCache.ts`,
+`pricing/`, `validation.ts`, `workspaceStatus.ts`).
+
+AGENTS.md caps directories at ten direct children for new or substantially reorganised directories,
+and the plan's own constraint 12 repeats it. `validation.ts` (79 KB) and `mutations.ts` (72 KB) are
+also large enough to be worth splitting on their own terms.
+
+## A4. Resolved since §1–§3
+
+- **`park_shot` is restored** (`8e844315c`), as `{ kind: 'shot'; beatId; shotId; reason: 'lifted' }`.
+  Carrying `beatId` makes restore well-defined, which is better than the sketch in §1. The blocking
+  finding is closed.
+- **The three-pass split was honoured** — `801b04179` (1A internal identifiers), `b37e00e4f` (1B
+  persisted and wire names), `39302a957` (1C core). `nativePayloadSchemas.test.ts` moved in the same
+  commit as the wire rename, as 1B required.
+- The conditioning-frame correction in §3 stands: `adapters/conditioningFrame.ts` exists and the
+  poster aliasing is gone.
+
+## A5. Scope note
+
+`d384112fb` is **16,299 insertions across 33 files**, including `store.ts` +6,167 under a Task 6
+label. This is an observation about reviewability, not a process violation — A2 establishes that
+large tranche commits are the plan's deliberate design, and Task 6 carries its own `Commit:` step
+outside the tranche.
+
+The point that survives: a commit of this size cannot be meaningfully reviewed as one unit, whatever
+the plan permits. Since the tranche's atomicity is load-bearing and should not be broken, the
+available lever is the opposite one — keep post-tranche tasks narrow, and where a task must touch a
+large shared file like `store.ts`, say so in its Files list so the size is predicted rather than
+discovered at review.

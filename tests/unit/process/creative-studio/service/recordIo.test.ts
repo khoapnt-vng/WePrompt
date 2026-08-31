@@ -14,6 +14,7 @@ import {
   publishImmutableRecord,
   readBoundedRegularFile,
   RecordIoError,
+  removeRegularRecordIfPresent,
   removeRegularRecordIfIdentity,
   resolveCompleteDirectorySet,
   resolveConfinedRecordPath,
@@ -133,6 +134,77 @@ describe('error-neutral Creative Studio record IO', () => {
       })
     ).rejects.toMatchObject({ code: 'partial_directory_set' });
     expect(existsSync(path.join(projectDir, 'commands', 'receipts'))).toBe(false);
+  });
+
+  it('resumes one safe unpublished partial stage without exposing a partial final family', async () => {
+    const projectDir = path.join(canonicalRoot, 'project_1');
+    await nodeFs.mkdir(projectDir);
+    let failed = false;
+    const interruptedFs = new Proxy(nodeFs, {
+      get(target, property, receiver) {
+        if (property !== 'mkdir') return Reflect.get(target, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.mkdir>) => {
+          if (!failed && path.basename(String(args[0])) === 'slots') {
+            failed = true;
+            throw new Error('injected child creation interruption');
+          }
+          return nodeFs.mkdir(...args);
+        };
+      },
+    }) as typeof nodeFs;
+
+    await expect(
+      resolveCompleteDirectorySet({
+        fs: interruptedFs,
+        canonicalRoot,
+        parent: projectDir,
+        rootName: 'commands',
+        childNames: ['pending', 'slots', 'receipts'],
+        createIfWhollyAbsent: true,
+      })
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    expect(existsSync(path.join(projectDir, 'commands'))).toBe(false);
+    expect((await nodeFs.readdir(projectDir)).filter((name) => name.startsWith('.commands.'))).toHaveLength(1);
+
+    await expect(
+      resolveCompleteDirectorySet({
+        fs: nodeFs,
+        canonicalRoot,
+        parent: projectDir,
+        rootName: 'commands',
+        childNames: ['pending', 'slots', 'receipts'],
+        createIfWhollyAbsent: true,
+      })
+    ).resolves.toEqual({
+      root: path.join(projectDir, 'commands'),
+      pending: path.join(projectDir, 'commands', 'pending'),
+      slots: path.join(projectDir, 'commands', 'slots'),
+      receipts: path.join(projectDir, 'commands', 'receipts'),
+    });
+    expect((await nodeFs.readdir(projectDir)).filter((name) => name.startsWith('.commands.'))).toEqual([]);
+  });
+
+  it('preserves and rejects a staged family containing any unpublished record', async () => {
+    const projectDir = path.join(canonicalRoot, 'project_1');
+    const stage = path.join(projectDir, '.commands.foreign.tmp');
+    await nodeFs.mkdir(projectDir);
+    await nodeFs.mkdir(stage);
+    await Promise.all(['pending', 'slots', 'receipts'].map((name) => nodeFs.mkdir(path.join(stage, name))));
+    const foreignFile = path.join(stage, 'pending', 'foreign.json');
+    await nodeFs.writeFile(foreignFile, '{"foreign":true}');
+
+    await expect(
+      resolveCompleteDirectorySet({
+        fs: nodeFs,
+        canonicalRoot,
+        parent: projectDir,
+        rootName: 'commands',
+        childNames: ['pending', 'slots', 'receipts'],
+        createIfWhollyAbsent: true,
+      })
+    ).rejects.toMatchObject({ code: 'partial_directory_set' });
+    await expect(nodeFs.readFile(foreignFile, 'utf8')).resolves.toBe('{"foreign":true}');
+    expect(existsSync(path.join(projectDir, 'commands'))).toBe(false);
   });
 
   it.each(['root-symlink', 'child-symlink', 'child-file'])(
@@ -559,6 +631,30 @@ describe('error-neutral Creative Studio record IO', () => {
     expect(fenceCalls).toBe(1);
     expect(removeCalls).toBe(0);
     expect(await nodeFs.readFile(target, 'utf8')).toBe('owned-slot');
+  });
+
+  it('awaits an asynchronous removal fence and preserves bytes when authority expires', async () => {
+    const records = path.join(canonicalRoot, 'records');
+    await nodeFs.mkdir(records);
+    const target = path.join(records, 'receipt.json');
+    await nodeFs.writeFile(target, 'authoritative-receipt');
+    let fenceCalls = 0;
+
+    await expect(
+      removeRegularRecordIfPresent({
+        fs: nodeFs,
+        canonicalRoot,
+        file: target,
+        isStillAuthorized: async () => {
+          fenceCalls += 1;
+          await Promise.resolve();
+          return false;
+        },
+      })
+    ).rejects.toMatchObject({ code: 'storage_error', message: 'Record IO failed' });
+
+    expect(fenceCalls).toBe(1);
+    await expect(nodeFs.readFile(target, 'utf8')).resolves.toBe('authoritative-receipt');
   });
 
   it('publishes immutable bytes only after file sync and then syncs the parent directory', async () => {

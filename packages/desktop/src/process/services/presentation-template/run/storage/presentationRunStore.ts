@@ -8,6 +8,7 @@ import { createHash, randomUUID as createRandomUUID, timingSafeEqual } from 'nod
 import { isDeepStrictEqual } from 'node:util';
 import { PRESENTATION_RUN_DISPATCH_STATUSES, PRESENTATION_RUN_LIMITS } from '@/common/config/constants';
 import type { PresentationReadinessEvidence } from '@/common/types/office/artifactReadiness';
+import { normalizePresentationConversationId } from '@/common/types/office/presentationConversationId';
 import type {
   PresentationGrantOwner,
   PresentationRunFailure,
@@ -164,7 +165,12 @@ export type PresentationSourceStoreFailureCode =
 export class PresentationSourceStoreError extends Error {
   constructor(
     readonly code: PresentationSourceStoreFailureCode,
-    readonly details: { draftId?: string; conversationId?: string; grantId?: string } = {},
+    readonly details: {
+      draftId?: string;
+      conversationId?: string;
+      grantId?: string;
+      queueUnboundAtRevoke?: true;
+    } = {},
     options?: ErrorOptions
   ) {
     super(code, options);
@@ -449,7 +455,7 @@ function isStructurallyValidGrant(value: unknown, expectedGrantId: string): valu
     value.grantId !== expectedGrantId ||
     !UUID_RE.test(expectedGrantId) ||
     typeof value.ownerKey !== 'string' ||
-    !/^(?:conversation|draft):.{1,256}$/.test(value.ownerKey) ||
+    canonicalPresentationSourceOwnerKeyFromLegacy(value.ownerKey) === null ||
     !isNonnegativeInteger(value.revision) ||
     !isIsoTimestamp(value.createdAt) ||
     !isIsoTimestamp(value.updatedAt) ||
@@ -681,16 +687,55 @@ function isPresentationRunFailure(value: unknown): value is PresentationRunFailu
 
 const tupleIndexKey = (first: string, second: string): string => JSON.stringify([first, second]);
 
-const requestIndexKey = (conversationId: string, clientRequestId: string): string =>
-  tupleIndexKey(conversationId, clientRequestId);
+const presentationConversationIndexKey = (conversationId: string): string =>
+  normalizePresentationConversationId(conversationId) ?? conversationId;
 
-const turnIndexKey = (conversationId: string, turnId: string): string => tupleIndexKey(conversationId, turnId);
+const requestIndexKey = (conversationId: string, clientRequestId: string): string =>
+  tupleIndexKey(presentationConversationIndexKey(conversationId), clientRequestId);
+
+const turnIndexKey = (conversationId: string, turnId: string): string =>
+  tupleIndexKey(presentationConversationIndexKey(conversationId), turnId);
 
 const draftRequestIndexKey = (principalId: string, clientRequestId: string): string =>
   tupleIndexKey(principalId, clientRequestId);
 
 export function presentationSourceOwnerKey(owner: PresentationGrantOwner): string {
   return owner.owner_type === 'conversation' ? `conversation:${owner.conversation_id}` : `draft:${owner.draft_id}`;
+}
+
+function normalizePresentationSourceOwner(owner: PresentationGrantOwner): PresentationGrantOwner | null {
+  if (owner.owner_type === 'conversation') {
+    const conversationId = normalizePresentationConversationId(owner.conversation_id);
+    return conversationId === null ? null : { owner_type: 'conversation', conversation_id: conversationId };
+  }
+  return UUID_RE.test(owner.draft_id) ? structuredClone(owner) : null;
+}
+
+function canonicalPresentationSourceOwnerKey(owner: PresentationGrantOwner): string | null {
+  const normalized = normalizePresentationSourceOwner(owner);
+  return normalized === null ? null : presentationSourceOwnerKey(normalized);
+}
+
+function canonicalPresentationSourceOwnerKeyFromLegacy(ownerKey: string): string | null {
+  if (ownerKey.startsWith('conversation:')) {
+    const conversationId = normalizePresentationConversationId(ownerKey.slice('conversation:'.length));
+    return conversationId === null ? null : `conversation:${conversationId}`;
+  }
+  if (ownerKey.startsWith('draft:')) {
+    const draftId = ownerKey.slice('draft:'.length);
+    return UUID_RE.test(draftId) ? `draft:${draftId}` : null;
+  }
+  return null;
+}
+
+function isSamePresentationSourceOwner(left: PresentationGrantOwner, right: PresentationGrantOwner): boolean {
+  const leftKey = canonicalPresentationSourceOwnerKey(left);
+  return leftKey !== null && leftKey === canonicalPresentationSourceOwnerKey(right);
+}
+
+function isSamePresentationConversation(left: unknown, right: unknown): boolean {
+  const normalizedLeft = normalizePresentationConversationId(left);
+  return normalizedLeft !== null && normalizedLeft === normalizePresentationConversationId(right);
 }
 
 /** Produces a stable UUID-shaped canonical entity id without exposing an owner path. */
@@ -770,20 +815,24 @@ export class PresentationRunStore {
     await this.initialize();
     this.assertStorageHealthy();
     await this.expirePresentationSourceOwnerIfNeeded(owner);
-    const ownerId = presentationSourceOwnerId(owner);
-    return this.lock.runExclusive(['store:health', `owner:${ownerId}`], async () => {
+    const resolved = this.requireSourceOwnerResolution(owner);
+    return this.lock.runExclusive(['store:health', `owner:${resolved.canonicalKey}`], async () => {
       this.assertStorageHealthy();
-      const manifest = this.sourceOwners.get(ownerId);
+      const manifest = this.sourceOwners.get(resolved.ownerId);
       if (manifest === undefined) {
-        if (owner.owner_type === 'conversation') return { owner, ownerRevision: 0, grants: [] };
-        this.throwDraftLookupFailure(owner.draft_id, principalId);
+        if (resolved.owner.owner_type === 'conversation') {
+          return { owner: resolved.owner, ownerRevision: 0, grants: [] };
+        }
+        this.throwDraftLookupFailure(resolved.owner.draft_id, principalId);
       }
       if (manifest.principalId !== principalId) {
-        throw new PresentationSourceStoreError(owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN');
+        throw new PresentationSourceStoreError(
+          resolved.owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN'
+        );
       }
-      if (owner.owner_type === 'draft') {
+      if (resolved.owner.owner_type === 'draft') {
         if (manifest.draftLifecycle === 'expired') {
-          throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: owner.draft_id });
+          throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: resolved.owner.draft_id });
         }
         if (manifest.draftLifecycle !== 'active') {
           throw new PresentationSourceStoreError('DRAFT_NOT_FOUND');
@@ -794,13 +843,13 @@ export class PresentationRunStore {
         if (
           grant === undefined ||
           grant.state !== 'active' ||
-          presentationSourceOwnerKey(grant.owner) !== presentationSourceOwnerKey(owner)
+          !isSamePresentationSourceOwner(grant.owner, resolved.owner)
         ) {
           throw new PresentationCanonicalCorruptionError('Presentation source owner references an invalid grant');
         }
         return frozenSnapshot(grant);
       });
-      return { owner: structuredClone(owner), ownerRevision: manifest.revision, grants };
+      return { owner: structuredClone(resolved.owner), ownerRevision: manifest.revision, grants };
     });
   }
 
@@ -902,123 +951,131 @@ export class PresentationRunStore {
     await this.initialize();
     this.assertStorageHealthy();
     await this.expirePresentationSourceOwnerIfNeeded(input.owner);
-    const ownerId = presentationSourceOwnerId(input.owner);
+    const resolved = this.requireSourceOwnerResolution(input.owner);
     const grantLockKeys = input.grants.map(({ grantId }) => `grant:${grantId}`);
-    return this.lock.runExclusive(['store:health', 'policy:app', `owner:${ownerId}`, ...grantLockKeys], async () => {
-      this.assertStorageHealthy();
-      const currentOwner = this.requireMutableSourceOwner(input.owner, input.principalId, input.expectedOwnerRevision);
-      if (input.grants.length === 0) throw new PresentationSourceStoreError('INVALID_REQUEST');
-      if (new Set(input.grants.map(({ grantId }) => grantId)).size !== input.grants.length) {
-        throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID');
-      }
-      const batchBytes = input.grants.reduce((total, grant) => total + grant.byteLength, 0);
-      const appGrants = Array.from(this.sourceGrants.values()).filter((grant) => grant.state === 'active');
-      const appBytes = appGrants.reduce((total, grant) => total + grant.byteLength, 0);
-      if (
-        currentOwner.grantIds.length + input.grants.length > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANTS_PER_OWNER ||
-        appGrants.length + input.grants.length > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANTS_PER_APP
-      ) {
-        throw new PresentationSourceStoreError('GRANT_LIMIT_EXCEEDED');
-      }
-      if (
-        batchBytes > PRESENTATION_RUN_LIMITS.MAX_TOTAL_SOURCE_BYTES ||
-        currentOwner.unboundBytes + batchBytes > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANT_BYTES_PER_OWNER ||
-        appBytes + batchBytes > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANT_BYTES_PER_APP
-      ) {
-        throw new PresentationSourceStoreError('SOURCE_LIMIT_EXCEEDED');
-      }
-      const now = this.now().toISOString();
-      const expiresAt = new Date(Date.parse(now) + PRESENTATION_RUN_LIMITS.GRANT_TTL_MS).toISOString();
-      const grants = input.grants.map<StoredPresentationSourceGrantManifest>((grant) => ({
-        version: 2,
-        recordType: 'presentation-source-grant',
-        grantId: grant.grantId,
-        owner: structuredClone(input.owner),
-        revision: 0,
-        displayName: grant.displayName,
-        format: grant.format,
-        sourceKind: grant.sourceKind,
-        snapshotRelativePath: grant.snapshotRelativePath,
-        sha256: grant.sha256.toLowerCase(),
-        byteLength: grant.byteLength,
-        createdAt: now,
-        updatedAt: now,
-        expiresAt,
-        stateEnteredAt: now,
-        state: 'active',
-        queueExtendedAt: null,
-        queueItemId: null,
-        claimedRunId: null,
-      }));
-      for (const grant of grants) {
-        if (this.sourceGrants.has(grant.grantId) || this.sourceGrantTombstones.has(grant.grantId)) {
-          throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', { grantId: grant.grantId });
+    return this.lock.runExclusive(
+      ['store:health', 'policy:app', `owner:${resolved.canonicalKey}`, ...grantLockKeys],
+      async () => {
+        this.assertStorageHealthy();
+        const currentOwner = this.requireMutableSourceOwner(
+          resolved.owner,
+          input.principalId,
+          input.expectedOwnerRevision
+        );
+        if (input.grants.length === 0) throw new PresentationSourceStoreError('INVALID_REQUEST');
+        if (new Set(input.grants.map(({ grantId }) => grantId)).size !== input.grants.length) {
+          throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID');
         }
-        assertPresentationSourceGrantManifest(grant);
-      }
-      const nextOwner: StoredPresentationSourceOwnerManifest = {
-        ...currentOwner,
-        revision: currentOwner.revision + 1,
-        createdAt: currentOwner.createdAt === '' ? now : currentOwner.createdAt,
-        updatedAt: now,
-        grantIds: [...currentOwner.grantIds, ...grants.map(({ grantId }) => grantId)].toSorted(),
-        unboundBytes: currentOwner.unboundBytes + batchBytes,
-      };
-      assertPresentationSourceOwnerManifest(nextOwner);
-      const draft = input.owner.owner_type === 'draft' ? this.sourceDrafts.get(input.owner.draft_id) : undefined;
-      const nextDraft =
-        draft === undefined
-          ? undefined
-          : ({
-              ...draft,
-              revision: draft.revision + 1,
-              updatedAt: now,
-            } satisfies StoredPresentationSourceDraftManifest);
-      if (nextDraft !== undefined) assertPresentationSourceDraftManifest(nextDraft);
-      await this.runCanonicalTransaction(
-        {
-          sourceSnapshotPromotions: input.grants.map(({ preparedSnapshot }) => preparedSnapshot),
-          mutations: [
-            {
-              entityKind: 'owner',
-              entityId: ownerId,
-              expectedRevision:
-                currentOwner.revision === 0 && currentOwner.createdAt === '' ? null : currentOwner.revision,
-              nextManifest: nextOwner,
-            },
-            ...grants.map((grant) => ({
-              entityKind: 'grant' as const,
-              entityId: grant.grantId,
-              expectedRevision: null as null,
-              nextManifest: grant,
-            })),
-            ...(nextDraft === undefined
-              ? []
-              : [
-                  {
-                    entityKind: 'draft' as const,
-                    entityId: nextDraft.draftId,
-                    expectedRevision: draft?.revision ?? null,
-                    nextManifest: nextDraft,
-                  },
-                ]),
-          ],
-        },
-        async () => {
-          for (const grant of input.grants) await this.files.removePreparedSourceSnapshot(grant.preparedSnapshot);
+        const batchBytes = input.grants.reduce((total, grant) => total + grant.byteLength, 0);
+        const appGrants = Array.from(this.sourceGrants.values()).filter((grant) => grant.state === 'active');
+        const appBytes = appGrants.reduce((total, grant) => total + grant.byteLength, 0);
+        if (
+          currentOwner.grantIds.length + input.grants.length > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANTS_PER_OWNER ||
+          appGrants.length + input.grants.length > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANTS_PER_APP
+        ) {
+          throw new PresentationSourceStoreError('GRANT_LIMIT_EXCEEDED');
         }
-      );
-      this.sourceOwners.set(ownerId, frozenSnapshot(nextOwner));
-      for (const grant of grants) this.sourceGrants.set(grant.grantId, frozenSnapshot(grant));
-      if (nextDraft !== undefined) this.sourceDrafts.set(nextDraft.draftId, frozenSnapshot(nextDraft));
-      this.index = this.buildIndex();
-      await this.persistDerivedIndexBestEffort();
-      return {
-        owner: structuredClone(input.owner),
-        ownerRevision: nextOwner.revision,
-        grants: grants.map(frozenSnapshot),
-      };
-    });
+        if (
+          batchBytes > PRESENTATION_RUN_LIMITS.MAX_TOTAL_SOURCE_BYTES ||
+          currentOwner.unboundBytes + batchBytes > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANT_BYTES_PER_OWNER ||
+          appBytes + batchBytes > PRESENTATION_RUN_LIMITS.MAX_UNBOUND_GRANT_BYTES_PER_APP
+        ) {
+          throw new PresentationSourceStoreError('SOURCE_LIMIT_EXCEEDED');
+        }
+        const now = this.now().toISOString();
+        const expiresAt = new Date(Date.parse(now) + PRESENTATION_RUN_LIMITS.GRANT_TTL_MS).toISOString();
+        const grants = input.grants.map<StoredPresentationSourceGrantManifest>((grant) => ({
+          version: 2,
+          recordType: 'presentation-source-grant',
+          grantId: grant.grantId,
+          owner: structuredClone(currentOwner.owner),
+          revision: 0,
+          displayName: grant.displayName,
+          format: grant.format,
+          sourceKind: grant.sourceKind,
+          snapshotRelativePath: grant.snapshotRelativePath,
+          sha256: grant.sha256.toLowerCase(),
+          byteLength: grant.byteLength,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt,
+          stateEnteredAt: now,
+          state: 'active',
+          queueExtendedAt: null,
+          queueItemId: null,
+          claimedRunId: null,
+        }));
+        for (const grant of grants) {
+          if (this.sourceGrants.has(grant.grantId) || this.sourceGrantTombstones.has(grant.grantId)) {
+            throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', { grantId: grant.grantId });
+          }
+          assertPresentationSourceGrantManifest(grant);
+        }
+        const nextOwner: StoredPresentationSourceOwnerManifest = {
+          ...currentOwner,
+          revision: currentOwner.revision + 1,
+          createdAt: currentOwner.createdAt === '' ? now : currentOwner.createdAt,
+          updatedAt: now,
+          grantIds: [...currentOwner.grantIds, ...grants.map(({ grantId }) => grantId)].toSorted(),
+          unboundBytes: currentOwner.unboundBytes + batchBytes,
+        };
+        assertPresentationSourceOwnerManifest(nextOwner);
+        const draft =
+          resolved.owner.owner_type === 'draft' ? this.sourceDrafts.get(resolved.owner.draft_id) : undefined;
+        const nextDraft =
+          draft === undefined
+            ? undefined
+            : ({
+                ...draft,
+                revision: draft.revision + 1,
+                updatedAt: now,
+              } satisfies StoredPresentationSourceDraftManifest);
+        if (nextDraft !== undefined) assertPresentationSourceDraftManifest(nextDraft);
+        await this.runCanonicalTransaction(
+          {
+            sourceSnapshotPromotions: input.grants.map(({ preparedSnapshot }) => preparedSnapshot),
+            mutations: [
+              {
+                entityKind: 'owner',
+                entityId: resolved.ownerId,
+                expectedRevision:
+                  currentOwner.revision === 0 && currentOwner.createdAt === '' ? null : currentOwner.revision,
+                nextManifest: nextOwner,
+              },
+              ...grants.map((grant) => ({
+                entityKind: 'grant' as const,
+                entityId: grant.grantId,
+                expectedRevision: null as null,
+                nextManifest: grant,
+              })),
+              ...(nextDraft === undefined
+                ? []
+                : [
+                    {
+                      entityKind: 'draft' as const,
+                      entityId: nextDraft.draftId,
+                      expectedRevision: draft?.revision ?? null,
+                      nextManifest: nextDraft,
+                    },
+                  ]),
+            ],
+          },
+          async () => {
+            for (const grant of input.grants) await this.files.removePreparedSourceSnapshot(grant.preparedSnapshot);
+          }
+        );
+        this.sourceOwners.set(resolved.ownerId, frozenSnapshot(nextOwner));
+        for (const grant of grants) this.sourceGrants.set(grant.grantId, frozenSnapshot(grant));
+        if (nextDraft !== undefined) this.sourceDrafts.set(nextDraft.draftId, frozenSnapshot(nextDraft));
+        this.index = this.buildIndex();
+        await this.persistDerivedIndexBestEffort();
+        return {
+          owner: structuredClone(resolved.owner),
+          ownerRevision: nextOwner.revision,
+          grants: grants.map(frozenSnapshot),
+        };
+      }
+    );
   }
 
   async extendPresentationSourceGrantsForQueue(input: {
@@ -1046,26 +1103,49 @@ export class PresentationRunStore {
       throw new PresentationSourceStoreError('INVALID_REQUEST');
     }
     await this.expirePresentationSourceOwnerIfNeeded(input.owner);
-    const ownerId = presentationSourceOwnerId(input.owner);
+    const resolved = this.requireSourceOwnerResolution(input.owner);
     return this.lock.runExclusive(
-      ['store:health', 'policy:app', `owner:${ownerId}`, ...input.sources.map(({ grantId }) => `grant:${grantId}`)],
+      [
+        'store:health',
+        'policy:app',
+        `owner:${resolved.canonicalKey}`,
+        ...input.sources.map(({ grantId }) => `grant:${grantId}`),
+      ],
       async () => {
         this.assertStorageHealthy();
+        const sourceTombstones: Array<{
+          grantId: string;
+          tombstone: StoredPresentationSourceGrantTombstone;
+        }> = [];
         for (const { grantId } of input.sources) {
           const tombstone = this.sourceGrantTombstones.get(grantId);
           if (tombstone === undefined) continue;
-          if (presentationSourceOwnerKey(tombstone.owner) !== presentationSourceOwnerKey(input.owner)) {
+          sourceTombstones.push({ grantId, tombstone });
+          if (!isSamePresentationSourceOwner(tombstone.owner, resolved.owner)) {
             throw new PresentationSourceStoreError('SOURCE_GRANT_FOREIGN', { grantId });
           }
+        }
+        const provenRevocation = sourceTombstones.find(
+          ({ tombstone }) =>
+            tombstone.version === 3 && tombstone.terminalState === 'revoked' && tombstone.queueUnboundAtRevoke === true
+        );
+        if (provenRevocation !== undefined) {
+          throw new PresentationSourceStoreError('SOURCE_GRANT_REPLAYED', {
+            grantId: provenRevocation.grantId,
+            queueUnboundAtRevoke: true,
+          });
+        }
+        const firstTombstone = sourceTombstones[0];
+        if (firstTombstone !== undefined) {
           throw new PresentationSourceStoreError(
-            tombstone.terminalState === 'expired' ? 'SOURCE_GRANT_EXPIRED' : 'SOURCE_GRANT_REPLAYED',
-            { grantId }
+            firstTombstone.tombstone.terminalState === 'expired' ? 'SOURCE_GRANT_EXPIRED' : 'SOURCE_GRANT_REPLAYED',
+            { grantId: firstTombstone.grantId }
           );
         }
-        const owner = this.sourceOwners.get(ownerId);
+        const owner = this.sourceOwners.get(resolved.ownerId);
         if (owner === undefined) {
-          if (input.owner.owner_type === 'draft') {
-            this.throwDraftLookupFailure(input.owner.draft_id, input.principalId);
+          if (resolved.owner.owner_type === 'draft') {
+            this.throwDraftLookupFailure(resolved.owner.draft_id, input.principalId);
           }
           throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', {
             grantId: input.sources[0]?.grantId,
@@ -1073,12 +1153,12 @@ export class PresentationRunStore {
         }
         if (owner.principalId !== input.principalId) {
           throw new PresentationSourceStoreError(
-            input.owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN'
+            resolved.owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN'
           );
         }
-        if (input.owner.owner_type === 'draft') {
+        if (resolved.owner.owner_type === 'draft') {
           if (owner.draftLifecycle === 'expired') {
-            throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: input.owner.draft_id });
+            throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: resolved.owner.draft_id });
           }
           if (owner.draftLifecycle !== 'active') throw new PresentationSourceStoreError('DRAFT_NOT_FOUND');
         }
@@ -1087,7 +1167,7 @@ export class PresentationRunStore {
           if (grant === undefined || !owner.grantIds.includes(source.grantId)) {
             throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', { grantId: source.grantId });
           }
-          if (presentationSourceOwnerKey(grant.owner) !== presentationSourceOwnerKey(input.owner)) {
+          if (!isSamePresentationSourceOwner(grant.owner, resolved.owner)) {
             throw new PresentationSourceStoreError('SOURCE_GRANT_FOREIGN', { grantId: source.grantId });
           }
           if (grant.state !== 'active') {
@@ -1118,7 +1198,7 @@ export class PresentationRunStore {
           }
           return {
             status: 'already_confirmed',
-            owner: structuredClone(input.owner),
+            owner: structuredClone(resolved.owner),
             ownerRevision: owner.revision,
             expiresAt,
             grants: owner.grantIds.map((grantId) => {
@@ -1154,14 +1234,20 @@ export class PresentationRunStore {
           revision: owner.revision + 1,
           updatedAt: now,
         };
-        const draft = input.owner.owner_type === 'draft' ? this.sourceDrafts.get(input.owner.draft_id) : undefined;
+        const draft =
+          resolved.owner.owner_type === 'draft' ? this.sourceDrafts.get(resolved.owner.draft_id) : undefined;
         const nextDraft = draft === undefined ? undefined : { ...draft, revision: draft.revision + 1, updatedAt: now };
         for (const grant of nextGrants) assertPresentationSourceGrantManifest(grant);
         assertPresentationSourceOwnerManifest(nextOwner);
         if (nextDraft !== undefined) assertPresentationSourceDraftManifest(nextDraft);
         await this.runCanonicalTransaction({
           mutations: [
-            { entityKind: 'owner', entityId: ownerId, expectedRevision: owner.revision, nextManifest: nextOwner },
+            {
+              entityKind: 'owner',
+              entityId: resolved.ownerId,
+              expectedRevision: owner.revision,
+              nextManifest: nextOwner,
+            },
             ...nextGrants.map((grant, index) => ({
               entityKind: 'grant' as const,
               entityId: grant.grantId,
@@ -1180,14 +1266,14 @@ export class PresentationRunStore {
                 ]),
           ],
         });
-        this.sourceOwners.set(ownerId, frozenSnapshot(nextOwner));
+        this.sourceOwners.set(resolved.ownerId, frozenSnapshot(nextOwner));
         for (const grant of nextGrants) this.sourceGrants.set(grant.grantId, frozenSnapshot(grant));
         if (nextDraft !== undefined) this.sourceDrafts.set(nextDraft.draftId, frozenSnapshot(nextDraft));
         this.index = this.buildIndex();
         await this.persistDerivedIndexBestEffort();
         return {
           status: 'confirmed',
-          owner: structuredClone(input.owner),
+          owner: structuredClone(resolved.owner),
           ownerRevision: nextOwner.revision,
           expiresAt,
           grants: nextOwner.grantIds.map((grantId) => {
@@ -1210,13 +1296,15 @@ export class PresentationRunStore {
   }): Promise<BindPresentationSourceDraftStoreResult> {
     await this.initialize();
     this.assertStorageHealthy();
+    const conversationId = normalizePresentationConversationId(input.conversationId);
+    if (conversationId === null) throw new PresentationSourceStoreError('INVALID_REQUEST');
     const draftOwner: PresentationGrantOwner = { owner_type: 'draft', draft_id: input.draftId };
     const destinationOwner: PresentationGrantOwner = {
       owner_type: 'conversation',
-      conversation_id: input.conversationId,
+      conversation_id: conversationId,
     };
     const draftOwnerId = presentationSourceOwnerId(draftOwner);
-    const destinationOwnerId = presentationSourceOwnerId(destinationOwner);
+    const destination = this.requireSourceOwnerResolution(destinationOwner);
     const knownGrantIds = this.sourceOwners.get(draftOwnerId)?.grantIds ?? [];
     return this.lock.runExclusive(
       [
@@ -1224,7 +1312,7 @@ export class PresentationRunStore {
         'policy:app',
         `draft:${input.draftId}`,
         `owner:${draftOwnerId}`,
-        `owner:${destinationOwnerId}`,
+        `owner:${destination.canonicalKey}`,
         ...knownGrantIds.map((grantId) => `grant:${grantId}`),
       ],
       async () => {
@@ -1238,11 +1326,11 @@ export class PresentationRunStore {
           if (terminal.terminalState === 'expired') {
             throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: input.draftId });
           }
-          if (terminal.boundConversationId === input.conversationId) {
+          if (isSamePresentationConversation(terminal.boundConversationId, conversationId)) {
             return {
               status: 'already_bound',
               draftId: terminal.draftId,
-              conversationId: input.conversationId,
+              conversationId,
               revision: terminal.lastRevision,
               boundAt: terminal.terminalAt,
             };
@@ -1265,11 +1353,11 @@ export class PresentationRunStore {
           throw new PresentationSourceStoreError('DRAFT_EXPIRED', { draftId: draft.draftId });
         }
         if (draft.state === 'bound') {
-          if (draft.boundConversationId === input.conversationId && draft.boundAt !== null) {
+          if (isSamePresentationConversation(draft.boundConversationId, conversationId) && draft.boundAt !== null) {
             return {
               status: 'already_bound',
               draftId: draft.draftId,
-              conversationId: input.conversationId,
+              conversationId,
               revision: draft.revision,
               boundAt: draft.boundAt,
             };
@@ -1292,7 +1380,7 @@ export class PresentationRunStore {
         if (new Set(knownGrantIds).size !== new Set(currentDraftOwner.grantIds).size) {
           throw new PresentationSourceStoreError('INVALID_REQUEST');
         }
-        const existingDestination = this.sourceOwners.get(destinationOwnerId);
+        const existingDestination = this.sourceOwners.get(destination.ownerId);
         if (existingDestination !== undefined && existingDestination.principalId !== input.principalId) {
           throw new PresentationSourceStoreError('RUN_FORBIDDEN');
         }
@@ -1313,7 +1401,7 @@ export class PresentationRunStore {
           revision: draft.revision + 1,
           state: 'bound',
           updatedAt: now,
-          boundConversationId: input.conversationId,
+          boundConversationId: conversationId,
           boundAt: now,
         };
         const nextDraftOwner: StoredPresentationSourceOwnerManifest = {
@@ -1329,8 +1417,8 @@ export class PresentationRunStore {
             ? {
                 version: 2,
                 recordType: 'presentation-source-owner',
-                ownerId: destinationOwnerId,
-                owner: destinationOwner,
+                ownerId: destination.ownerId,
+                owner: destination.owner,
                 principalId: input.principalId,
                 revision: 1,
                 createdAt: now,
@@ -1349,7 +1437,7 @@ export class PresentationRunStore {
               };
         const migratedGrants = grants.map<StoredPresentationSourceGrantManifest>((grant) => ({
           ...grant,
-          owner: destinationOwner,
+          owner: structuredClone(existingDestination?.owner ?? destination.owner),
           revision: grant.revision + 1,
           updatedAt: now,
         }));
@@ -1365,7 +1453,7 @@ export class PresentationRunStore {
           tombstonedAt: now,
           deleteAfter: new Date(Date.parse(now) + PRESENTATION_RUN_LIMITS.TOMBSTONE_RETENTION_MS).toISOString(),
           lastRevision: nextDraft.revision,
-          boundConversationId: input.conversationId,
+          boundConversationId: conversationId,
         };
         assertPresentationSourceDraftManifest(nextDraft);
         assertPresentationSourceOwnerManifest(nextDraftOwner);
@@ -1394,7 +1482,7 @@ export class PresentationRunStore {
             },
             {
               entityKind: 'owner',
-              entityId: destinationOwnerId,
+              entityId: destination.ownerId,
               expectedRevision: existingDestination?.revision ?? null,
               nextManifest: nextDestination,
             },
@@ -1409,7 +1497,7 @@ export class PresentationRunStore {
         this.sourceDrafts.delete(draft.draftId);
         this.sourceDraftTombstones.set(draft.draftId, frozenSnapshot(tombstone));
         this.sourceOwners.set(draftOwnerId, frozenSnapshot(nextDraftOwner));
-        this.sourceOwners.set(destinationOwnerId, frozenSnapshot(nextDestination));
+        this.sourceOwners.set(destination.ownerId, frozenSnapshot(nextDestination));
         for (const grant of migratedGrants) this.sourceGrants.set(grant.grantId, frozenSnapshot(grant));
         this.index = this.buildIndex();
         await this.persistDerivedIndexBestEffort();
@@ -1417,7 +1505,7 @@ export class PresentationRunStore {
         return {
           status: 'bound',
           draftId: draft.draftId,
-          conversationId: input.conversationId,
+          conversationId,
           revision: nextDraft.revision,
           boundAt: now,
         };
@@ -1430,13 +1518,19 @@ export class PresentationRunStore {
     principalId: string;
     grantId: string;
     expectedOwnerRevision: number;
-  }): Promise<{ status: 'revoked' | 'already_revoked'; grantId: string; ownerRevision: number; revokedAt: string }> {
+  }): Promise<{
+    status: 'revoked' | 'already_revoked';
+    grantId: string;
+    ownerRevision: number;
+    revokedAt: string;
+    queueUnboundAtRevoke: boolean;
+  }> {
     await this.initialize();
     this.assertStorageHealthy();
     await this.expirePresentationSourceOwnerIfNeeded(input.owner);
-    const ownerId = presentationSourceOwnerId(input.owner);
+    const resolved = this.requireSourceOwnerResolution(input.owner);
     return this.lock.runExclusive(
-      ['store:health', 'policy:app', `owner:${ownerId}`, `grant:${input.grantId}`],
+      ['store:health', 'policy:app', `owner:${resolved.canonicalKey}`, `grant:${input.grantId}`],
       async () => {
         this.assertStorageHealthy();
         const existingTombstone = this.sourceGrantTombstones.get(input.grantId);
@@ -1444,19 +1538,19 @@ export class PresentationRunStore {
           if (!Number.isSafeInteger(input.expectedOwnerRevision) || input.expectedOwnerRevision < 0) {
             throw new PresentationSourceStoreError('INVALID_REQUEST');
           }
-          if (presentationSourceOwnerKey(existingTombstone.owner) !== presentationSourceOwnerKey(input.owner)) {
+          if (!isSamePresentationSourceOwner(existingTombstone.owner, resolved.owner)) {
             throw new PresentationSourceStoreError('SOURCE_GRANT_FOREIGN', { grantId: input.grantId });
           }
-          const currentOwner = this.sourceOwners.get(ownerId);
+          const currentOwner = this.sourceOwners.get(resolved.ownerId);
           if (currentOwner === undefined) {
-            if (input.owner.owner_type === 'draft') {
-              this.throwDraftLookupFailure(input.owner.draft_id, input.principalId);
+            if (resolved.owner.owner_type === 'draft') {
+              this.throwDraftLookupFailure(resolved.owner.draft_id, input.principalId);
             }
             throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', { grantId: input.grantId });
           }
           if (currentOwner.principalId !== input.principalId) {
             throw new PresentationSourceStoreError(
-              input.owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN'
+              resolved.owner.owner_type === 'draft' ? 'DRAFT_FOREIGN' : 'RUN_FORBIDDEN'
             );
           }
           if (existingTombstone.terminalState === 'revoked') {
@@ -1465,6 +1559,7 @@ export class PresentationRunStore {
               grantId: input.grantId,
               ownerRevision: currentOwner.revision,
               revokedAt: existingTombstone.terminalAt,
+              queueUnboundAtRevoke: existingTombstone.version === 3 && existingTombstone.queueUnboundAtRevoke === true,
             };
           }
           throw new PresentationSourceStoreError(
@@ -1472,12 +1567,15 @@ export class PresentationRunStore {
             { grantId: input.grantId }
           );
         }
-        const owner = this.requireMutableSourceOwner(input.owner, input.principalId, input.expectedOwnerRevision);
+        const owner = this.requireMutableSourceOwner(resolved.owner, input.principalId, input.expectedOwnerRevision);
         const grant = this.sourceGrants.get(input.grantId);
         if (grant === undefined)
           throw new PresentationSourceStoreError('SOURCE_GRANT_INVALID', { grantId: input.grantId });
-        if (presentationSourceOwnerKey(grant.owner) !== presentationSourceOwnerKey(input.owner)) {
+        if (!isSamePresentationSourceOwner(grant.owner, resolved.owner)) {
           throw new PresentationSourceStoreError('SOURCE_GRANT_FOREIGN', { grantId: input.grantId });
+        }
+        if (grant.queueItemId !== null || grant.queueExtendedAt !== null) {
+          throw new PresentationSourceStoreError('SOURCE_GRANT_REPLAYED', { grantId: input.grantId });
         }
         if (grant.state !== 'active') {
           throw new PresentationSourceStoreError(
@@ -1500,8 +1598,9 @@ export class PresentationRunStore {
           grantIds: owner.grantIds.filter((grantId) => grantId !== input.grantId),
           unboundBytes: owner.unboundBytes - grant.byteLength,
         };
-        const tombstone = this.createGrantTombstone(nextGrant, 'revoked', now);
-        const draft = input.owner.owner_type === 'draft' ? this.sourceDrafts.get(input.owner.draft_id) : undefined;
+        const tombstone = this.createGrantTombstone(nextGrant, 'revoked', now, true);
+        const draft =
+          resolved.owner.owner_type === 'draft' ? this.sourceDrafts.get(resolved.owner.draft_id) : undefined;
         const nextDraft = draft === undefined ? undefined : { ...draft, revision: draft.revision + 1, updatedAt: now };
         await this.runCanonicalTransaction({
           mutations: [
@@ -1517,7 +1616,12 @@ export class PresentationRunStore {
               expectedRevision: null,
               nextManifest: tombstone,
             },
-            { entityKind: 'owner', entityId: ownerId, expectedRevision: owner.revision, nextManifest: nextOwner },
+            {
+              entityKind: 'owner',
+              entityId: resolved.ownerId,
+              expectedRevision: owner.revision,
+              nextManifest: nextOwner,
+            },
             ...(nextDraft === undefined
               ? []
               : [
@@ -1532,18 +1636,27 @@ export class PresentationRunStore {
         });
         this.sourceGrants.delete(grant.grantId);
         this.sourceGrantTombstones.set(grant.grantId, frozenSnapshot(tombstone));
-        this.sourceOwners.set(ownerId, frozenSnapshot(nextOwner));
+        this.sourceOwners.set(resolved.ownerId, frozenSnapshot(nextOwner));
         if (nextDraft !== undefined) this.sourceDrafts.set(nextDraft.draftId, frozenSnapshot(nextDraft));
         this.index = this.buildIndex();
         await this.persistDerivedIndexBestEffort();
         await this.files.removeGrant(grant.grantId);
-        return { status: 'revoked', grantId: grant.grantId, ownerRevision: nextOwner.revision, revokedAt: now };
+        return {
+          status: 'revoked',
+          grantId: grant.grantId,
+          ownerRevision: nextOwner.revision,
+          revokedAt: now,
+          queueUnboundAtRevoke: tombstone.version === 3 && tombstone.queueUnboundAtRevoke === true,
+        };
       }
     );
   }
 
   async allocateRun(unsafeInput: AllocatePresentationRunInput): Promise<AllocatePresentationRunResult> {
     const input = structuredClone(unsafeInput);
+    const conversationId = normalizePresentationConversationId(input.conversationId);
+    if (conversationId === null) throw new PresentationSourceStoreError('INVALID_REQUEST');
+    input.conversationId = conversationId;
     if (typeof input.requestFingerprint === 'string' && REQUEST_FINGERPRINT_INPUT_RE.test(input.requestFingerprint)) {
       input.requestFingerprint = input.requestFingerprint.toLowerCase();
     }
@@ -1551,16 +1664,16 @@ export class PresentationRunStore {
     await this.initialize();
     this.assertStorageHealthy();
     const requestKey = requestIndexKey(input.conversationId, input.clientRequestId);
-    const sourceOwner: PresentationGrantOwner = {
+    const sourceOwnerRequest: PresentationGrantOwner = {
       owner_type: 'conversation',
       conversation_id: input.conversationId,
     };
-    const sourceOwnerId = presentationSourceOwnerId(sourceOwner);
+    const sourceOwner = this.requireSourceOwnerResolution(sourceOwnerRequest);
     const lockKeys = [
       'store:health',
       `conversation:${input.conversationId}`,
       ...input.grantClaims.map(({ grantId }) => `grant:${grantId}`),
-      `owner:${sourceOwnerId}`,
+      `owner:${sourceOwner.canonicalKey}`,
       'policy:app',
       `request:${requestKey}`,
     ];
@@ -1606,8 +1719,8 @@ export class PresentationRunStore {
         const claim = unsafeClaim;
         const tombstone = this.sourceGrantTombstones.get(claim.grantId);
         if (tombstone !== undefined && Date.parse(tombstone.deleteAfter) > this.now().getTime()) {
-          const ownerKey = presentationSourceOwnerKey(tombstone.owner);
-          if (ownerKey !== `conversation:${input.conversationId}`) {
+          const ownerKey = canonicalPresentationSourceOwnerKey(tombstone.owner);
+          if (ownerKey !== sourceOwner.canonicalKey) {
             return {
               ok: false,
               code: 'SOURCE_GRANT_FOREIGN',
@@ -1652,8 +1765,11 @@ export class PresentationRunStore {
             details: { grantId: claim.grantId },
           };
         }
-        const ownerKey = 'recordType' in grant ? presentationSourceOwnerKey(grant.owner) : grant.ownerKey;
-        if (ownerKey !== `conversation:${input.conversationId}`) {
+        const ownerKey =
+          'recordType' in grant
+            ? canonicalPresentationSourceOwnerKey(grant.owner)
+            : canonicalPresentationSourceOwnerKeyFromLegacy(grant.ownerKey);
+        if (ownerKey !== sourceOwner.canonicalKey) {
           return {
             ok: false,
             code: 'SOURCE_GRANT_FOREIGN',
@@ -1749,7 +1865,7 @@ export class PresentationRunStore {
       }
       const task3Grants = grants.filter(isStoredPresentationSourceGrantManifest);
       const usesIntegrityClaims = input.grantClaims.some(isIntegrityPresentationRunGrantClaim);
-      const currentSourceOwner = task3Grants.length === 0 ? undefined : this.sourceOwners.get(sourceOwnerId);
+      const currentSourceOwner = task3Grants.length === 0 ? undefined : this.sourceOwners.get(sourceOwner.ownerId);
       if (
         usesIntegrityClaims &&
         task3Grants.length > 0 &&
@@ -1803,7 +1919,7 @@ export class PresentationRunStore {
       if (
         task3Grants.length > 0 &&
         (currentSourceOwner === undefined ||
-          presentationSourceOwnerKey(currentSourceOwner.owner) !== presentationSourceOwnerKey(sourceOwner) ||
+          !isSamePresentationSourceOwner(currentSourceOwner.owner, sourceOwner.owner) ||
           task3Grants.some((grant) => !currentSourceOwner.grantIds.includes(grant.grantId)) ||
           currentSourceOwner.unboundBytes < task3Bytes)
       ) {
@@ -1881,7 +1997,7 @@ export class PresentationRunStore {
             : [
                 {
                   entityKind: 'owner' as const,
-                  entityId: sourceOwnerId,
+                  entityId: sourceOwner.ownerId,
                   expectedRevision: currentSourceOwner.revision,
                   nextManifest: nextSourceOwner,
                 },
@@ -1895,7 +2011,7 @@ export class PresentationRunStore {
         ],
       });
       const cached = this.cacheRun(run);
-      if (nextSourceOwner !== undefined) this.sourceOwners.set(sourceOwnerId, frozenSnapshot(nextSourceOwner));
+      if (nextSourceOwner !== undefined) this.sourceOwners.set(sourceOwner.ownerId, frozenSnapshot(nextSourceOwner));
       for (const grant of claimedGrants) {
         if (isStoredPresentationSourceGrantManifest(grant)) {
           this.sourceGrants.set(grant.grantId, frozenSnapshot(grant));
@@ -2171,7 +2287,7 @@ export class PresentationRunStore {
     return this.lock.runExclusive(['store:health', `run:${input.runId}`], async () => {
       this.assertStorageHealthy();
       const current = this.runs.get(input.runId);
-      if (current === undefined || current.conversationId !== input.conversationId) {
+      if (current === undefined || !isSamePresentationConversation(current.conversationId, input.conversationId)) {
         throw new PresentationRunStoreError('RUN_STATE_CONFLICT');
       }
       if (current.dispatchStatus !== 'committed' || current.postInvoked) {
@@ -2219,7 +2335,7 @@ export class PresentationRunStore {
       const current = this.runs.get(input.runId);
       if (
         current === undefined ||
-        current.conversationId !== input.conversationId ||
+        !isSamePresentationConversation(current.conversationId, input.conversationId) ||
         current.dispatchStatus !== 'committed' ||
         current.postInvoked
       ) {
@@ -2254,7 +2370,7 @@ export class PresentationRunStore {
     return this.lock.runExclusive(['store:health'], async () => {
       this.assertStorageHealthy();
       const current = this.runs.get(input.runId);
-      if (current === undefined || current.conversationId !== input.conversationId) {
+      if (current === undefined || !isSamePresentationConversation(current.conversationId, input.conversationId)) {
         throw new PresentationRunStoreError('RUN_STATE_CONFLICT');
       }
       const lease = current?.initialDispatchLease ?? null;
@@ -2281,7 +2397,7 @@ export class PresentationRunStore {
     return this.lock.runExclusive(['store:health', 'policy:app', `run:${input.runId}`], async () => {
       this.assertStorageHealthy();
       const current = this.runs.get(input.runId);
-      if (current === undefined || current.conversationId !== input.conversationId) {
+      if (current === undefined || !isSamePresentationConversation(current.conversationId, input.conversationId)) {
         throw new PresentationRunStoreError('RUN_STATE_CONFLICT');
       }
       if (current.revision !== input.expectedRevision || current.dispatchStatus !== 'committed') {
@@ -2354,7 +2470,7 @@ export class PresentationRunStore {
     this.assertStorageHealthy();
     return this.lock.runExclusive(['store:health'], async () => {
       this.assertStorageHealthy();
-      const runId = this.index.turns[`${conversationId}\u0000${turnId}`];
+      const runId = getOwnIndexValue(this.index.turns, turnIndexKey(conversationId, turnId));
       if (runId === undefined) return null;
       const run = this.runs.get(runId);
       return run === undefined ? null : this.snapshotRun(run);
@@ -2683,7 +2799,10 @@ export class PresentationRunStore {
     const recoverable = new Set(['retained', 'failed_retained', 'dispatch_uncertain']);
     return this.lock.runExclusive(['store:health'], async () => {
       this.assertStorageHealthy();
-      return this.sortedRuns((run) => run.conversationId === conversationId && recoverable.has(run.dispatchStatus));
+      return this.sortedRuns(
+        (run) =>
+          isSamePresentationConversation(run.conversationId, conversationId) && recoverable.has(run.dispatchStatus)
+      );
     });
   }
 
@@ -3011,8 +3130,9 @@ export class PresentationRunStore {
     for (const [draftId, draft] of scannedDrafts) this.sourceDrafts.set(draftId, draft);
     this.sourceDraftTombstones.clear();
     for (const [draftId, tombstone] of scannedDraftTombstones) this.sourceDraftTombstones.set(draftId, tombstone);
-    this.assertSourceCanonicalReferences();
-    this.index = this.buildIndex();
+    const rebuiltIndex = this.buildIndex();
+    this.assertSourceCanonicalReferences(rebuiltIndex);
+    this.index = rebuiltIndex;
     this.rebuildRateBuckets();
     await this.persistDerivedIndexBestEffort();
   }
@@ -3089,6 +3209,29 @@ export class PresentationRunStore {
     await this.sweepExpiredPresentationSources();
   }
 
+  private requireSourceOwnerResolution(owner: PresentationGrantOwner): {
+    owner: PresentationGrantOwner;
+    canonicalKey: string;
+    ownerId: string;
+  } {
+    const normalizedOwner = normalizePresentationSourceOwner(owner);
+    if (normalizedOwner === null) throw new PresentationSourceStoreError('INVALID_REQUEST');
+    const canonicalKey = presentationSourceOwnerKey(normalizedOwner);
+    return {
+      owner: normalizedOwner,
+      canonicalKey,
+      ownerId: getOwnIndexValue(this.index.sourceOwners, canonicalKey) ?? presentationSourceOwnerId(normalizedOwner),
+    };
+  }
+
+  private findPersistedSourceOwnerId(owner: PresentationGrantOwner, index = this.index): string | undefined {
+    const canonicalKey = canonicalPresentationSourceOwnerKey(owner);
+    if (canonicalKey === null) {
+      throw new PresentationCanonicalCorruptionError('Presentation source owner identity is corrupt');
+    }
+    return getOwnIndexValue(index.sourceOwners, canonicalKey);
+  }
+
   private requireMutableSourceOwner(
     owner: PresentationGrantOwner,
     principalId: string,
@@ -3097,16 +3240,16 @@ export class PresentationRunStore {
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
       throw new PresentationSourceStoreError('INVALID_REQUEST');
     }
-    const ownerId = presentationSourceOwnerId(owner);
-    const existing = this.sourceOwners.get(ownerId);
+    const resolved = this.requireSourceOwnerResolution(owner);
+    const existing = this.sourceOwners.get(resolved.ownerId);
     if (existing === undefined) {
       if (owner.owner_type === 'draft') this.throwDraftLookupFailure(owner.draft_id, principalId);
       if (expectedRevision !== 0) throw new PresentationSourceStoreError('INVALID_REQUEST');
       return {
         version: 2,
         recordType: 'presentation-source-owner',
-        ownerId,
-        owner: structuredClone(owner),
+        ownerId: resolved.ownerId,
+        owner: structuredClone(resolved.owner),
         principalId,
         revision: 0,
         createdAt: '',
@@ -3147,26 +3290,37 @@ export class PresentationRunStore {
   private createGrantTombstone(
     grant: StoredPresentationSourceGrantManifest,
     terminalState: StoredPresentationSourceGrantTombstone['terminalState'],
-    now: string
+    now: string,
+    queueUnboundAtRevoke = false
   ): StoredPresentationSourceGrantTombstone {
-    const tombstone: StoredPresentationSourceGrantTombstone = {
-      version: 2,
-      recordType: 'presentation-source-grant-tombstone',
-      revision: 0,
+    if (
+      queueUnboundAtRevoke &&
+      (terminalState !== 'revoked' || grant.queueItemId !== null || grant.queueExtendedAt !== null)
+    ) {
+      throw new PresentationCanonicalCorruptionError('Queue-bound presentation source cannot carry revoke proof');
+    }
+    const common = {
+      recordType: 'presentation-source-grant-tombstone' as const,
+      revision: 0 as const,
       grantId: grant.grantId,
       owner: structuredClone(grant.owner),
-      terminalState,
       terminalAt: now,
       tombstonedAt: now,
       deleteAfter: new Date(Date.parse(now) + PRESENTATION_RUN_LIMITS.TOMBSTONE_RETENTION_MS).toISOString(),
       lastRevision: grant.revision,
     };
+    const tombstone: StoredPresentationSourceGrantTombstone = queueUnboundAtRevoke
+      ? { ...common, version: 3, terminalState: 'revoked', queueUnboundAtRevoke: true }
+      : { ...common, version: 2, terminalState };
     assertPresentationSourceGrantTombstone(tombstone);
     return tombstone;
   }
 
   private async expireGrantLocked(grant: StoredPresentationSourceGrantManifest, now: string): Promise<void> {
-    const ownerId = presentationSourceOwnerId(grant.owner);
+    const ownerId = this.findPersistedSourceOwnerId(grant.owner);
+    if (ownerId === undefined) {
+      throw new PresentationCanonicalCorruptionError('Presentation source owner is missing');
+    }
     const owner = this.sourceOwners.get(ownerId);
     if (owner === undefined) throw new PresentationCanonicalCorruptionError('Presentation source owner is missing');
     const nextGrant: StoredPresentationSourceGrantManifest = {
@@ -3299,7 +3453,7 @@ export class PresentationRunStore {
     await this.files.removeDraft(draft.draftId);
   }
 
-  private assertSourceCanonicalReferences(): void {
+  private assertSourceCanonicalReferences(index = this.index): void {
     for (const owner of this.sourceOwners.values()) {
       let bytes = 0;
       for (const grantId of owner.grantIds) {
@@ -3307,7 +3461,7 @@ export class PresentationRunStore {
         if (
           grant === undefined ||
           grant.state !== 'active' ||
-          presentationSourceOwnerKey(grant.owner) !== presentationSourceOwnerKey(owner.owner)
+          !isSamePresentationSourceOwner(grant.owner, owner.owner)
         ) {
           throw new PresentationCanonicalCorruptionError('Presentation source ownership is corrupt');
         }
@@ -3324,7 +3478,8 @@ export class PresentationRunStore {
       }
     }
     for (const grant of this.sourceGrants.values()) {
-      const owner = this.sourceOwners.get(presentationSourceOwnerId(grant.owner));
+      const ownerId = this.findPersistedSourceOwnerId(grant.owner, index);
+      const owner = ownerId === undefined ? undefined : this.sourceOwners.get(ownerId);
       if (grant.state === 'active') {
         if (owner === undefined || !owner.grantIds.includes(grant.grantId)) {
           throw new PresentationCanonicalCorruptionError('Active presentation source grant has no owner accounting');
@@ -3360,20 +3515,26 @@ export class PresentationRunStore {
       const indexedRecord = indexed ?? indexedTombstone;
       if (
         indexedRecord !== undefined &&
-        indexedRecord.conversationId === conversationId &&
+        isSamePresentationConversation(indexedRecord.conversationId, conversationId) &&
         indexedRecord.clientRequestId === clientRequestId
       ) {
         return this.snapshotRun(indexedRecord);
       }
     }
     for (const run of this.runs.values()) {
-      if (run.conversationId === conversationId && run.clientRequestId === clientRequestId) {
+      if (
+        isSamePresentationConversation(run.conversationId, conversationId) &&
+        run.clientRequestId === clientRequestId
+      ) {
         return this.snapshotRun(run);
       }
     }
     for (const tombstone of this.tombstones.values()) {
       const run = tombstone.discardedRun;
-      if (run.conversationId === conversationId && run.clientRequestId === clientRequestId) {
+      if (
+        isSamePresentationConversation(run.conversationId, conversationId) &&
+        run.clientRequestId === clientRequestId
+      ) {
         return this.snapshotRun(run);
       }
     }
@@ -3387,9 +3548,10 @@ export class PresentationRunStore {
       throw new PresentationCanonicalCorruptionError('Duplicate presentation request ownership');
     }
     index.requests[requestKey] = run.runId;
-    const runs = getOwnIndexValue(index.conversations, run.conversationId) ?? [];
+    const conversationKey = presentationConversationIndexKey(run.conversationId);
+    const runs = getOwnIndexValue(index.conversations, conversationKey) ?? [];
     if (!runs.includes(run.runId)) runs.push(run.runId);
-    index.conversations[run.conversationId] = runs;
+    index.conversations[conversationKey] = runs;
     if (run.binding !== null) {
       const turnKey = turnIndexKey(run.binding.conversationId, run.binding.turnId);
       const turnOwner = getOwnIndexValue(index.turns, turnKey);
@@ -3525,7 +3687,10 @@ export class PresentationRunStore {
       index.requests[requestKey] = run.runId;
     }
     for (const owner of this.sourceOwners.values()) {
-      const key = presentationSourceOwnerKey(owner.owner);
+      const key = canonicalPresentationSourceOwnerKey(owner.owner);
+      if (key === null) {
+        throw new PresentationCanonicalCorruptionError('Presentation source owner identity is corrupt');
+      }
       const indexedOwner = getOwnIndexValue(index.sourceOwners, key);
       if (indexedOwner !== undefined && indexedOwner !== owner.ownerId) {
         throw new PresentationCanonicalCorruptionError('Duplicate presentation source owner');
@@ -3660,10 +3825,14 @@ export class PresentationRunStore {
     const live = runs.filter((run) => LIVE_GENERATION_STATUSES.has(run.dispatchStatus));
     const active = [...predispatch, ...live];
     const retained = runs.filter((run) => RETAINED_STATUSES.has(run.dispatchStatus));
-    const conversationActiveCount = active.filter((run) => run.conversationId === conversationId).length;
-    const conversationRetained = retained.filter((run) => run.conversationId === conversationId);
+    const conversationActiveCount = active.filter((run) =>
+      isSamePresentationConversation(run.conversationId, conversationId)
+    ).length;
+    const conversationRetained = retained.filter((run) =>
+      isSamePresentationConversation(run.conversationId, conversationId)
+    );
     const conversationDurableBytes = runs
-      .filter((run) => run.conversationId === conversationId)
+      .filter((run) => isSamePresentationConversation(run.conversationId, conversationId))
       .reduce((total, run) => total + run.retainedBytes, 0);
     const appDurableBytes = runs.reduce((total, run) => total + run.retainedBytes, 0);
     if (
@@ -3692,7 +3861,7 @@ export class PresentationRunStore {
   private assertLiveGenerationCapacity(conversationId: string): void {
     const live = Array.from(this.runs.values()).filter((run) => LIVE_GENERATION_STATUSES.has(run.dispatchStatus));
     if (
-      live.filter((run) => run.conversationId === conversationId).length >=
+      live.filter((run) => isSamePresentationConversation(run.conversationId, conversationId)).length >=
         PRESENTATION_RUN_LIMITS.MAX_LIVE_RUNS_PER_CONVERSATION ||
       live.length >= PRESENTATION_RUN_LIMITS.MAX_LIVE_RUNS_PER_APP
     ) {
@@ -3704,7 +3873,7 @@ export class PresentationRunStore {
     if (!Number.isSafeInteger(additionalBytes) || additionalBytes < 0) return true;
     const runs = Array.from(this.runs.values());
     const conversationBytes = runs
-      .filter((run) => run.conversationId === conversationId)
+      .filter((run) => isSamePresentationConversation(run.conversationId, conversationId))
       .reduce((total, run) => total + run.retainedBytes, 0);
     const appBytes = runs.reduce((total, run) => total + run.retainedBytes, 0);
     return (
@@ -3717,13 +3886,14 @@ export class PresentationRunStore {
     conversationId: string,
     nowMs: number
   ): Extract<PresentationRunFailure, { code: 'RATE_LIMITED' }> | null {
+    const conversationKey = presentationConversationIndexKey(conversationId);
     const conversationBucket = this.refillBucket(
-      this.conversationStartBuckets.get(conversationId),
+      this.conversationStartBuckets.get(conversationKey),
       PRESENTATION_RUN_LIMITS.STARTS_PER_CONVERSATION_BURST,
       PRESENTATION_RUN_LIMITS.MAX_STARTS_PER_CONVERSATION_PER_WINDOW,
       nowMs
     );
-    this.conversationStartBuckets.set(conversationId, conversationBucket);
+    this.conversationStartBuckets.set(conversationKey, conversationBucket);
     const appBucket = this.refillBucket(
       this.appStartBucket ?? undefined,
       PRESENTATION_RUN_LIMITS.STARTS_PER_APP_BURST,
@@ -3766,14 +3936,15 @@ export class PresentationRunStore {
   }
 
   private recordStartEvent(conversationId: string, atMs: number): void {
+    const conversationKey = presentationConversationIndexKey(conversationId);
     const conversationBucket = this.refillBucket(
-      this.conversationStartBuckets.get(conversationId),
+      this.conversationStartBuckets.get(conversationKey),
       PRESENTATION_RUN_LIMITS.STARTS_PER_CONVERSATION_BURST,
       PRESENTATION_RUN_LIMITS.MAX_STARTS_PER_CONVERSATION_PER_WINDOW,
       atMs
     );
     conversationBucket.tokens = Math.max(0, conversationBucket.tokens - 1);
-    this.conversationStartBuckets.set(conversationId, conversationBucket);
+    this.conversationStartBuckets.set(conversationKey, conversationBucket);
     const appBucket = this.refillBucket(
       this.appStartBucket ?? undefined,
       PRESENTATION_RUN_LIMITS.STARTS_PER_APP_BURST,

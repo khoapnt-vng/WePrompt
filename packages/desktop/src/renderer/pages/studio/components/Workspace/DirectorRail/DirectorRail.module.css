@@ -1,0 +1,154 @@
+.rail {
+  display: flex;
+  inline-size: clamp(300px, 31vw, 430px);
+  min-inline-size: 300px;
+  min-block-size: 0;
+  flex: none;
+  flex-direction: column;
+  border-inline-end: 1px solid var(--color-border-2);
+  background: var(--color-bg-2);
+  overflow: hidden;
+  transition:
+    inline-size 160ms ease,
+    min-inline-size 160ms ease;
+}
+
+.collapsed {
+  /* A hidden rail occupies nothing. The stub this used to keep was sized for a collapse control
+     that now lives in the app bar, so it held nothing and read as dead space beside the work panel.
+     The content stays mounted — the Director conversation is film-scoped and must not reassemble
+     itself when the rail is toggled. */
+  inline-size: 0;
+  min-inline-size: 0;
+  border-inline-end: none;
+}
+
+.header {
+  display: flex;
+  min-block-size: 52px;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border-block-end: 1px solid var(--color-border-2);
+  padding-block: 8px;
+  padding-inline: 14px 10px;
+}
+
+.title {
+  margin: 0;
+  color: var(--color-text-1);
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: var(--fw-bold);
+  white-space: nowrap;
+}
+
+.toggle:global(.arco-btn) {
+  display: inline-flex;
+  inline-size: 32px;
+  block-size: 32px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  color: var(--color-text-2);
+  background: transparent;
+  cursor: pointer;
+}
+
+.toggle:global(.arco-btn):hover {
+  color: var(--color-text-1);
+  background: var(--color-fill-2);
+}
+
+.toggle:global(.arco-btn):focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: 2px;
+}
+
+.collapsed .header {
+  justify-content: center;
+  padding-inline: 10px;
+}
+
+.collapsed .title {
+  display: none;
+}
+
+.content {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+  opacity: 1;
+  transition: opacity 100ms ease;
+}
+
+.collapsed .content {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.owner {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 180px;
+  flex: 1;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.notice {
+  display: flex;
+  min-inline-size: 0;
+  min-block-size: 0;
+  flex: 1;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  overflow-y: auto;
+  padding-block: 16px;
+  padding-inline: 16px;
+  color: var(--color-text-2);
+}
+
+.pendingOutputs {
+  display: flex;
+  inline-size: 100%;
+  min-inline-size: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.pendingOutput {
+  min-inline-size: 0;
+}
+
+.notice p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.notice [role='alert'] {
+  color: var(--color-danger-6);
+  font-size: 12px;
+}
+
+.starting {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rail,
+  .content {
+    transition: none;
+  }
+}

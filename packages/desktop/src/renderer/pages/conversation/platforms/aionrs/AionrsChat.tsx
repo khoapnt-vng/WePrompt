@@ -10,7 +10,7 @@ import { ConversationProvider } from '@/renderer/hooks/context/ConversationConte
 import KbStaleChatHint from '@/renderer/pages/conversation/knowledge/KbStaleChatHint';
 import { CHAT_SURFACE_CONTAINER_CLASS } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
 import FlexFullContainer from '@renderer/components/layout/FlexFullContainer';
-import MessageList from '@renderer/pages/conversation/Messages/MessageList';
+import MessageList, { type MessageListInlineItem } from '@renderer/pages/conversation/Messages/MessageList';
 import { ConversationArtifactProvider } from '@renderer/pages/conversation/Messages/artifacts';
 import {
   MessageListLoadingProvider,
@@ -23,7 +23,7 @@ import HOC from '@renderer/utils/ui/HOC';
 import React, { useEffect, useMemo } from 'react';
 import LocalImageView from '@renderer/components/media/LocalImageView';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
-import AionrsSendBox from './AionrsSendBox';
+import AionrsSendBox, { type AionrsBeforeSend } from './AionrsSendBox';
 import type { AionrsModelSelection } from './useAionrsModelSelection';
 
 const AionrsChat: React.FC<{
@@ -35,6 +35,7 @@ const AionrsChat: React.FC<{
   session_mode?: string;
   cron_job_id?: string;
   emptySlot?: React.ReactNode;
+  inlineItems?: readonly MessageListInlineItem[];
   loadedSkills?: string[];
   loadedMcpServers?: string[];
   loadedMcpStatuses?: IConversationMcpStatus[];
@@ -45,6 +46,8 @@ const AionrsChat: React.FC<{
   project_id?: string;
   /** Frozen-at-create MCP snapshot; validated by the hint, not trusted here. */
   session_mcp_servers?: ISessionMcpServer[];
+  /** Optional human-submit interception. Assistant output never enters this path. */
+  beforeSend?: AionrsBeforeSend;
 }> = ({
   conversation_id,
   conversation,
@@ -54,6 +57,7 @@ const AionrsChat: React.FC<{
   session_mode,
   cron_job_id,
   emptySlot,
+  inlineItems,
   loadedSkills,
   loadedMcpServers,
   loadedMcpStatuses,
@@ -63,6 +67,7 @@ const AionrsChat: React.FC<{
   assistantId,
   project_id,
   session_mcp_servers,
+  beforeSend,
 }) => {
   useMessageLstCache(conversation_id);
   usePendingConfirmationsRecovery(conversation_id);
@@ -98,7 +103,7 @@ const AionrsChat: React.FC<{
       <ConversationArtifactProvider conversation_id={conversation_id}>
         <div className={`${CHAT_SURFACE_CONTAINER_CLASS} flex-1 flex flex-col px-20px min-h-0`}>
           <FlexFullContainer>
-            <MessageList className='flex-1' emptySlot={emptySlot} />
+            <MessageList className='flex-1' emptySlot={emptySlot} inlineItems={inlineItems} />
           </FlexFullContainer>
           <KbStaleChatHint
             conversationId={conversation_id}
@@ -114,6 +119,7 @@ const AionrsChat: React.FC<{
             agent_name={agent_name}
             teamSendMessage={teamSendMessage}
             teamRuntime={teamRuntime}
+            beforeSend={beforeSend}
           />
         </div>
       </ConversationArtifactProvider>

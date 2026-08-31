@@ -4,123 +4,334 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ipcBridge } from '@/common';
+import { Button, Card } from '@arco-design/web-react';
 import React from 'react';
+import { useTranslation } from 'react-i18next';
 
-import type { StudioProposal, StudioRendererProject } from '@/common/types/project/creativeStudioTypes';
-import { getConversationPinnedContext } from '@/renderer/pages/conversation/contextHandoff/pinnedContext';
-import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
-import type { UseStoryboardEditorResult } from '@/renderer/pages/studio/hooks/useStoryboardEditor';
-import type { StudioBriefConversation } from '../PhaseShell/phases/brief/useBriefConversation';
-import { useBriefConversationContext } from './BriefConversationContext';
-import {
-  DirectorProposalCard,
-  type DirectorProposalAction,
-  type DirectorProposalRejectAction,
-} from './DirectorProposalCard';
-
-/**
- * Sent verbatim to the Director when a proposal has gone stale. It names the tool to call because a
- * bare "try again" reliably produces a redraft from memory rather than from the current script.
- */
-const REPROPOSE_INSTRUCTION =
-  'The script changed since your last proposal (it is now at a newer revision). Call read_storyboard and redraft your proposal against the current script.';
-
-export type StudioRuleBreachReport = {
-  sceneTitle: string;
-  ruleText: string;
-  matchedTerm: string;
-};
-
-/**
- * Sent verbatim when a rule blocked a render. English, like REPROPOSE_INSTRUCTION and every other
- * model-facing literal in Studio: localising the model's instructions makes its behaviour depend on
- * the UI language.
- */
-export const describeRuleBreachInstruction = (reports: readonly StudioRuleBreachReport[]): string =>
-  [
-    'A governing project rule blocked this render before any paid generation began. Nothing was generated.',
-    ...reports.map(
-      (report) =>
-        `- Shot "${report.sceneTitle}" violated the rule "${report.ruleText}" because the term "${report.matchedTerm}" matched.`
-    ),
-    "Rewrite each affected shot's visual prompt to satisfy the quoted rule, then propose the change. Do not ask to remove the rule.",
-  ].join('\n');
-
-/**
- * One desktop send site for every Studio-initiated Director turn, so the latest pinned-context
- * payload is attached consistently. The current backend may ignore this field; the re-GET preserves
- * the intended payload for a backend that supports it.
- *
- * The conversation is re-read before its pins are accessed, matching AionrsSendBox. The in-memory
- * record from ConversationHistoryContext can lag a pin written through IPC. A failed re-GET falls
- * back to the handle already held rather than dropping the message.
- */
-export const sendDirectorInstruction = async (input: {
-  conversation: StudioBriefConversation;
-  instruction: string;
-}): Promise<void> => {
-  const latest = (await getConversationOrNull(input.conversation.id)) ?? input.conversation;
-  await ipcBridge.conversation.sendMessage.invoke({
-    input: input.instruction,
-    conversation_id: input.conversation.id,
-    files: [],
-    pinned_context: getConversationPinnedContext(latest),
-  });
-};
+import type {
+  StudioPaidRecoveryQuoteSummaryV2,
+  StudioRendererProposalV2,
+  StudioReferenceRequestV2,
+  StudioRendererProjectV2,
+  StudioRendererReferenceGenerationHandoffV2,
+} from '@/common/types/project/creativeStudioTypes';
+import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
+import { DirectorProposalCard } from './DirectorProposalCard';
 
 export type DirectorProposalsProps = {
-  project: StudioRendererProject;
-  proposals: readonly StudioProposal[];
-  editor: Pick<UseStoryboardEditorResult, 'hasUnsavedSceneDrafts' | 'flushAllSceneDrafts'>;
-  acceptProposal: DirectorProposalAction;
-  rejectProposal: DirectorProposalRejectAction;
+  project: StudioRendererProjectV2;
+  proposals: readonly StudioRendererProposalV2[];
+  referenceRequests: readonly StudioReferenceRequestV2[];
+  referenceGenerationHandoffs: readonly StudioRendererReferenceGenerationHandoffV2[];
+  pendingAction: { kind: 'proposal' | 'reference_request' | 'handoff'; id: string } | null;
+  actionsLocked?: boolean;
+  proposalAuthorityState?: (proposal: StudioRendererProposalV2) => 'ready' | 'stale' | 'unavailable' | 'refreshing';
+  proposalAuthorityVerified?: (proposal: StudioRendererProposalV2) => boolean;
+  proposalDraftBlocker?: (proposal: StudioRendererProposalV2) => 'workspace' | 'rules' | null;
+  proposalErrorMessageKey?: string | null;
+  referenceErrorMessageKey?: string | null;
+  onAcceptProposal: (proposalId: string) => Promise<void>;
+  onRejectProposal: (proposalId: string) => Promise<void>;
+  paidRecoveryQuote?: (proposal: StudioRendererProposalV2) => StudioPaidRecoveryQuoteSummaryV2 | null;
+  paidRecoveryStatusMessageKey?: (proposal: StudioRendererProposalV2) => string | null;
+  onPaidRecoveryAction?: (proposalId: string) => Promise<void>;
+  onRequestUpdatedProposal?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
+  onReviewRuleDrafts?: () => void;
+  onEditProposalShots?: (beatId: string, shotIds: readonly string[]) => void;
+  onGenerateReferences: (requestId: string) => Promise<void>;
+  onRejectReferences: (requestId: string) => Promise<void>;
+  onReviewHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onReviewReferences: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onRetryFailedReferences: (handoff: StudioRendererReferenceGenerationHandoffV2) => void;
+  onDismissHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => Promise<void>;
+  gateLocked?: boolean;
+  reviewBlockedMessageKey?: string | null;
 };
 
-/** Returns the proposals still awaiting an answer. Exported so the page can decide whether to render the slot at all. */
-export const pendingDirectorProposals = (proposals: readonly StudioProposal[]): StudioProposal[] =>
+export const pendingDirectorProposals = (proposals: readonly StudioRendererProposalV2[]): StudioRendererProposalV2[] =>
   proposals.filter((proposal) => proposal.status === 'pending');
 
-/**
- * The pending proposals, rendered inside the Director pane.
- *
- * This lived in Brief until the work panel became phase-agnostic. A proposal is the Director's
- * output and outlives whichever phase is open, so tying its render site to Brief meant a user who
- * moved to Write lost the card without answering it.
- */
+type ResolvedProposal = {
+  proposal: StudioRendererProposalV2;
+  authorityState: 'ready' | 'stale' | 'unavailable' | 'refreshing';
+  authorityVerified: boolean;
+};
+
+const isTerminalProposal = (entry: ResolvedProposal, pendingAction: DirectorProposalsProps['pendingAction']): boolean =>
+  entry.authorityVerified &&
+  !(pendingAction?.kind === 'proposal' && pendingAction.id === entry.proposal.id) &&
+  ((entry.authorityState === 'stale' && entry.proposal.review.status === 'stale') ||
+    (entry.authorityState === 'unavailable' && entry.proposal.review.status === 'unavailable'));
+
+const uniqueHandoffs = (
+  handoffs: readonly StudioRendererReferenceGenerationHandoffV2[]
+): StudioRendererReferenceGenerationHandoffV2[] => {
+  const byId = new Map<string, StudioRendererReferenceGenerationHandoffV2>();
+  for (const handoff of handoffs) {
+    byId.set(handoff.handoffId, handoff);
+  }
+  return [...byId.values()];
+};
+
+/** Reviewed Director output with persistent, explicitly actioned generation handoffs. */
 export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   project,
   proposals,
-  editor,
-  acceptProposal,
-  rejectProposal,
+  referenceRequests,
+  referenceGenerationHandoffs,
+  pendingAction,
+  actionsLocked = false,
+  proposalAuthorityState = (proposal) => proposal.review.status,
+  proposalAuthorityVerified = () => true,
+  proposalDraftBlocker = () => null,
+  proposalErrorMessageKey = null,
+  referenceErrorMessageKey = null,
+  onAcceptProposal,
+  onRejectProposal,
+  paidRecoveryQuote = () => null,
+  paidRecoveryStatusMessageKey = () => null,
+  onPaidRecoveryAction,
+  onRequestUpdatedProposal = async () => undefined,
+  onReviewRuleDrafts = () => undefined,
+  onEditProposalShots = () => undefined,
+  onGenerateReferences,
+  onRejectReferences,
+  onReviewHandoff,
+  onReviewReferences,
+  onRetryFailedReferences,
+  onDismissHandoff,
+  gateLocked = false,
+  reviewBlockedMessageKey = null,
 }) => {
-  const conversation = useBriefConversationContext();
-  const pending = pendingDirectorProposals(proposals);
-
-  const repropose = async (): Promise<void> => {
-    if (conversation.state.kind !== 'ready') return;
-    await sendDirectorInstruction({
-      conversation: conversation.state.conversation,
-      instruction: REPROPOSE_INSTRUCTION,
-    });
+  const { t } = useTranslation();
+  const pendingProposals = pendingDirectorProposals(proposals);
+  const [expandedTerminalProjectId, setExpandedTerminalProjectId] = React.useState<string | null>(null);
+  const resolvedProposals = pendingProposals.map(
+    (proposal): ResolvedProposal => ({
+      proposal,
+      authorityState: proposalAuthorityState(proposal),
+      authorityVerified: proposalAuthorityVerified(proposal),
+    })
+  );
+  const activeProposals = resolvedProposals.filter((entry) => !isTerminalProposal(entry, pendingAction));
+  const terminalProposals = resolvedProposals.filter((entry) => isTerminalProposal(entry, pendingAction));
+  const collapseTerminalProposals = terminalProposals.length > 1;
+  const visibleProposals = collapseTerminalProposals ? activeProposals : resolvedProposals;
+  const terminalProposalsOpen = expandedTerminalProjectId === project.id;
+  const terminalProposalListId = React.useId();
+  const handoffs = uniqueHandoffs(referenceGenerationHandoffs);
+  const referenceName = (referenceId: string): string => {
+    const reference = Object.hasOwn(project.references, referenceId) ? project.references[referenceId] : undefined;
+    return reference?.id === referenceId ? reference.label : referenceId;
   };
-
-  if (pending.length === 0) return null;
+  if (
+    pendingProposals.length === 0 &&
+    referenceRequests.length === 0 &&
+    handoffs.length === 0 &&
+    proposalErrorMessageKey === null &&
+    referenceErrorMessageKey === null
+  ) {
+    return null;
+  }
 
   return (
-    <>
-      {pending.map((proposal) => (
+    <section aria-label={t('conversation.creativeStudio.workspace.review.title')}>
+      <h2>{t('conversation.creativeStudio.workspace.review.title')}</h2>
+      {proposalErrorMessageKey !== null ? <div role='alert'>{t(proposalErrorMessageKey)}</div> : null}
+      {referenceErrorMessageKey !== null ? <div role='alert'>{t(referenceErrorMessageKey)}</div> : null}
+      {visibleProposals.map(({ proposal, authorityState, authorityVerified }) => (
         <DirectorProposalCard
           key={proposal.id}
           project={project}
           proposal={proposal}
-          editor={editor}
-          acceptProposal={acceptProposal}
-          rejectProposal={rejectProposal}
-          onRepropose={repropose}
+          pending={pendingAction?.kind === 'proposal' && pendingAction.id === proposal.id}
+          actionsLocked={actionsLocked}
+          authorityState={authorityState}
+          authorityVerified={authorityVerified}
+          draftBlocker={proposalDraftBlocker(proposal)}
+          acceptBlockedMessageKey={null}
+          onAccept={onAcceptProposal}
+          onReject={onRejectProposal}
+          paidRecoveryQuote={paidRecoveryQuote(proposal)}
+          paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey(proposal)}
+          onPaidRecoveryAction={onPaidRecoveryAction}
+          onRequestUpdated={onRequestUpdatedProposal}
+          onReviewRuleDrafts={onReviewRuleDrafts}
+          onEditShotsDirectly={onEditProposalShots}
         />
       ))}
-    </>
+      {!collapseTerminalProposals ? null : (
+        <>
+          <Card data-testid='studio-terminal-proposals'>
+            <div className='flex items-center justify-between gap-8px'>
+              <p className='m-0'>
+                {t('conversation.creativeStudio.workspace.proposals.terminalCount', {
+                  count: terminalProposals.length,
+                })}
+              </p>
+              <Button
+                aria-controls={terminalProposalListId}
+                aria-expanded={terminalProposalsOpen}
+                onClick={() => setExpandedTerminalProjectId(terminalProposalsOpen ? null : project.id)}
+                size='mini'
+                type='text'
+              >
+                {t(
+                  terminalProposalsOpen
+                    ? 'conversation.creativeStudio.workspace.proposals.hideTerminal'
+                    : 'conversation.creativeStudio.workspace.proposals.showTerminal'
+                )}
+              </Button>
+            </div>
+          </Card>
+          {terminalProposalsOpen ? (
+            <div
+              className='flex flex-col gap-8px'
+              data-testid='studio-terminal-proposal-list'
+              id={terminalProposalListId}
+            >
+              {terminalProposals.map(({ proposal, authorityState, authorityVerified }) => (
+                <DirectorProposalCard
+                  key={proposal.id}
+                  project={project}
+                  proposal={proposal}
+                  pending={pendingAction?.kind === 'proposal' && pendingAction.id === proposal.id}
+                  actionsLocked={actionsLocked}
+                  authorityState={authorityState}
+                  authorityVerified={authorityVerified}
+                  draftBlocker={proposalDraftBlocker(proposal)}
+                  acceptBlockedMessageKey={null}
+                  onAccept={onAcceptProposal}
+                  onReject={onRejectProposal}
+                  paidRecoveryQuote={paidRecoveryQuote(proposal)}
+                  paidRecoveryStatusMessageKey={paidRecoveryStatusMessageKey(proposal)}
+                  onPaidRecoveryAction={onPaidRecoveryAction}
+                  onRequestUpdated={onRequestUpdatedProposal}
+                  onReviewRuleDrafts={onReviewRuleDrafts}
+                  onEditShotsDirectly={onEditProposalShots}
+                />
+              ))}
+            </div>
+          ) : null}
+        </>
+      )}
+      {referenceRequests.map((request) => (
+        <Card
+          key={request.id}
+          data-testid={`studio-reference-${request.id}`}
+          title={t('conversation.creativeStudio.workspace.references.title')}
+        >
+          <p>
+            {t('conversation.creativeStudio.workspace.references.referenceCount', {
+              total: request.referenceIds.length,
+            })}
+          </p>
+          <ul data-reference-request-names>
+            {request.referenceIds.map((referenceId) => (
+              <li key={referenceId}>
+                <bdi dir='auto'>{referenceName(referenceId)}</bdi>
+              </li>
+            ))}
+          </ul>
+          <div className='flex gap-8px'>
+            <Button
+              type='primary'
+              disabled={actionsLocked}
+              loading={pendingAction?.kind === 'reference_request' && pendingAction.id === request.id}
+              onClick={() => void onGenerateReferences(request.id)}
+            >
+              {t('conversation.creativeStudio.workspace.references.generate')}
+            </Button>
+            <Button disabled={actionsLocked} onClick={() => void onRejectReferences(request.id)}>
+              {t('conversation.creativeStudio.workspace.references.reject')}
+            </Button>
+          </div>
+        </Card>
+      ))}
+      {handoffs.map((handoff) => (
+        <Card
+          key={handoff.handoffId}
+          data-testid={`studio-handoff-${handoff.handoffId}`}
+          title={t('conversation.creativeStudio.workspace.handoffs.title')}
+        >
+          <p>
+            {t('conversation.creativeStudio.workspace.handoffs.referenceCount', {
+              total: handoff.referenceIds.length,
+            })}
+          </p>
+          <ul data-reference-handoff-names>
+            {handoff.referenceIds.map((referenceId) => (
+              <li key={referenceId}>
+                <bdi dir='auto'>{referenceName(referenceId)}</bdi>
+              </li>
+            ))}
+          </ul>
+          <p data-reference-handoff-progress>
+            {t('conversation.creativeStudio.workspace.handoffs.progress', handoff.counts)}
+          </p>
+          {handoff.resultAssetIds.length === 0 ? null : (
+            <div className='flex flex-wrap gap-8px' data-reference-handoff-thumbnails>
+              {handoff.resultAssetIds.map((assetId) => {
+                const reference = project.referenceOrder
+                  .map((referenceId) => project.references[referenceId])
+                  .find(
+                    (candidate) =>
+                      candidate?.approvedAssetId === assetId || candidate?.supersededAssetIds.includes(assetId)
+                  );
+                return (
+                  <img
+                    alt={t('conversation.creativeStudio.workspace.referenceWorkflow.previewAlt', {
+                      label: reference?.label ?? t('conversation.creativeStudio.workspace.views.references'),
+                    })}
+                    className='h-48px w-72px rd-4px object-cover'
+                    key={assetId}
+                    src={createManagedStudioAssetUrl(project.id, assetId)}
+                  />
+                );
+              })}
+            </div>
+          )}
+          {handoff.status === 'awaiting_spend' ? (
+            <div className='flex gap-8px'>
+              <Button
+                type='primary'
+                disabled={gateLocked || actionsLocked || reviewBlockedMessageKey !== null}
+                onClick={() => onReviewHandoff(handoff)}
+              >
+                {t('conversation.creativeStudio.workspace.handoffs.review')}
+              </Button>
+              <Button
+                disabled={gateLocked || actionsLocked}
+                loading={pendingAction?.kind === 'handoff' && pendingAction.id === handoff.handoffId}
+                onClick={() => void onDismissHandoff(handoff)}
+              >
+                {t('conversation.creativeStudio.workspace.handoffs.dismiss')}
+              </Button>
+              {reviewBlockedMessageKey === null ? null : <p>{t(reviewBlockedMessageKey)}</p>}
+            </div>
+          ) : (
+            <>
+              <p>{t(`conversation.creativeStudio.workspace.handoffs.${handoff.status}`)}</p>
+              {handoff.status === 'succeeded' ||
+              handoff.status === 'partially_failed' ||
+              handoff.status === 'failed' ? (
+                <div className='flex flex-wrap gap-8px'>
+                  {handoff.resultAssetIds.length === 0 ? null : (
+                    <Button type='primary' disabled={actionsLocked} onClick={() => onReviewReferences(handoff)}>
+                      {t('conversation.creativeStudio.workspace.handoffs.reviewReferences')}
+                    </Button>
+                  )}
+                  {handoff.failedReferenceIds.length === 0 ? null : (
+                    <Button disabled={gateLocked || actionsLocked} onClick={() => onRetryFailedReferences(handoff)}>
+                      {t('conversation.creativeStudio.workspace.handoffs.retryFailed')}
+                    </Button>
+                  )}
+                </div>
+              ) : null}
+            </>
+          )}
+        </Card>
+      ))}
+    </section>
   );
 };

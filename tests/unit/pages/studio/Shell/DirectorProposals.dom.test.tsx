@@ -4,312 +4,414 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type { TContextHandoffItem } from '@/common/config/storage';
-import type {
-  StudioEditableScene,
-  StudioProposal,
-  StudioProposalStatus,
-  StudioRendererProject,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
+  type StudioReferenceRequestV2,
+  type StudioRendererProjectV2,
+  type StudioRendererProposalV2,
+  type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
-import type { DirectorProposalCardProps } from '@renderer/pages/studio/components/Shell/DirectorProposalCard';
-import type {
-  StudioBriefConversation,
-  UseBriefConversationResult,
-} from '@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation';
-import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
+import { DirectorProposals } from '@renderer/pages/studio/components/Shell/DirectorProposals';
 
-const sendMessage = vi.fn(async () => ({}));
-const conversationCache = vi.fn(async () => null);
-
-vi.mock('@/common', () => ({
-  ipcBridge: { conversation: { sendMessage: { invoke: sendMessage } } },
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values
+        ? `${key}(${Object.entries(values)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(',')})`
+        : key,
+  }),
 }));
 
-vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
-  getConversationOrNull: conversationCache,
-}));
+const timestamp = '2026-08-24T00:00:00.000Z';
 
-const harness: { result: UseBriefConversationResult } = {
-  result: {
-    state: { kind: 'absent' },
-    errorMessageKey: null,
-    recreate: vi.fn(),
+const proposal = (
+  id: string,
+  status: StudioRendererProposalV2['status'] = 'pending',
+  payload: StudioRendererProposalV2['payload'] = {
+    kind: 'mutation_batch',
+    operations: [{ kind: 'set_brief', brief: 'A new Brief' }],
+  }
+): StudioRendererProposalV2 => ({
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  id,
+  projectId: 'project_1',
+  status,
+  baseRevision: 3,
+  payload,
+  createdAt: timestamp,
+  decidedAt: status === 'pending' ? null : '2026-08-24T01:00:00.000Z',
+  review: {
+    status: 'ready',
+    groups: [
+      {
+        change: 'edited',
+        subject: {
+          kind: 'project',
+          id: 'project_1',
+          title: 'Reunion',
+          position: null,
+          ownerBeatId: null,
+          ownerBeatTitle: null,
+        },
+        fields: [
+          {
+            key: payload.kind === 'pin_rule' ? 'rules' : 'brief',
+            before: payload.kind === 'pin_rule' ? { kind: 'rule_list', values: [] } : { kind: 'text', value: 'Old' },
+            after:
+              payload.kind === 'pin_rule'
+                ? { kind: 'rule_list', values: [{ text: payload.rule.text, forbiddenTerms: [] }] }
+                : { kind: 'text', value: 'A new Brief' },
+          },
+        ],
+      },
+    ],
   },
-};
-
-vi.mock('@renderer/pages/studio/components/Shell/BriefConversationContext', () => ({
-  useBriefConversationContext: () => harness.result,
-}));
-
-/**
- * The real card renders nothing for a resolved proposal, which would hide a broken pending filter
- * behind the card's own guard. This stub always renders, so what reaches it is what is asserted.
- */
-vi.mock('@renderer/pages/studio/components/Shell/DirectorProposalCard', () => ({
-  DirectorProposalCard: ({ proposal, onRepropose }: DirectorProposalCardProps) => (
-    <div data-testid='proposal-card' data-proposal-id={proposal.id} data-proposal-status={proposal.status}>
-      <button type='button' onClick={() => void onRepropose()}>
-        repropose {proposal.id}
-      </button>
-    </div>
-  ),
-}));
-
-const { describeRuleBreachInstruction, DirectorProposals, pendingDirectorProposals, sendDirectorInstruction } =
-  await import('@renderer/pages/studio/components/Shell/DirectorProposals');
-
-const editableScene = (): StudioEditableScene => ({
-  title: 'Opening',
-  purpose: 'Introduce',
-  visualPrompt: 'A sunrise',
-  narration: 'Old narration',
-  onScreenText: '',
-  mediaKind: 'image',
-  durationSeconds: 10,
-  referenceAssetId: null,
 });
 
-const project = (): StudioRendererProject => ({
-  schemaVersion: 1,
-  revision: 4,
-  id: 'project-1',
-  name: 'Launch film',
-  brief: 'Launch it',
-  aspectRatio: '16:9',
-  targetDurationSeconds: 10,
-  resolution: '1080p',
-  sceneOrder: ['scene-1'],
-  scenes: {
-    'scene-1': {
-      id: 'scene-1',
-      ...editableScene(),
-      selectedAssetId: null,
-      assetIds: [],
+const referenceRequest = (id: string): StudioReferenceRequestV2 => ({
+  schemaVersion: STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
+  id,
+  projectId: 'project_1',
+  referenceIds: ['reference_ming', 'reference_mei'],
+  status: 'pending',
+  createdAt: timestamp,
+});
+
+const handoff = (
+  handoffId: string,
+  status: StudioRendererReferenceGenerationHandoffV2['status'] = 'awaiting_spend'
+): StudioRendererReferenceGenerationHandoffV2 => ({
+  handoffId,
+  requestId: `request_${handoffId}`,
+  referenceIds: ['reference_ming'],
+  decidedAt: timestamp,
+  status,
+  completedAt:
+    status === 'succeeded' || status === 'partially_failed' || status === 'failed' || status === 'dismissed'
+      ? '2026-08-24T01:00:00.000Z'
+      : null,
+  counts: {
+    queued: status === 'awaiting_spend' ? 1 : 0,
+    running: status === 'running' ? 1 : 0,
+    succeeded: status === 'succeeded' || status === 'partially_failed' ? 1 : 0,
+    failed: status === 'failed' || status === 'partially_failed' ? 1 : 0,
+  },
+  resultAssetIds: status === 'succeeded' || status === 'partially_failed' ? ['asset_ming'] : [],
+  failedReferenceIds: status === 'failed' || status === 'partially_failed' ? ['reference_ming'] : [],
+});
+
+const project = (): StudioRendererProjectV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  revision: 3,
+  id: 'project_1',
+  name: 'Reunion',
+  brief: 'Current Brief',
+  rules: [],
+  briefConversationId: null,
+  referencePlanStatus: 'planned',
+  referenceOrder: ['reference_ming'],
+  references: {
+    reference_ming: {
+      id: 'reference_ming',
+      kind: 'character',
+      label: 'Ming',
+      prompt: 'Ming reference prompt',
+      approvedAssetId: 'asset_ming',
+      supersededAssetIds: [],
       jobIds: [],
-      reviewState: 'draft',
+      createdAt: timestamp,
+      updatedAt: timestamp,
     },
   },
+  aspectRatio: '16:9',
+  targetDurationSeconds: 30,
+  resolution: '1080p',
+  boardStyle: null,
+  beatOrder: [],
+  beats: {},
+  shots: {},
+  bin: [],
+  bedAssetId: null,
+  spendPolicy: null,
+  imageRouteId: null,
+  videoRouteId: null,
   assets: {},
   jobs: {},
-  routing: { storyboard: null, image: null, video: null },
-  createdAt: '2026-08-11T00:00:00.000Z',
-  updatedAt: '2026-08-11T00:00:00.000Z',
-});
-
-const proposal = (id: string, status: StudioProposalStatus): StudioProposal => ({
-  schemaVersion: 1,
-  id,
-  projectId: 'project-1',
-  status,
-  baseRevision: 4,
-  payload: {
-    kind: 'replace_storyboard',
-    sceneOrder: ['proposed-1'],
-    scenes: { 'proposed-1': editableScene() },
-  },
-  createdAt: '2026-08-11T01:00:00.000Z',
-  decidedAt: status === 'pending' ? null : '2026-08-11T02:00:00.000Z',
-});
-
-const pinnedItem: TContextHandoffItem = {
-  id: 'pin-1',
-  title: 'Brand rules',
-  content: 'Never show the logo upside down',
-  source: 'manual',
-  created_at: 1,
-  updated_at: 1,
-};
-
-const conversation = (): StudioBriefConversation =>
-  ({
-    id: 'conversation_brief',
-    name: 'Brief',
-    type: 'aionrs',
-    model: { id: 'provider_1', use_model: 'model_1' },
-    created_at: 1,
-    modified_at: 1,
-    extra: { backend: 'aionrs', workspace: '', context_handoff: { pinned_context: [pinnedItem] } },
-  }) as unknown as StudioBriefConversation;
-
-const editor = (): Pick<UseStoryboardEditorResult, 'hasUnsavedSceneDrafts' | 'flushAllSceneDrafts'> => ({
-  hasUnsavedSceneDrafts: false,
-  flushAllSceneDrafts: vi.fn(async () => ({ failed: [], dirtied: [] })),
-});
-
-const renderProposals = (proposals: readonly StudioProposal[]): ReturnType<typeof render> =>
-  render(
-    <DirectorProposals
-      project={project()}
-      proposals={proposals}
-      editor={editor()}
-      acceptProposal={vi.fn()}
-      rejectProposal={vi.fn()}
-    />
-  );
-
-const renderedProposalIds = (): string[] =>
-  screen.queryAllByTestId('proposal-card').map((card) => card.getAttribute('data-proposal-id') ?? '');
-
-beforeEach(() => {
-  sendMessage.mockClear();
-  harness.result = {
-    state: { kind: 'ready', conversation: conversation() },
-    errorMessageKey: null,
-    recreate: vi.fn(),
-  };
-});
-
-describe('pendingDirectorProposals', () => {
-  /**
-   * A proposal the user already answered is history, not an open question. Accepted ones were merged
-   * into the script and rejected ones were dropped; re-offering either would invite a second decision
-   * on a script that has already moved.
-   */
-  it('keeps only the proposals still awaiting an answer', () => {
-    const kept = pendingDirectorProposals([
-      proposal('accepted-1', 'accepted'),
-      proposal('pending-1', 'pending'),
-      proposal('rejected-1', 'rejected'),
-      proposal('pending-2', 'pending'),
-      proposal('expired-1', 'expired'),
-    ]);
-
-    expect(kept.map((entry) => entry.id)).toEqual(['pending-1', 'pending-2']);
-  });
-
-  it('returns nothing when every proposal has been answered', () => {
-    expect(
-      pendingDirectorProposals([
-        proposal('accepted-1', 'accepted'),
-        proposal('rejected-1', 'rejected'),
-        proposal('expired-1', 'expired'),
-      ])
-    ).toEqual([]);
-  });
+  createdAt: timestamp,
+  updatedAt: timestamp,
 });
 
 describe('DirectorProposals', () => {
-  it('quotes the rule and the shot when handing a breach to the Director', async () => {
-    await sendDirectorInstruction({
-      conversation: conversation(),
-      instruction: describeRuleBreachInstruction([
-        { sceneTitle: 'Opening', ruleText: 'No competitor logos.', matchedTerm: 'acme' },
-      ]),
-    });
+  const onAcceptProposal = vi.fn(async () => undefined);
+  const onRejectProposal = vi.fn(async () => undefined);
+  const onRequestUpdatedProposal = vi.fn(async () => undefined);
+  const onGenerateReferences = vi.fn(async () => undefined);
+  const onRejectReferences = vi.fn(async () => undefined);
+  const onReviewHandoff = vi.fn();
+  const onReviewReferences = vi.fn();
+  const onRetryFailedReferences = vi.fn();
+  const onDismissHandoff = vi.fn(async () => undefined);
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const [payload] = sendMessage.mock.calls[0] as [{ input: string; conversation_id: string }];
-    expect(payload.conversation_id).toBe('conversation_brief');
-    expect(payload.input).toContain('No competitor logos.');
-    expect(payload.input).toContain('Opening');
-    expect(payload.input).toContain('acme');
-    expect(payload.input).toContain('Rewrite');
-    // Does not ask the Director to remove the rule — the whole point of the instruction.
-    expect(payload.input).toContain('Do not ask to remove the rule');
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('re-reads the conversation before attaching pins to the breach request', async () => {
-    const stale = conversation();
-    const fresh = {
-      ...stale,
-      extra: {
-        ...stale.extra,
-        context_handoff: {
-          pinned_context: [
-            {
-              id: 'studio_brief_rules',
-              title: 'Project rules',
-              content: 'PROJECT RULES',
-              source: 'manual' as const,
-              created_at: 1,
-              updated_at: 1,
-            },
-          ],
-        },
+  const renderList = (
+    proposals: StudioRendererProposalV2[] = [],
+    referenceRequests: StudioReferenceRequestV2[] = [],
+    referenceGenerationHandoffs: StudioRendererReferenceGenerationHandoffV2[] = [],
+    overrides: Partial<React.ComponentProps<typeof DirectorProposals>> = {}
+  ) =>
+    render(
+      <DirectorProposals
+        project={project()}
+        proposals={proposals}
+        referenceRequests={referenceRequests}
+        referenceGenerationHandoffs={referenceGenerationHandoffs}
+        pendingAction={null}
+        onAcceptProposal={onAcceptProposal}
+        onRejectProposal={onRejectProposal}
+        onRequestUpdatedProposal={onRequestUpdatedProposal}
+        onGenerateReferences={onGenerateReferences}
+        onRejectReferences={onRejectReferences}
+        onReviewHandoff={onReviewHandoff}
+        onReviewReferences={onReviewReferences}
+        onRetryFailedReferences={onRetryFailedReferences}
+        onDismissHandoff={onDismissHandoff}
+        {...overrides}
+      />
+    );
+
+  it('renders only pending schema-5 proposals with their main-derived review', () => {
+    renderList([proposal('pending'), proposal('accepted', 'accepted'), proposal('rejected', 'rejected')]);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.reviewDetails',
+      })
+    );
+    expect(screen.getByTestId('studio-proposal-pending')).toHaveTextContent('A new Brief');
+    expect(screen.queryByTestId('studio-proposal-accepted')).toBeNull();
+    expect(screen.queryByTestId('studio-proposal-rejected')).toBeNull();
+  });
+
+  it('collapses only verified terminal proposals while keeping actionable and uncertain work visible', () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const refused = {
+      ...proposal('refused'),
+      review: {
+        status: 'unavailable' as const,
+        groups: [],
+        reason: 'reducer_rejected' as const,
+        refusal: null,
       },
     };
-    conversationCache.mockResolvedValueOnce(fresh as never);
+    const refreshing = proposal('refreshing');
+    const unverified = proposal('unverified');
+    renderList([proposal('ready'), stale, refused, refreshing, unverified], [], [], {
+      proposalAuthorityState: (candidate) => {
+        if (candidate.id === 'refreshing') return 'refreshing';
+        if (candidate.id === 'unverified') return 'unavailable';
+        return candidate.review.status;
+      },
+      proposalAuthorityVerified: (candidate) => candidate.id !== 'refreshing' && candidate.id !== 'unverified',
+    });
 
-    // The stale handle carries `pin-1`; the server copy carries the Studio pin. The request must
-    // use the latest desktop-side pin set even though the current backend ignores this field.
-    await sendDirectorInstruction({ conversation: stale, instruction: 'x' });
-
-    const [payload] = sendMessage.mock.calls[0] as [{ pinned_context: TContextHandoffItem[] }];
-    expect(payload.pinned_context.map((pin) => pin.id)).toEqual(['studio_brief_rules']);
+    expect(screen.getByTestId('studio-proposal-ready')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-refreshing')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-unverified')).toBeVisible();
+    expect(screen.queryByTestId('studio-proposal-stale')).toBeNull();
+    expect(screen.queryByTestId('studio-proposal-refused')).toBeNull();
+    expect(screen.getByTestId('studio-terminal-proposals')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.terminalCount(count=2)'
+    );
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    ).toHaveAttribute('aria-expanded', 'false');
   });
 
-  it('renders one card per pending proposal, in the order they arrived', () => {
-    renderProposals([proposal('pending-1', 'pending'), proposal('pending-2', 'pending')]);
-
-    expect(renderedProposalIds()).toEqual(['pending-1', 'pending-2']);
-  });
-
-  /**
-   * The pane pins this slot under the conversation with its own border, so anything rendered here is
-   * a visible strip. An answered proposal must produce no node at all, not an empty card.
-   */
-  it('renders nothing when every proposal has already been answered', () => {
-    const { container } = renderProposals([
-      proposal('accepted-1', 'accepted'),
-      proposal('rejected-1', 'rejected'),
-      proposal('expired-1', 'expired'),
-    ]);
-
-    expect(renderedProposalIds()).toEqual([]);
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('renders nothing when the project has no proposals at all', () => {
-    const { container } = renderProposals([]);
-
-    expect(container).toBeEmptyDOMElement();
-  });
-
-  it('drops the answered proposals and keeps the pending one', () => {
-    renderProposals([
-      proposal('accepted-1', 'accepted'),
-      proposal('pending-1', 'pending'),
-      proposal('rejected-1', 'rejected'),
-    ]);
-
-    expect(renderedProposalIds()).toEqual(['pending-1']);
-  });
-
-  /**
-   * Re-proposing has to reach the Director's own thread — a bare retry against a fresh conversation
-   * redrafts from memory instead of from the script that moved underneath it.
-   */
-  it('asks the Director to redraft against the current script, in the Director conversation', async () => {
-    renderProposals([proposal('pending-1', 'pending')]);
-
-    fireEvent.click(screen.getByRole('button', { name: 'repropose pending-1' }));
-
-    await waitFor(() => expect(sendMessage).toHaveBeenCalledOnce());
-    const payload = sendMessage.mock.calls[0]?.[0] as {
-      input: string;
-      conversation_id: string;
-      files: unknown[];
-      pinned_context: TContextHandoffItem[];
+  it('keeps exact re-propose and reject actions available inside the terminal disclosure', async () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
     };
-    expect(payload.conversation_id).toBe('conversation_brief');
-    // Naming the tool is the load-bearing half: without it the Director redrafts from memory.
-    expect(payload.input).toContain('read_storyboard');
-    expect(payload.files).toEqual([]);
-    // The desktop preserves the current pin payload for backends that support it.
-    expect(payload.pinned_context).toEqual([pinnedItem]);
+    const refused = {
+      ...proposal('refused'),
+      review: {
+        status: 'unavailable' as const,
+        groups: [],
+        reason: 'reducer_rejected' as const,
+        refusal: null,
+      },
+    };
+    renderList([stale, refused]);
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    );
+
+    const staleCard = within(screen.getByTestId('studio-proposal-stale'));
+    const refusedCard = within(screen.getByTestId('studio-proposal-refused'));
+    expect(screen.getByTestId('studio-terminal-proposal-list')).toBeVisible();
+    expect(staleCard.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewStale');
+    expect(refusedCard.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewUnavailable');
+    expect(staleCard.getByRole('button', { name: /workspace\.proposals\.accept/ })).toBeDisabled();
+    expect(staleCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ })).toHaveClass(
+      'arco-btn-primary'
+    );
+
+    fireEvent.click(staleCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ }));
+    fireEvent.click(refusedCard.getByRole('button', { name: /workspace\.proposals\.reject/ }));
+    await waitFor(() => {
+      expect(onRequestUpdatedProposal).toHaveBeenCalledWith('stale', false);
+      expect(onRejectProposal).toHaveBeenCalledWith('refused');
+    });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.hideTerminal' })
+    );
+    expect(screen.queryByTestId('studio-terminal-proposal-list')).toBeNull();
+    expect(screen.queryByTestId('studio-proposal-stale')).toBeNull();
   });
 
-  it('stays silent when there is no Director conversation to ask', () => {
-    harness.result = { ...harness.result, state: { kind: 'absent' } };
+  it('keeps an in-flight terminal proposal visible and leaves disclosure review available while actions are locked', () => {
+    const stale = {
+      ...proposal('stale'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const sibling = {
+      ...proposal('sibling'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    const secondSibling = {
+      ...proposal('second-sibling'),
+      review: { status: 'stale' as const, groups: [], baseRevision: 3, currentRevision: 4 },
+    };
+    renderList([stale, sibling, secondSibling], [], [], {
+      actionsLocked: true,
+      pendingAction: { kind: 'proposal', id: 'stale' },
+    });
 
-    renderProposals([proposal('pending-1', 'pending')]);
+    expect(screen.getByTestId('studio-proposal-stale')).toBeVisible();
+    expect(screen.getByTestId('studio-terminal-proposals')).toHaveTextContent('terminalCount(count=2)');
+    const show = screen.getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.showTerminal',
+    });
+    expect(show).toBeEnabled();
+    fireEvent.click(show);
+    const siblingCard = within(screen.getByTestId('studio-proposal-sibling'));
+    expect(siblingCard.getByRole('button', { name: /workspace\.proposals\.reject/ })).toBeDisabled();
+    expect(siblingCard.getByRole('button', { name: /workspace\.proposals\.requestUpdated/ })).toBeDisabled();
+  });
 
-    fireEvent.click(screen.getByRole('button', { name: 'repropose pending-1' }));
+  it('keeps semantic reference generation behind an explicit reviewed human decision', async () => {
+    renderList([], [referenceRequest('request_references')]);
 
-    expect(sendMessage).not.toHaveBeenCalled();
+    expect(screen.getByText(/workspace\.references\.referenceCount/)).toHaveTextContent('total=2');
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.generate' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' }));
+    await waitFor(() => {
+      expect(onGenerateReferences).toHaveBeenCalledWith('request_references');
+      expect(onRejectReferences).toHaveBeenCalledWith('request_references');
+    });
+  });
+
+  it('deduplicates durable handoffs and exposes only explicit review/dismiss actions before spend', async () => {
+    renderList([], [], [handoff('handoff_1'), handoff('handoff_1'), handoff('dismissed', 'dismissed')]);
+
+    expect(screen.getAllByTestId('studio-handoff-handoff_1')).toHaveLength(1);
+    const open = within(screen.getByTestId('studio-handoff-handoff_1'));
+    fireEvent.click(open.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+    fireEvent.click(open.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' }));
+    await waitFor(() => {
+      expect(onReviewHandoff).toHaveBeenCalledWith(expect.objectContaining({ handoffId: 'handoff_1' }));
+      expect(onDismissHandoff).toHaveBeenCalledWith(expect.objectContaining({ handoffId: 'handoff_1' }));
+    });
+  });
+
+  it('shows durable progress and exact approved result thumbnails on success', () => {
+    renderList([], [], [handoff('success', 'succeeded')]);
+
+    const card = within(screen.getByTestId('studio-handoff-success'));
+    expect(card.getByText(/workspace\.handoffs\.progress/)).toHaveTextContent('succeeded=1');
+    expect(card.getByRole('img', { name: /Ming/ })).toHaveAttribute('src', expect.stringContaining('asset_ming'));
+    fireEvent.click(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.reviewReferences' })
+    );
+    expect(onReviewReferences).toHaveBeenCalledWith(expect.objectContaining({ handoffId: 'success' }));
+  });
+
+  it('retries only the exact failed identities carried by a partial handoff', () => {
+    const partial = handoff('partial', 'partially_failed');
+    renderList([], [], [partial]);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.retryFailed' }));
+    expect(onRetryFailedReferences).toHaveBeenCalledWith(partial);
+  });
+
+  it('blocks dirty-generation review with guidance while leaving free dismissal available', () => {
+    renderList([], [], [handoff('handoff_1')], {
+      reviewBlockedMessageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+    });
+
+    const card = within(screen.getByTestId('studio-handoff-handoff_1'));
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled();
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })).toBeEnabled();
+    expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+  });
+
+  it('blocks structural proposals for dirty drafts without blocking an independent rule pin', async () => {
+    const pinRule = proposal('rule', 'pending', {
+      kind: 'pin_rule',
+      rule: { text: 'Keep brands fictional.', predicate: null },
+    });
+    renderList([proposal('mutation'), pinRule], [], [], {
+      proposalDraftBlocker: (candidate) => (candidate.payload.kind === 'mutation_batch' ? 'workspace' : null),
+    });
+
+    const mutation = within(screen.getByTestId('studio-proposal-mutation'));
+    expect(
+      mutation.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    const rule = within(screen.getByTestId('studio-proposal-rule'));
+    fireEvent.click(rule.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' }));
+    await waitFor(() => expect(onAcceptProposal).toHaveBeenCalledWith('rule'));
+  });
+
+  it('returns no surface without pending output or errors, and exposes channel-specific errors when present', () => {
+    const { container, rerender } = renderList();
+    expect(container).toBeEmptyDOMElement();
+
+    rerender(
+      <DirectorProposals
+        project={project()}
+        proposals={[]}
+        referenceRequests={[]}
+        referenceGenerationHandoffs={[]}
+        pendingAction={null}
+        proposalErrorMessageKey='proposal.error'
+        referenceErrorMessageKey='reference.error'
+        onAcceptProposal={onAcceptProposal}
+        onRejectProposal={onRejectProposal}
+        onGenerateReferences={onGenerateReferences}
+        onRejectReferences={onRejectReferences}
+        onReviewHandoff={onReviewHandoff}
+        onReviewReferences={onReviewReferences}
+        onRetryFailedReferences={onRetryFailedReferences}
+        onDismissHandoff={onDismissHandoff}
+      />
+    );
+    expect(screen.getAllByRole('alert').map((node) => node.textContent)).toEqual(['proposal.error', 'reference.error']);
   });
 });

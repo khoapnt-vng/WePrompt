@@ -78,8 +78,8 @@ jobs:
           bun run i18n:types
           node scripts/check-i18n.js
 
-      # Runs the whole suite in one invocation. Baseline on the integrated
-      # sprint3 tip: 624 files (1 skipped), 8,126 passed, 19 skipped.
+      # Runs the whole suite with the reviewed Creative Studio runtime manifest's
+      # per-file coverage thresholds in one invocation.
       #
       # BUG-030 quarantine: TeamSiderSection can raise EnvironmentTeardownError
       # that fails the PROCESS after every test has already passed. That is
@@ -97,7 +97,7 @@ jobs:
           set -o pipefail
           log="$RUNNER_TEMP/suite.log"
 
-          if bun run test 2>&1 | tee "$log"; then
+          if bun run test:coverage:creative-studio 2>&1 | tee "$log"; then
             exit 0
           fi
 
@@ -105,10 +105,11 @@ jobs:
           sed $'s/\033\\[[0-9;]*[mK]//g' "$log" > "$clean"
 
           # Pass only when the process died on the known teardown error while
-          # NOTHING actually failed. Any failed file or test still blocks.
+          # NOTHING actually failed. Any failed file, test, or coverage threshold still blocks.
           if grep -q 'EnvironmentTeardownError' "$clean" \
             && ! grep -Eq 'Test Files[[:space:]]+[0-9]+ failed' "$clean" \
-            && ! grep -Eq 'Tests[[:space:]]+[0-9]+ failed' "$clean"; then
+            && ! grep -Eq 'Tests[[:space:]]+[0-9]+ failed' "$clean" \
+            && ! grep -Eq 'Coverage for .* does not meet .*threshold' "$clean"; then
             echo '::warning title=BUG-030 quarantine::Suite exited non-zero via EnvironmentTeardownError with zero failing tests; treated as the known BUG-030 teardown.'
             {
               echo '### BUG-030 quarantine'

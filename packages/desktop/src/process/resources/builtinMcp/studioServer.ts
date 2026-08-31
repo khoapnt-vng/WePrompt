@@ -8,61 +8,106 @@
 // read a bounded script view and write durable approval-queue records. It never
 // writes project.json; the main-process store remains the sole project writer.
 
-import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
+import { z as z4 } from 'zod/v4';
 import {
   hasRuleToken,
   resolveEffectiveStudioRules,
   STUDIO_RULE_LIMITS,
 } from '@/common/types/project/creativeStudioRules';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
-import { resolveActiveStudioBriefReferences } from '@/common/types/project/creativeStudioManagedAssetCollections';
 import {
-  STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE,
-  STUDIO_MAX_REFERENCE_REQUEST_SCENES,
-  STUDIO_MAX_SCENES,
+  isUnsupportedStudioPrototypeSchemaVersion,
+  STUDIO_BOARD_STYLES_V2,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
+  STUDIO_MAX_REFERENCE_LABEL_LENGTH,
+  STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
+  STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
+  STUDIO_MAX_BEATS,
+  STUDIO_MAX_BIN_BEAT_ITEMS,
+  STUDIO_MAX_BIN_SHOT_ITEMS,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
+  STUDIO_MAX_STORY_LENGTH,
+  STUDIO_MIN_SHOT_SECONDS,
   STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS,
-  type StudioAsset,
-  type StudioEditableScene,
-  type StudioProject,
-  type StudioScene,
-  type StudioRouteCatalog,
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES,
+  type StudioDirectorOperationV2,
+  type StudioDirectorFreeRecoveryV2,
+  type StudioPaidRecoveryBlockerV2,
+  type StudioMutationOperationV2,
+  type StudioProjectV2,
+  type StudioRouteCatalogV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { isCanonicalStudioGeneratedTake } from '@/common/types/project/creativeStudioCanonicalTake';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
-import { StudioProposalWriteError, writeProposalRecord } from '@process/resources/builtinMcp/studioProposalWriter';
+import { StudioProposalWriteError, writeProposalRecordV2 } from '@process/resources/builtinMcp/studioProposalWriter';
 import {
-  listPendingReferenceRequestSceneIds,
-  writeReferenceRequestRecord,
+  listPendingReferenceRequestIdsV2,
+  writeReferenceRequestRecordV2,
 } from '@process/resources/builtinMcp/studioReferenceRequestWriter';
-import { StudioPendingRecordWriteError } from '@process/resources/builtinMcp/studioPendingRecordWriter';
 import {
-  createStudioDirectorCommandWriter,
-  type StudioApplyEditsInput,
+  assertPendingRecordProjectAuthorityV2,
+  StudioPendingRecordWriteError,
+  type StudioPendingProjectAuthorityV2,
+} from '@process/resources/builtinMcp/studioPendingRecordWriter';
+import {
+  createStudioDirectorCommandWriterV2,
+  studioDirectorFreeFixInputFitsDurableRecordV2,
+  studioDirectorPaidRecoveryInputFitsDurableRecordV2,
+  studioDirectorToolInputFitsDurableRecordV2,
+  type StudioApplyEditsInputV2,
+  type StudioApplyFreeFixInputV2,
+  type StudioProposePaidRecoveryInputV2,
   type StudioDirectorCommandWriterDeps,
   type StudioGetCommandStatusInput,
+  type StudioGetProposalDirectorInputV2,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
+import {
+  decodeStudioProjectManifestV2,
+  STUDIO_BRIEF_FILE_MAX_BYTES,
+  STUDIO_BRIEF_FILE_NAME,
+} from '@process/services/creative-studio/service/briefFile';
+import {
+  classifyStudioDirectorOperationV2,
+  validatesStudioPaidRecoveryBlockerV2,
+  type StudioDirectorOperationDispositionV2,
+} from '@process/services/creative-studio/service/directorCommandContracts';
+import {
+  type RecordIoFileSystem,
+  readBoundedRegularBinaryFileWithIdentity,
+  readBoundedRegularFileWithIdentity,
+  resolveSafeRecordDirectory,
+} from '@process/services/creative-studio/service/recordIo';
+import {
+  deriveStudioFixedShotReasonsV2,
+  STUDIO_FIXED_SHOT_REASON_ORDER_V2,
+} from '@process/services/creative-studio/service/schema2/fixedShots';
+import { createStudioFrameExtractionId } from '@process/services/creative-studio/service/schema2/generation/frameExtraction';
 
 export type StudioServerEnv = {
   projectId: string;
   projectDir: string;
   pendingDir: string;
   referencePendingDir: string;
-  routeCatalog?: StudioRouteCatalog | null;
+  routeCatalog?: StudioRouteCatalogV2 | null;
+  /** V2-only deterministic filesystem seam; environment parsing leaves it undefined. */
+  fs?: RecordIoFileSystem;
 };
 
 export type StudioToolResult = {
-  content: Array<{ type: 'text'; text: string }>;
+  content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
   isError?: boolean;
-};
-
-export type ProposeStoryboardInput = {
-  base_revision: number;
-  scene_order: string[];
-  scenes: Record<string, StudioEditableScene>;
 };
 
 export type ProposeBriefRuleInput = {
@@ -71,157 +116,679 @@ export type ProposeBriefRuleInput = {
   forbidden_terms: string[];
 };
 
+export type ProposeStoryboardInputV2 = {
+  base_revision: number;
+  operations: StudioMutationOperationV2[];
+};
+
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+const STUDIO_DIRECTOR_CONDITIONING_FRAME_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp']);
+const conditioningFrameMatchesMimeTypeV2 = (bytes: Uint8Array, mimeType: string): boolean => {
+  const buffer = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  if (mimeType === 'image/png') return buffer.subarray(0, 8).equals(Buffer.from('89504e470d0a1a0a', 'hex'));
+  if (mimeType === 'image/jpeg') return buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  return (
+    mimeType === 'image/webp' &&
+    buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+    buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+  );
+};
+type StudioDirectoryIdentityV2 = { dev: number; ino: number };
+const captureStudioDirectoryIdentityV2 = async (
+  fs: RecordIoFileSystem,
+  directory: string
+): Promise<StudioDirectoryIdentityV2 | null> => {
+  const stats = await fs.lstat(directory);
+  if (!stats.isDirectory() || stats.isSymbolicLink() || (await fs.realpath(directory)) !== directory) return null;
+  return { dev: stats.dev, ino: stats.ino };
+};
+const studioDirectoryIdentitiesEqualV2 = (
+  left: StudioDirectoryIdentityV2 | null,
+  right: StudioDirectoryIdentityV2 | null
+): boolean => left !== null && right !== null && left.dev === right.dev && left.ino === right.ino;
+const NONTERMINAL_REFERENCE_JOB_STATUSES: ReadonlySet<StudioProjectV2['jobs'][string]['status']> = new Set([
+  'waiting_for_conditioning',
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+  'needs_attention',
+]);
 
 const compareCodeUnits = (left: string, right: string): number => (left < right ? -1 : left > right ? 1 : 0);
 
-const projectSceneTakes = (
-  project: StudioProject,
-  scene: StudioScene
-): { selectedTakeId: string | null; availableTakeIds: string[] } => {
-  const canonicalById = new Map<string, StudioAsset>();
-  for (const assetId of scene.assetIds) {
-    const asset = project.assets[assetId];
-    if (asset !== undefined && asset.id === assetId && isCanonicalStudioGeneratedTake(asset, project.id, scene)) {
-      canonicalById.set(assetId, asset);
-    }
-  }
-  const selectedTakeId =
-    scene.selectedAssetId !== null && canonicalById.has(scene.selectedAssetId) ? scene.selectedAssetId : null;
-  const remaining = [...canonicalById.values()]
-    .filter((asset) => asset.id !== selectedTakeId)
-    .toSorted(
-      (left, right) => compareCodeUnits(right.createdAt, left.createdAt) || compareCodeUnits(left.id, right.id)
-    );
-  return {
-    selectedTakeId,
-    availableTakeIds: [
-      ...(selectedTakeId === null ? [] : [selectedTakeId]),
-      ...remaining.map((asset) => asset.id),
-    ].slice(0, STUDIO_MAX_MCP_AVAILABLE_TAKE_IDS_PER_SCENE),
-  };
+const studioDirectorIdSchemaV2 = z4.string().min(1).max(256).regex(SAFE_ID);
+const studioProjectNameSchemaV2 = z4
+  .string()
+  .max(256)
+  .refine((name) => name.trim().length > 0, { message: 'Project name must not be blank.' });
+const studioEditableProjectChangesFieldsV2 = {
+  name: studioProjectNameSchemaV2,
+  aspectRatio: z4.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
+  resolution: z4.enum(['720p', '1080p']),
+  targetDurationSeconds: z4.number().int().min(5).max(1440),
+  boardStyle: z4.enum(STUDIO_BOARD_STYLES_V2).nullable(),
 };
-
-/**
- * How long each editable field may be in a proposal this server records.
- *
- * These are not the tool's own preference. The proposal is written straight to the pending
- * directory and validated only when the store reads it back, so a field this schema admits and
- * `validateProposalScene` (store.ts) refuses is written to disk, reported to the Director as
- * "recorded for user review", and then dropped on read with nothing but a log line — no proposal
- * reaches the user and no error reaches the model. Every limit here must therefore be no looser
- * than the store's. `purpose` was 2048 against a store limit of 256 and lost proposals exactly
- * that way; since D10 this is the only route to a drafted storyboard, so it lost the only one.
- */
-export const STUDIO_EDITABLE_SCENE_LIMITS = {
-  title: 256,
-  purpose: 256,
-  visualPrompt: 4096,
-  narration: 4096,
-  onScreenText: 1024,
-} as const;
-
-export const editableSceneSchema = z
+const studioEditableProjectChangesSchemaV2 = z4.union([
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ name: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ aspectRatio: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ resolution: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ targetDurationSeconds: true }).strict(),
+  z4.object(studioEditableProjectChangesFieldsV2).partial().required({ boardStyle: true }).strict(),
+]);
+const studioBeatInputSchemaV2 = z4
   .object({
-    title: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.title),
-    purpose: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.purpose),
-    visualPrompt: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.visualPrompt),
-    narration: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.narration),
-    onScreenText: z.string().max(STUDIO_EDITABLE_SCENE_LIMITS.onScreenText),
-    mediaKind: z.enum(['image', 'video']),
-    durationSeconds: z.number().int().min(1).max(60),
-    referenceAssetId: z.string().regex(SAFE_ID).nullable(),
+    title: z4.string().max(256),
+    story: z4.string().max(STUDIO_MAX_STORY_LENGTH),
+    targetSeconds: z4.number().int().min(1).max(1440).nullable(),
   })
   .strict();
 
-const studioDirectorIdSchema = z.string().min(1).max(256).regex(SAFE_ID);
-const studioDirectorNewSceneSchema = z
-  .object({
-    title: z.string().max(256),
-    purpose: z.string().max(256),
-    visualPrompt: z.string().max(8 * 1024),
-    narration: z.string().max(4 * 1024),
-    onScreenText: z.string().max(1024),
-    mediaKind: z.enum(['image', 'video']),
-    durationSeconds: z.number().int().min(1).max(60),
-  })
-  .strict();
-const studioDirectorEditChangesFields = {
-  title: z.string().max(256),
-  purpose: z.string().max(256),
-  visualPrompt: z.string().max(8 * 1024),
-  narration: z.string().max(4 * 1024),
-  onScreenText: z.string().max(1024),
-  durationSeconds: z.number().int().min(1).max(60),
-};
-const studioDirectorEditChangesSchema = z.union([
-  z.object(studioDirectorEditChangesFields).partial().required({ title: true }).strict(),
-  z.object(studioDirectorEditChangesFields).partial().required({ purpose: true }).strict(),
-  z.object(studioDirectorEditChangesFields).partial().required({ visualPrompt: true }).strict(),
-  z.object(studioDirectorEditChangesFields).partial().required({ narration: true }).strict(),
-  z.object(studioDirectorEditChangesFields).partial().required({ onScreenText: true }).strict(),
-  z.object(studioDirectorEditChangesFields).partial().required({ durationSeconds: true }).strict(),
-]);
-const studioDirectorOperationSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
-  z
-    .object({
-      kind: z.literal('add_scene'),
-      scene: studioDirectorNewSceneSchema,
-      beforeSceneId: studioDirectorIdSchema.nullable(),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('edit_scene'),
-      sceneId: studioDirectorIdSchema,
-      changes: studioDirectorEditChangesSchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('reorder_scenes'),
-      sceneOrder: z
-        .array(studioDirectorIdSchema)
-        .min(1)
-        .max(STUDIO_MAX_SCENES)
-        .refine((sceneOrder) => new Set(sceneOrder).size === sceneOrder.length, {
-          message: 'sceneOrder must not contain duplicate ids.',
-        }),
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal('select_take'),
-      sceneId: studioDirectorIdSchema,
-      assetId: studioDirectorIdSchema,
-    })
-    .strict(),
-]);
-
-const studioDirectorOperationsSchema = z
-  .array(studioDirectorOperationSchema)
-  .min(1)
-  .max(STUDIO_DIRECTOR_COMMAND_MAX_OPERATIONS)
-  .refine(
-    (operations) =>
-      !(
-        operations.some((operation) => operation.kind === 'add_scene') &&
-        operations.some((operation) => operation.kind === 'reorder_scenes')
-      ),
-    { message: 'add_scene and reorder_scenes cannot be combined in one command.' }
+const studioShootingScriptSchemaV2 = z4
+  .string()
+  .max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH)
+  .describe(
+    'Shot-specific direction for what is seen and heard, including intended narration, dialogue, ambience, and discrete sound hits. Do not repeat project-wide or global instruction boilerplate.'
   );
 
-export const studioApplyEditsInputSchema = z
+const studioShotInputSchemaV2 = z4
   .object({
-    expectedRevision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
-    operations: studioDirectorOperationsSchema,
+    shootingScript: studioShootingScriptSchemaV2,
+    durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
   })
   .strict();
 
-export const studioGetCommandStatusInputSchema = z
+const studioBeatChangesFieldsV2 = {
+  title: z4.string().max(256),
+  story: z4.string().max(STUDIO_MAX_STORY_LENGTH),
+  targetSeconds: z4.number().int().min(1).max(1440).nullable(),
+};
+const studioBeatChangesSchemaV2 = z4.union([
+  z4.object(studioBeatChangesFieldsV2).partial().required({ title: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ story: true }).strict(),
+  z4.object(studioBeatChangesFieldsV2).partial().required({ targetSeconds: true }).strict(),
+]);
+
+const studioShotChangesFieldsV2 = {
+  shootingScript: studioShootingScriptSchemaV2,
+  durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
+};
+const studioShotChangesSchemaV2 = z4.union([
+  z4.object(studioShotChangesFieldsV2).partial().required({ shootingScript: true }).strict(),
+  z4.object(studioShotChangesFieldsV2).partial().required({ durationSeconds: true }).strict(),
+]);
+
+const studioBinItemSchemaV2 = z4.discriminatedUnion('kind', [
+  z4
+    .object({
+      kind: z4.literal('beat'),
+      beatId: studioDirectorIdSchemaV2,
+      reason: z4.enum(['lifted', 'alternate']),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      reason: z4.literal('lifted'),
+    })
+    .strict(),
+]);
+
+const studioRuleTermSchemaV2 = z4
+  .string()
+  .max(STUDIO_RULE_LIMITS.term)
+  .refine((term) => term.trim().length > 0 && hasRuleToken(term), {
+    message: 'Rule terms must contain an enforceable token.',
+  });
+const studioRulePredicateSchemaV2 = z4
   .object({
-    commandId: studioDirectorIdSchema,
+    kind: z4.literal('forbidden_terms'),
+    terms: z4
+      .array(studioRuleTermSchemaV2)
+      .min(1)
+      .max(STUDIO_RULE_LIMITS.maxTerms)
+      .refine((terms) => new Set(terms).size === terms.length, { message: 'Rule terms must not repeat.' })
+      .meta({ uniqueItems: true }),
+  })
+  .strict();
+const studioRuleDraftSchemaV2 = z4
+  .object({
+    id: studioDirectorIdSchemaV2,
+    text: z4
+      .string()
+      .max(STUDIO_RULE_LIMITS.text)
+      .refine((text) => text.trim().length > 0, { message: 'Rule text must not be blank.' }),
+    predicate: studioRulePredicateSchemaV2.nullable(),
+  })
+  .strict();
+const studioRuleDraftsSchemaV2 = z4
+  .array(studioRuleDraftSchemaV2)
+  .max(STUDIO_RULE_LIMITS.maxRules)
+  .refine((rules) => new Set(rules.map((rule) => rule.id)).size === rules.length, {
+    message: 'Rule ids must not repeat.',
+  })
+  .meta({ uniqueItems: true });
+
+const studioProjectReferenceDraftSchemaV2 = z4
+  .object({
+    kind: z4.enum(['character', 'background']),
+    label: z4
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_LABEL_LENGTH)
+      .refine((label) => label === label.trim(), { message: 'Reference labels must be trimmed.' }),
+    prompt: z4
+      .string()
+      .min(1)
+      .max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH)
+      .refine((prompt) => prompt === prompt.trim(), { message: 'Reference prompts must be trimmed.' }),
+  })
+  .strict();
+
+const studioBackgroundReferenceDraftSchemaV2 = studioProjectReferenceDraftSchemaV2
+  .extend({ kind: z4.literal('background') })
+  .strict();
+
+const studioProjectReferenceDraftsSchemaV2 = z4
+  .array(studioProjectReferenceDraftSchemaV2)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .refine(
+    (references) =>
+      new Set(references.map((reference) => `${reference.kind}\0${reference.label}`)).size === references.length,
+    { message: 'Reference labels must be unique within each kind.' }
+  )
+  .refine(
+    (references) => {
+      let sawBackground = false;
+      for (const reference of references) {
+        if (reference.kind === 'background') sawBackground = true;
+        else if (sawBackground) return false;
+      }
+      return true;
+    },
+    { message: 'Character references must precede background references.' }
+  );
+
+const studioProjectReferencePlanAdditionsSchemaV2 = z4
+  .array(studioBackgroundReferenceDraftSchemaV2)
+  .min(1)
+  .max(STUDIO_MAX_PROJECT_REFERENCES)
+  .refine(
+    (references) =>
+      new Set(references.map((reference) => `${reference.kind}\0${reference.label}`)).size === references.length,
+    { message: 'Reference labels must be unique within each kind.' }
+  )
+  .meta({ minItems: 1 });
+
+const studioProposedShotSchemaV2 = z4
+  .object({
+    shotId: studioDirectorIdSchemaV2,
+    shootingScript: studioShootingScriptSchemaV2,
+    durationSeconds: z4.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
+    chainBreak: z4.enum(['none', 'hard_cut']),
+  })
+  .strict();
+const studioFixedShotReviewSchemaV2 = z4
+  .object({
+    shotId: studioDirectorIdSchemaV2,
+    reasons: z4
+      .array(z4.enum(STUDIO_FIXED_SHOT_REASON_ORDER_V2))
+      .min(1)
+      .max(STUDIO_FIXED_SHOT_REASON_ORDER_V2.length)
+      .refine(
+        (reasons) =>
+          reasons.every(
+            (reason, index) =>
+              index === 0 ||
+              STUDIO_FIXED_SHOT_REASON_ORDER_V2.indexOf(reasons[index - 1]!) <
+                STUDIO_FIXED_SHOT_REASON_ORDER_V2.indexOf(reason)
+          ),
+        { message: 'Fixed-shot reasons must be unique and canonically ordered.' }
+      ),
+  })
+  .strict();
+const studioFixedShotReviewsSchemaV2 = z4
+  .array(studioFixedShotReviewSchemaV2)
+  .max(STUDIO_MAX_SHOTS_PER_PROJECT)
+  .refine((rows) => new Set(rows.map((row) => row.shotId)).size === rows.length, {
+    message: 'Fixed-shot rows must not repeat a shot id.',
+  })
+  .meta({ uniqueItems: true });
+
+const studioTrimBoundarySchemaV2 = z4
+  .number()
+  .finite()
+  .nonnegative()
+  .refine((value) => !Object.is(value, -0), { message: 'Trim boundaries must not be negative zero.' });
+const studioSpendPolicySchemaV2 = z4
+  .object({
+    currency: z4.string().regex(/^[A-Z]{3}$/),
+    maxPerBatchMinorUnits: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
+const uniqueStudioIdsSchema = (maximum: number) =>
+  z4
+    .array(studioDirectorIdSchemaV2)
+    .max(maximum)
+    .refine((ids) => new Set(ids).size === ids.length, { message: 'Ids must not repeat.' })
+    .meta({ uniqueItems: true });
+
+const studioMutationOperationSchemasV2 = {
+  editProject: z4.object({ kind: z4.literal('edit_project'), changes: studioEditableProjectChangesSchemaV2 }).strict(),
+  setBrief: z4.object({ kind: z4.literal('set_brief'), brief: z4.string().max(16 * 1024) }).strict(),
+  setRules: z4.object({ kind: z4.literal('set_rules'), rules: studioRuleDraftsSchemaV2 }).strict(),
+  setReferencePlan: z4
+    .object({ kind: z4.literal('set_reference_plan'), references: studioProjectReferenceDraftsSchemaV2 })
+    .strict(),
+  amendReferencePlan: z4
+    .object({ kind: z4.literal('amend_reference_plan'), additions: studioProjectReferencePlanAdditionsSchemaV2 })
+    .strict(),
+  setReferenceLabel: z4
+    .object({
+      kind: z4.literal('set_reference_label'),
+      referenceId: studioDirectorIdSchemaV2,
+      label: z4.string().trim().min(1).max(STUDIO_MAX_REFERENCE_LABEL_LENGTH),
+    })
+    .strict(),
+  setReferencePrompt: z4
+    .object({
+      kind: z4.literal('set_reference_prompt'),
+      referenceId: studioDirectorIdSchemaV2,
+      prompt: z4.string().trim().min(1).max(STUDIO_MAX_REFERENCE_PROMPT_LENGTH),
+    })
+    .strict(),
+  selectReferenceImage: z4
+    .object({
+      kind: z4.literal('select_reference_image'),
+      referenceId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  removeReferenceImage: z4
+    .object({
+      kind: z4.literal('remove_reference_image'),
+      referenceId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  setShotReferenceBinding: z4
+    .object({
+      kind: z4.literal('set_shot_reference_binding'),
+      shotId: studioDirectorIdSchemaV2,
+      characterReferenceIds: uniqueStudioIdsSchema(STUDIO_MAX_PROJECT_REFERENCES),
+      backgroundReferenceId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  addBeat: z4
+    .object({
+      kind: z4.literal('add_beat'),
+      beatId: studioDirectorIdSchemaV2,
+      beat: studioBeatInputSchemaV2,
+      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  editBeat: z4
+    .object({
+      kind: z4.literal('edit_beat'),
+      beatId: studioDirectorIdSchemaV2,
+      changes: studioBeatChangesSchemaV2,
+    })
+    .strict(),
+  reorderBeats: z4
+    .object({ kind: z4.literal('reorder_beats'), beatOrder: uniqueStudioIdsSchema(STUDIO_MAX_BEATS) })
+    .strict(),
+  parkBeat: z4.object({ kind: z4.literal('park_beat'), beatId: studioDirectorIdSchemaV2 }).strict(),
+  restoreBeat: z4
+    .object({
+      kind: z4.literal('restore_beat'),
+      beatId: studioDirectorIdSchemaV2,
+      beforeBeatId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  addBinnedBeat: z4
+    .object({ kind: z4.literal('add_binned_beat'), beatId: studioDirectorIdSchemaV2, beat: studioBeatInputSchemaV2 })
+    .strict(),
+  addShot: z4
+    .object({
+      kind: z4.literal('add_shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      shot: studioShotInputSchemaV2,
+      beforeShotId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  editShot: z4
+    .object({ kind: z4.literal('edit_shot'), shotId: studioDirectorIdSchemaV2, changes: studioShotChangesSchemaV2 })
+    .strict(),
+  deleteShot: z4.object({ kind: z4.literal('delete_shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+  parkShot: z4.object({ kind: z4.literal('park_shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+  restoreShot: z4
+    .object({
+      kind: z4.literal('restore_shot'),
+      shotId: studioDirectorIdSchemaV2,
+      beforeShotId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  reorderShots: z4
+    .object({
+      kind: z4.literal('reorder_shots'),
+      beatId: studioDirectorIdSchemaV2,
+      shotOrder: uniqueStudioIdsSchema(STUDIO_MAX_SHOTS_PER_BEAT),
+    })
+    .strict(),
+  applyCoverage: z4
+    .object({
+      kind: z4.literal('apply_coverage'),
+      beatId: studioDirectorIdSchemaV2,
+      shots: z4.array(studioProposedShotSchemaV2).max(STUDIO_MAX_SHOTS_PER_BEAT),
+      fixedShots: studioFixedShotReviewsSchemaV2,
+    })
+    .strict(),
+  setHardCut: z4
+    .object({ kind: z4.literal('set_hard_cut'), shotId: studioDirectorIdSchemaV2, hardCut: z4.boolean() })
+    .strict(),
+  setSeedStill: z4
+    .object({
+      kind: z4.literal('set_seed_still'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  dismissSeedStill: z4
+    .object({
+      kind: z4.literal('dismiss_seed_still'),
+      shotId: studioDirectorIdSchemaV2,
+      assetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  promoteBoardPanel: z4
+    .object({
+      kind: z4.literal('promote_board_panel'),
+      shotId: studioDirectorIdSchemaV2,
+      boardAssetId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  trimShot: z4
+    .object({
+      kind: z4.literal('trim_shot'),
+      shotId: studioDirectorIdSchemaV2,
+      trimInSeconds: studioTrimBoundarySchemaV2.nullable(),
+      trimOutSeconds: studioTrimBoundarySchemaV2.nullable(),
+    })
+    .strict(),
+  reorderBin: z4
+    .object({
+      kind: z4.literal('reorder_bin'),
+      bin: z4
+        .array(studioBinItemSchemaV2)
+        .max(STUDIO_MAX_BIN_BEAT_ITEMS + STUDIO_MAX_BIN_SHOT_ITEMS)
+        .refine(
+          (items) =>
+            new Set(items.map((item) => (item.kind === 'beat' ? `beat:${item.beatId}` : `shot:${item.shotId}`)))
+              .size === items.length,
+          { message: 'Bin identities must not repeat.' }
+        )
+        .refine((items) => items.filter((item) => item.kind === 'beat').length <= STUDIO_MAX_BIN_BEAT_ITEMS, {
+          message: 'Beat bin capacity exceeded.',
+        })
+        .refine((items) => items.filter((item) => item.kind === 'shot').length <= STUDIO_MAX_BIN_SHOT_ITEMS, {
+          message: 'Shot bin capacity exceeded.',
+        })
+        .meta({ uniqueItems: true }),
+    })
+    .strict(),
+  setRoutes: z4
+    .object({
+      kind: z4.literal('set_routes'),
+      imageRouteId: studioDirectorIdSchemaV2.nullable(),
+      videoRouteId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  setSpendPolicy: z4
+    .object({ kind: z4.literal('set_spend_policy'), policy: studioSpendPolicySchemaV2.nullable() })
+    .strict(),
+  setBed: z4.object({ kind: z4.literal('set_bed'), assetId: studioDirectorIdSchemaV2.nullable() }).strict(),
+  undoLast: z4.object({ kind: z4.literal('undo_last'), entryId: studioDirectorIdSchemaV2 }).strict(),
+};
+
+export const studioMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.editProject,
+  studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.setRules,
+  studioMutationOperationSchemasV2.setReferencePlan,
+  studioMutationOperationSchemasV2.amendReferencePlan,
+  studioMutationOperationSchemasV2.setReferenceLabel,
+  studioMutationOperationSchemasV2.setReferencePrompt,
+  studioMutationOperationSchemasV2.selectReferenceImage,
+  studioMutationOperationSchemasV2.removeReferenceImage,
+  studioMutationOperationSchemasV2.setShotReferenceBinding,
+  studioMutationOperationSchemasV2.addBeat,
+  studioMutationOperationSchemasV2.editBeat,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.parkBeat,
+  studioMutationOperationSchemasV2.restoreBeat,
+  studioMutationOperationSchemasV2.addBinnedBeat,
+  studioMutationOperationSchemasV2.addShot,
+  studioMutationOperationSchemasV2.editShot,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.parkShot,
+  studioMutationOperationSchemasV2.restoreShot,
+  studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.applyCoverage,
+  studioMutationOperationSchemasV2.setHardCut,
+  studioMutationOperationSchemasV2.setSeedStill,
+  studioMutationOperationSchemasV2.dismissSeedStill,
+  studioMutationOperationSchemasV2.promoteBoardPanel,
+  studioMutationOperationSchemasV2.trimShot,
+  studioMutationOperationSchemasV2.reorderBin,
+  studioMutationOperationSchemasV2.setRoutes,
+  studioMutationOperationSchemasV2.setSpendPolicy,
+  studioMutationOperationSchemasV2.setBed,
+  studioMutationOperationSchemasV2.undoLast,
+]);
+
+/**
+ * Keep each Director tool's advertised JSON schema inside its real authority.
+ *
+ * Runtime capability checks remain a fail-closed backstop, but advertising the full mutation
+ * catalog invites a model to select an operation that the handler can only reject. In a live
+ * Director turn that produced an unbounded retry loop around the same forbidden `set_rules`
+ * proposal. These unions are deliberately explicit so a policy change must update both the
+ * authority table and the tool surface under focused tests.
+ */
+const studioDirectorDirectMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.setReferencePlan,
+  studioMutationOperationSchemasV2.amendReferencePlan,
+  studioMutationOperationSchemasV2.setShotReferenceBinding,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.reorderBin,
+]);
+
+const studioDirectorProposalMutationOperationSchemaV2 = z4.discriminatedUnion('kind', [
+  studioMutationOperationSchemasV2.editProject,
+  studioMutationOperationSchemasV2.setBrief,
+  studioMutationOperationSchemasV2.setReferencePrompt,
+  studioMutationOperationSchemasV2.addBeat,
+  studioMutationOperationSchemasV2.editBeat,
+  studioMutationOperationSchemasV2.reorderBeats,
+  studioMutationOperationSchemasV2.addBinnedBeat,
+  studioMutationOperationSchemasV2.addShot,
+  studioMutationOperationSchemasV2.editShot,
+  studioMutationOperationSchemasV2.deleteShot,
+  studioMutationOperationSchemasV2.reorderShots,
+  studioMutationOperationSchemasV2.applyCoverage,
+  studioMutationOperationSchemasV2.reorderBin,
+]);
+
+const proposalInputFitsDurableRecordV2 = (value: unknown): boolean => {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+    const input = value as { base_revision?: unknown; operations?: unknown };
+    const preview = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: 'x'.repeat(256),
+      projectId: 'x'.repeat(256),
+      status: 'pending',
+      baseRevision: input.base_revision,
+      payload: { kind: 'mutation_batch', operations: input.operations },
+      createdAt: '9999-12-31T23:59:59.999Z',
+      decidedAt: null as null,
+    };
+    return Buffer.byteLength(JSON.stringify(preview), 'utf8') <= STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES;
+  } catch {
+    return false;
+  }
+};
+
+export type StudioApplyEditsToolInputV2 = {
+  expectedRevision: number;
+  operations: StudioMutationOperationV2[];
+};
+
+export const studioApplyEditsInputSchemaV2 = z4
+  .object({
+    expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    operations: z4.array(studioDirectorDirectMutationOperationSchemaV2).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
+  })
+  .strict();
+
+const studioDirectorFreeRecoverySchemaV2 = z4.discriminatedUnion('op', [
+  z4
+    .object({
+      op: z4.literal('retry_conditioning_frame'),
+      dependentShotId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+  z4
+    .object({
+      op: z4.literal('terminalize_refused_job'),
+      jobId: studioDirectorIdSchemaV2,
+    })
+    .strict(),
+]);
+
+export const studioApplyFreeFixInputSchemaV2 = z4
+  .object({
+    expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    recovery: studioDirectorFreeRecoverySchemaV2,
+  })
+  .strict();
+
+const studioPaidRecoveryWhereSchemaV2 = z4.discriminatedUnion('kind', [
+  z4.object({ kind: z4.literal('project') }).strict(),
+  z4
+    .object({
+      kind: z4.literal('route'),
+      routeKind: z4.enum(['image', 'video']),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('reference'),
+      referenceId: studioDirectorIdSchemaV2,
+      jobId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('shot'),
+      beatId: studioDirectorIdSchemaV2,
+      shotId: studioDirectorIdSchemaV2,
+      beatPosition: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      shotPosition: z4.number().int().min(0).max(Number.MAX_SAFE_INTEGER),
+      jobId: studioDirectorIdSchemaV2.nullable(),
+    })
+    .strict(),
+  z4.object({ kind: z4.literal('cut') }).strict(),
+]);
+
+const studioPaidRecoveryGenerationChoiceSchemaV2 = z4
+  .object({
+    target: z4.object({ kind: z4.literal('shot'), shotId: studioDirectorIdSchemaV2 }).strict(),
+    purpose: z4.enum(['seed_still', 'board_still', 'video_take']),
+  })
+  .strict();
+
+const studioPaidRecoveryPrepareSchemaV2 = z4.discriminatedUnion('kind', [
+  z4
+    .object({
+      kind: z4.literal('project_references'),
+      referenceIds: uniqueStudioIdsSchema(STUDIO_MAX_PROJECT_REFERENCES).min(1),
+    })
+    .strict(),
+  z4
+    .object({
+      kind: z4.literal('generation'),
+      baseChoices: z4.array(studioPaidRecoveryGenerationChoiceSchemaV2).max(STUDIO_MAX_MUTATION_OPERATIONS),
+      cascadeChoices: z4.array(studioPaidRecoveryGenerationChoiceSchemaV2).max(STUDIO_MAX_MUTATION_OPERATIONS),
+      continuityChange: z4
+        .object({
+          shotId: studioDirectorIdSchemaV2,
+          hardCut: z4.boolean(),
+          requiresSeedGeneration: z4.boolean(),
+        })
+        .strict()
+        .nullable(),
+    })
+    .strict(),
+]);
+
+const studioPaidRecoveryBlockerSchemaV2 = z4
+  .object({
+    cause: z4.enum(STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2),
+    where: studioPaidRecoveryWhereSchemaV2,
+    remedy: z4
+      .object({
+        kind: z4.literal('proposal'),
+        prepare: studioPaidRecoveryPrepareSchemaV2,
+        estimatedMinorUnits: z4.null(),
+        currency: z4.null(),
+      })
+      .strict(),
+  })
+  .strict()
+  .refine(validatesStudioPaidRecoveryBlockerV2, {
+    message: 'Copy one exact proposal blocker from a fresh detailed Studio status read.',
+  });
+
+export const studioProposePaidRecoveryInputSchemaV2 = z4
+  .object({
+    expectedRevision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    blocker: studioPaidRecoveryBlockerSchemaV2,
+  })
+  .strict();
+
+export const studioGetCommandStatusInputSchemaV2 = z4.object({ commandId: studioDirectorIdSchemaV2 }).strict();
+
+export const studioGetProjectStatusInputSchemaV2 = z4.object({ detail: z4.boolean().optional() }).strict();
+
+export const studioGetProposalInputSchemaV2 = z4.object({ proposalId: studioDirectorIdSchemaV2 }).strict();
+
+export const studioGetConditioningFrameInputSchemaV2 = z4.object({ shotId: studioDirectorIdSchemaV2 }).strict();
+
+export const studioProposeStoryboardInputSchemaV2 = z4
+  .object({
+    base_revision: z4.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    operations: z4.array(studioDirectorProposalMutationOperationSchemaV2).min(1).max(STUDIO_MAX_MUTATION_OPERATIONS),
+  })
+  .strict();
+
+export const studioRequestReferenceImagesInputSchemaV2 = z4
+  .object({
+    referenceIds: z4
+      .array(studioDirectorIdSchemaV2)
+      .min(1)
+      .max(STUDIO_MAX_PROJECT_REFERENCES)
+      .refine((referenceIds) => new Set(referenceIds).size === referenceIds.length, {
+        message: 'Reference ids must not repeat.',
+      })
+      .meta({ uniqueItems: true }),
   })
   .strict();
 
@@ -234,10 +801,10 @@ export function parseStudioServerEnv(env: Record<string, string | undefined>): S
     (projectDir ? path.join(projectDir, 'reference-requests', 'pending') : undefined);
   const serializedRouteCatalog = env[STUDIO_ENV.routeCatalog];
   if (!projectId || !projectDir || !pendingDir) return null;
-  let routeCatalog: StudioRouteCatalog | null = null;
+  let routeCatalog: StudioRouteCatalogV2 | null = null;
   if (serializedRouteCatalog) {
     try {
-      routeCatalog = JSON.parse(serializedRouteCatalog) as StudioRouteCatalog;
+      routeCatalog = JSON.parse(serializedRouteCatalog) as StudioRouteCatalogV2;
     } catch {
       routeCatalog = null;
     }
@@ -250,132 +817,559 @@ const errorResult = (message: string): StudioToolResult => ({
   isError: true,
 });
 
-/**
- * The subprocess reads project.json raw: no migrateSchemaV1Project, no validateProject. Main's
- * `rules: []` default (`migrateSchemaV1Project`, store.ts:971-973, applied from `readProject` at
- * :1812) is in-memory only and nothing rewrites the manifest on open, so every project written
- * before rules existed still has no `rules` key on disk. Defaulting it here — once, at the single
- * read point every handler shares — is what stops `read_storyboard` and `propose_brief_rule`
- * throwing on `undefined` and reporting the project as unavailable. Doing it at the call sites
- * instead means every future handler has to remember.
- */
-const readProject = async (config: StudioServerEnv): Promise<StudioProject> => {
-  const raw = JSON.parse(await readFile(path.join(config.projectDir, 'project.json'), 'utf8')) as StudioProject;
-  return Array.isArray(raw.rules) ? raw : { ...raw, rules: [] };
+const describeError = (error: unknown): string => String(error).replace(/^Error:\s*/, '');
+
+type StudioApplyEditsRejectedOperationV2 = {
+  index: number;
+  kind: StudioMutationOperationV2['kind'];
+  disposition: Exclude<StudioDirectorOperationDispositionV2, 'direct'>;
+  reason: 'requires_user_review' | 'unavailable_to_director';
 };
 
-export function createReadStoryboardHandler(
+const studioApplyEditsCapabilityRejectionV2 = (
+  operations: readonly StudioMutationOperationV2[]
+): StudioToolResult | null => {
+  const rejectedOperations: StudioApplyEditsRejectedOperationV2[] = [];
+  const directCapableOperationIndexes: number[] = [];
+  operations.forEach((operation, index) => {
+    const disposition = classifyStudioDirectorOperationV2(operation.kind);
+    if (disposition === 'direct') {
+      directCapableOperationIndexes.push(index);
+      return;
+    }
+    rejectedOperations.push({
+      index,
+      kind: operation.kind,
+      disposition: disposition === 'proposal' ? 'proposal' : 'operation_not_permitted',
+      reason: disposition === 'proposal' ? 'requires_user_review' : 'unavailable_to_director',
+    });
+  });
+  if (rejectedOperations.length === 0) return null;
+  return errorResult(
+    JSON.stringify({
+      code: 'operation_not_permitted',
+      message:
+        'studio_apply_edits rejected the batch at capability preflight; no operation reached command evaluation or was applied.',
+      operationIndexBase: 0,
+      rejectedOperations,
+      directCapableOperationIndexes,
+      guidance: {
+        proposal:
+          'After omitting unavailable and reference-direct operations, submit the full ordered proposal-eligible subset to propose_storyboard when it still expresses the intended atomic change.',
+        unavailable:
+          'Omit unavailable operations or ask the user to perform them manually in Creative Studio when supported.',
+        direct:
+          'Only if the direct-capable operations are independently valid, call read_storyboard and submit them in a new studio_apply_edits batch against the fresh revision.',
+        retry: 'Do not retry this batch unchanged.',
+      },
+    })
+  );
+};
+
+const operationBatchIsProposalCapableV2 = (operations: readonly StudioMutationOperationV2[]): boolean =>
+  Array.isArray(operations) &&
+  operations.every((operation) => {
+    if (
+      operation.kind === 'set_reference_plan' ||
+      operation.kind === 'amend_reference_plan' ||
+      operation.kind === 'set_shot_reference_binding'
+    ) {
+      return false;
+    }
+    const disposition = classifyStudioDirectorOperationV2(operation?.kind);
+    return disposition === 'direct' || disposition === 'proposal';
+  });
+
+class StudioProjectReadErrorV2 extends Error {
+  constructor(public readonly code: 'unsupported_prototype_schema' | 'invalid' | 'storage') {
+    super(
+      code === 'unsupported_prototype_schema'
+        ? code
+        : `Invalid schema-${STUDIO_PROJECT_SCHEMA_VERSION} Creative Studio project`
+    );
+  }
+}
+
+type StudioProjectSnapshotV2 = {
+  project: StudioProjectV2;
+  canonicalRoot: string;
+  rootIdentity: { dev: number; ino: number };
+  fileIdentity: { dev: number; ino: number };
+  bytes: string;
+  briefFileIdentity: { dev: number; ino: number } | null;
+  briefBytes: string | null;
+};
+
+const pendingProjectAuthorityV2 = (snapshot: StudioProjectSnapshotV2): StudioPendingProjectAuthorityV2 => ({
+  canonicalRoot: snapshot.canonicalRoot,
+  rootIdentity: snapshot.rootIdentity,
+});
+
+const STUDIO_PROJECT_V2_MAX_RECORD_BYTES = 64 * 1024 * 1024;
+
+const readProjectSnapshotV2 = async (config: StudioServerEnv): Promise<StudioProjectSnapshotV2> => {
+  const recordFs = config.fs ?? nodeFs;
+  const configuredRoot = path.resolve(config.projectDir);
+  try {
+    const configuredStats = await recordFs.lstat(configuredRoot);
+    if (!configuredStats.isDirectory() || configuredStats.isSymbolicLink())
+      throw new StudioProjectReadErrorV2('storage');
+    const canonicalRoot = await recordFs.realpath(configuredRoot);
+    const rootStats = await recordFs.lstat(canonicalRoot);
+    if (
+      !rootStats.isDirectory() ||
+      rootStats.isSymbolicLink() ||
+      rootStats.dev !== configuredStats.dev ||
+      rootStats.ino !== configuredStats.ino
+    ) {
+      throw new StudioProjectReadErrorV2('storage');
+    }
+    const record = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot,
+      file: path.join(canonicalRoot, 'project.json'),
+      maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+    });
+    if (record === null) throw new StudioProjectReadErrorV2('storage');
+    let raw: unknown;
+    try {
+      raw = JSON.parse(record.bytes) as unknown;
+    } catch {
+      throw new StudioProjectReadErrorV2('invalid');
+    }
+    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+      throw new StudioProjectReadErrorV2('invalid');
+    }
+    const schemaDescriptor = Object.getOwnPropertyDescriptor(raw, 'schemaVersion');
+    if (
+      schemaDescriptor === undefined ||
+      !('value' in schemaDescriptor) ||
+      !Number.isSafeInteger(schemaDescriptor.value)
+    ) {
+      throw new StudioProjectReadErrorV2('invalid');
+    }
+    if (isUnsupportedStudioPrototypeSchemaVersion(schemaDescriptor.value)) {
+      throw new StudioProjectReadErrorV2('unsupported_prototype_schema');
+    }
+    if (schemaDescriptor.value !== STUDIO_PROJECT_SCHEMA_VERSION) throw new StudioProjectReadErrorV2('invalid');
+    const briefRecord = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot,
+      file: path.join(canonicalRoot, STUDIO_BRIEF_FILE_NAME),
+      maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+    });
+    const finalRootStats = await recordFs.lstat(canonicalRoot);
+    if (
+      !finalRootStats.isDirectory() ||
+      finalRootStats.isSymbolicLink() ||
+      finalRootStats.dev !== rootStats.dev ||
+      finalRootStats.ino !== rootStats.ino
+    ) {
+      throw new StudioProjectReadErrorV2('storage');
+    }
+    const decoded = decodeStudioProjectManifestV2(raw, briefRecord?.bytes ?? null);
+    if (decoded === null || !decoded.synchronized || decoded.project.id !== config.projectId) {
+      throw new StudioProjectReadErrorV2('invalid');
+    }
+    return {
+      project: decoded.project,
+      canonicalRoot,
+      rootIdentity: { dev: rootStats.dev, ino: rootStats.ino },
+      fileIdentity: record.identity,
+      bytes: record.bytes,
+      briefFileIdentity: briefRecord?.identity ?? null,
+      briefBytes: briefRecord?.bytes ?? null,
+    };
+  } catch (error) {
+    if (error instanceof StudioProjectReadErrorV2) throw error;
+    throw new StudioProjectReadErrorV2('storage');
+  }
+};
+
+const reassertProjectSnapshotV2 = async (config: StudioServerEnv, snapshot: StudioProjectSnapshotV2): Promise<void> => {
+  const recordFs = config.fs ?? nodeFs;
+  try {
+    const configuredRoot = path.resolve(config.projectDir);
+    const configuredStats = await recordFs.lstat(configuredRoot);
+    if (
+      !configuredStats.isDirectory() ||
+      configuredStats.isSymbolicLink() ||
+      configuredStats.dev !== snapshot.rootIdentity.dev ||
+      configuredStats.ino !== snapshot.rootIdentity.ino ||
+      (await recordFs.realpath(configuredRoot)) !== snapshot.canonicalRoot
+    ) {
+      throw new StudioProjectReadErrorV2('storage');
+    }
+    const rootStats = await recordFs.lstat(snapshot.canonicalRoot);
+    if (
+      !rootStats.isDirectory() ||
+      rootStats.isSymbolicLink() ||
+      rootStats.dev !== snapshot.rootIdentity.dev ||
+      rootStats.ino !== snapshot.rootIdentity.ino
+    ) {
+      throw new StudioProjectReadErrorV2('storage');
+    }
+    const record = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot: snapshot.canonicalRoot,
+      file: path.join(snapshot.canonicalRoot, 'project.json'),
+      maxBytes: STUDIO_PROJECT_V2_MAX_RECORD_BYTES,
+    });
+    const briefRecord = await readBoundedRegularFileWithIdentity({
+      fs: recordFs,
+      canonicalRoot: snapshot.canonicalRoot,
+      file: path.join(snapshot.canonicalRoot, STUDIO_BRIEF_FILE_NAME),
+      maxBytes: STUDIO_BRIEF_FILE_MAX_BYTES,
+    });
+    if (
+      record === null ||
+      record.identity.dev !== snapshot.fileIdentity.dev ||
+      record.identity.ino !== snapshot.fileIdentity.ino ||
+      record.bytes !== snapshot.bytes ||
+      !(
+        (briefRecord === null && snapshot.briefFileIdentity === null && snapshot.briefBytes === null) ||
+        (briefRecord !== null &&
+          snapshot.briefFileIdentity !== null &&
+          briefRecord.identity.dev === snapshot.briefFileIdentity.dev &&
+          briefRecord.identity.ino === snapshot.briefFileIdentity.ino &&
+          briefRecord.bytes === snapshot.briefBytes)
+      )
+    ) {
+      throw new StudioProjectReadErrorV2('storage');
+    }
+  } catch (error) {
+    if (error instanceof StudioProjectReadErrorV2) throw error;
+    throw new StudioProjectReadErrorV2('storage');
+  }
+};
+
+const projectSnapshotStatusV2 = async (
+  config: StudioServerEnv,
+  snapshot: StudioProjectSnapshotV2
+): Promise<'valid' | 'unsupported_prototype_schema' | 'invalid'> => {
+  try {
+    await reassertProjectSnapshotV2(config, snapshot);
+    return 'valid';
+  } catch {
+    try {
+      const current = await readProjectSnapshotV2(config);
+      if (
+        current.canonicalRoot !== snapshot.canonicalRoot ||
+        current.rootIdentity.dev !== snapshot.rootIdentity.dev ||
+        current.rootIdentity.ino !== snapshot.rootIdentity.ino
+      ) {
+        return 'invalid';
+      }
+      // A normal atomic V2 commit replaces project.json's inode. The queued record retains the
+      // original base revision, so main's CAS remains the authority that rejects stale work.
+      return current.project.revision > snapshot.project.revision ? 'valid' : 'invalid';
+    } catch (error) {
+      return error instanceof StudioProjectReadErrorV2 && error.code === 'unsupported_prototype_schema'
+        ? 'unsupported_prototype_schema'
+        : 'invalid';
+    }
+  }
+};
+
+const assertProjectSnapshotStatusV2 = async (
+  config: StudioServerEnv,
+  snapshot: StudioProjectSnapshotV2
+): Promise<void> => {
+  const status = await projectSnapshotStatusV2(config, snapshot);
+  if (status === 'valid') return;
+  throw new StudioProjectReadErrorV2(status === 'unsupported_prototype_schema' ? status : 'invalid');
+};
+
+const readProjectV2 = async (config: StudioServerEnv): Promise<StudioProjectV2> =>
+  (await readProjectSnapshotV2(config)).project;
+
+export function createReadStoryboardHandlerV2(
   config: StudioServerEnv | null
 ): (_input: Record<string, never>) => Promise<StudioToolResult> {
   return async () => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
     try {
-      const project = await readProject(config);
-      const scenes = Object.fromEntries(
-        project.sceneOrder.flatMap((sceneId) => {
-          const scene = project.scenes[sceneId];
-          if (!scene) return [];
-          const takes = projectSceneTakes(project, scene);
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
+      // readProjectV2 has already proved that every active id resolves to its exact own record.
+      const beats = Object.fromEntries(
+        project.beatOrder.map((beatId) => {
+          const beat = project.beats[beatId]!;
           return [
-            [
-              sceneId,
-              {
-                title: scene.title,
-                purpose: scene.purpose,
-                visualPrompt: scene.visualPrompt,
-                narration: scene.narration,
-                onScreenText: scene.onScreenText,
-                mediaKind: scene.mediaKind,
-                durationSeconds: scene.durationSeconds,
-                referenceAssetId: scene.referenceAssetId,
-                hasReference: scene.referenceAssetId !== null,
-                hasSelectedTake: takes.selectedTakeId !== null,
-                selectedTakeId: takes.selectedTakeId,
-                availableTakeIds: takes.availableTakeIds,
-              },
-            ],
+            beatId,
+            {
+              title: beat.title,
+              story: beat.story,
+              targetSeconds: beat.targetSeconds,
+              shotOrder: [...beat.shotOrder],
+            },
           ];
         })
       );
-      // Rule ids are not exposed: the Director never addresses a rule by id, and an id in the
-      // context is one more thing it can hallucinate back at us. Text is the handle.
+      const activeShotIds = project.beatOrder.flatMap((beatId) => project.beats[beatId]!.shotOrder);
+      const shots = Object.fromEntries(
+        activeShotIds.map((shotId) => {
+          const shot = project.shots[shotId]!;
+          return [
+            shotId,
+            {
+              shootingScript: shot.shootingScript,
+              durationSeconds: shot.durationSeconds,
+              chainBreak: shot.chainBreak,
+              fixedReasons: deriveStudioFixedShotReasonsV2(project, shot),
+              hasSeedStill: shot.seedStillId !== null,
+              hasVideo: shot.videoAssetId !== null,
+              videoAssetId: shot.videoAssetId,
+              referenceBinding: structuredClone(shot.referenceBinding),
+            },
+          ];
+        })
+      );
       const rules = resolveEffectiveStudioRules(project.rules).map((rule) => ({
         scope: rule.scope,
         text: rule.text,
         enforced: rule.predicate !== null,
         ...(rule.predicate === null ? {} : { forbiddenTerms: rule.predicate.terms }),
       }));
-      const briefReferences = (resolveActiveStudioBriefReferences(project.assets) ?? []).map((asset) => ({
-        id: asset.id,
-        label: asset.briefReferenceLabel!,
-        role: asset.briefReferenceRole!,
-      }));
+      const beatCount = Object.keys(project.beats).length;
+      const references = project.referenceOrder.map((referenceId) => {
+        const reference = project.references[referenceId]!;
+        return {
+          id: referenceId,
+          kind: reference.kind,
+          label: reference.label,
+          prompt: reference.prompt,
+          approvalStatus: reference.approvedAssetId !== null ? 'current' : 'awaiting_generation',
+          approvedAssetId: reference.approvedAssetId,
+        };
+      });
       const view = {
         revision: project.revision,
         name: project.name,
         brief: project.brief,
-        briefReferences,
         rules,
         aspectRatio: project.aspectRatio,
         targetDurationSeconds: project.targetDurationSeconds,
-        sceneCapacity: {
-          current: project.sceneOrder.length,
-          maximum: STUDIO_MAX_SCENES,
-          remaining: Math.max(0, STUDIO_MAX_SCENES - project.sceneOrder.length),
-          overCapacity: project.sceneOrder.length > STUDIO_MAX_SCENES,
+        boardStyle: project.boardStyle,
+        referencePlanStatus: project.referencePlanStatus,
+        referenceOrder: [...project.referenceOrder],
+        references,
+        beatCapacity: {
+          current: beatCount,
+          maximum: STUDIO_MAX_BEATS,
+          remaining: Math.max(0, STUDIO_MAX_BEATS - beatCount),
+          overCapacity: beatCount > STUDIO_MAX_BEATS,
         },
-        sceneOrder: project.sceneOrder,
-        scenes,
+        beatOrder: [...project.beatOrder],
+        beats,
+        shots,
+        bin: project.bin.map((item) => ({ ...item })),
       };
       return { content: [{ type: 'text', text: JSON.stringify(view, null, 2) }] };
     } catch (error) {
-      return errorResult(
-        `Creative Studio project is unavailable: ${error instanceof Error ? error.message : String(error)}`
-      );
+      return errorResult(`Creative Studio project is unavailable: ${describeError(error)}`);
+    }
+  };
+}
+
+type StudioConditioningFrameUnavailableReasonV2 =
+  | 'not_chained'
+  | 'predecessor_take_missing'
+  | 'extraction_missing'
+  | 'extraction_pending'
+  | 'extraction_failed';
+
+const conditioningFrameUnavailableResultV2 = (
+  projectRevision: number,
+  shotId: string,
+  reason: StudioConditioningFrameUnavailableReasonV2,
+  detail: Record<string, unknown> = {}
+): StudioToolResult => ({
+  content: [
+    {
+      type: 'text',
+      text: JSON.stringify({ status: 'unavailable', projectRevision, shotId, reason, ...detail }, null, 2),
+    },
+  ],
+});
+
+/**
+ * Gives the Director sight of one exact inherited frame without granting asset or path selection.
+ * The dependent Shot is the only caller input; the app derives every media authority from the
+ * current validated project and reasserts that authority after reading the immutable frame.
+ */
+export function createStudioGetConditioningFrameHandlerV2(
+  config: StudioServerEnv | null
+): (input: { shotId: string }) => Promise<StudioToolResult> {
+  return async ({ shotId }) => {
+    if (!config) return errorResult('Creative Studio project is unavailable.');
+    try {
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
+      let beatId: string | null = null;
+      let shotIndex = -1;
+      for (const activeBeatId of project.beatOrder) {
+        const candidateIndex = project.beats[activeBeatId]!.shotOrder.indexOf(shotId);
+        if (candidateIndex === -1) continue;
+        beatId = activeBeatId;
+        shotIndex = candidateIndex;
+        break;
+      }
+      if (beatId === null || shotIndex < 0) {
+        return errorResult(JSON.stringify({ status: 'invalid_request', reason: 'inactive_shot', shotId }, null, 2));
+      }
+
+      const shot = project.shots[shotId]!;
+      if (shotIndex === 0 || shot.chainBreak === 'hard_cut') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'not_chained');
+      }
+      const predecessorShotId = project.beats[beatId]!.shotOrder[shotIndex - 1]!;
+      const predecessor = project.shots[predecessorShotId]!;
+      const takeAssetId = predecessor.videoAssetId;
+      const take = takeAssetId === null ? undefined : project.assets[takeAssetId];
+      if (takeAssetId === null || take?.mediaKind !== 'video' || take.durationSeconds === undefined) {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'predecessor_take_missing', {
+          predecessorShotId,
+        });
+      }
+
+      const endpointSeconds = take.durationSeconds - (predecessor.trimOutSeconds ?? 0);
+      const extractionId = createStudioFrameExtractionId({
+        shotId: predecessorShotId,
+        videoAssetId: takeAssetId,
+        endpointSeconds,
+      });
+      const authority = { predecessorShotId, takeAssetId, extractionId, endpointSeconds };
+      const extraction = project.frameExtractions[extractionId];
+      if (extraction === undefined) {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_missing', authority);
+      }
+      if (extraction.status === 'pending' || extraction.status === 'extracting') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_pending', authority);
+      }
+      if (extraction.status === 'failed') {
+        return conditioningFrameUnavailableResultV2(project.revision, shotId, 'extraction_failed', {
+          ...authority,
+          errorCode: extraction.errorCode,
+        });
+      }
+
+      const frameAssetId = extraction.frameAssetId;
+      const frameAsset = frameAssetId === null ? undefined : project.assets[frameAssetId];
+      if (
+        frameAssetId === null ||
+        frameAsset === undefined ||
+        frameAsset.shotId !== predecessorShotId ||
+        frameAsset.mediaKind !== 'image' ||
+        frameAsset.managedAsset.collection !== 'conditioningFrames' ||
+        !STUDIO_DIRECTOR_CONDITIONING_FRAME_MIME_TYPES.has(frameAsset.mimeType) ||
+        frameAsset.byteSize <= 0 ||
+        frameAsset.byteSize > STUDIO_MAX_IMAGE_ASSET_BYTES_V2
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+
+      const recordFs = config.fs ?? nodeFs;
+      const framesDirectory = await resolveSafeRecordDirectory({
+        fs: recordFs,
+        canonicalRoot: snapshot.canonicalRoot,
+        parent: snapshot.canonicalRoot,
+        name: 'conditioningFrames',
+        createIfMissing: false,
+      });
+      if (framesDirectory === null) return errorResult('Creative Studio conditioning frame is unavailable.');
+      const framesDirectoryIdentity = await captureStudioDirectoryIdentityV2(recordFs, framesDirectory);
+      if (framesDirectoryIdentity === null) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      const frameRecord = await readBoundedRegularBinaryFileWithIdentity({
+        fs: recordFs,
+        canonicalRoot: snapshot.canonicalRoot,
+        file: path.join(framesDirectory, frameAsset.managedAsset.fileName),
+        maxBytes: frameAsset.byteSize,
+      });
+      if (
+        frameRecord === null ||
+        frameRecord.bytes.byteLength !== frameAsset.byteSize ||
+        createHash('sha256').update(frameRecord.bytes).digest('hex') !== frameAsset.sha256 ||
+        !conditioningFrameMatchesMimeTypeV2(frameRecord.bytes, frameAsset.mimeType)
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      if (
+        !studioDirectoryIdentitiesEqualV2(
+          framesDirectoryIdentity,
+          await captureStudioDirectoryIdentityV2(recordFs, framesDirectory)
+        )
+      ) {
+        return errorResult('Creative Studio conditioning frame is unavailable.');
+      }
+      await reassertProjectSnapshotV2(config, snapshot);
+
+      const metadata = {
+        status: 'ready',
+        projectRevision: project.revision,
+        shotId,
+        predecessorShotId,
+        takeAssetId,
+        extractionId,
+        frameAssetId,
+        endpointSeconds,
+        mimeType: frameAsset.mimeType,
+        byteSize: frameAsset.byteSize,
+        sha256: frameAsset.sha256,
+        requiresVisualInput: true,
+      };
+      return {
+        content: [
+          { type: 'text', text: JSON.stringify(metadata, null, 2) },
+          { type: 'image', data: Buffer.from(frameRecord.bytes).toString('base64'), mimeType: frameAsset.mimeType },
+        ],
+      };
+    } catch {
+      return errorResult('Creative Studio conditioning frame is unavailable.');
     }
   };
 }
 
 export function createListRoutesHandler(
-  config: StudioServerEnv | null
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
 ): (_input: Record<string, never>) => Promise<StudioToolResult> {
-  return async () => {
-    if (!config?.routeCatalog) return errorResult('Creative Studio route catalog is unavailable.');
-    return { content: [{ type: 'text', text: JSON.stringify(config.routeCatalog, null, 2) }] };
-  };
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async () => commandToolResult(await writer.listRoutes());
 }
 
-export function createProposeStoryboardHandler(
+export function createProposeStoryboardHandlerV2(
   config: StudioServerEnv | null
-): (input: ProposeStoryboardInput) => Promise<StudioToolResult> {
-  return async ({ base_revision, scene_order, scenes }) => {
+): (input: ProposeStoryboardInputV2) => Promise<StudioToolResult> {
+  return async ({ base_revision, operations }) => {
+    if (!operationBatchIsProposalCapableV2(operations)) return errorResult('operation_not_permitted');
+    if (!proposalInputFitsDurableRecordV2({ base_revision, operations })) {
+      return errorResult('Proposal input exceeds the durable record size cap.');
+    }
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    const sceneIds = Object.keys(scenes);
-    const orderSet = new Set(scene_order);
-    if (scene_order.length > STUDIO_MAX_SCENES) {
-      return errorResult(`At most ${STUDIO_MAX_SCENES} scenes may be proposed at once.`);
-    }
-    if (
-      orderSet.size !== scene_order.length ||
-      sceneIds.length !== scene_order.length ||
-      !sceneIds.every((sceneId) => orderSet.has(sceneId))
-    ) {
-      return errorResult('scene_order and scenes must contain exactly the same unique scene ids.');
-    }
-
     try {
-      const project = await readProject(config);
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
       if (project.revision !== base_revision) {
         return errorResult(
           `The project is at revision ${project.revision}; you proposed against ${base_revision}. ` +
             'Call read_storyboard and redraft.'
         );
       }
-      const record = await writeProposalRecord({
+      await assertProjectSnapshotStatusV2(config, snapshot);
+      const record = await writeProposalRecordV2({
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
-        payload: { kind: 'replace_storyboard', sceneOrder: scene_order, scenes },
+        payload: { kind: 'mutation_batch', operations },
+        fs: config.fs,
+        authorityFence: () => projectSnapshotStatusV2(config, snapshot),
+        projectAuthority: pendingProjectAuthorityV2(snapshot),
       });
       return {
         content: [
@@ -387,24 +1381,12 @@ export function createProposeStoryboardHandler(
       };
     } catch (error) {
       if (error instanceof StudioProposalWriteError) return errorResult(error.message);
-      return errorResult(
-        `Creative Studio proposal could not be recorded: ${error instanceof Error ? error.message : String(error)}`
-      );
+      return errorResult(`Creative Studio proposal could not be recorded: ${describeError(error)}`);
     }
   };
 }
 
-/**
- * Records a rule for the user to pin. The tool never writes the project: main is the sole writer of
- * the CAS-guarded store, and the user decides.
- *
- * Every limit here is the store's limit, not this tool's preference. The record goes straight to the
- * pending directory and is validated only when the store reads it back, so a field this schema
- * admits and `validateBriefRulePredicate` refuses is written to disk, reported to the Director as
- * "recorded for user review", and then dropped on read with nothing but a log line — see the
- * warning above STUDIO_EDITABLE_SCENE_LIMITS, which `purpose` learned the hard way.
- */
-export function createProposeBriefRuleHandler(
+export function createProposeBriefRuleHandlerV2(
   config: StudioServerEnv | null
 ): (input: ProposeBriefRuleInput) => Promise<StudioToolResult> {
   return async ({ base_revision, text, forbidden_terms }) => {
@@ -421,20 +1403,19 @@ export function createProposeBriefRuleHandler(
       return errorResult(`forbidden_terms contains an unenforceable term: "${unenforceableTerm}".`);
     }
     try {
-      const project = await readProject(config);
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
       if (project.revision !== base_revision) {
         return errorResult(
           `The project is at revision ${project.revision}; you proposed against ${base_revision}. ` +
             'Call read_storyboard and redraft.'
         );
       }
-      // `project.rules` is always an array here because Step 4.2 normalised it inside readProject.
-      // Without that, a manifest written before rules existed throws on `.length` and this tool
-      // reports the project as unavailable — do not reorder Task 4 after Task 6.
       if (project.rules.length >= STUDIO_RULE_LIMITS.maxRules) {
         return errorResult(`This project already holds the maximum of ${STUDIO_RULE_LIMITS.maxRules} rules.`);
       }
-      const record = await writeProposalRecord({
+      await assertProjectSnapshotStatusV2(config, snapshot);
+      const record = await writeProposalRecordV2({
         pendingDir: config.pendingDir,
         projectId: config.projectId,
         baseRevision: base_revision,
@@ -442,6 +1423,9 @@ export function createProposeBriefRuleHandler(
           kind: 'pin_rule',
           rule: { text: trimmed, predicate: terms.length === 0 ? null : { kind: 'forbidden_terms', terms } },
         },
+        fs: config.fs,
+        authorityFence: () => projectSnapshotStatusV2(config, snapshot),
+        projectAuthority: pendingProjectAuthorityV2(snapshot),
       });
       return {
         content: [
@@ -453,66 +1437,117 @@ export function createProposeBriefRuleHandler(
       };
     } catch (error) {
       if (error instanceof StudioProposalWriteError) return errorResult(error.message);
-      return errorResult(
-        `Creative Studio rule could not be recorded: ${error instanceof Error ? error.message : String(error)}`
-      );
+      return errorResult(`Creative Studio rule could not be recorded: ${describeError(error)}`);
     }
   };
 }
 
-export function createRequestReferenceImagesHandler(
+export function createRequestReferenceImagesHandlerV2(
   config: StudioServerEnv | null
-): (input: { sceneIds: string[] }) => Promise<StudioToolResult> {
-  return async ({ sceneIds }) => {
+): (input: { referenceIds: string[] }) => Promise<StudioToolResult> {
+  return async ({ referenceIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
-    if (!Array.isArray(sceneIds)) return errorResult('sceneIds must be an array.');
-    if (sceneIds.length < 1) return errorResult('At least one scene id is required.');
-    if (sceneIds.length > STUDIO_MAX_REFERENCE_REQUEST_SCENES) {
-      return errorResult(`At most ${STUDIO_MAX_REFERENCE_REQUEST_SCENES} scene ids may be requested at once.`);
+    if (!Array.isArray(referenceIds)) return errorResult('referenceIds must be an array.');
+    if (referenceIds.length < 1) return errorResult('At least one reference id is required.');
+    if (referenceIds.length > STUDIO_MAX_PROJECT_REFERENCES) {
+      return errorResult(`At most ${STUDIO_MAX_PROJECT_REFERENCES} reference ids may be requested at once.`);
     }
-    const invalidSceneIds = sceneIds.filter((sceneId) => !SAFE_ID.test(sceneId));
-    if (invalidSceneIds.length > 0) return errorResult(`Invalid scene ids: ${invalidSceneIds.join(', ')}`);
-    const duplicateSceneIds = sceneIds.filter((sceneId, index) => sceneIds.indexOf(sceneId) !== index);
-    if (duplicateSceneIds.length > 0) {
-      return errorResult(`Duplicate scene ids: ${[...new Set(duplicateSceneIds)].join(', ')}`);
+    const invalidReferenceIds = referenceIds.filter(
+      (referenceId) => !studioDirectorIdSchemaV2.safeParse(referenceId).success
+    );
+    if (invalidReferenceIds.length > 0) {
+      return errorResult(`Invalid reference ids: ${invalidReferenceIds.join(', ')}`);
+    }
+    const duplicateReferenceIds = referenceIds.filter(
+      (referenceId, index) => referenceIds.indexOf(referenceId) !== index
+    );
+    if (duplicateReferenceIds.length > 0) {
+      return errorResult(`Duplicate reference ids: ${[...new Set(duplicateReferenceIds)].join(', ')}`);
     }
     try {
-      const project = await readProject(config);
-      const unknownSceneIds = sceneIds.filter((sceneId) => project.scenes[sceneId] === undefined);
-      if (unknownSceneIds.length > 0) return errorResult(`Unknown scenes: ${unknownSceneIds.join(', ')}`);
-      const pendingSceneIds = await listPendingReferenceRequestSceneIds(config.referencePendingDir, config.projectId);
-      const alreadyQueued = sceneIds.filter((sceneId) => pendingSceneIds.has(sceneId));
-      const scenesToQueue = sceneIds.filter((sceneId) => !pendingSceneIds.has(sceneId));
-      const results = await Promise.allSettled(
-        scenesToQueue.map((sceneId) =>
-          writeReferenceRequestRecord({
-            pendingDir: config.referencePendingDir,
-            projectId: config.projectId,
-            sceneId,
-          })
+      const snapshot = await readProjectSnapshotV2(config);
+      const project = snapshot.project;
+      const activeReferenceIds = new Set(project.referenceOrder);
+      const unknownReferenceIds = referenceIds.filter(
+        (referenceId) =>
+          !activeReferenceIds.has(referenceId) ||
+          !Object.hasOwn(project.references, referenceId) ||
+          project.references[referenceId]?.id !== referenceId
+      );
+      if (unknownReferenceIds.length > 0) {
+        return errorResult(`Unknown or inactive references: ${unknownReferenceIds.join(', ')}`);
+      }
+      const activePositions = new Map(
+        project.referenceOrder.map((referenceId, index) => [referenceId, index] as const)
+      );
+      if (
+        referenceIds.some(
+          (referenceId, index) =>
+            index > 0 && activePositions.get(referenceId)! <= activePositions.get(referenceIds[index - 1]!)!
+        )
+      ) {
+        return errorResult('Reference ids must follow project reference order.');
+      }
+      const allCharactersApproved = project.referenceOrder.every((referenceId) => {
+        const reference = project.references[referenceId];
+        return reference?.kind !== 'character' || reference.approvedAssetId !== null;
+      });
+      const requestedBackgroundIds = referenceIds.filter(
+        (referenceId) => project.references[referenceId]?.kind === 'background'
+      );
+      if (!allCharactersApproved && requestedBackgroundIds.length > 0) {
+        return errorResult(
+          `Approve every character reference before requesting backgrounds: ${requestedBackgroundIds.join(', ')}`
+        );
+      }
+      const projectAuthority = pendingProjectAuthorityV2(snapshot);
+      await assertPendingRecordProjectAuthorityV2({
+        pendingDir: config.referencePendingDir,
+        projectAuthority,
+        fs: config.fs,
+      });
+      const pendingReferenceIds = await listPendingReferenceRequestIdsV2(
+        config.referencePendingDir,
+        config.projectId,
+        config.fs,
+        projectAuthority
+      );
+      const alreadyQueued = referenceIds.filter((referenceId) => pendingReferenceIds.has(referenceId));
+      if (alreadyQueued.length > 0) {
+        return errorResult(`References already have pending requests: ${alreadyQueued.join(', ')}`);
+      }
+      const alreadyRunning = referenceIds.filter((referenceId) =>
+        Object.values(project.jobs).some(
+          (job) =>
+            job.purpose === 'reference_image' &&
+            job.target.kind === 'reference' &&
+            job.target.referenceId === referenceId &&
+            NONTERMINAL_REFERENCE_JOB_STATUSES.has(job.status)
         )
       );
-      const queued = results.filter((result) => result.status === 'fulfilled').length;
-      const failed = results.flatMap((result, index) =>
-        result.status === 'rejected'
-          ? [
-              `${scenesToQueue[index]} failed: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
-            ]
-          : []
-      );
-      const details = [
-        `Queued ${queued} of ${sceneIds.length} reference image request(s) for user approval`,
-        ...(alreadyQueued.length > 0 ? [`Already queued: ${alreadyQueued.join(', ')}`] : []),
-        ...failed,
-        'Nothing was generated',
-      ];
-      const result = { content: [{ type: 'text' as const, text: `${details.join('. ')}.` }] };
-      return failed.length > 0 ? { ...result, isError: true } : result;
+      if (alreadyRunning.length > 0) {
+        return errorResult(`References already have generation in progress: ${alreadyRunning.join(', ')}`);
+      }
+      await assertProjectSnapshotStatusV2(config, snapshot);
+      await writeReferenceRequestRecordV2({
+        pendingDir: config.referencePendingDir,
+        projectId: config.projectId,
+        referenceIds,
+        fs: config.fs,
+        authorityFence: () => projectSnapshotStatusV2(config, snapshot),
+        projectAuthority,
+      });
+      return {
+        content: [
+          {
+            type: 'text',
+            text: `Queued ${referenceIds.length} reference image request(s) for user approval. Nothing was generated.`,
+          },
+        ],
+      };
     } catch (error) {
       if (error instanceof StudioPendingRecordWriteError) return errorResult(error.message);
-      return errorResult(
-        `Reference requests could not be recorded: ${error instanceof Error ? error.message : String(error)}`
-      );
+      return errorResult(`Reference requests could not be recorded: ${describeError(error)}`);
     }
   };
 }
@@ -521,110 +1556,244 @@ const commandToolResult = (value: unknown): StudioToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(value) }],
 });
 
-export function createStudioApplyEditsHandler(
+export function createStudioApplyEditsHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
-): (input: StudioApplyEditsInput) => Promise<StudioToolResult> {
-  const writer = createStudioDirectorCommandWriter(
+): (input: StudioApplyEditsToolInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
     config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
     deps
   );
-  return async (input) => commandToolResult(await writer.apply(input));
+  return async (input) => {
+    const capabilityRejection = studioApplyEditsCapabilityRejectionV2(input.operations);
+    if (capabilityRejection !== null) return capabilityRejection;
+    const directInput: StudioApplyEditsInputV2 = {
+      expectedRevision: input.expectedRevision,
+      operations: input.operations as StudioDirectorOperationV2[],
+    };
+    if (!studioDirectorToolInputFitsDurableRecordV2(directInput)) {
+      return errorResult('Command input exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.apply(directInput));
+  };
 }
 
-export function createStudioGetCommandStatusHandler(
+export function createStudioApplyFreeFixHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioApplyFreeFixInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => {
+    if (!studioDirectorFreeFixInputFitsDurableRecordV2(input)) {
+      return errorResult('Free-fix input is invalid or exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.applyFreeFix(input));
+  };
+}
+
+export function createStudioProposePaidRecoveryHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioProposePaidRecoveryInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => {
+    if (!studioDirectorPaidRecoveryInputFitsDurableRecordV2(input)) {
+      return errorResult('Paid-recovery input is invalid or exceeds the durable record size cap.');
+    }
+    return commandToolResult(await writer.proposePaidRecovery(input));
+  };
+}
+
+export function createStudioGetCommandStatusHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
 ): (input: StudioGetCommandStatusInput) => Promise<StudioToolResult> {
-  const writer = createStudioDirectorCommandWriter(
+  const writer = createStudioDirectorCommandWriterV2(
     config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
     deps
   );
   return async (input) => commandToolResult(await writer.getStatus(input));
 }
 
-export function registerStudioTools(
-  server: Pick<McpServer, 'tool' | 'registerTool'>,
+export function createStudioGetProjectStatusHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: { detail?: boolean }) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.getProjectStatus(input));
+}
+
+export function createStudioGetProposalHandlerV2(
+  config: StudioServerEnv | null,
+  deps: StudioDirectorCommandWriterDeps = {}
+): (input: StudioGetProposalDirectorInputV2) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  return async (input) => commandToolResult(await writer.getProposal(input));
+}
+
+/** Registers the sole production Beat/Shot catalog after the atomic Task 7 cutover. */
+export function registerStudioToolsV2(
+  server: Pick<McpServer, 'registerTool'>,
   config: StudioServerEnv | null,
   writerDeps: StudioDirectorCommandWriterDeps = {}
 ): void {
-  server.tool(
+  server.registerTool(
     'studio_list_routes',
-    "Read the generation routes available to this project, with their constraints. Call this before proposing scene durations: a scene shorter than the video route's minDurationSeconds cannot be produced. Never assume a limit; read it.",
-    {},
-    createListRoutesHandler(config)
+    {
+      description:
+        'Read the generation routes available to this project and their constraints before drafting shot durations.',
+      inputSchema: z.object({}).strict(),
+    },
+    createListRoutesHandler(config, writerDeps)
   );
-  server.tool(
+  server.registerTool(
     'read_storyboard',
-    "Read this project's brief, sanitized Cast/Look references, governing rules and current script: revision, settings, brief prose, pinned rules, and every scene's editable fields plus its concrete referenceAssetId and whether it has a selected take. Read this BEFORE you draft a script, critique one, propose any change, or answer any question about what this project may or may not show — do not answer from memory. The brief prose is not carried in your context; it lives here, and this call is the freshest and authoritative copy of both the brief and the rules. A rule marked enforced is checked against every visual prompt before anything is generated: a prompt that breaks one is refused and nothing is charged, so satisfy the rules while you write the prompt rather than after it is refused.",
-    {},
-    createReadStoryboardHandler(config)
+    {
+      description:
+        'Read the authoritative schema-5 Beat/Shot storyboard, project references, bin, rules, and current video picture before proposing changes.',
+      inputSchema: z.object({}).strict(),
+    },
+    createReadStoryboardHandlerV2(config)
   );
-  server.tool(
+  server.registerTool(
+    'studio_get_conditioning_frame',
+    {
+      description:
+        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.',
+      inputSchema: studioGetConditioningFrameInputSchemaV2,
+    },
+    createStudioGetConditioningFrameHandlerV2(config)
+  );
+  server.registerTool(
     'studio_request_reference_images',
-    'Request a supporting reference image for one or more scenes. This does NOT generate anything — it queues a request the user approves before any money is spent. One image per scene; do not request a scene that already has one unless the user asked you to replace it.',
-    { sceneIds: z.array(z.string().regex(SAFE_ID)).min(1).max(STUDIO_MAX_REFERENCE_REQUEST_SCENES) },
-    createRequestReferenceImagesHandler(config)
+    {
+      description:
+        'Request candidate images for ordered project reference ids after the reference plan is approved. Character sheets must be approved before backgrounds. This only records a request for user approval and never starts paid generation.',
+      inputSchema: studioRequestReferenceImagesInputSchemaV2,
+    },
+    createRequestReferenceImagesHandlerV2(config)
   );
-  server.tool(
+  server.registerTool(
     'propose_storyboard',
-    'Record a complete replacement script as a proposal the user reviews in Brief. Requires base_revision from your latest read_storyboard. The proposal is a whole-script replacement: include EVERY scene you want to keep, not only changes.',
     {
-      base_revision: z
-        .number()
-        .int()
-        .positive()
-        .describe('The revision you saw in read_storyboard. Re-read if your last read is stale.'),
-      scene_order: z.array(z.string().regex(SAFE_ID)).min(1).max(STUDIO_MAX_SCENES),
-      scenes: z.record(z.string().regex(SAFE_ID), editableSceneSchema),
+      description:
+        'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Author every shootingScript with Shot-specific direction for what is seen and heard, including intended narration, dialogue, ambience, and discrete sound hits; do not repeat project-wide boilerplate. The input schema exposes only proposal-capable authoring operations, including editable project settings and reference prompts, plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
+      inputSchema: studioProposeStoryboardInputSchemaV2,
     },
-    createProposeStoryboardHandler(config)
+    async (input) =>
+      createProposeStoryboardHandlerV2(config)({
+        base_revision: input.base_revision,
+        operations: input.operations as StudioMutationOperationV2[],
+      })
   );
-  server.tool(
+  server.registerTool(
     'propose_brief_rule',
-    'Record one project rule for the user to pin. Use it when the user states a standing constraint ("keep the kits generic", "never show a competitor logo") — offer to pin it, then call this. Requires base_revision from your latest read_storyboard. A rule with forbidden_terms is ENFORCED: main refuses any visual prompt containing one of those words before anything is generated, so only list words that must never appear. Leave forbidden_terms empty for a rule that is guidance you should follow but nothing can check. Offer ONE rule per turn: two rules recorded against the same base_revision cannot both be accepted, because accepting the first moves the project past the revision the second was drafted against. If the user states several constraints at once, record the most important one and offer the rest after they answer. This pins nothing on its own; the user decides.',
     {
-      base_revision: z
-        .number()
-        .int()
-        .positive()
-        .describe('The revision you saw in read_storyboard. Re-read if your last read is stale.'),
-      text: z
-        .string()
-        .min(1)
-        .max(STUDIO_RULE_LIMITS.text)
-        .describe('One sentence, in the user’s own words where possible.'),
-      forbidden_terms: z
-        .array(z.string().min(1).max(STUDIO_RULE_LIMITS.term))
-        .max(STUDIO_RULE_LIMITS.maxTerms)
-        .describe('Words that must never appear in a visual prompt. Empty for an unenforced rule.'),
+      description:
+        'Record one project rule for user review against the latest base_revision. This does not mutate the project.',
+      inputSchema: z
+        .object({
+          base_revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+          text: z.string().min(1).max(STUDIO_RULE_LIMITS.text),
+          forbidden_terms: z.array(z.string().min(1).max(STUDIO_RULE_LIMITS.term)).max(STUDIO_RULE_LIMITS.maxTerms),
+        })
+        .strict(),
     },
-    createProposeBriefRuleHandler(config)
+    createProposeBriefRuleHandlerV2(config)
   );
   server.registerTool(
     'studio_apply_edits',
     {
       description:
-        'Read the current revision first with read_storyboard, then apply one bounded ordered batch of free edits to that exact revision. Use this direct patch contract, not legacy whole-project base_revision/scene_order/scenes: {"expectedRevision":8,"operations":[{"kind":"set_brief","brief":"..."},{"kind":"edit_scene","sceneId":"scene_1","changes":{"title":"..."}},{"kind":"reorder_scenes","sceneOrder":["scene_2","scene_1"]}]}. This never starts paid generation. Validation errors and unconfirmed results must not be retried; for unconfirmed, call studio_get_command_status with the returned commandId.',
-      inputSchema: studioApplyEditsInputSchema,
+        'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. The input schema exposes only direct-capable authoring operations; operational recovery uses studio_apply_free_fix instead. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story, Shot Shooting-script, editable project settings, and set_reference_prompt authoring belong in propose_storyboard for human review. set_reference_label, select_reference_image and remove_reference_image remain renderer-only and never Director-callable. This never starts paid generation. Proposal-only and unavailable operations are invalid arguments; capability preflight remains a fail-closed backstop and no rejected operation reaches command evaluation or is applied. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected or invalid batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
+      inputSchema: studioApplyEditsInputSchemaV2,
     },
-    createStudioApplyEditsHandler(config, writerDeps)
+    async (input) =>
+      createStudioApplyEditsHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        operations: input.operations as StudioMutationOperationV2[],
+      })
+  );
+  server.registerTool(
+    'studio_apply_free_fix',
+    {
+      description:
+        "Apply one exact free recovery only after an immediately preceding studio_get_project_status call with detail: true returned the same free_fix remedy. Copy that result's projectRevision to expectedRevision and copy its exact dependentShotId or jobId. Only retry_conditioning_frame and terminalize_refused_job are accepted. A refused submission is local terminal cleanup only; submission_unknown and duplicate-charge acknowledgement remain owner-only. This creates no quote, authorization, job, generation request, or spend, although a successful conditioning repair may release work the owner already authorized. Never infer or reuse a stale remedy, and read fresh detailed status again afterward. Unconfirmed results must not be retried; call studio_get_command_status with the commandId.",
+      inputSchema: studioApplyFreeFixInputSchemaV2,
+    },
+    async (input) =>
+      createStudioApplyFreeFixHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        recovery: input.recovery as StudioDirectorFreeRecoveryV2,
+      })
+  );
+  server.registerTool(
+    'studio_propose_paid_recovery',
+    {
+      description:
+        "Prepare and record one priced recovery only after an immediately preceding studio_get_project_status call with detail: true returned the exact proposal remedy. Copy that result's projectRevision and complete blocker verbatim. Preparation is free: it creates no authorization, job, provider request, or spend. The resulting card shows the price, and only the person's explicit Confirm button may spend. Never treat a recorded proposal or a typed chat approval as confirmation.",
+      inputSchema: studioProposePaidRecoveryInputSchemaV2,
+    },
+    async (input) =>
+      createStudioProposePaidRecoveryHandlerV2(
+        config,
+        writerDeps
+      )({
+        expectedRevision: input.expectedRevision,
+        blocker: input.blocker as StudioPaidRecoveryBlockerV2,
+      })
+  );
+  server.registerTool(
+    'studio_get_project_status',
+    {
+      description:
+        'Read the fresh derived project pipeline status without writing, generating, or spending. Set detail to true only when per-Shot generation, binding, reference, or conditioning diagnosis is needed.',
+      inputSchema: studioGetProjectStatusInputSchemaV2,
+    },
+    createStudioGetProjectStatusHandlerV2(config, writerDeps)
+  );
+  server.registerTool(
+    'studio_get_proposal',
+    {
+      description:
+        'Read one exact proposal by its complete proposalId. This read never authors the project, generates, authorizes, or spends. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
+      inputSchema: studioGetProposalInputSchemaV2,
+    },
+    createStudioGetProposalHandlerV2(config, writerDeps)
   );
   server.registerTool(
     'studio_get_command_status',
     {
       description:
-        'Read the exact durable or pending status for one commandId. Unconfirmed and indeterminate outcomes must not be retried. For indeterminate, reread canonical state, report uncertainty, and await explicit user direction.',
-      inputSchema: studioGetCommandStatusInputSchema,
+        'Read the exact durable or pending current Director mutation or read-query status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
+      inputSchema: studioGetCommandStatusInputSchemaV2,
     },
-    createStudioGetCommandStatusHandler(config, writerDeps)
+    createStudioGetCommandStatusHandlerV2(config, writerDeps)
   );
 }
 
 async function main() {
   const config = parseStudioServerEnv(process.env);
   const server = new McpServer({ name: BUILTIN_STUDIO_NAME, version: '1.0.0' });
-  registerStudioTools(server, config);
+  registerStudioToolsV2(server, config);
 
   const transport = new StdioServerTransport();
   await server.connect(transport);

@@ -486,7 +486,7 @@ describe('release packaging configuration', () => {
     ]) {
       expect(desktopSource).not.toContain(rscApi);
     }
-  });
+  }, 30_000);
 
   it('uses WePrompt as the visible application identity while preserving compatibility identifiers', () => {
     const rootPackage = readProjectJson<{
@@ -640,6 +640,106 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain('Contents/MacOS/WePrompt');
     expect(workflow).not.toContain('Forge-*-win-*.exe');
     expect(workflow).not.toContain('Contents/MacOS/Forge');
+  });
+
+  it('blocks local pushes and sprint3 pull requests on reviewed Creative Studio coverage', () => {
+    const justfile = readProjectFile('justfile');
+    const workflow = readProjectFile('.github/workflows/sprint3-pr-gate.yml');
+    const selector = readProjectFile('scripts/select-push-tests.js');
+    const pushDependencies = justfile.match(/^push \*ARGS: (.+)$/m)?.[1].split(/\s+/) ?? [];
+
+    /*
+     * Run the real selector and read the leg it chooses. `.md` is NOT a safe proxy for
+     * "documentation" in this repository: the twelve `presentation-templates/<pack>/THEME.md` files are
+     * imported into source with `?raw` and asserted byte-for-byte, and documentation.test.ts reads
+     * seven `docs/design/creative-studio-2-*` files and matches exact sentences out of them, and
+     * the eleven `tests/eval/fixture/corpus*` documents are the KB retrieval regression corpus
+     * whose baseline is computed over their bytes. All three classes must reach the gate; ordinary
+     * prose must still skip it, or the optimisation is pointless.
+     */
+    const legFor = (...files: string[]) =>
+      spawnSync('node', ['scripts/select-push-tests.js', '--classify', ...files], {
+        cwd: projectRoot,
+        encoding: 'utf8',
+      }).stdout.trim();
+    const decisions = {
+      inertProse: legFor('docs/prds/creative-studio/creative-studio-3-bug-list.md'),
+      nothingAtAll: legFor(),
+      shippedTemplateContent: legFor(
+        'packages/desktop/src/process/resources/presentation-templates/business-review/THEME.md'
+      ),
+      testReadDesignDoc: legFor('docs/design/creative-studio-2-programme-plan.md'),
+      testReadGateRecord: legFor('docs/design/creative-studio-2-gates/phase-1.md'),
+      testFixtureCorpus: legFor('tests/eval/fixture/corpus/quy-dinh-bao-mat-thong-tin.md'),
+      sourceFile: legFor('packages/desktop/src/renderer/pages/studio/StudioPage.tsx'),
+      prosePlusSource: legFor('docs/prds/x.md', 'packages/desktop/src/main.ts'),
+    };
+
+    /*
+     * The local push reaches the coverage gate through a selector that skips tests for
+     * documentation-only pushes, rather than depending on the recipe directly. What must stay true
+     * is that any change able to move coverage still runs the reviewed script — so the selector is
+     * held to having exactly one test command, and to deciding on documentation alone.
+     *
+     * An earlier draft of that selector also had a no-coverage middle leg for changes that touched
+     * no coverage-enforced file. That was unsound: deleting a test, or editing a helper a Studio
+     * file imports, moves a manifest file's coverage without touching any manifest file. This
+     * assertion is what caught it.
+     */
+    expect({
+      localPushReachesTestSelector: pushDependencies.includes('test-for-push'),
+      localPushStillRunsRedundantSuite: pushDependencies.includes('test'),
+      localGateRunsReviewedScript: /^test-for-push:\s*\n\s+node scripts\/select-push-tests\.js$/m.test(justfile),
+      /*
+       * Two gates on one machine inflate test durations by one to two orders of magnitude and
+       * manufacture timeouts that pass in isolation seconds later, so the coverage leg is taken
+       * under a machine-wide lock. Structural on purpose, unlike the decisions below: what must
+       * not be lost here is the wiring. That the lock queues rather than fails, and recovers from
+       * a gate killed mid-run, is proven behaviourally in tests/unit/build-scripts/pushGateLock.test.ts.
+       * The documentation leg returns above this line and takes no lock, because it runs no tests
+       * and so contends for nothing.
+       */
+      localGateSerialisesTheCoverageRun: /withPushGateLock\(\{\}, \(\) => execFileSync\(command\[0\]/.test(selector),
+      // The manual recipe runs the same six-minute suite, so it queues behind a push gate rather
+      // than running beside it and manufacturing the timeouts both are trying to avoid. CI is
+      // deliberately not in this: the workflow calls the package script directly, and one runner
+      // has nothing to contend with.
+      manualCoverageRecipeSerialises:
+        /^test-coverage-creative-studio:\s*\n\s+node packages\/shared-scripts\/src\/push-gate-lock\.js bun run test:coverage:creative-studio$/m.test(
+          justfile
+        ),
+      selectorOnlyEverRunsTheReviewedScript:
+        [...selector.matchAll(/bun[^\n]*run['"\s,]+([\w:-]+)/g)].map((match) => match[1]).join() ===
+        'test:coverage:creative-studio',
+      // The skip rule is pinned by BEHAVIOUR, below, not by matching this file's source text. An
+      // earlier version asserted the predicate's exact source line, which a mutation walked
+      // straight around: making `classify` return 'none' unconditionally left the predicate's text
+      // untouched, so every push — source changes included — ran zero tests and this stayed green.
+      selectorDecisions: decisions,
+      pullRequestGateRunsReviewedScript: workflow.includes('if bun run test:coverage:creative-studio 2>&1'),
+      quarantineCanHideCoverageFailure: !workflow.includes(
+        '! grep -Eq \'Coverage for .* does not meet .*threshold\' "$clean"'
+      ),
+    }).toEqual({
+      localPushReachesTestSelector: true,
+      localPushStillRunsRedundantSuite: false,
+      localGateRunsReviewedScript: true,
+      localGateSerialisesTheCoverageRun: true,
+      manualCoverageRecipeSerialises: true,
+      selectorOnlyEverRunsTheReviewedScript: true,
+      selectorDecisions: {
+        inertProse: 'none',
+        nothingAtAll: 'none',
+        shippedTemplateContent: 'coverage',
+        testReadDesignDoc: 'coverage',
+        testReadGateRecord: 'coverage',
+        testFixtureCorpus: 'coverage',
+        sourceFile: 'coverage',
+        prosePlusSource: 'coverage',
+      },
+      pullRequestGateRunsReviewedScript: true,
+      quarantineCanHideCoverageFailure: false,
+    });
   });
 
   it('runs lineage recovery acceptance on architecture-matched native package runners', () => {

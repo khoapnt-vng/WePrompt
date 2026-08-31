@@ -64,6 +64,9 @@ type IMessageVO =
     };
 type IArtifactVO = { type: 'artifact'; id: string; artifact: IConversationArtifact; created_at: number };
 type IProcessedItem = IMessageVO | IArtifactVO;
+export type MessageListInlineItem = { id: string; createdAt: number; content: React.ReactNode };
+type IInlineVO = { type: 'inline'; id: string; content: React.ReactNode; created_at: number };
+type ITimelineItem = IProcessedItem | IInlineVO;
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -106,7 +109,7 @@ const getProcessedItemAnchorId = (item: IProcessedItem): string => {
   return sourceIds[0] || ('id' in item ? item.id : uuid());
 };
 
-const getProcessedItemCreatedAt = (item: IProcessedItem): number => {
+const getProcessedItemCreatedAt = (item: ITimelineItem): number => {
   if ('type' in item && ['file_summary', 'work_summary', 'artifact'].includes(item.type)) {
     return item.created_at;
   }
@@ -274,7 +277,11 @@ const MessageItem: React.FC<{
     prev.showCopyRow === next.showCopyRow
 );
 
-const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }> = ({ emptySlot }) => {
+const MessageList: React.FC<{
+  className?: string;
+  emptySlot?: React.ReactNode;
+  inlineItems?: readonly MessageListInlineItem[];
+}> = ({ emptySlot, inlineItems = [] }) => {
   const list = useMessageList();
   const isMessageListLoading = useMessageListLoading();
   const pagination = useMessagePaginationState();
@@ -435,6 +442,20 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     );
   }, [artifacts, list]);
 
+  const timelineList = useMemo<ITimelineItem[]>(
+    () =>
+      [
+        ...processedList,
+        ...inlineItems.map<IInlineVO>((item) => ({
+          type: 'inline',
+          id: item.id,
+          content: item.content,
+          created_at: item.createdAt,
+        })),
+      ].toSorted((a, b) => getProcessedItemCreatedAt(a) - getProcessedItemCreatedAt(b)),
+    [inlineItems, processedList]
+  );
+
   const activeWorkSummaryId = useMemo(() => {
     if (!isProcessing) return undefined;
     const sourceIndexById = new Map(list.map((message, index) => [message.id, index]));
@@ -534,7 +555,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     hideScrollButton,
   } = useAutoScroll({
     messages: list,
-    itemCount: processedList.length,
+    itemCount: timelineList.length,
     isStreaming: isProcessing,
   });
 
@@ -616,7 +637,7 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     loadEarlierMessagesPreservingScroll,
     pagination.hasMoreBefore,
     pagination.isLoadingBefore,
-    processedList.length,
+    timelineList.length,
   ]);
 
   useEffect(() => {
@@ -730,7 +751,19 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     scrollToBottom('smooth');
   };
 
-  const renderItem = (_index: number, item: (typeof processedList)[0]) => {
+  const renderItem = (_index: number, item: ITimelineItem) => {
+    if (item.type === 'inline') {
+      return (
+        <div
+          className={`${rowWidthClass} min-w-0 message-item px-8px m-t-10px`}
+          data-message-inline-item={item.id}
+          data-studio-director-reviewed-output
+          key={item.id}
+        >
+          {item.content}
+        </div>
+      );
+    }
     const highlighted = matchesTargetMessage(item, highlightedMessageId);
     if ('type' in item && item.type === 'artifact') {
       return (
@@ -782,11 +815,11 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
     );
   };
 
-  if (processedList.length === 0 && isMessageListLoading) {
+  if (timelineList.length === 0 && isMessageListLoading) {
     return <MessageListSkeleton rowWidthClass={rowWidthClass} />;
   }
 
-  if (processedList.length === 0 && emptySlot) {
+  if (timelineList.length === 0 && emptySlot) {
     return <div className='relative flex-1 h-full flex items-center justify-center'>{emptySlot}</div>;
   }
 
@@ -808,8 +841,10 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
           >
             <div ref={setContentRef} data-testid='message-list-content' style={{ overflowAnchor: 'none' }}>
               <div className='h-10px' />
-              {processedList.map((item, index) => (
-                <React.Fragment key={getProcessedItemAnchorId(item) || index}>{renderItem(index, item)}</React.Fragment>
+              {timelineList.map((item, index) => (
+                <React.Fragment key={item.type === 'inline' ? item.id : getProcessedItemAnchorId(item) || index}>
+                  {renderItem(index, item)}
+                </React.Fragment>
               ))}
               <div className='h-20px' />
               {/* Reserved space so a streaming reply fills in below the anchored user

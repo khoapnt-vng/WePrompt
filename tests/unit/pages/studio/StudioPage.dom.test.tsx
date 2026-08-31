@@ -1,5423 +1,9344 @@
-/**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
-  StudioAsset,
-  StudioCommandResult,
-  StudioFitStoryboardOutcome,
-  StudioProposal,
-  StudioReferenceRequest,
-  StudioRendererJob,
-  StudioRendererProject,
-  StudioRenderProgressEvent,
-  StudioRouteCatalog,
-  StudioRouteCatalogEntry,
-  StudioScene,
+  StudioAssetV2,
+  StudioBriefRuleDraft,
+  StudioGenerationBlockV2,
+  StudioGenerationCompositionV2,
+  StudioGenerationCapabilityItemV2,
+  StudioReferenceRequestV2,
+  StudioProjectStatusStageV2,
+  StudioProjectStatusV2,
+  StudioRendererExportCatalogV2,
+  StudioRendererChainStatusV2,
+  StudioRendererJobV2,
+  StudioRendererProjectV2,
+  StudioRendererProposalCatalogV2,
+  StudioRendererProposalV2,
+  StudioRendererReferenceGenerationHandoffV2,
+  StudioRendererSubmissionQuoteV2,
+  StudioRendererWorkspaceStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
-import StudioPage from '@renderer/pages/studio/StudioPage';
-import { buildFirstFramePrompt } from '@/common/types/project/creativeStudioReferencePrompt';
-import { useStudioProject } from '@renderer/pages/studio/hooks';
-import {
-  defaultStudioView,
-  parseStudioView,
-  readLastStudioView,
-  rememberStudioView,
-  resolveStudioEntryView,
-  STUDIO_VIEWS,
-  type StudioView,
-  studioViewPath,
-} from '@renderer/pages/studio/studioPhaseRoute';
+import type {
+  BeatPanelActions,
+  BeatPanelImportResult,
+  BoardActions,
+  CutActions,
+  ReferenceRetainedShotReviewClaim,
+  ReferencesViewActions,
+  WorkspaceMutationCallbacks,
+  WorkspaceProjectMenuProps,
+} from '@/renderer/pages/studio/components/Workspace';
+import type { DirectorProposalChatIntent } from '@/renderer/pages/studio/components/Workspace/DirectorRail';
 
-const bridge = vi.hoisted(() => ({
-  hasUnsavedWork: { provider: vi.fn() },
-  flushUnsavedWork: { provider: vi.fn() },
-  getProject: { invoke: vi.fn() },
-  listProposals: { invoke: vi.fn() },
-  listPendingReferenceRequests: { invoke: vi.fn() },
-  dismissReferenceRequests: { invoke: vi.fn() },
-  listRoutes: { invoke: vi.fn() },
-  updateModelSelection: { invoke: vi.fn() },
-  updateProject: { invoke: vi.fn() },
-  undoBriefRules: { invoke: vi.fn() },
-  updateScene: { invoke: vi.fn() },
-  reorderScenes: { invoke: vi.fn() },
-  proposeStoryboard: { invoke: vi.fn() },
-  chooseAndImportReference: { invoke: vi.fn() },
-  detachBriefReference: { invoke: vi.fn() },
-  renderCut: { invoke: vi.fn() },
-  cancelRender: { invoke: vi.fn() },
-  fitStoryboard: { invoke: vi.fn() },
-  submitScenes: { invoke: vi.fn() },
-  cancelJob: { invoke: vi.fn() },
-  retryJob: { invoke: vi.fn() },
-  retryDownload: { invoke: vi.fn() },
-  selectAsset: { invoke: vi.fn() },
-  listConnectionCandidates: { invoke: vi.fn() },
-  listConnections: { invoke: vi.fn() },
-  validateConnection: { invoke: vi.fn() },
-  saveConnection: { invoke: vi.fn() },
-  removeConnection: { invoke: vi.fn() },
-  projectUpdated: { on: vi.fn() },
-  proposalUpdated: { on: vi.fn() },
-  renderProgress: { on: vi.fn() },
-  turnCompleted: { on: vi.fn() },
-}));
-
-const briefConversationHarness = vi.hoisted(() => ({
-  state: { kind: 'absent' } as const,
-  errorMessageKey: null as string | null,
-  recreate: vi.fn(),
-}));
-
-const studioRuleEvaluationHarness = vi.hoisted(() => ({
-  evaluateStudioRules: vi.fn(),
-}));
-
-vi.mock('@/common', () => ({
-  ipcBridge: {
-    creativeStudio: bridge,
-    conversation: { turnCompleted: bridge.turnCompleted },
-  },
-}));
-vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
-vi.mock('@renderer/pages/studio/components/PhaseShell/phases/brief/useBriefConversation', () => ({
-  useBriefConversation: () => briefConversationHarness,
-}));
-vi.mock('@/common/types/project/creativeStudioRules', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@/common/types/project/creativeStudioRules')>();
-  studioRuleEvaluationHarness.evaluateStudioRules.mockImplementation(actual.evaluateStudioRules);
-  return { ...actual, evaluateStudioRules: studioRuleEvaluationHarness.evaluateStudioRules };
-});
-const ok = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
-const failure = <T,>(): StudioCommandResult<T> => ({
-  ok: false,
-  error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.errors.storage' },
-});
-const stale = <T,>(): StudioCommandResult<T> => ({
-  ok: false,
-  error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
-});
-/** What main answers a submit it refuses outright — `invalid_request` reaches the renderer as this. */
-const invalidPayload = <T,>(): StudioCommandResult<T> => ({
-  ok: false,
-  error: { code: 'invalid_payload', messageKey: 'conversation.creativeStudio.errors.invalidPayload' },
-});
-
-const project = (id = 'project-1', overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
-  schemaVersion: 1,
-  revision: 2,
-  id,
-  name: id === 'project-1' ? 'Launch film' : 'Second film',
-  brief: 'A short launch video',
-  rules: [],
-  ruleListUndo: null,
-  aspectRatio: '16:9',
-  targetDurationSeconds: 15,
-  resolution: '720p',
-  sceneOrder: [],
-  scenes: {},
-  assets: {},
-  jobs: {},
-  routing: {
-    storyboard: null,
-    image: {
-      choiceId: 'choice_image',
-      providerId: 'provider-image',
-      model: 'image-model',
+const mocks = vi.hoisted(() => {
+  type ProjectEventListener = (payload: { projectId: string }) => void;
+  const listeners: {
+    projectUpdated: ProjectEventListener | null;
+    proposalUpdated: ProjectEventListener | null;
+    referenceUpdated: ProjectEventListener | null;
+  } = { projectUpdated: null, proposalUpdated: null, referenceUpdated: null };
+  const closeHandlers: {
+    hasUnsavedWork: (() => { dirtyDraftCount: number }) | null;
+    flushUnsavedWork: (() => Promise<{ saved: boolean }>) | null;
+  } = { hasUnsavedWork: null, flushUnsavedWork: null };
+  const event = (name: keyof typeof listeners) => ({
+    on: vi.fn((listener: ProjectEventListener) => {
+      listeners[name] = listener;
+      return vi.fn(() => {
+        if (listeners[name] === listener) listeners[name] = null;
+      });
+    }),
+  });
+  return {
+    callOrder: [] as string[],
+    listeners,
+    closeHandlers,
+    beatPanelActions: null as BeatPanelActions | null,
+    boardActions: null as BoardActions | null,
+    cutActions: null as CutActions | null,
+    referenceActions: null as ReferencesViewActions | null,
+    workspaceMutations: null as WorkspaceMutationCallbacks | null,
+    projectMenuProps: null as WorkspaceProjectMenuProps | null,
+    workspaceControlsProps: null as null | {
+      onReviewShotReferenceBinding: (shotId: string) => void;
+      projectStatus: StudioProjectStatusV2 | null;
+      projectStatusPending: boolean;
     },
-    video: null,
-  },
-  createdAt: '2026-07-30T00:00:00.000Z',
-  updatedAt: '2026-07-30T00:00:00.000Z',
-  ...overrides,
-});
-
-const scene = (overrides: Partial<StudioScene> = {}): StudioScene => ({
-  id: 'scene-1',
-  title: 'Opening',
-  purpose: 'Introduce the story',
-  visualPrompt: 'A bright studio',
-  narration: '',
-  onScreenText: '',
-  mediaKind: 'image',
-  durationSeconds: 5,
-  referenceAssetId: null,
-  selectedAssetId: null,
-  assetIds: [],
-  jobIds: [],
-  reviewState: 'draft',
-  ...overrides,
-});
-
-const job = (id: string, overrides: Partial<StudioRendererJob> = {}): StudioRendererJob => ({
-  id,
-  projectId: 'project-1',
-  sceneId: 'scene-1',
-  status: 'succeeded',
-  provider: {
-    choiceId: 'choice_image',
-    providerId: 'provider-image',
-    model: 'image-model',
-  },
-  outputAssetIds: [],
-  error: null,
-  canRetryDownload: false,
-  retryOfJobId: null,
-  retryReason: null,
-  duplicateChargeAcknowledged: false,
-  duplicateChargeAcknowledgedAt: null,
-  createdAt: '2026-07-30T00:00:00.000Z',
-  updatedAt: '2026-07-30T00:00:00.000Z',
-  ...overrides,
-});
-
-const asset = (id: string): StudioAsset => ({
-  id,
-  projectId: 'project-1',
-  sceneId: 'scene-1',
-  mediaKind: 'image',
-  mimeType: 'image/png',
-  managedAsset: { collection: 'assets', fileName: `${id}.png` },
-  byteSize: 128,
-  sha256: id.padEnd(64, 'a').slice(0, 64),
-  createdAt: '2026-07-30T00:00:00.000Z',
-});
-
-const briefReferenceAsset = (id = 'brief-cast', overrides: Partial<StudioAsset> = {}): StudioAsset => ({
-  id,
-  projectId: 'project-1',
-  sceneId: null,
-  mediaKind: 'image',
-  mimeType: 'image/png',
-  managedAsset: { collection: 'imports', fileName: `${id}.png` },
-  byteSize: 128,
-  sha256: id.padEnd(64, 'a').slice(0, 64),
-  createdAt: '2026-07-30T00:00:00.000Z',
-  briefReferenceRole: 'cast',
-  briefReferenceLabel: 'Scarf and telescope',
-  ...overrides,
-});
-
-const routes = (): StudioRouteCatalog => ({
-  storyboard: {
-    status: 'ready',
-    selected: { providerId: 'provider-1', model: 'operations-model' },
-    options: [
-      {
-        providerId: 'provider-1',
-        providerName: 'Provider',
-        model: 'operations-model',
-        health: 'available',
+    directorProposalIntent: null as null | ((intent: DirectorProposalChatIntent) => Promise<void>),
+    directorDraftRequest: null as null | { requestId: number; projectId: string; prompt: string },
+    bridge: {
+      getProject: { invoke: vi.fn() },
+      getProjectWorkspace: { invoke: vi.fn() },
+      getProjectStatus: { invoke: vi.fn() },
+      analyzeShotAudio: { invoke: vi.fn() },
+      listProposals: { invoke: vi.fn() },
+      acceptProposal: { invoke: vi.fn() },
+      rejectProposal: { invoke: vi.fn() },
+      listReferenceRequests: { invoke: vi.fn() },
+      decideReferenceRequest: { invoke: vi.fn() },
+      listReferenceGenerationHandoffs: { invoke: vi.fn() },
+      projectWorkspaceStatusFixture: { invoke: vi.fn() },
+      projectWorkspaceChainFixture: { invoke: vi.fn() },
+      listRoutes: { invoke: vi.fn() },
+      getGenerationCapability: { invoke: vi.fn() },
+      listConnectionCandidates: { invoke: vi.fn() },
+      listConnections: { invoke: vi.fn() },
+      validateConnection: { invoke: vi.fn() },
+      saveConnection: { invoke: vi.fn() },
+      importBedAudio: { invoke: vi.fn() },
+      detachBedAudio: { invoke: vi.fn() },
+      setBed: { invoke: vi.fn() },
+      createExport: { invoke: vi.fn() },
+      getFilmExportCapability: { invoke: vi.fn() },
+      getFilmExportStatus: { invoke: vi.fn() },
+      cancelFilmExport: { invoke: vi.fn() },
+      acknowledgeFilmExport: { invoke: vi.fn() },
+      listExports: { invoke: vi.fn() },
+      copyExport: { invoke: vi.fn() },
+      revealExport: { invoke: vi.fn() },
+      prepareSubmission: { invoke: vi.fn() },
+      prepareProjectReferences: { invoke: vi.fn() },
+      confirmSubmission: { invoke: vi.fn() },
+      cancelJob: { invoke: vi.fn() },
+      retryJob: { invoke: vi.fn() },
+      retryDownload: { invoke: vi.fn() },
+      dismissReferenceGenerationHandoff: { invoke: vi.fn() },
+      applyAuthoringBatch: { invoke: vi.fn() },
+      undoLast: { invoke: vi.fn() },
+      retryConditioningFrame: { invoke: vi.fn() },
+      cancelWaitingCascade: { invoke: vi.fn() },
+      editProject: { invoke: vi.fn() },
+      setRules: { invoke: vi.fn() },
+      importSeedStill: { invoke: vi.fn() },
+      importReferenceImage: { invoke: vi.fn() },
+      persistCapturedPoster: { invoke: vi.fn() },
+      parkShot: { invoke: vi.fn() },
+      parkBeat: { invoke: vi.fn() },
+      restoreBeat: { invoke: vi.fn() },
+      restoreShot: { invoke: vi.fn() },
+      reorderBin: { invoke: vi.fn() },
+      hasUnsavedWork: {
+        provider: vi.fn((handler: () => { dirtyDraftCount: number }) => {
+          closeHandlers.hasUnsavedWork = handler;
+          return vi.fn();
+        }),
       },
-    ],
-  },
-  image: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
-  video: { status: 'setup_required', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
-  catalogVersion: 'catalog-1',
-});
-
-const proposal = (): StudioProposal => ({
-  schemaVersion: 1,
-  id: 'proposal_1',
-  projectId: 'project-1',
-  status: 'pending',
-  baseRevision: 2,
-  payload: {
-    kind: 'replace_storyboard',
-    sceneOrder: ['scene-proposed'],
-    scenes: {
-      'scene-proposed': {
-        title: 'Observed proposal',
-        purpose: 'Prove renderer observation',
-        visualPrompt: 'A durable proposal appears',
-        narration: '',
-        onScreenText: '',
-        mediaKind: 'image',
-        durationSeconds: 5,
-        referenceAssetId: null,
+      flushUnsavedWork: {
+        provider: vi.fn((handler: () => Promise<{ saved: boolean }>) => {
+          closeHandlers.flushUnsavedWork = handler;
+          return vi.fn();
+        }),
       },
+      projectUpdated: event('projectUpdated'),
+      proposalUpdated: event('proposalUpdated'),
+      referenceUpdated: event('referenceUpdated'),
     },
-  },
-  createdAt: '2026-08-06T00:00:00.000Z',
-  decidedAt: null,
+  };
 });
 
-const referenceRequest = (sceneId: string, index: number): StudioReferenceRequest => ({
-  schemaVersion: 1,
-  id: `reference_request_${index}`,
-  projectId: 'project-1',
-  sceneId,
-  status: 'pending',
-  createdAt: `2026-08-11T00:00:0${index}.000Z`,
-});
+vi.mock('@/common', () => ({ ipcBridge: { creativeStudio: mocks.bridge } }));
 
-const imageRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
-  choiceId: 'choice_image',
-  providerId: 'provider-image',
-  providerName: 'Image provider',
-  model: 'image-model',
-  integrationLabelKey: 'imageApi',
-  health: 'available',
-  kind: 'image',
-  constraints: {
-    aspectRatios: ['16:9'],
-    resolutions: ['720p'],
-    minDurationSeconds: 1,
-    maxDurationSeconds: 60,
-    supportsFirstFrame: true,
-    maxConditioningImages: 0,
-    silentOutput: true,
-  },
-  ...overrides,
-});
-
-const routesWithImage = (route = imageRoute()): StudioRouteCatalog => ({
-  ...routes(),
-  image: {
-    status: 'ready',
-    selected: {
-      choiceId: route.choiceId,
-      providerId: route.providerId,
-      model: route.model,
+vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/pages/studio/components/Workspace')>();
+  return {
+    ...actual,
+    WorkspaceControls: (props: React.ComponentProps<typeof actual.WorkspaceControls>) => {
+      mocks.beatPanelActions = props.beatPanelActions;
+      mocks.boardActions = props.boardActions;
+      mocks.cutActions = props.cutActions;
+      mocks.referenceActions = props.referenceActions ?? null;
+      mocks.workspaceMutations = props.mutations;
+      mocks.workspaceControlsProps = {
+        onReviewShotReferenceBinding: props.onReviewShotReferenceBinding,
+        projectStatus: props.projectStatus,
+        projectStatusPending: props.projectStatusPending,
+      };
+      return React.createElement(actual.WorkspaceControls, props);
     },
-    selectedRoute: route,
-    selectionIssue: null,
-    options: [route],
-  },
-});
-
-const videoRoute = (overrides: Partial<StudioRouteCatalogEntry> = {}): StudioRouteCatalogEntry => ({
-  ...imageRoute(),
-  choiceId: 'choice_video',
-  providerId: 'provider-video',
-  providerName: 'Video provider',
-  model: 'video-model',
-  integrationLabelKey: 'selfHostedVideoGateway',
-  kind: 'video',
-  ...overrides,
-});
-
-const routesWithVideo = (route = videoRoute()): StudioRouteCatalog => ({
-  ...routesWithImage(),
-  video: {
-    status: 'ready',
-    selected: {
-      choiceId: route.choiceId,
-      providerId: route.providerId,
-      model: route.model,
+    WorkspaceProjectMenu: (props: React.ComponentProps<typeof actual.WorkspaceProjectMenu>) => {
+      mocks.projectMenuProps = props;
+      return React.createElement(actual.WorkspaceProjectMenu, props);
     },
-    selectedRoute: route,
-    selectionIssue: null,
-    options: [route],
-  },
+  };
 });
+
+vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
+  // Applies widthPixels the way the real pane does. A mock that drops the prop would let the shell
+  // stop passing it without a single test noticing.
+  DirectorRail: ({
+    project,
+    reviewedOutputs = [],
+    collapsed,
+    contentId,
+    widthPixels,
+    onProposalIntent,
+    draftRequest,
+  }: {
+    project: StudioRendererProjectV2;
+    reviewedOutputs?: readonly { id: string; content: React.ReactNode; createdAt: number }[];
+    collapsed: boolean;
+    contentId: string;
+    widthPixels?: number;
+    onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
+    draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
+  }) => {
+    mocks.directorProposalIntent = onProposalIntent ?? null;
+    mocks.directorDraftRequest = draftRequest ?? null;
+    return (
+      <aside
+        data-studio-director-rail
+        style={collapsed || widthPixels === undefined ? undefined : { inlineSize: `${widthPixels}px` }}
+      >
+        <div id={contentId} data-studio-director-content aria-hidden={collapsed} inert={collapsed}>
+          <span tabIndex={0} data-studio-director-focus-target>
+            Director focus target
+          </span>
+          <div data-studio-director-conversation-owner>
+            {project.id}
+            <div data-testid='message-list-content'>
+              {reviewedOutputs.map((output) => (
+                <div data-studio-director-reviewed-output={output.id} key={output.id}>
+                  {output.content}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </aside>
+    );
+  },
+}));
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, values?: Record<string, unknown>) =>
+      values === undefined ? key : `${key}:${JSON.stringify(values)}`,
+    i18n: { language: 'en-US', resolvedLanguage: 'en-US' },
+  }),
+}));
+
+import StudioPage from '@/renderer/pages/studio/StudioPage';
+import { railPreferenceKey } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
+import { useStudioProject, type UseStudioProjectResult } from '@/renderer/pages/studio/hooks/useStudioProject';
+
+const ok = <T,>(data: T) => ({ ok: true as const, data });
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
-  const promise = new Promise<T>((resolvePromise) => {
-    resolve = resolvePromise;
+  const promise = new Promise<T>((next) => {
+    resolve = next;
   });
   return { promise, resolve };
 };
 
-/**
- * The queued reference requests as main keeps them: on disk, read back by
- * `listPendingReferenceRequests` and removed by `dismissReferenceRequests`.
- *
- * A fixed `mockResolvedValue` cannot express that, and the difference is exactly what decides
- * whether a remount pays for the same plate a second time — the renderer's de-dup sets are refs
- * inside a shell React remounts per project, so this queue is the only record that outlives it.
- */
-const installReferenceRequestQueue = (
-  initial: readonly StudioReferenceRequest[]
-): {
-  queue: (request: StudioReferenceRequest) => void;
-  remove: (requestId: string) => void;
-  replace: (request: StudioReferenceRequest) => void;
-  pendingIds: () => string[];
-} => {
-  let pending: StudioReferenceRequest[] = [...initial];
-  bridge.listPendingReferenceRequests.invoke.mockImplementation(async () => ok([...pending]));
-  bridge.dismissReferenceRequests.invoke.mockImplementation(
-    async (input: {
-      requestIds: string[];
-      expectedRequests?: Array<Pick<StudioReferenceRequest, 'id' | 'sceneId'>>;
-    }) => {
-      const { requestIds, expectedRequests } = input;
-      if (expectedRequests !== undefined) {
-        const pendingSceneById = new Map(pending.map((request) => [request.id, request.sceneId]));
-        if (
-          expectedRequests.length !== requestIds.length ||
-          expectedRequests.some(
-            (request, index) => request.id !== requestIds[index] || pendingSceneById.get(request.id) !== request.sceneId
-          )
-        ) {
-          return invalidPayload();
-        }
-      }
-      pending = pending.filter((request) => !requestIds.includes(request.id));
-      return ok(true);
-    }
-  );
-  return {
-    queue: (request) => {
-      pending = [...pending, request];
-    },
-    remove: (requestId) => {
-      pending = pending.filter((request) => request.id !== requestId);
-    },
-    replace: (replacement) => {
-      pending = pending.map((request) => (request.id === replacement.id ? replacement : request));
-    },
-    pendingIds: () => pending.map(({ id }) => id),
-  };
-};
+const sameCapabilityItem = (left: StudioGenerationCapabilityItemV2, right: StudioGenerationCapabilityItemV2): boolean =>
+  left.purpose === right.purpose &&
+  left.target.kind === right.target.kind &&
+  (left.target.kind === 'shot' && right.target.kind === 'shot'
+    ? left.target.shotId === right.target.shotId
+    : left.target.kind === 'reference' && right.target.kind === 'reference'
+      ? left.target.referenceId === right.target.referenceId
+      : false);
 
-const renderRoute = (path: string | { pathname: string; state?: unknown } = '/studio/project-1/table') => {
-  const router = createMemoryRouter([{ path: '/studio/:id/:view?', element: <StudioPage /> }], {
-    initialEntries: [path],
+const supportedCapabilityResult = (
+  input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] },
+  catalogVersion = 'catalog_1'
+) =>
+  ok({
+    projectId: input.projectId,
+    projectRevision: input.expectedRevision,
+    catalogVersion,
+    supportedItems: structuredClone(input.items),
+    blocks: [],
   });
-  return { router, view: render(<RouterProvider router={router} />) };
-};
 
-type StudioTestRouter = ReturnType<typeof createMemoryRouter>;
-
-const selectStudioView = async (router: StudioTestRouter, view: StudioView): Promise<void> => {
-  const expectedPath = studioViewPath('project-1', view);
-  fireEvent.click(
-    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-      'button',
-      { name: `conversation.creativeStudio.phase.nav.${view}` }
-    )
-  );
-
-  await waitFor(() => expect(router.state.location.pathname).toBe(expectedPath));
-  await act(async () => {});
-
-  expect(
-    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-      'button',
-      { current: 'page' }
-    )
-  ).toHaveTextContent(`conversation.creativeStudio.phase.nav.${view}`);
-};
-
-type ResizeObservation = {
-  callback: ResizeObserverCallback;
-  disconnect: ReturnType<typeof vi.fn>;
-  observer: ResizeObserver;
-  target: Element | null;
-};
-
-const installResizeObserverMock = (): {
-  observations: ResizeObservation[];
-  resize: (width: number) => void;
-} => {
-  const observations: ResizeObservation[] = [];
-
-  class ResizeObserverMock implements ResizeObserver {
-    readonly observation: ResizeObservation;
-
-    constructor(callback: ResizeObserverCallback) {
-      this.observation = {
-        callback,
-        disconnect: vi.fn(),
-        observer: this,
-        target: null,
-      };
-      observations.push(this.observation);
-    }
-
-    disconnect(): void {
-      this.observation.disconnect();
-    }
-
-    observe(target: Element): void {
-      this.observation.target = target;
-    }
-
-    takeRecords(): ResizeObserverEntry[] {
-      return [];
-    }
-
-    unobserve(): void {}
-  }
-
-  vi.stubGlobal('ResizeObserver', ResizeObserverMock);
-  return {
-    observations,
-    resize: (width) => {
-      const observation = observations[0];
-      if (observation?.target === null || observation === undefined) {
-        throw new Error('Studio layout container was not observed');
+const mockGenerationBlock = (item: StudioGenerationCapabilityItemV2, block: StudioGenerationBlockV2): void => {
+  mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+    async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) => {
+      if (!input.items.some((candidate) => sameCapabilityItem(candidate, item))) {
+        throw new Error(`Capability request omitted blocked item: ${JSON.stringify(item)}`);
       }
-      observation.callback(
-        [{ target: observation.target, contentRect: { width } } as ResizeObserverEntry],
-        observation.observer
-      );
+      const supportedItems = input.items.filter((candidate) => !sameCapabilityItem(candidate, item));
+      return ok({
+        projectId: input.projectId,
+        projectRevision: input.expectedRevision,
+        catalogVersion: 'catalog_1',
+        supportedItems,
+        blocks: [{ block, items: [structuredClone(item)] }],
+      });
+    }
+  );
+};
+
+const project = (): StudioRendererProjectV2 => ({
+  schemaVersion: 5,
+  revision: 3,
+  id: 'project_1',
+  name: 'Launch film',
+  brief: 'A small launch film.',
+  rules: [],
+  briefConversationId: null,
+  aspectRatio: '16:9',
+  targetDurationSeconds: 30,
+  resolution: '720p',
+  boardStyle: null,
+  beatOrder: [],
+  beats: {},
+  shots: {},
+  referencePlanStatus: 'unplanned',
+  referenceOrder: [],
+  references: {},
+  bin: [],
+  bedAssetId: null,
+  spendPolicy: null,
+  imageRouteId: null,
+  videoRouteId: null,
+  assets: {},
+  jobs: {},
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+});
+
+const unassignedReferenceBinding = () => ({
+  status: 'unassigned' as const,
+  characterReferenceIds: [],
+  backgroundReferenceId: null,
+});
+
+const readyReferenceBinding = (characterReferenceIds: string[], backgroundReferenceId: string | null) => ({
+  status: 'ready' as const,
+  characterReferenceIds,
+  backgroundReferenceId,
+});
+
+const testComposition = (
+  target: StudioRendererJobV2['target'],
+  purpose: StudioRendererJobV2['purpose'],
+  input: {
+    projectRevision?: number;
+    referenceInputs?: StudioGenerationCompositionV2['inputs']['referenceInputs'];
+    boardStyle?: StudioGenerationCompositionV2['inputs']['boardStyle'];
+  } = {}
+): StudioGenerationCompositionV2 => {
+  const route = {
+    choiceId: purpose === 'video_take' ? 'route_video' : 'route_image',
+    providerId: 'provider_safe',
+    model: 'model_safe',
+  };
+  const source =
+    target.kind === 'reference'
+      ? {
+          kind: 'project_reference' as const,
+          referenceId: target.referenceId,
+          referenceKind: target.referenceId.includes('background') ? ('background' as const) : ('character' as const),
+          prompt: `Reference prompt for ${target.referenceId}`,
+        }
+      : {
+          kind: 'shot' as const,
+          beatId: `beat_for_${target.shotId}`,
+          story: `Story for ${target.shotId}`,
+          shotId: target.shotId,
+          shootingScript: `Shooting script for ${target.shotId}`,
+        };
+  return {
+    inputs: {
+      schemaVersion: 1,
+      projectRevision: input.projectRevision ?? 3,
+      brief: 'A small launch film.',
+      rules: [],
+      source,
+      purpose,
+      referenceInputs: input.referenceInputs ?? [],
+      aspectRatio: '16:9',
+      resolution: '720p',
+      route,
+      boardStyle: input.boardStyle ?? null,
+      instructionProfile: 'studio_generation_v1',
+    },
+    prompt: `Expanded ${purpose} prompt for ${target.kind === 'shot' ? target.shotId : target.referenceId}`,
+  };
+};
+
+const projectWithHandoffShot = (): StudioRendererProjectV2 => {
+  const value = project();
+  value.beatOrder = ['beat_1'];
+  value.beats.beat_1 = {
+    id: 'beat_1',
+    title: 'Opening',
+    story: 'Open on the hero in bright daylight.',
+    targetSeconds: 4,
+    shotOrder: ['shot_3'],
+  };
+  value.shots.shot_3 = {
+    id: 'shot_3',
+    shootingScript: 'Opening frame',
+    durationSeconds: 4,
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    chainBreak: 'hard_cut',
+    referenceBinding: unassignedReferenceBinding(),
+    seedStillId: null,
+    dismissedSeedStillIds: [],
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: [],
+    jobIds: [],
+  };
+  return value;
+};
+
+const projectWithReferenceHandoff = (): StudioRendererProjectV2 => {
+  const value = projectWithHandoffShot();
+  value.referencePlanStatus = 'planned';
+  value.referenceOrder = ['reference_3'];
+  value.references.reference_3 = {
+    id: 'reference_3',
+    kind: 'character',
+    label: 'Hero',
+    prompt: 'Stable character sheet for the hero',
+    approvedAssetId: null,
+    supersededAssetIds: [],
+    jobIds: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  value.shots.shot_3!.referenceBinding = readyReferenceBinding(['reference_3'], null);
+  return value;
+};
+
+const projectWithCandidateReference = (): StudioRendererProjectV2 => {
+  const value = projectWithReferenceHandoff();
+  value.imageRouteId = 'route_image';
+  value.references.reference_3!.approvedAssetId = 'asset_reference_3';
+  value.references.reference_3!.supersededAssetIds = ['asset_reference_3_old'];
+  return value;
+};
+
+const projectWithRemovableReferenceTakes = (): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1);
+  const reference = value.references.reference_character!;
+  const currentAsset = value.assets.asset_reference_character!;
+  const currentJob = value.jobs.job_reference_character!;
+  const oldAssetId = 'asset_reference_character_old';
+  const oldJobId = 'job_reference_character_old';
+
+  currentAsset.createdAt = '2026-01-01T00:00:02.000Z';
+  currentJob.createdAt = '2026-01-01T00:00:02.000Z';
+  currentJob.updatedAt = '2026-01-01T00:00:02.000Z';
+  value.assets[oldAssetId] = {
+    ...structuredClone(currentAsset),
+    id: oldAssetId,
+    managedAsset: { collection: 'assets', fileName: `${oldAssetId}.png` },
+    sha256: 'e'.repeat(64),
+    producerJobId: oldJobId,
+    compositionDigest: 'f'.repeat(64),
+    createdAt: '2026-01-01T00:00:01.000Z',
+  };
+  value.jobs[oldJobId] = {
+    ...structuredClone(currentJob),
+    id: oldJobId,
+    outputAssetIds: [oldAssetId],
+    outputAssetIdsByRole: { primary: oldAssetId, poster: null },
+    createdAt: '2026-01-01T00:00:01.000Z',
+    updatedAt: '2026-01-01T00:00:01.000Z',
+  };
+  reference.supersededAssetIds = [oldAssetId];
+  reference.jobIds = [oldJobId, currentJob.id];
+  return value;
+};
+
+const projectWithReferenceCandidateJob = (
+  overrides: Partial<Pick<StudioRendererJobV2, 'status' | 'error' | 'canCancel' | 'canRetry' | 'canRetryDownload'>> = {}
+): StudioRendererProjectV2 => {
+  const value = projectWithReferenceHandoff();
+  const jobId = 'job_reference_3';
+  value.imageRouteId = 'route_image';
+  value.references.reference_3!.jobIds.push(jobId);
+  value.jobs[jobId] = {
+    id: jobId,
+    projectId: value.id,
+    target: { kind: 'reference', referenceId: 'reference_3' },
+    status: 'needs_attention',
+    provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+    outputAssetIds: [],
+    outputAssetIdsByRole: { primary: null, poster: null },
+    error: {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    },
+    canCancel: true,
+    canRetry: true,
+    canRetryDownload: false,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    purpose: 'reference_image',
+    composition: testComposition({ kind: 'reference', referenceId: 'reference_3' }, 'reference_image'),
+    spendReceipt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+    ...overrides,
+  };
+  return value;
+};
+
+const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
+  const value = project();
+  for (let index = 0; index < beatCount; index += 1) {
+    const beatId = `beat_${index}`;
+    const shotId = `shot_${index}`;
+    value.beatOrder.push(beatId);
+    value.beats[beatId] = {
+      id: beatId,
+      title: `Beat ${index + 1}`,
+      story: `Story ${index + 1}`,
+      targetSeconds: 4,
+      shotOrder: [shotId],
+    };
+    value.shots[shotId] = {
+      id: shotId,
+      shootingScript: `Shot ${index + 1}`,
+      durationSeconds: 4,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: index === 0 ? 'hard_cut' : 'none',
+      referenceBinding: unassignedReferenceBinding(),
+      seedStillId: null,
+      dismissedSeedStillIds: [],
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    };
+  }
+  return value;
+};
+
+const projectWithGenerationReferences = (
+  beatCount: number,
+  input: { approvedBackground?: boolean; assignedBackgroundShotIds?: readonly string[] } = {}
+): StudioRendererProjectV2 => {
+  const value = projectWithDraftBatch(beatCount);
+  const approvedBackground = input.approvedBackground ?? true;
+  const assignedBackgroundShotIds = new Set(input.assignedBackgroundShotIds ?? []);
+  value.imageRouteId = 'route_image';
+  value.referencePlanStatus = 'planned';
+  value.referenceOrder = ['reference_character', 'reference_background'];
+
+  const addApprovedReference = (referenceId: string, kind: 'character' | 'background', label: string): void => {
+    const assetId = `asset_${referenceId}`;
+    const jobId = `job_${referenceId}`;
+    value.references[referenceId] = {
+      id: referenceId,
+      kind,
+      label,
+      prompt: label,
+      approvedAssetId: assetId,
+      supersededAssetIds: [],
+      jobIds: [jobId],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+    value.assets[assetId] = {
+      id: assetId,
+      projectId: value.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'assets', fileName: `${assetId}.png` },
+      byteSize: 16,
+      sha256: (kind === 'character' ? 'a' : 'b').repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      projectReferenceId: referenceId,
+      generationReferenceAssetIds: [],
+      producerJobId: jobId,
+      compositionDigest: (kind === 'character' ? 'c' : 'd').repeat(64),
+    };
+    value.jobs[jobId] = {
+      id: jobId,
+      projectId: value.id,
+      target: { kind: 'reference', referenceId },
+      status: 'succeeded',
+      provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+      outputAssetIds: [assetId],
+      outputAssetIdsByRole: { primary: assetId, poster: null },
+      error: null,
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      purpose: 'reference_image',
+      composition: testComposition({ kind: 'reference', referenceId }, 'reference_image'),
+      spendReceipt: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+  };
+
+  addApprovedReference('reference_character', 'character', 'Hero');
+  if (approvedBackground) {
+    addApprovedReference('reference_background', 'background', 'City park');
+  } else {
+    value.references.reference_background = {
+      id: 'reference_background',
+      kind: 'background',
+      label: 'City park',
+      prompt: 'City park',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+  }
+  for (let index = 0; index < beatCount; index += 1) {
+    const shotId = `shot_${index}`;
+    value.shots[shotId]!.referenceBinding = readyReferenceBinding(
+      ['reference_character'],
+      assignedBackgroundShotIds.has(shotId) ? 'reference_background' : null
+    );
+  }
+  return value;
+};
+
+const projectWithReferenceDownloadBlocker = (revision = 3): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1);
+  value.revision = revision;
+  const referenceAsset = value.assets.asset_reference_character!;
+  const jobId = 'job_seed_download_failed';
+  value.jobs[jobId] = {
+    ...structuredClone(value.jobs.job_reference_character!),
+    id: jobId,
+    target: { kind: 'shot', shotId: 'shot_0' },
+    status: 'failed',
+    outputAssetIds: [],
+    outputAssetIdsByRole: { primary: null, poster: null },
+    error: {
+      code: 'download_failed',
+      messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+    },
+    canCancel: false,
+    canRetry: false,
+    canRetryDownload: true,
+    purpose: 'seed_still',
+    composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+      projectRevision: revision,
+      referenceInputs: [
+        {
+          referenceId: 'reference_character',
+          kind: 'character',
+          assetId: referenceAsset.id,
+          sha256: referenceAsset.sha256,
+        },
+      ],
+    }),
+  };
+  value.shots.shot_0!.jobIds.push(jobId);
+  return value;
+};
+
+const projectWithRetainedReferenceDownloadBlocker = (
+  ownerKind: 'shot' | 'beat',
+  revision = 3
+): StudioRendererProjectV2 => {
+  const value = projectWithReferenceDownloadBlocker(revision);
+  value.beats.beat_0!.shotOrder = [];
+  if (ownerKind === 'shot') {
+    value.bin = [{ kind: 'shot', beatId: 'beat_0', shotId: 'shot_0', reason: 'lifted' }];
+  } else {
+    value.beatOrder = [];
+    value.beats.beat_0!.shotOrder = ['shot_0'];
+    value.bin = [{ kind: 'beat', beatId: 'beat_0', reason: 'lifted' }];
+  }
+  return value;
+};
+
+const retainedShotReviewClaim = (ownerKind: 'shot' | 'beat'): ReferenceRetainedShotReviewClaim => ({
+  kind: 'download_recovery',
+  recoveryAction: 'restore_shot',
+  referenceId: 'reference_character',
+  assetId: 'asset_reference_character',
+  jobId: 'job_seed_download_failed',
+  createdAt: '2026-01-01T00:00:00.000Z',
+  purpose: 'seed_still',
+  status: 'failed',
+  shotId: 'shot_0',
+  beatId: null,
+  beatPosition: null,
+  shotPosition: null,
+  retainedOwner:
+    ownerKind === 'shot'
+      ? { kind: 'shot', beatId: 'beat_0', shotId: 'shot_0', reason: 'lifted' }
+      : { kind: 'beat', beatId: 'beat_0', reason: 'lifted' },
+});
+
+const projectWithBoardJobs = (shotCount: number, includeJobs = true): StudioRendererProjectV2 => {
+  const value = project();
+  value.boardStyle = 'grey_tone';
+  value.imageRouteId = 'route_image';
+  value.targetDurationSeconds = shotCount * 4;
+  for (let offset = 0; offset < shotCount; offset += 8) {
+    const beatId = `board_beat_${offset / 8 + 1}`;
+    const shotIds = Array.from({ length: Math.min(8, shotCount - offset) }, (_, index) => {
+      const shotNumber = offset + index + 1;
+      const shotId = `board_shot_${String(shotNumber).padStart(2, '0')}`;
+      const jobId = `board_job_${String(shotNumber).padStart(2, '0')}`;
+      value.shots[shotId] = {
+        id: shotId,
+        shootingScript: `Board Shot ${shotNumber}`,
+        durationSeconds: 4,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'hard_cut',
+        referenceBinding: unassignedReferenceBinding(),
+        seedStillId: null,
+        dismissedSeedStillIds: [],
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
+        assetIds: [],
+        jobIds: includeJobs ? [jobId] : [],
+      };
+      if (includeJobs) {
+        value.jobs[jobId] = {
+          id: jobId,
+          projectId: value.id,
+          target: { kind: 'shot', shotId },
+          status: 'queued_local',
+          provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+          outputAssetIds: [],
+          outputAssetIdsByRole: { primary: null, poster: null },
+          error: null,
+          canCancel: true,
+          canRetry: false,
+          canRetryDownload: false,
+          retryOfJobId: null,
+          retryReason: null,
+          duplicateChargeAcknowledged: false,
+          duplicateChargeAcknowledgedAt: null,
+          purpose: 'board_still',
+          composition: testComposition({ kind: 'shot', shotId }, 'board_still', { boardStyle: 'grey_tone' }),
+          spendReceipt: null,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+      }
+      return shotId;
+    });
+    value.beatOrder.push(beatId);
+    value.beats[beatId] = {
+      id: beatId,
+      title: `Board Beat ${offset / 8 + 1}`,
+      story: `Board story ${offset / 8 + 1}`,
+      targetSeconds: shotIds.length * 4,
+      shotOrder: shotIds,
+    };
+  }
+  return value;
+};
+
+const withCancelledBoardJobs = (source: StudioRendererProjectV2, cancelledCount: number): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  value.revision = source.revision + cancelledCount;
+  for (let shotNumber = 1; shotNumber <= cancelledCount; shotNumber += 1) {
+    const jobId = `board_job_${String(shotNumber).padStart(2, '0')}`;
+    const job = value.jobs[jobId];
+    if (job === undefined) continue;
+    job.status = 'cancelled';
+    job.canCancel = false;
+    job.updatedAt = `2026-01-01T00:00:${String(shotNumber).padStart(2, '0')}.000Z`;
+  }
+  return value;
+};
+
+const withCurrentBoardPanels = (
+  source: StudioRendererProjectV2,
+  shotNumbers: readonly number[]
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  for (const shotNumber of shotNumbers) {
+    const suffix = String(shotNumber).padStart(2, '0');
+    const shotId = `board_shot_${suffix}`;
+    const assetId = `board_asset_${suffix}`;
+    const jobId = `board_current_job_${suffix}`;
+    const shot = value.shots[shotId];
+    if (shot === undefined) continue;
+    value.assets[assetId] = {
+      id: assetId,
+      projectId: value.id,
+      shotId,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'boardStills', fileName: `${assetId}.png` },
+      byteSize: 16,
+      sha256: 'b'.repeat(64),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: jobId,
+      compositionDigest: 'd'.repeat(64),
+    };
+    shot.boardAssetId = assetId;
+    shot.assetIds.push(assetId);
+    shot.jobIds.push(jobId);
+    value.jobs[jobId] = {
+      id: jobId,
+      projectId: value.id,
+      target: { kind: 'shot', shotId },
+      status: 'succeeded',
+      provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+      outputAssetIds: [assetId],
+      outputAssetIdsByRole: { primary: assetId, poster: null },
+      error: null,
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+      retryOfJobId: null,
+      retryReason: null,
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      purpose: 'board_still',
+      composition: testComposition({ kind: 'shot', shotId }, 'board_still', {
+        projectRevision: value.revision,
+        boardStyle: value.boardStyle,
+      }),
+      spendReceipt: {
+        purpose: 'board_still',
+        routeId: 'route_image',
+        currency: 'USD',
+        rateUnit: 'generation',
+        rateMinorUnits: 3,
+        durationSeconds: null,
+        generationCount: 1,
+        totalMinorUnits: 3,
+      },
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    };
+  }
+  return value;
+};
+
+const withCurrentVideoTakes = (
+  source: StudioRendererProjectV2,
+  shotNumbers: readonly number[]
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  for (const shotNumber of shotNumbers) {
+    const suffix = String(shotNumber).padStart(2, '0');
+    const shotId = `board_shot_${suffix}`;
+    const assetId = `video_asset_${suffix}`;
+    const shot = value.shots[shotId];
+    if (shot === undefined) continue;
+    value.assets[assetId] = {
+      id: assetId,
+      projectId: value.id,
+      shotId,
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: `${assetId}.mp4` },
+      byteSize: 16,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 4,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      projectReferenceId: null,
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+    };
+    shot.videoAssetId = assetId;
+    shot.assetIds.push(assetId);
+  }
+  return value;
+};
+
+const boardPromotionQuote = (
+  authority: StudioRendererProjectV2,
+  shotIds: readonly string[]
+): StudioRendererSubmissionQuoteV2 => ({
+  id: 'quote_board_promotion',
+  projectId: authority.id,
+  projectRevision: authority.revision,
+  expiresAt: '2026-01-01T01:00:00.000Z',
+  currency: 'USD',
+  baseItems: shotIds.map((shotId) => ({
+    target: { kind: 'shot' as const, shotId },
+    purpose: 'video_take',
+    route: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
+    generationCount: 1,
+    durationSeconds: 4,
+    oneGenerationMinorUnits: 400,
+    requestedTotalMinorUnits: 400,
+    composition: testComposition({ kind: 'shot', shotId }, 'video_take', {
+      projectRevision: authority.revision,
+      boardStyle: authority.boardStyle,
+    }),
+  })),
+  cascadeItems: [],
+  lowerMinorUnits: shotIds.length * 400,
+  upperMinorUnits: shotIds.length * 400,
+  budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 10_000 },
+});
+
+const withBoardAttention = (
+  source: StudioRendererProjectV2,
+  input: { submissionUnknown: boolean; canCancel: boolean }
+): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  const job = value.jobs.board_job_01!;
+  job.status = 'needs_attention';
+  job.error = {
+    code: input.submissionUnknown ? 'submission_unknown' : 'provider_unavailable',
+    messageKey: input.submissionUnknown
+      ? 'conversation.creativeStudio.jobs.errors.submissionUnknown'
+      : 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+  };
+  job.canRetry = true;
+  job.canCancel = input.canCancel;
+  return value;
+};
+
+const recoveryAsset = (id: string, shotId: string | null, mediaKind: StudioAssetV2['mediaKind']): StudioAssetV2 => ({
+  id,
+  projectId: 'project_1',
+  shotId,
+  mediaKind,
+  mimeType: mediaKind === 'video' ? 'video/mp4' : mediaKind === 'audio' ? 'audio/wav' : 'image/png',
+  managedAsset: { collection: mediaKind === 'video' ? 'assets' : 'imports', fileName: `${id}.bin` },
+  byteSize: 16,
+  sha256: 'a'.repeat(64),
+  ...(mediaKind === 'video' || mediaKind === 'audio' ? { durationSeconds: 4 } : {}),
+  createdAt: '2026-01-01T00:00:00.000Z',
+  projectReferenceId: null,
+  generationReferenceAssetIds: [],
+  producerJobId: null,
+  compositionDigest: null,
+});
+
+const projectWithRecovery = (revision = 3): StudioRendererProjectV2 => {
+  const value = project();
+  const shotIds = ['upstream_seed', 'dependent_seed', 'upstream_take', 'dependent_take'];
+  value.revision = revision;
+  value.beatOrder = ['beat_recovery'];
+  value.beats.beat_recovery = {
+    id: 'beat_recovery',
+    title: 'Recovery Beat',
+    story: 'Continue the authorized sequence in warm daylight.',
+    targetSeconds: 16,
+    shotOrder: shotIds,
+  };
+  for (const [index, shotId] of shotIds.entries()) {
+    value.shots[shotId] = {
+      id: shotId,
+      shootingScript: `Recovery Shot ${index + 1}`,
+      durationSeconds: 4,
+      trimInSeconds: null,
+      trimOutSeconds: null,
+      chainBreak: index === 0 || index === 2 ? 'hard_cut' : 'none',
+      referenceBinding: unassignedReferenceBinding(),
+      seedStillId: null,
+      dismissedSeedStillIds: [],
+      boardAssetId: null,
+      supersededBoardAssetIds: [],
+      videoAssetId: null,
+      supersededVideoAssetIds: [],
+      assetIds: [],
+      jobIds: [],
+    };
+  }
+  const seed = recoveryAsset('seed_asset', 'upstream_seed', 'image');
+  const take = recoveryAsset('take_asset', 'upstream_take', 'video');
+  value.assets = { [seed.id]: seed, [take.id]: take };
+  value.shots.upstream_seed!.assetIds.push(seed.id);
+  value.shots.upstream_take!.assetIds.push(take.id);
+  value.shots.upstream_take!.videoAssetId = take.id;
+  return value;
+};
+
+const projectWithAuthorizedSeedLock = (revision = 3): StudioRendererProjectV2 => {
+  const value = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+  value.revision = revision;
+  value.targetDurationSeconds = 8;
+  value.beats.beat_0!.targetSeconds = 8;
+  value.beats.beat_0!.shotOrder.push('shot_locked');
+  value.shots.shot_locked = {
+    ...value.shots.shot_0!,
+    id: 'shot_locked',
+    shootingScript: 'Authorized locked Shot',
+    chainBreak: 'hard_cut',
+    seedStillId: null,
+    dismissedSeedStillIds: [],
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: ['authorized_seed', 'imported_seed'],
+    jobIds: [],
+  };
+  value.assets.authorized_seed = {
+    ...recoveryAsset('authorized_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'assets', fileName: 'authorized_seed.png' },
+    createdAt: '2026-01-01T00:00:01.000Z',
+    sha256: 'd'.repeat(64),
+  };
+  value.assets.imported_seed = {
+    ...recoveryAsset('imported_seed', 'shot_locked', 'image'),
+    managedAsset: { collection: 'imports', fileName: 'imported_seed.png' },
+    createdAt: '2026-01-01T00:00:02.000Z',
+    sha256: 'e'.repeat(64),
+  };
+  return value;
+};
+
+const projectWithAttentionJob = (
+  status: 'needs_attention' | 'queued_remote' | 'failed' | 'cancelled'
+): StudioRendererProjectV2 => {
+  const value = projectWithHandoffShot();
+  value.revision = status === 'needs_attention' ? 3 : 4;
+  value.shots.shot_3!.jobIds = ['job_attention'];
+  value.jobs.job_attention = {
+    id: 'job_attention',
+    projectId: value.id,
+    target: { kind: 'shot', shotId: 'shot_3' },
+    status,
+    provider: { choiceId: 'route_video', providerId: 'provider_safe', model: 'model_safe' },
+    outputAssetIds: [],
+    outputAssetIdsByRole: { primary: null, poster: null },
+    error:
+      status === 'needs_attention'
+        ? {
+            code: 'provider_unavailable',
+            messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+          }
+        : null,
+    canCancel: status === 'needs_attention',
+    canRetry: status === 'needs_attention',
+    canRetryDownload: false,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    purpose: 'video_take',
+    composition: testComposition({ kind: 'shot', shotId: 'shot_3' }, 'video_take', {
+      projectRevision: value.revision,
+    }),
+    spendReceipt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+  return value;
+};
+
+const statusProject = (authority: number | StudioRendererProjectV2): StudioRendererProjectV2 => {
+  if (typeof authority !== 'number') return authority;
+  return { ...project(), revision: authority };
+};
+
+const currentVideoJobs = (authority: StudioRendererProjectV2): StudioRendererWorkspaceStatusV2['currentVideoJobs'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.map((shotId) => {
+      const shot = authority.shots[shotId];
+      return {
+        shotId,
+        jobIds:
+          shot?.id === shotId
+            ? shot.jobIds.filter((jobId) => {
+                const job = authority.jobs[jobId];
+                return (
+                  job?.id === jobId &&
+                  job.target.kind === 'shot' &&
+                  job.target.shotId === shotId &&
+                  job.purpose === 'video_take'
+                );
+              })
+            : [],
+      };
+    });
+  });
+
+const boardPanels = (authority: StudioRendererProjectV2): StudioRendererWorkspaceStatusV2['boardPanels'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.flatMap((shotId) => {
+      const shot = authority.shots[shotId];
+      if (shot?.id !== shotId) return [];
+      const latestBoardJob = shot.jobIds.reduce<StudioRendererJobV2 | null>((latest, jobId) => {
+        const job = authority.jobs[jobId];
+        return job?.id === jobId &&
+          job.projectId === authority.id &&
+          job.target.kind === 'shot' &&
+          job.target.shotId === shot.id &&
+          job.purpose === 'board_still'
+          ? job
+          : latest;
+      }, null);
+      const producer = shot.jobIds
+        .map((jobId) => authority.jobs[jobId])
+        .find(
+          (job) =>
+            job?.id !== undefined &&
+            job.projectId === authority.id &&
+            job.target.kind === 'shot' &&
+            job.target.shotId === shot.id &&
+            job.purpose === 'board_still' &&
+            job.status === 'succeeded' &&
+            job.outputAssetIdsByRole.primary === shot.boardAssetId
+        );
+      return [
+        {
+          shotId,
+          assetId: shot.boardAssetId,
+          producerJobId: producer?.id ?? null,
+          latestJobId: latestBoardJob?.id ?? null,
+          staleCauses: [],
+        },
+      ];
+    });
+  });
+
+const chainBoundaries = (authority: StudioRendererProjectV2): StudioRendererChainStatusV2['boundaries'] =>
+  authority.beatOrder.flatMap((beatId) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.slice(1).flatMap((dependentShotId, index) => {
+      const upstreamShotId = beat.shotOrder[index]!;
+      const upstream = authority.shots[upstreamShotId];
+      const dependent = authority.shots[dependentShotId];
+      if (upstream?.id !== upstreamShotId || dependent?.id !== dependentShotId || dependent.chainBreak === 'hard_cut') {
+        return [];
+      }
+      return [{ upstreamShotId, dependentShotId, status: 'empty' as const, frameAssetId: null }];
+    });
+  });
+
+const recoveryStatus = (authority: number | StudioRendererProjectV2): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(typeof authority === 'number' ? projectWithRecovery(authority) : authority),
+  cascadeProgress: [
+    {
+      dependentShotId: 'dependent_seed',
+      upstreamShotId: 'upstream_seed',
+      eligiblePrimaryAssetIds: ['seed_asset'],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: false,
+      waitingReason: 'choose_seed' as const,
+    },
+    {
+      dependentShotId: 'dependent_take',
+      upstreamShotId: 'upstream_take',
+      eligiblePrimaryAssetIds: ['take_asset'],
+      canRetryConditioningFrame: true,
+      canCancelWaiting: true,
+      waitingReason: 'conditioning_failed' as const,
+    },
+  ],
+});
+
+const workspaceStatus = (source: number | StudioRendererProjectV2, locked = false): StudioRendererWorkspaceStatusV2 => {
+  const authority = statusProject(source);
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    undoTop: null,
+    dirtyShots: [],
+    boardPanels: boardPanels(authority),
+    cascadeProgress: [],
+    currentVideoJobs: currentVideoJobs(authority),
+    parkEligibility: locked
+      ? [
+          {
+            subject: 'shot' as const,
+            action: 'park' as const,
+            beatId: 'beat_1',
+            shotId: 'shot_1',
+            allowed: false,
+            blockers: [{ shotId: 'shot_1', code: 'bound_nonterminal_request' as const }],
+          },
+        ]
+      : [],
+  };
+};
+
+const authorizedSeedLockStatus = (
+  authority: StudioRendererProjectV2,
+  waitingReason: 'choose_seed' | 'cancelled' = 'choose_seed'
+): StudioRendererWorkspaceStatusV2 => ({
+  ...workspaceStatus(authority),
+  cascadeProgress: [
+    {
+      dependentShotId: 'shot_locked',
+      upstreamShotId: 'shot_locked',
+      eligiblePrimaryAssetIds: waitingReason === 'choose_seed' ? ['authorized_seed'] : [],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: waitingReason === 'choose_seed',
+      waitingReason,
+    },
+  ],
+});
+
+const chainStatus = (source: number | StudioRendererProjectV2): StudioRendererChainStatusV2 => {
+  const authority = statusProject(source);
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    conditioningFailures: [],
+    boundaries: chainBoundaries(authority),
+  };
+};
+
+const projectStatus = (
+  authority: StudioRendererProjectV2,
+  options: { readyEmptyViews?: boolean } = {}
+): StudioProjectStatusV2 => {
+  const readyEmptyViews = options.readyEmptyViews ?? true;
+  const positions = authority.beatOrder.flatMap((beatId, beatIndex) => {
+    const beat = authority.beats[beatId];
+    if (beat?.id !== beatId) return [];
+    return beat.shotOrder.flatMap((shotId, shotIndex) => {
+      const shot = authority.shots[shotId];
+      return shot?.id === shotId ? [{ beat, beatIndex, shot, shotIndex }] : [];
+    });
+  });
+  const shotCount = positions.length;
+  const currentTakeCount = positions.filter(({ shot }) => shot.videoAssetId !== null).length;
+  const plannedSeconds = positions.reduce((sum, { shot }) => sum + shot.durationSeconds, 0);
+  const referenceDetails = authority.referenceOrder.flatMap((referenceId) => {
+    const reference = authority.references[referenceId];
+    return reference?.id === referenceId
+      ? [
+          {
+            referenceId,
+            kind: reference.kind,
+            approved: reference.approvedAssetId !== null,
+            latestJob: null,
+          },
+        ]
+      : [];
+  });
+  const referenceBlockers = referenceDetails.flatMap((reference) =>
+    reference.approved
+      ? []
+      : [
+          {
+            cause: 'reference_approval_required' as const,
+            where: { kind: 'reference' as const, referenceId: reference.referenceId, jobId: null },
+            remedy: { kind: 'owner_only' as const, reason: 'approve_reference' as const },
+          },
+        ]
+  );
+  const bindingDetails = positions.map(({ beat, beatIndex, shot, shotIndex }) => {
+    const selectedCount =
+      shot.referenceBinding.characterReferenceIds.length +
+      (shot.referenceBinding.backgroundReferenceId === null ? 0 : 1);
+    return {
+      beat,
+      beatIndex,
+      shot,
+      shotIndex,
+      binding:
+        shot.referenceBinding.status === 'unassigned'
+          ? ({ status: 'unassigned', selectedCount, limit: 3 } as const)
+          : ({ status: 'ready', selectedCount, limit: 3 } as const),
+    };
+  });
+  const bindingBlockers = bindingDetails.flatMap(({ beat, beatIndex, shot, shotIndex, binding }) =>
+    binding.status === 'ready'
+      ? []
+      : [
+          {
+            cause: 'reference_binding_unassigned' as const,
+            where: {
+              kind: 'shot' as const,
+              beatId: beat.id,
+              shotId: shot.id,
+              beatPosition: beatIndex + 1,
+              shotPosition: shotIndex + 1,
+              jobId: null,
+            },
+            remedy: {
+              kind: 'free_fix' as const,
+              op: 'set_shot_reference_binding' as const,
+              shotId: shot.id,
+            },
+          },
+        ]
+  );
+  const stages: StudioProjectStatusStageV2[] = [
+    {
+      id: 'brief',
+      state: authority.brief.trim() === '' ? 'not_started' : 'complete',
+      summary: { stage: 'brief', hasBrief: authority.brief.trim() !== '' },
+      blockers: [],
+    },
+    {
+      id: 'engines',
+      state: 'complete',
+      summary: { stage: 'engines', image: 'ready', video: 'ready' },
+      blockers: [],
+    },
+    {
+      id: 'references',
+      state:
+        referenceDetails.length === 0
+          ? readyEmptyViews
+            ? 'complete'
+            : 'not_started'
+          : referenceBlockers.length === 0
+            ? 'complete'
+            : 'blocked',
+      summary: {
+        stage: 'references',
+        plannedCount: referenceDetails.length,
+        approvedCount: referenceDetails.filter((reference) => reference.approved).length,
+      },
+      blockers: referenceBlockers,
+    },
+    {
+      id: 'storyboard',
+      state: shotCount === 0 && !readyEmptyViews ? 'not_started' : 'complete',
+      summary: {
+        stage: 'storyboard',
+        beatCount: authority.beatOrder.length,
+        shotCount,
+        authoredShotCount: positions.filter(({ shot }) => shot.shootingScript.trim() !== '').length,
+        plannedSeconds,
+        targetSeconds: authority.targetDurationSeconds,
+      },
+      blockers: [],
+    },
+    {
+      id: 'bindings',
+      state:
+        shotCount === 0
+          ? readyEmptyViews
+            ? 'complete'
+            : 'not_started'
+          : bindingBlockers.length === 0
+            ? 'complete'
+            : 'blocked',
+      summary: {
+        stage: 'bindings',
+        readyShotCount: bindingDetails.filter(({ binding }) => binding.status === 'ready').length,
+        shotCount,
+        maxConditioningImages: 3,
+      },
+      blockers: bindingBlockers,
+    },
+    {
+      id: 'production',
+      state:
+        currentTakeCount === 0
+          ? readyEmptyViews || shotCount > 0
+            ? 'in_progress'
+            : 'not_started'
+          : currentTakeCount === shotCount && shotCount > 0
+            ? 'complete'
+            : 'in_progress',
+      summary: { stage: 'production', currentTakeCount, shotCount, activeJobCount: 0 },
+      blockers: [],
+    },
+    {
+      id: 'cut',
+      state:
+        currentTakeCount === 0
+          ? readyEmptyViews
+            ? 'in_progress'
+            : 'not_started'
+          : currentTakeCount === shotCount && shotCount > 0
+            ? 'complete'
+            : 'in_progress',
+      summary: {
+        stage: 'cut',
+        currentTakeCount,
+        shotCount,
+        durationSeconds: currentTakeCount === shotCount && shotCount > 0 ? plannedSeconds : null,
+        targetSeconds: authority.targetDurationSeconds,
+        structurallyPlayable: currentTakeCount === shotCount && shotCount > 0,
+      },
+      blockers: [],
+    },
+  ];
+  return {
+    projectId: authority.id,
+    projectRevision: authority.revision,
+    catalogVersion: 'catalog_1',
+    stages,
+    blockerCount: referenceBlockers.length + bindingBlockers.length,
+    advisories: [],
+    boards: { currentPictureCount: currentTakeCount, shotCount },
+    detail: {
+      shots: bindingDetails.map(({ beat, beatIndex, shot, shotIndex, binding }) => ({
+        beatId: beat.id,
+        shotId: shot.id,
+        beatPosition: beatIndex + 1,
+        shotPosition: shotIndex + 1,
+        seedStillAssetId: shot.seedStillId,
+        videoAssetId: shot.videoAssetId,
+        latestGenerationJob: null,
+        binding,
+        conditioning: null,
+      })),
+      references: referenceDetails,
     },
   };
 };
 
-/**
- * The document's single paid entry point, and the box that holds it with its advisory.
- *
- * Two facts, deliberately expressed as `expect` rather than `throw`: a helper that throws reports a
- * moved control as an opaque error at whichever test called it first, so the diff a reader needs —
- * where the button actually is — never reaches the output. The uniqueness check matters most:
- * `submitScenes` is the only spend in Studio, and a second visible entry point is the bug this
- * whole placement exists to prevent.
- */
-const findBatchAction = async (): Promise<{ batchAction: HTMLElement; batchControl: HTMLElement }> => {
-  await waitFor(() =>
-    expect(
-      document.querySelector('[data-studio-batch-control]'),
-      'Studio must expose one batch-generation action'
-    ).not.toBeNull()
-  );
-  const batchControls = document.querySelectorAll<HTMLElement>('[data-studio-batch-control]');
-  expect(batchControls, 'Studio must expose exactly one batch-generation action').toHaveLength(1);
-  const batchControl = batchControls[0]!;
-  const batchButtons = within(batchControl).getAllByRole('button');
-  expect(batchButtons, 'The batch control must expose exactly one paid action').toHaveLength(1);
-  const batchAction = batchButtons[0]!;
-  expect(
-    batchControl.closest('[data-studio-phase-actions]'),
-    'Batch generation must stay in the top bar rather than inside a view'
-  ).not.toBeNull();
-  return { batchAction, batchControl };
+const projectWorkspaceLoad = (
+  authority: StudioRendererProjectV2,
+  workspace = workspaceStatus(authority),
+  chain = chainStatus(authority)
+) =>
+  ok({
+    status: 'supported' as const,
+    snapshot: { project: authority, workspaceStatus: workspace, chainStatus: chain },
+  });
+
+const mockSupportedProject = (authority: StudioRendererProjectV2): void => {
+  mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: authority }));
+  mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(authority)));
+  mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(authority)));
+  mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority)));
 };
 
-const ProjectHookHarness: React.FC = () => {
-  const { project: currentProject, proposals, refetch } = useStudioProject('project-1');
+const installCompositeProjectWorkspaceRead = (): void => {
+  mocks.bridge.getProjectWorkspace.invoke.mockImplementation(async (input: { projectId: string }) => {
+    const projectResult = await mocks.bridge.getProject.invoke(input);
+    if (projectResult.ok === false) return projectResult;
+    if (projectResult.data.status !== 'supported') return projectResult;
+    const workspaceResult = await mocks.bridge.projectWorkspaceStatusFixture.invoke(input);
+    if (workspaceResult.ok === false) return workspaceResult;
+    const chainResult = await mocks.bridge.projectWorkspaceChainFixture.invoke(input);
+    if (chainResult.ok === false) return chainResult;
+    return ok({
+      status: 'supported' as const,
+      snapshot: {
+        project: projectResult.data.project,
+        workspaceStatus: workspaceResult.data,
+        chainStatus: chainResult.data,
+      },
+    });
+  });
+};
 
+const commit = (revision: number) =>
+  ok({ projectId: 'project_1', projectRevision: revision, createdBeatIds: [], createdShotIds: [] });
+
+const proposal = (): StudioRendererProposalV2 => ({
+  schemaVersion: 5,
+  id: 'proposal_1',
+  projectId: 'project_1',
+  status: 'pending',
+  baseRevision: 3,
+  payload: { kind: 'mutation_batch', operations: [{ kind: 'set_brief', brief: 'A sharper launch film.' }] },
+  createdAt: '2026-01-01T00:00:01.000Z',
+  decidedAt: null,
+  review: {
+    status: 'ready',
+    groups: [
+      {
+        change: 'edited',
+        subject: {
+          kind: 'project',
+          id: 'project_1',
+          title: 'Launch film',
+          position: null,
+          ownerBeatId: null,
+          ownerBeatTitle: null,
+        },
+        fields: [
+          {
+            key: 'brief',
+            before: { kind: 'text', value: 'A small launch film.' },
+            after: { kind: 'text', value: 'A sharper launch film.' },
+          },
+        ],
+      },
+    ],
+  },
+});
+
+const fixedCoverageProposal = (): StudioRendererProposalV2 => ({
+  ...proposal(),
+  id: 'proposal_fixed_coverage',
+  payload: {
+    kind: 'mutation_batch',
+    operations: [
+      {
+        kind: 'apply_coverage',
+        beatId: 'beat_0',
+        shots: [
+          {
+            shotId: 'shot_0',
+            shootingScript: 'Replacement coverage.',
+            durationSeconds: 4,
+            chainBreak: 'hard_cut',
+          },
+        ],
+        fixedShots: [],
+      },
+    ],
+  },
+  review: {
+    status: 'unavailable',
+    groups: [],
+    reason: 'reducer_rejected',
+    refusal: {
+      reasonCode: 'dependency_blocked',
+      operationKind: 'apply_coverage',
+      subjects: [
+        {
+          subject: {
+            kind: 'shot',
+            id: 'shot_0',
+            title: null,
+            position: 1,
+            ownerBeatId: 'beat_0',
+            ownerBeatTitle: 'Beat 1',
+          },
+          fixedReasons: ['shooting_script'],
+        },
+      ],
+    },
+  },
+});
+
+const proposalCatalog = (
+  proposals: StudioRendererProposalV2[] = [],
+  projectRevision = proposals[0]?.review.status === 'stale'
+    ? proposals[0].review.currentRevision
+    : (proposals[0]?.baseRevision ?? 3),
+  projectId = proposals[0]?.projectId ?? 'project_1'
+): StudioRendererProposalCatalogV2 => ({ projectId, projectRevision, proposals });
+
+const pinRuleProposal = (): StudioRendererProposalV2 => ({
+  ...proposal(),
+  id: 'proposal_rule',
+  payload: { kind: 'pin_rule', rule: { text: 'Never show a logo', predicate: null } },
+});
+
+const staleProposal = (candidate: StudioRendererProposalV2, currentRevision: number): StudioRendererProposalV2 => ({
+  ...candidate,
+  review: {
+    status: 'stale',
+    groups: [],
+    baseRevision: candidate.baseRevision,
+    currentRevision,
+  },
+});
+
+const mockProposalUntilDecision = (candidate: StudioRendererProposalV2): void => {
+  mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+    ok(
+      proposalCatalog(
+        mocks.bridge.acceptProposal.invoke.mock.calls.length + mocks.bridge.rejectProposal.invoke.mock.calls.length ===
+          0
+          ? [candidate]
+          : []
+      )
+    )
+  );
+};
+
+const referenceRequest = (): StudioReferenceRequestV2 => ({
+  schemaVersion: 5,
+  id: 'reference_1',
+  projectId: 'project_1',
+  referenceIds: ['reference_1', 'reference_2'],
+  status: 'pending',
+  createdAt: '2026-01-01T00:00:02.000Z',
+});
+
+const handoff = (
+  status: StudioRendererReferenceGenerationHandoffV2['status'] = 'awaiting_spend'
+): StudioRendererReferenceGenerationHandoffV2 => ({
+  handoffId: `handoff_${status}`,
+  requestId: `reference_${status}`,
+  referenceIds: ['reference_3'],
+  decidedAt: '2026-01-01T00:00:03.000Z',
+  status,
+  counts: {
+    queued: status === 'awaiting_spend' ? 1 : 0,
+    running: status === 'running' ? 1 : 0,
+    succeeded: status === 'succeeded' ? 1 : 0,
+    failed: status === 'partially_failed' || status === 'failed' ? 1 : 0,
+  },
+  resultAssetIds: status === 'succeeded' ? ['asset_reference_3'] : [],
+  failedReferenceIds: status === 'partially_failed' || status === 'failed' ? ['reference_3'] : [],
+  completedAt: status === 'awaiting_spend' || status === 'running' ? null : '2026-01-01T00:00:04.000Z',
+});
+
+const LocationProbe = () => {
+  const location = useLocation();
+  return <output data-testid='location'>{location.pathname}</output>;
+};
+
+const ProjectSwitchProbe = () => {
+  const navigate = useNavigate();
   return (
     <>
-      <span>{currentProject?.name}</span>
-      <span>{proposals.map((candidate) => candidate.payload.scenes[candidate.payload.sceneOrder[0]!]?.title)}</span>
-      <button type='button' onClick={() => void refetch()}>
-        Refetch project
-      </button>
+      <button onClick={() => navigate('/studio/project_2/table')}>Switch project</button>
+      <button onClick={() => navigate('/studio/project_1/table')}>Return to first project</button>
+      <button onClick={() => navigate('/studio')}>Return to library</button>
     </>
   );
 };
 
-describe('StudioPage and useStudioProject', () => {
+let latestHookResult: UseStudioProjectResult | null = null;
+
+const HookProbe: React.FC<{ projectId?: string }> = ({ projectId }) => {
+  latestHookResult = useStudioProject(projectId);
+  return <output data-testid='hook-state'>{latestHookResult.loadState}</output>;
+};
+
+const attachedProject = () => ({ ...project(), briefConversationId: 'conversation_director' });
+
+const renderStudio = (path = '/studio/project_1/table') =>
+  render(
+    <MemoryRouter initialEntries={[path]}>
+      <Routes>
+        <Route
+          path='/studio/:id/:view?'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+            </>
+          }
+        />
+        <Route
+          path='/studio'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
+  );
+
+const renderStudioWithProjectSwitch = () =>
+  render(
+    <MemoryRouter initialEntries={['/studio/project_1/table']}>
+      <Routes>
+        <Route
+          path='/studio/:id/:view?'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
+        <Route
+          path='/studio'
+          element={
+            <>
+              <StudioPage />
+              <LocationProbe />
+              <ProjectSwitchProbe />
+            </>
+          }
+        />
+      </Routes>
+    </MemoryRouter>
+  );
+
+const MORE = 'common.more';
+const BRIEF_RULES_TITLE = 'conversation.creativeStudio.workspace.controls.briefAndRulesTitle';
+const NAME = 'conversation.creativeStudio.workspace.controls.name';
+const BRIEF = 'conversation.creativeStudio.workspace.controls.brief';
+const RESOLUTION = 'conversation.creativeStudio.workspace.controls.resolution';
+const IMAGE_ROUTE = 'conversation.creativeStudio.workspace.controls.imageRoute';
+const VIDEO_ROUTE = 'conversation.creativeStudio.workspace.controls.videoRoute';
+const RULE_TEXT = 'conversation.creativeStudio.rules.textLabel';
+const RULE_TERMS = 'conversation.creativeStudio.rules.termsLabel';
+
+const openProjectDialog = async (title: typeof BRIEF_RULES_TITLE): Promise<HTMLElement> => {
+  fireEvent.click(await screen.findByRole('button', { name: MORE }));
+  const menu = await screen.findByRole('menu');
+  fireEvent.click(within(menu).getByRole('menuitem', { name: title }));
+  return screen.findByRole('dialog', { name: title });
+};
+
+const closeProjectDialog = async (dialog: HTMLElement, title: string): Promise<void> => {
+  fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+  await waitFor(() => expect(screen.queryByRole('dialog', { name: title })).toBeNull());
+};
+
+const expectProjectFormsAbsentFromMain = (view: 'table' | 'board' | 'cut'): void => {
+  const main = document.querySelector<HTMLElement>(`main[data-studio-view="${view}"]`);
+  expect(main).not.toBeNull();
+  expect(within(main!).queryByLabelText(NAME)).toBeNull();
+  expect(within(main!).queryByLabelText(BRIEF)).toBeNull();
+};
+
+const seedWorkspaceDrafts = (
+  entries: Record<string, { baseValue: unknown; value: unknown }>,
+  projectId = 'project_1',
+  sourceRevision = 3
+): void => {
+  window.sessionStorage.setItem(
+    `aionui:creative-studio:v3:workspace-drafts:${projectId}`,
+    JSON.stringify({
+      version: 3,
+      projectId,
+      sourceRevision,
+      entries,
+      selection: { selectedBeatId: null, selectedShotIds: [], anchorShotId: null },
+    })
+  );
+};
+
+const capturedBeatPanelActions = (): BeatPanelActions => {
+  expect(mocks.beatPanelActions).not.toBeNull();
+  return mocks.beatPanelActions!;
+};
+
+const capturedBoardActions = (): BoardActions => {
+  expect(mocks.boardActions).not.toBeNull();
+  return mocks.boardActions!;
+};
+
+const capturedCutActions = (): CutActions => {
+  expect(mocks.cutActions).not.toBeNull();
+  return mocks.cutActions!;
+};
+
+const capturedReferenceActions = (): ReferencesViewActions => {
+  expect(mocks.referenceActions).not.toBeNull();
+  return mocks.referenceActions!;
+};
+
+const capturedWorkspaceMutations = (): WorkspaceMutationCallbacks => {
+  expect(mocks.workspaceMutations).not.toBeNull();
+  return mocks.workspaceMutations!;
+};
+
+const capturedProjectMenuProps = (): WorkspaceProjectMenuProps => {
+  expect(mocks.projectMenuProps).not.toBeNull();
+  return mocks.projectMenuProps!;
+};
+
+const capturedDirectorProposalIntent = (): ((intent: DirectorProposalChatIntent) => Promise<void>) => {
+  expect(mocks.directorProposalIntent).not.toBeNull();
+  return mocks.directorProposalIntent!;
+};
+
+const expectSuccessfulBeatPanelAction = async (invoke: () => Promise<boolean>): Promise<void> => {
+  let result: boolean | undefined;
+  await act(async () => {
+    result = await invoke();
+  });
+  expect(result).toBe(true);
+};
+
+const invokeBeatPanelImport = async (invoke: () => Promise<BeatPanelImportResult>): Promise<BeatPanelImportResult> => {
+  let result: BeatPanelImportResult | undefined;
+  await act(async () => {
+    result = await invoke();
+  });
+  return result!;
+};
+
+const invokeStudioAction = async <Result,>(invoke: () => Promise<Result>): Promise<Result> => {
+  let result!: Result;
+  await act(async () => {
+    result = await invoke();
+  });
+  return result;
+};
+
+/**
+ * This file renders the whole Studio page and drives it through real navigation, so its cases are
+ * dominated by render and effect settling rather than by their assertions. Measured with the
+ * coverage config: its tests run ~26s in isolation but ~155s inside the full suite, a 5.4x
+ * inflation. Under that load its heaviest case — the Table/Board/Cut navigation check, 3.4s-4.7s
+ * quiet — exceeded the 10s global testTimeout and failed the push gate.
+ *
+ * The ceiling is set on the suite rather than on that one case deliberately: which case loses the
+ * race under load is arbitrary, so a per-case ceiling derived from isolated timings would only
+ * move the failure. It is a hang-detector, not a performance budget — a genuine hang still fails,
+ * just later, and no assertion is weakened by it. See the fake-toolchain note in
+ * tests/unit/assets/prepareAioncoreActionsArtifact.test.ts for the same reasoning.
+ */
+const STUDIO_PAGE_DOM_TIMEOUT_MS = 60_000;
+
+describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    window.sessionStorage.clear();
+    // The rail's collapse choice and width persist per project and view, so a test that toggles the
+    // rail would otherwise decide the starting state of every test after it.
     window.localStorage.clear();
-    window.sessionStorage.clear();
-    vi.spyOn(globalThis.crypto, 'randomUUID').mockReturnValue('11111111-1111-4111-8111-111111111111');
-    bridge.getProject.invoke.mockResolvedValue(ok(project()));
-    bridge.listProposals.invoke.mockResolvedValue(ok([]));
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([]));
-    bridge.dismissReferenceRequests.invoke.mockResolvedValue(ok(true));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
-    bridge.updateModelSelection.invoke.mockResolvedValue(ok(project()));
-    bridge.updateProject.invoke.mockImplementation(async () => ok(project()));
-    bridge.undoBriefRules.invoke.mockImplementation(async () => ok(project()));
-    bridge.updateScene.invoke.mockImplementation(async () => ok(project()));
-    bridge.reorderScenes.invoke.mockImplementation(async () => ok(project()));
-    bridge.proposeStoryboard.invoke.mockImplementation(async () => ok(project()));
-    bridge.chooseAndImportReference.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
-    bridge.detachBriefReference.invoke.mockResolvedValue(failure());
-    bridge.renderCut.invoke.mockResolvedValue(ok({ assetId: 'render-1', missingSceneIds: [] }));
-    bridge.cancelRender.invoke.mockResolvedValue(ok({ cancelled: true }));
-    bridge.fitStoryboard.invoke.mockResolvedValue(
-      ok<StudioFitStoryboardOutcome>({
-        status: 'already_matches',
+    latestHookResult = null;
+    mocks.beatPanelActions = null;
+    mocks.callOrder.length = 0;
+    mocks.listeners.projectUpdated = null;
+    mocks.listeners.proposalUpdated = null;
+    mocks.listeners.referenceUpdated = null;
+    mocks.bridge.projectUpdated.on.mockImplementation((listener) => {
+      mocks.listeners.projectUpdated = listener;
+      return vi.fn(() => {
+        if (mocks.listeners.projectUpdated === listener) mocks.listeners.projectUpdated = null;
+      });
+    });
+    mocks.bridge.proposalUpdated.on.mockImplementation((listener) => {
+      mocks.listeners.proposalUpdated = listener;
+      return vi.fn(() => {
+        if (mocks.listeners.proposalUpdated === listener) mocks.listeners.proposalUpdated = null;
+      });
+    });
+    mocks.bridge.referenceUpdated.on.mockImplementation((listener) => {
+      mocks.listeners.referenceUpdated = listener;
+      return vi.fn(() => {
+        if (mocks.listeners.referenceUpdated === listener) mocks.listeners.referenceUpdated = null;
+      });
+    });
+    mocks.closeHandlers.hasUnsavedWork = null;
+    mocks.closeHandlers.flushUnsavedWork = null;
+    mocks.boardActions = null;
+    mocks.cutActions = null;
+    mocks.referenceActions = null;
+    mocks.workspaceMutations = null;
+    mocks.projectMenuProps = null;
+    mocks.workspaceControlsProps = null;
+    mocks.directorProposalIntent = null;
+    mocks.directorDraftRequest = null;
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog()));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(project())));
+    mocks.bridge.analyzeShotAudio.invoke.mockImplementation(
+      async (input: {
+        projectId: string;
+        expectedRevision: number;
+        shots: Array<{ shotId: string; assetId: string }>;
+      }) =>
+        ok({
+          projectId: input.projectId,
+          projectRevision: input.expectedRevision,
+          profile: 'effective-loudness-v1' as const,
+          shots: input.shots.map(({ shotId, assetId }) => ({
+            shotId,
+            assetId,
+            status: 'unavailable' as const,
+            meanVolumeDbfs: null,
+            peakVolumeDbfs: null,
+          })),
+        })
+    );
+    installCompositeProjectWorkspaceRead();
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+        supportedCapabilityResult(input)
+    );
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(ok([]));
+    mocks.bridge.listConnections.invoke.mockResolvedValue(ok({ integrations: [], connections: [] }));
+    mocks.bridge.validateConnection.invoke.mockResolvedValue(ok({}));
+    mocks.bridge.saveConnection.invoke.mockResolvedValue(ok({}));
+    mocks.bridge.listExports.invoke.mockResolvedValue(ok({ revision: 1, artifacts: [] }));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.undoLast.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.retryConditioningFrame.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.setRules.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.importSeedStill.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.importBedAudio.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 4 }));
+    mocks.bridge.setBed.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.createExport.invoke.mockResolvedValue(ok({ revision: 2, artifacts: [] }));
+    mocks.bridge.getFilmExportCapability.invoke.mockResolvedValue(
+      ok({ status: 'ready', encoder: 'h264_videotoolbox' })
+    );
+    mocks.bridge.getFilmExportStatus.invoke.mockResolvedValue(ok({ status: 'idle' }));
+    mocks.bridge.cancelFilmExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.acknowledgeFilmExport.invoke.mockResolvedValue(ok({ status: 'acknowledged' }));
+    mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' }));
+    mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' }));
+    mocks.bridge.parkShot.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.parkBeat.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.restoreBeat.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.restoreShot.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.reorderBin.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.prepareProjectReferences.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'invalid_prepare_request', messageKey: 'native.prepareReferencesFailed' },
+    });
+    mocks.bridge.dismissReferenceGenerationHandoff.invoke.mockResolvedValue(
+      ok({ status: 'dismissed', completedAt: '2026-01-01T00:00:05.000Z' })
+    );
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: { ...proposal(), status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
         project: project(),
-        changedSceneIds: [],
-        lockedSceneIds: [],
+        applied: true,
       })
     );
-    bridge.submitScenes.invoke.mockResolvedValue(ok([]));
-    bridge.cancelJob.invoke.mockResolvedValue(failure());
-    bridge.retryJob.invoke.mockResolvedValue(failure());
-    bridge.retryDownload.invoke.mockResolvedValue(failure());
-    bridge.selectAsset.invoke.mockResolvedValue(failure());
-    bridge.listConnectionCandidates.invoke.mockResolvedValue(ok([]));
-    bridge.listConnections.invoke.mockResolvedValue(ok([]));
-    bridge.validateConnection.invoke.mockResolvedValue(failure());
-    bridge.saveConnection.invoke.mockResolvedValue(failure());
-    bridge.removeConnection.invoke.mockResolvedValue(failure());
-    bridge.projectUpdated.on.mockReturnValue(() => {});
-    bridge.proposalUpdated.on.mockReturnValue(() => {});
-    bridge.renderProgress.on.mockReturnValue(() => {});
-    bridge.turnCompleted.on.mockReturnValue(() => {});
-    bridge.hasUnsavedWork.provider.mockReturnValue(() => {});
-    bridge.flushUnsavedWork.provider.mockReturnValue(() => {});
-    briefConversationHarness.errorMessageKey = null;
-  });
-
-  afterEach(() => {
-    window.sessionStorage.clear();
-    vi.unstubAllGlobals();
-    vi.restoreAllMocks();
-  });
-
-  describe('Studio view routes', () => {
-    it.each([...STUDIO_VIEWS])('accepts %s as a canonical Studio view', (view) => {
-      expect(parseStudioView(view)).toBe(view);
-    });
-
-    // The retired phase vocabulary is rejected, not remapped: it is what real localStorage values
-    // and real bookmarks still carry, and the graceful path for them is the entry redirect below.
-    it.each([undefined, '', 'bogus', 'TABLE', 'brief', 'write', 'produce', 'review'])(
-      'rejects %s as a Studio view',
-      (view) => {
-        expect(parseStudioView(view)).toBeNull();
-      }
+    mocks.bridge.rejectProposal.invoke.mockResolvedValue(
+      ok({ ...proposal(), status: 'rejected', decidedAt: '2026-01-01T00:00:05.000Z' })
     );
-
-    it('encodes project ids in canonical view paths', () => {
-      expect(studioViewPath('project / 1', 'cut')).toBe('/studio/project%20%2F%201/cut');
-    });
-
-    it('treats unavailable storage as no saved Studio view', () => {
-      const inaccessibleStorage = {
-        getItem: () => {
-          throw new Error('storage unavailable');
+    mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue(
+      ok({
+        schemaVersion: 5,
+        requestId: 'reference_1',
+        projectId: 'project_1',
+        decidedAt: '2026-01-01T00:00:05.000Z',
+        outcome: {
+          kind: 'generation_gate',
+          handoffId: 'handoff_open',
+          referenceIds: ['reference_1', 'reference_2'],
         },
-      } as Storage;
+      })
+    );
+  });
 
-      expect(readLastStudioView('project-1', inaccessibleStorage)).toBeNull();
-    });
+  it('requests the exact ordered capability matrix for every Shot and semantic reference', async () => {
+    const authority = projectWithGenerationReferences(2);
+    mockSupportedProject(authority);
 
-    it('does not throw when remembering a Studio view fails', () => {
-      const inaccessibleStorage = {
-        setItem: () => {
-          throw new Error('quota exceeded');
-        },
-      } as Storage;
+    render(<HookProbe projectId='project_1' />);
 
-      expect(() => rememberStudioView('project-1', 'table', inaccessibleStorage)).not.toThrow();
-    });
-
-    it('opens a project on Table', () => {
-      expect(defaultStudioView()).toBe('table');
-    });
-
-    it('prefers the saved Studio view over the default', () => {
-      window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'cut');
-
-      expect(resolveStudioEntryView('project-1')).toBe('cut');
-    });
-
-    it('falls back to the default when the saved value is a retired phase name', () => {
-      window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'produce');
-
-      expect(resolveStudioEntryView('project-1')).toBe('table');
-    });
-
-    it('falls back to Table when the saved view is the retired Brief route', () => {
-      window.localStorage.setItem('aionui:creative-studio:last-view:project-1', 'brief');
-
-      expect(resolveStudioEntryView('project-1')).toBe('table');
-    });
-
-    it('opens the Brief drawer over Table only when creation supplies the renderer intent', async () => {
-      const { router } = renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-
-      const dialog = await screen.findByRole('dialog', {
-        name: 'conversation.creativeStudio.phase.brief.title',
-      });
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-      expect(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          { current: 'page' }
-        )
-      ).toHaveTextContent('conversation.creativeStudio.phase.nav.table');
-    });
-
-    it('flushes a just-typed brief before closing the drawer', async () => {
-      renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-      const dialog = await screen.findByRole('dialog', {
-        name: 'conversation.creativeStudio.phase.brief.title',
-      });
-      const brief = within(dialog).getByLabelText('conversation.creativeStudio.project.brief');
-
-      fireEvent.change(brief, { target: { value: 'A last-second drawer edit' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
-
-      await waitFor(() =>
-        expect(bridge.updateProject.invoke).toHaveBeenCalledWith(
-          expect.objectContaining({ brief: 'A last-second drawer edit' })
-        )
-      );
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    });
-
-    it.each([...STUDIO_VIEWS])('renders the Studio page at the %s view route', async (view) => {
-      renderRoute(`/studio/project-1/${view}`);
-
-      expect(await screen.findByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
-    });
-
-    it('remembers a directly routed Cut view for the next project entry', async () => {
-      const firstVisit = renderRoute('/studio/project-1/cut');
-      await screen.findByRole('heading', {
-        level: 2,
-        name: 'conversation.creativeStudio.phase.review.title',
-      });
-      await waitFor(() => expect(readLastStudioView('project-1')).toBe('cut'));
-      firstVisit.view.unmount();
-
-      const { router } = renderRoute('/studio/project-1');
-
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/cut'));
-    });
-
-    it.each([
-      ['table', 'conversation.creativeStudio.phase.write.title', null],
-      ['board', 'conversation.creativeStudio.phase.produce.connectEngine', null],
-      [
-        'cut',
-        'conversation.creativeStudio.phase.review.title',
-        'conversation.creativeStudio.phase.review.handoffDescription',
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledOnce());
+    expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledWith({
+      projectId: authority.id,
+      expectedRevision: authority.revision,
+      items: [
+        { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
+        { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'board_still' },
+        { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'video_take' },
+        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' },
+        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'board_still' },
+        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+        { target: { kind: 'reference', referenceId: 'reference_character' }, purpose: 'reference_image' },
+        { target: { kind: 'reference', referenceId: 'reference_background' }, purpose: 'reference_image' },
       ],
-    ])('renders the localized %s view heading and guidance', async (view, heading, guidance) => {
-      renderRoute(`/studio/project-1/${view}`);
-
-      expect(await screen.findByRole('heading', { level: 2, name: heading })).toBeInTheDocument();
-      if (guidance !== null) expect(screen.getByText(guidance)).toBeInTheDocument();
     });
-
-    it('skips missing scene ids instead of crashing the Studio shell', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(
-          project('project-1', {
-            sceneOrder: [opening.id, 'missing-scene'],
-            scenes: { [opening.id]: opening },
-          })
-        )
-      );
-
-      renderRoute('/studio/project-1/cut');
-
-      expect(
-        await screen.findByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' })
-      ).toBeInTheDocument();
-    });
-
-    it('renders a missing-asset Review slate without claiming slates are handed off', async () => {
-      const missingScene = scene({ title: 'Missing close', durationSeconds: 7 });
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(
-          project('project-1', {
-            targetDurationSeconds: missingScene.durationSeconds,
-            sceneOrder: [missingScene.id],
-            scenes: { [missingScene.id]: missingScene },
-            cuts: {
-              'cut-1': {
-                id: 'cut-1',
-                name: 'Launch film',
-                orderMode: 'storyboard',
-                clipOrder: [],
-                clips: {},
-              },
-            },
-            activeCutId: 'cut-1',
-          })
-        )
-      );
-      renderRoute('/studio/project-1/cut');
-
-      const preview = await screen.findByRole('region', { name: 'conversation.creativeStudio.preview.title' });
-      expect(within(preview).getByText('Missing close')).toBeVisible();
-      expect(within(preview).getByText('conversation.creativeStudio.scene.durationSeconds')).toBeVisible();
-      expect(within(preview).getByText('conversation.creativeStudio.phase.review.slateDescription')).toBeVisible();
-      expect(within(preview).getByText('conversation.creativeStudio.phase.review.excludedFromHandoff')).toBeVisible();
-      expect(screen.getByText('conversation.creativeStudio.phase.review.handoffDescription')).toBeVisible();
-      expect(screen.queryByText('conversation.creativeStudio.export.body')).toBeNull();
-    });
-
-    it('renders one localized view switch with the routed view current', async () => {
-      renderRoute('/studio/project-1/table');
-
-      const viewSwitch = await screen.findByRole('navigation', {
-        name: 'conversation.creativeStudio.phase.nav.viewsLabel',
-      });
-      const actions = within(viewSwitch).getAllByRole('button');
-
-      expect(actions).toHaveLength(STUDIO_VIEWS.length);
-      for (const view of STUDIO_VIEWS) {
-        expect(
-          within(viewSwitch).getByRole('button', {
-            name: `conversation.creativeStudio.phase.nav.${view}`,
-          })
-        ).toBeVisible();
-      }
-      expect(within(viewSwitch).getByRole('button', { current: 'page' })).toHaveTextContent(
-        'conversation.creativeStudio.phase.nav.table'
-      );
-      // A switch has no sequence to be part of, so no segment claims a position in one.
-      expect(within(viewSwitch).queryByRole('button', { current: 'step' })).not.toBeInTheDocument();
-    });
-
-    it('shares one measured Studio layout across every view without observing the viewport', async () => {
-      const { observations, resize } = installResizeObserverMock();
-      const { router, view } = renderRoute('/studio/project-1/table');
-
-      await screen.findByRole('navigation', {
-        name: 'conversation.creativeStudio.phase.nav.viewsLabel',
-      });
-      expect(observations).toHaveLength(1);
-      const layoutRoot = observations[0]!.target;
-      expect(layoutRoot).toHaveAttribute('data-studio-layout-root');
-      expect(layoutRoot).not.toBe(document.documentElement);
-      expect(layoutRoot).not.toBe(document.body);
-
-      act(() => resize(1121));
-      expect(layoutRoot).toHaveAttribute('data-layout', 'inline');
-
-      const headingKeys: Record<StudioView, string> = {
-        table: 'conversation.creativeStudio.phase.write.title',
-        board: 'conversation.creativeStudio.phase.produce.connectEngine',
-        cut: 'conversation.creativeStudio.phase.review.title',
-      };
-      const expectSharedViewLayout = async (target: StudioView): Promise<void> => {
-        if (router.state.location.pathname !== `/studio/project-1/${target}`) {
-          await selectStudioView(router, target);
-          await waitFor(() => expect(router.state.location.pathname).toBe(`/studio/project-1/${target}`));
-        }
-        const heading = await screen.findByRole('heading', {
-          level: 2,
-          name: headingKeys[target],
-        });
-        expect(heading.closest('[data-layout]')).toHaveAttribute('data-layout', 'inline');
-        expect(observations).toHaveLength(1);
-      };
-      await expectSharedViewLayout('table');
-      await expectSharedViewLayout('board');
-      await expectSharedViewLayout('cut');
-
-      act(() => resize(1120));
-      expect(layoutRoot).toHaveAttribute('data-layout', 'drawer');
-      act(() => resize(821));
-      expect(layoutRoot).toHaveAttribute('data-layout', 'drawer');
-      act(() => resize(820));
-      expect(layoutRoot).toHaveAttribute('data-layout', 'compact');
-
-      view.unmount();
-      expect(observations[0]!.disconnect).toHaveBeenCalledOnce();
-    });
-
-    /**
-     * D10 removed Write's own writing assistant, so the Director's overlay is the only Drawer the
-     * page may put up. This used to cover the assistant's own focus recovery across the same two
-     * thresholds; what is worth guarding now is that no second assistant surface comes back at any
-     * of the three measured widths, since the whole point of removing it was that the Director is
-     * always beside the work panel already.
-     */
-    it('puts up no assistant surface of its own at any measured width', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      const { resize } = installResizeObserverMock();
-      renderRoute('/studio/project-1/table');
-
-      await screen.findByRole('heading', {
-        level: 2,
-        name: 'conversation.creativeStudio.phase.write.title',
-      });
-
-      for (const width of [820, 1121, 1120]) {
-        act(() => resize(width));
-        // Guards the guard: the phase really is mounted at this width.
-        expect(
-          screen.getByRole('region', { name: 'conversation.creativeStudio.phase.write.scriptTableTitle' }),
-          `${width}px`
-        ).toBeInTheDocument();
-        // Scoped to non-Director drawers: the Director pane renders in an Arco Drawer below inline
-        // width, and that one stays mounted on purpose so a streaming reply survives being hidden.
-        // Counting every .arco-drawer would assert the opposite of what the shell guarantees.
-        const assistantDrawers = [...document.querySelectorAll('.arco-drawer')].filter(
-          (drawer) => drawer.querySelector('[data-studio-director]') === null
-        );
-        expect(assistantDrawers, `${width}px`).toHaveLength(0);
-        expect(
-          screen.queryByRole('complementary', { name: 'conversation.creativeStudio.phase.write.assistantTitle' }),
-          `${width}px`
-        ).not.toBeInTheDocument();
-      }
-    });
-
-    it('renders only the active view and keeps project owners mounted across clean view changes', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      const { router } = renderRoute('/studio/project-1/table');
-
-      const tableHeading = await screen.findByRole('heading', {
-        level: 2,
-        name: 'conversation.creativeStudio.phase.write.title',
-      });
-      expect(
-        screen.queryByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' })
-      ).toBeNull();
-      const loadCount = bridge.getProject.invoke.mock.calls.length;
-
-      await selectStudioView(router, 'cut');
-
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/cut'));
-      const cutHeading = (
-        await screen.findAllByRole('heading', {
-          level: 2,
-          name: 'conversation.creativeStudio.phase.review.title',
-        })
-      )[0]!;
-      await waitFor(() => expect(document.activeElement).toBe(cutHeading));
-      expect(tableHeading).not.toBeInTheDocument();
-      expect(bridge.getProject.invoke).toHaveBeenCalledTimes(loadCount);
-    });
-
-    it('flushes multiple dirty scenes in serialized order before changing phase', async () => {
-      const opening = scene({ id: 'scene-1', title: 'Opening' });
-      const closing = scene({ id: 'scene-2', title: 'Closing' });
-      const initial = project('project-1', {
-        sceneOrder: [opening.id, closing.id],
-        scenes: { [opening.id]: opening, [closing.id]: closing },
-      });
-      const afterFirst = project('project-1', {
-        revision: 3,
-        sceneOrder: [opening.id, closing.id],
-        scenes: { [opening.id]: { ...opening, title: 'Opening v2' }, [closing.id]: closing },
-      });
-      const afterSecond = project('project-1', {
-        revision: 4,
-        sceneOrder: [opening.id, closing.id],
-        scenes: {
-          [opening.id]: { ...opening, title: 'Opening v2' },
-          [closing.id]: { ...closing, title: 'Closing v2' },
-        },
-      });
-      const firstSave = deferred<StudioCommandResult<StudioRendererProject>>();
-      bridge.getProject.invoke.mockResolvedValue(ok(initial));
-      bridge.updateScene.invoke.mockReturnValueOnce(firstSave.promise).mockResolvedValueOnce(ok(afterSecond));
-      const { router } = renderRoute('/studio/project-1/table');
-
-      const titleInputs = await screen.findAllByLabelText('conversation.creativeStudio.inspector.titleLabel');
-      fireEvent.change(titleInputs[0]!, {
-        target: { value: 'Opening v2' },
-      });
-      fireEvent.change(titleInputs[1]!, {
-        target: { value: 'Closing v2' },
-      });
-      fireEvent.click(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          {
-            name: 'conversation.creativeStudio.phase.nav.board',
-          }
-        )
-      );
-
-      await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1));
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-      expect(bridge.updateScene.invoke.mock.calls[0]?.[0]).toMatchObject({
-        sceneId: 'scene-1',
-        expectedRevision: 2,
-      });
-
-      await act(async () => firstSave.resolve(ok(afterFirst)));
-      await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(2));
-      expect(bridge.updateScene.invoke.mock.calls[1]?.[0]).toMatchObject({
-        sceneId: 'scene-2',
-        expectedRevision: 3,
-      });
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/board'));
-    });
-
-    it('re-flushes a scene edited during transition saving before changing phase', async () => {
-      const opening = scene({ title: 'Opening' });
-      const initial = project('project-1', {
-        sceneOrder: [opening.id],
-        scenes: { [opening.id]: opening },
-      });
-      const afterFirst = project('project-1', {
-        revision: 3,
-        sceneOrder: [opening.id],
-        scenes: { [opening.id]: { ...opening, title: 'First edit' } },
-      });
-      const afterSecond = project('project-1', {
-        revision: 4,
-        sceneOrder: [opening.id],
-        scenes: { [opening.id]: { ...opening, title: 'Newer edit' } },
-      });
-      const firstSave = deferred<StudioCommandResult<StudioRendererProject>>();
-      bridge.getProject.invoke.mockResolvedValue(ok(initial));
-      bridge.updateScene.invoke.mockReturnValueOnce(firstSave.promise).mockResolvedValueOnce(ok(afterSecond));
-      const { router } = renderRoute('/studio/project-1/table');
-      const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-
-      fireEvent.change(titleInput, { target: { value: 'First edit' } });
-      fireEvent.click(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          { name: 'conversation.creativeStudio.phase.nav.board' }
-        )
-      );
-      await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1));
-
-      fireEvent.change(titleInput, { target: { value: 'Newer edit' } });
-      await act(async () => firstSave.resolve(ok(afterFirst)));
-
-      await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(2));
-      expect(bridge.updateScene.invoke.mock.calls[1]?.[0]).toMatchObject({
-        sceneId: opening.id,
-        expectedRevision: 3,
-        scene: expect.objectContaining({ title: 'Newer edit' }),
-      });
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/board'));
-    });
-
-    it('shows a retryable message after three transition rounds keep getting dirtied', async () => {
-      const opening = scene({ title: 'Opening' });
-      const initial = project('project-1', {
-        sceneOrder: [opening.id],
-        scenes: { [opening.id]: opening },
-      });
-      const savedVersions = ['First edit', 'Second edit', 'Third edit'].map((title, index) =>
-        project('project-1', {
-          revision: index + 3,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: { ...opening, title } },
-        })
-      );
-      const saves = [
-        deferred<StudioCommandResult<StudioRendererProject>>(),
-        deferred<StudioCommandResult<StudioRendererProject>>(),
-        deferred<StudioCommandResult<StudioRendererProject>>(),
-      ];
-      bridge.getProject.invoke.mockResolvedValue(ok(initial));
-      for (const save of saves) bridge.updateScene.invoke.mockReturnValueOnce(save.promise);
-      const { router } = renderRoute('/studio/project-1/table');
-
-      fireEvent.change(await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel'), {
-        target: { value: 'First edit' },
-      });
-      fireEvent.click(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          { name: 'conversation.creativeStudio.phase.nav.board' }
-        )
-      );
-
-      for (const [index, nextTitle] of ['Second edit', 'Third edit', 'Fourth edit'].entries()) {
-        await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(index + 1));
-        fireEvent.change(screen.getByLabelText('conversation.creativeStudio.inspector.titleLabel'), {
-          target: { value: nextTitle },
-        });
-        await act(async () => saves[index]!.resolve(ok(savedVersions[index]!)));
-      }
-
-      const alert = await screen.findByRole('alert');
-      expect(alert).toHaveTextContent('conversation.creativeStudio.transition.savingBlocked');
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-      expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(3);
-      expect(screen.getByLabelText('conversation.creativeStudio.inspector.titleLabel')).toHaveValue('Fourth edit');
-      expect(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          { name: 'conversation.creativeStudio.phase.nav.board' }
-        )
-      ).toBeEnabled();
-    });
-
-    it('keeps a failed phase-transition draft recoverable and focuses its alert', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      bridge.updateScene.invoke.mockResolvedValueOnce(stale());
-      const { router } = renderRoute('/studio/project-1/table');
-      const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-
-      fireEvent.change(titleInput, { target: { value: 'Recoverable local title' } });
-      fireEvent.click(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          {
-            name: 'conversation.creativeStudio.phase.nav.board',
-          }
-        )
-      );
-
-      const recoverableRow = await screen.findByRole('region', { name: 'Recoverable local title' });
-      expect(
-        within(recoverableRow).getByRole('button', { name: 'conversation.creativeStudio.storyboard.retry' })
-      ).toBeInTheDocument();
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-      expect(within(recoverableRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel')).toHaveValue(
-        'Recoverable local title'
-      );
-      await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
-    });
-
-    it('recovers focus onto the work panel, never onto an alert in the Director pane', async () => {
-      const opening = scene();
-      // Paced to the target so the shell advisory stays silent and the only alert in the work
-      // panel is the one that explains the refused transition.
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(
-          project('project-1', {
-            targetDurationSeconds: opening.durationSeconds,
-            sceneOrder: [opening.id],
-            scenes: { [opening.id]: opening },
-          })
-        )
-      );
-      bridge.updateScene.invoke.mockResolvedValueOnce(stale());
-      briefConversationHarness.errorMessageKey = 'conversation.creativeStudio.errors.storage';
-      const { resize } = installResizeObserverMock();
-      const { router } = renderRoute('/studio/project-1/table');
-      const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-      act(() => resize(1121));
-
-      const directorPane = document.querySelector('[data-studio-director]');
-      const workPanel = document.querySelector('[data-studio-work-panel]');
-      if (directorPane === null || workPanel === null) throw new Error('Studio must render both panes inline');
-      // The defect is positional: the Director pane is rendered before the work panel, so the
-      // first `[role="alert"]` in the document is whatever the Director happens to be saying.
-      const directorAlert = within(directorPane as HTMLElement).getByRole('alert');
-      expect(directorPane.compareDocumentPosition(workPanel) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-
-      fireEvent.change(titleInput, { target: { value: 'Recoverable local title' } });
-      fireEvent.click(
-        within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-          'button',
-          { name: 'conversation.creativeStudio.phase.nav.board' }
-        )
-      );
-
-      await waitFor(() => expect(document.activeElement).toHaveAttribute('role', 'alert'));
-      expect(document.activeElement).not.toBe(directorAlert);
-      expect(workPanel.contains(document.activeElement)).toBe(true);
-      expect(document.activeElement).toHaveTextContent('conversation.creativeStudio.errors.staleProject');
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-    });
-
-    it('moves a Brief save failure from the drawer to one shell alert when the drawer closes', async () => {
-      bridge.updateProject.invoke.mockResolvedValueOnce(failure());
-      const { router } = renderRoute('/studio/project-1/table');
-      fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.brief.title' }));
-      const dialog = await screen.findByRole('dialog', {
-        name: 'conversation.creativeStudio.phase.brief.title',
-      });
-      const durationInput = within(dialog).getByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
-
-      fireEvent.change(durationInput, { target: { value: '24' } });
-      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
-
-      await waitFor(() => expect(bridge.updateProject.invoke).toHaveBeenCalledOnce());
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-      await waitFor(() =>
-        expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).toHaveTextContent(
-          'conversation.creativeStudio.errors.storage'
-        )
-      );
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-    });
-
-    it('renders a project-update conflict in the drawer while open and in the shell after close', async () => {
-      bridge.updateProject.invoke.mockResolvedValueOnce(stale());
-      renderRoute('/studio/project-1/table');
-      fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.brief.title' }));
-      const dialog = await screen.findByRole('dialog', {
-        name: 'conversation.creativeStudio.phase.brief.title',
-      });
-      const durationInput = within(dialog).getByLabelText('conversation.creativeStudio.phase.brief.durationLabel');
-
-      fireEvent.change(durationInput, { target: { value: '24' } });
-      fireEvent.blur(durationInput);
-
-      await waitFor(() =>
-        expect(within(dialog).getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
-      );
-      expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).not.toHaveTextContent(
-        'conversation.creativeStudio.errors.staleProject'
-      );
-
-      fireEvent.click(within(dialog).getByRole('button', { name: 'common.close' }));
-
-      await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-      expect(document.querySelector('[data-studio-phase-shell] > [role="alert"]')).toHaveTextContent(
-        'conversation.creativeStudio.errors.staleProject'
-      );
-    });
-
-    it('focuses and clears only a valid typed Write focus intent', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      const { router } = renderRoute({
-        pathname: '/studio/project-1/table',
-        state: { writeFocus: { sceneId: opening.id, field: 'visualPrompt' } },
-      });
-
-      const prompt = await screen.findByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
-      await waitFor(() => expect(document.activeElement).toBe(prompt));
-      expect(router.state.location.pathname).toBe('/studio/project-1/table');
-      expect(router.state.location.state).toBeNull();
-    });
-
-    it('retains a valid Write focus intent until the requested field is available and focused', async () => {
-      const opening = scene();
-      const catalogLoad = deferred<StudioCommandResult<StudioRouteCatalog>>();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      bridge.listRoutes.invoke.mockReturnValueOnce(catalogLoad.promise);
-      const realGetElementById = document.getElementById.bind(document);
-      let promptAvailable = false;
-      vi.spyOn(document, 'getElementById').mockImplementation((elementId) =>
-        elementId === `studio-scene-prompt-${opening.id}` && !promptAvailable ? null : realGetElementById(elementId)
-      );
-      const writeFocus = { sceneId: opening.id, field: 'visualPrompt' as const };
-      const { router } = renderRoute({
-        pathname: '/studio/project-1/table',
-        state: { writeFocus },
-      });
-
-      const prompt = await screen.findByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
-      expect(router.state.location.state).toEqual({ writeFocus });
-      expect(document.activeElement).not.toBe(prompt);
-
-      promptAvailable = true;
-      await act(async () => catalogLoad.resolve(ok(routes())));
-
-      await waitFor(() => expect(document.activeElement).toBe(prompt));
-      expect(router.state.location.state).toBeNull();
-    });
-
-    it('clears a Write focus intent immediately when its scene is not in the project', async () => {
-      const opening = scene();
-      bridge.getProject.invoke.mockResolvedValue(
-        ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-      );
-      const { router } = renderRoute({
-        pathname: '/studio/project-1/table',
-        state: { writeFocus: { sceneId: 'missing-scene', field: 'visualPrompt' } },
-      });
-
-      await screen.findByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
-      await waitFor(() => expect(router.state.location.state).toBeNull());
-    });
-
-    it('replaces a legacy project route with its canonical default view', async () => {
-      const { router } = renderRoute('/studio/project-1');
-
-      await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/table'));
-    });
-
-    // A bookmark or a stale in-flight URL from before the switch lands here. It must resolve to a
-    // real view, not fall through the Studio route to the chat workspace.
-    it.each(['bogus', 'brief', 'write', 'produce', 'review'])(
-      'replaces the invalid segment %s without falling through to Guid',
-      async (segment) => {
-        const { router } = renderRoute(`/studio/project-1/${segment}`);
-
-        await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/table'));
-        expect(router.state.location.pathname).not.toBe('/guid');
-      }
+    expect(mocks.bridge.listRoutes.invoke.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.bridge.getGenerationCapability.invoke.mock.invocationCallOrder[0]!
     );
   });
 
-  it('adopts the project returned after undo so the rules drawer and pin input receive the restored list', async () => {
-    const addedRule = {
-      id: 'rule_1',
-      scope: 'project' as const,
-      text: 'Keep the kits generic.',
-      predicate: null,
-      createdAt: '2026-08-13T00:00:00.000Z',
-    };
-    const ruled = project('project-1', {
-      rules: [addedRule],
-      ruleListUndo: { capturedRevision: 1, previousRules: [] },
-    });
-    const restored = project('project-1', { revision: 3, rules: [], ruleListUndo: null });
-    bridge.getProject.invoke.mockResolvedValue(ok(ruled));
-    bridge.undoBriefRules.invoke.mockImplementation(async () => {
-      bridge.getProject.invoke.mockResolvedValue(ok(restored));
-      return ok(restored);
-    });
-    renderRoute('/studio/project-1/table');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.open' }));
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.rules.undo' }));
-
-    await waitFor(() =>
-      expect(bridge.undoBriefRules.invoke).toHaveBeenCalledExactlyOnceWith({ projectId: 'project-1' })
-    );
-    await waitFor(() => expect(bridge.getProject.invoke.mock.calls.length).toBeGreaterThanOrEqual(2));
-    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.rules.undo' })).not.toBeInTheDocument();
-  });
-
-  describe('Cut render progress at project scope', () => {
-    let emitRenderProgress: ((event: StudioRenderProgressEvent) => void) | undefined;
-
-    beforeEach(() => {
-      emitRenderProgress = undefined;
-      bridge.renderProgress.on.mockImplementation((listener: (event: StudioRenderProgressEvent) => void) => {
-        emitRenderProgress = listener;
-        return () => {
-          if (emitRenderProgress === listener) emitRenderProgress = undefined;
-        };
-      });
-    });
-
-    it('keeps an in-flight cut render observable while the user works in another phase', async () => {
-      // The render never settles, so the only thing that can move its progress is the event
-      // stream - which a view-scoped subscription would have torn down on leaving Review.
-      bridge.renderCut.invoke.mockReturnValue(new Promise(() => {}));
-      const { router } = renderRoute('/studio/project-1/cut');
-
-      fireEvent.click(
-        await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.review.render.action' })
-      );
-      expect(
-        screen.getByRole('button', { name: 'conversation.creativeStudio.phase.review.render.progress' })
-      ).toBeDisabled();
-
-      await selectStudioView(router, 'board');
-      act(() =>
-        emitRenderProgress?.({
-          projectId: 'project-1',
-          status: 'running',
-          progress: 0.42,
-          clipIndex: 2,
-          clipTotal: 3,
-        })
-      );
-      await selectStudioView(router, 'cut');
-
-      const action = await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.review.render.progressWithClip',
-      });
-      expect(action).toBeDisabled();
-      expect(action.closest('[data-render-state-slot]')).toHaveAttribute('data-render-state', 'running');
-    });
-
-    it('subscribes to render progress once for the project rather than once per Review visit', async () => {
-      const { router } = renderRoute('/studio/project-1/cut');
-      await screen.findByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' });
-
-      await selectStudioView(router, 'board');
-      await selectStudioView(router, 'cut');
-
-      expect(bridge.renderProgress.on).toHaveBeenCalledOnce();
-    });
-
-    it('releases the render progress subscription when the project shell unmounts', async () => {
-      const { view } = renderRoute('/studio/project-1/cut');
-      await screen.findByRole('heading', { level: 2, name: 'conversation.creativeStudio.phase.review.title' });
-      expect(emitRenderProgress).toBeDefined();
-
-      view.unmount();
-
-      expect(emitRenderProgress).toBeUndefined();
-    });
-  });
-
-  it('shows a loading shell while the canonical project is being fetched', () => {
-    bridge.getProject.invoke.mockReturnValue(new Promise(() => {}));
-    renderRoute();
-
-    expect(screen.getByText('conversation.creativeStudio.project.loading')).toBeInTheDocument();
-  });
-
-  it('renders the durable project shell after a canonical result', async () => {
-    renderRoute();
-
-    expect(await screen.findByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
-    expect(
-      screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })
-    ).toBeInTheDocument();
-  });
-
-  it('composes the script-table workspace from the canonical project', async () => {
-    const opening = scene();
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-
-    const { router } = renderRoute();
-
-    expect(
-      await screen.findByRole('region', { name: 'conversation.creativeStudio.phase.write.scriptTableTitle' })
-    ).toBeInTheDocument();
-    const openingRow = screen.getByRole('region', { name: 'Opening' });
-    expect(within(openingRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel')).toHaveValue(
-      'Opening'
-    );
-    expect(screen.queryByText('conversation.creativeStudio.preview.noAssetTitle')).toBeNull();
-
-    await selectStudioView(router, 'board');
-    expect(
-      await screen.findByRole('heading', {
-        name: 'conversation.creativeStudio.phase.produce.connectEngine',
-      })
-    ).toBeInTheDocument();
-    expect(screen.queryByText('conversation.creativeStudio.preview.noAssetTitle')).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Opening' })).toBeNull();
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledWith({ projectId: 'project-1' }));
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.routing.connectProvider' })
-    ).not.toBeInTheDocument();
-    expect(bridge.listConnectionCandidates.invoke).not.toHaveBeenCalled();
-    expect(bridge.listConnections.invoke).not.toHaveBeenCalled();
-    expect(bridge.saveConnection.invoke).not.toHaveBeenCalled();
-    expect(bridge.removeConnection.invoke).not.toHaveBeenCalled();
-  });
-
-  it('keeps manual storyboard editing available when Storyboard setup is required', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok({
-        ...routes(),
-        storyboard: { status: 'setup_required', selected: null, options: [] },
-      })
-    );
-
-    renderRoute();
-
-    expect(
-      await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.write.addShot' })
-    ).toBeEnabled();
-    // A storyboard route awaiting setup must not lock the way out of Table either.
-    expect(
-      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-        'button',
-        { name: 'conversation.creativeStudio.phase.nav.board' }
-      )
-    ).toBeEnabled();
-  });
-
-  it('shows exactly one whole-screen Settings action when no selected media route is ready', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok({
-        storyboard: { status: 'setup_required' as const, selected: null, options: [] },
-        image: {
-          status: 'setup_required' as const,
-          selected: null,
-          selectedRoute: null,
-          selectionIssue: null,
-          options: [],
-        },
-        video: {
-          status: 'setup_required' as const,
-          selected: null,
-          selectedRoute: null,
-          selectionIssue: null,
-          options: [],
-        },
-        catalogVersion: 'catalog-full-setup',
-      })
-    );
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' });
-    expect(screen.getAllByRole('button', { name: 'conversation.creativeStudio.models.openSettings' })).toHaveLength(1);
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.askTeammate' })).toBeVisible();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  });
-
-  it('uses the live Engine Strip when one selected media engine is ready', async () => {
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(await screen.findByRole('button', { name: 'image-model' })).toBeVisible();
-    expect(screen.getByText('conversation.creativeStudio.models.engine.noFitVideo')).toBeVisible();
-    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.models.openSettings' })).toBeNull();
-    expect(screen.queryByRole('combobox')).not.toBeInTheDocument();
-  });
-
-  it('passes the chosen Brief role and current revision while cancellation causes no refetch or error', async () => {
-    bridge.getProject.invoke.mockResolvedValue(ok(project()));
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalled());
-    const readsBeforeImport = bridge.getProject.invoke.mock.calls.length;
-
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
-    );
-
-    await waitFor(() =>
-      expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        briefReferenceRole: 'cast',
-        expectedRevision: 2,
-      })
-    );
-    await act(async () => {});
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeImport);
-    expect(within(dialog).queryByRole('alert')).not.toBeInTheDocument();
-    expect(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
-    ).toHaveFocus();
-  });
-
-  it('adopts canonical refetches across sequential import and detach revisions without using the IPC project', async () => {
-    const imported = briefReferenceAsset('brief-cast', { briefReferenceLabel: 'Canonical cast' });
-    const initial = project();
-    const afterImport = project('project-1', { revision: 3, assets: { [imported.id]: imported } });
-    const afterDetach = project('project-1', { revision: 4, assets: {} });
-    const untrustedReturn = project('project-1', {
-      revision: 999,
-      assets: {
-        poison: briefReferenceAsset('poison', { briefReferenceLabel: 'IPC-only project must stay invisible' }),
-      },
-    });
-    let canonical = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
-    bridge.chooseAndImportReference.invoke.mockImplementation(async () => {
-      canonical = afterImport;
-      return ok({ status: 'imported' as const, asset: imported, project: untrustedReturn });
-    });
-    bridge.detachBriefReference.invoke.mockImplementation(async () => {
-      canonical = afterDetach;
-      return ok(untrustedReturn);
-    });
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
-    );
-    await waitFor(() => expect(within(dialog).getByText('Canonical cast')).toBeVisible());
-    expect(within(dialog).queryByText('IPC-only project must stay invisible')).not.toBeInTheDocument();
-    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      briefReferenceRole: 'cast',
-      expectedRevision: 2,
-    });
-
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
-    );
-    await waitFor(() => expect(within(dialog).queryByText('Canonical cast')).not.toBeInTheDocument());
-    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      assetId: 'brief-cast',
-      expectedRevision: 3,
-    });
-    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
-    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('single-flights Brief reference mutations without disabling generation, engines, views, or drawer close', async () => {
-    const opening = scene();
-    const existing = briefReferenceAsset('brief-look', {
-      briefReferenceRole: 'look',
-      briefReferenceLabel: 'Existing look',
-    });
-    const activeProject = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [existing.id]: existing },
-    });
-    const pendingImport = deferred<
-      StudioCommandResult<{
-        status: 'cancelled' | 'imported';
-        asset?: StudioAsset;
-        project?: StudioRendererProject;
-      }>
-    >();
-    bridge.getProject.invoke.mockResolvedValue(ok(activeProject));
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok(routesWithImage(imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 6 } })))
-    );
-    bridge.chooseAndImportReference.invoke.mockReturnValue(pendingImport.promise);
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    const { batchAction } = await findBatchAction();
-
-    const addCast = within(dialog).getByRole('button', {
-      name: 'conversation.creativeStudio.briefReferences.addCast',
-    });
-    const addLook = within(dialog).getByRole('button', {
-      name: 'conversation.creativeStudio.briefReferences.addLook',
-    });
-    const remove = within(dialog).getByRole('button', {
-      name: 'conversation.creativeStudio.briefReferences.removeAccessible',
-    });
-    act(() => {
-      addCast.click();
-      remove.click();
-      addLook.click();
-    });
-    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
-
-    expect(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' })
-    ).toBeDisabled();
-    expect(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' })
-    ).toBeDisabled();
-    expect(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
-    ).toBeDisabled();
-    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
-    expect(bridge.detachBriefReference.invoke).not.toHaveBeenCalled();
-    expect(batchAction).toBeEnabled();
-    expect(
-      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-        'button',
-        { name: 'conversation.creativeStudio.phase.nav.board' }
-      )
-    ).toBeEnabled();
-    expect(within(dialog).getByRole('button', { name: 'image-model' })).toBeEnabled();
-    expect(within(dialog).getByRole('button', { name: 'common.close' })).toBeEnabled();
-
-    await act(async () => pendingImport.resolve(ok({ status: 'cancelled' })));
-  });
-
-  it('keeps a Director request queued until an unresolved Brief import reaches canonical review', async () => {
-    const proposalListeners: Array<(event: { projectId: string }) => void> = [];
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      proposalListeners.push(listener);
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video' });
-    const imported = briefReferenceAsset('brief-cast', { briefReferenceLabel: 'Imported cast' });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const afterImport = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [imported.id]: imported },
-    });
-    let canonical = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
-    const request = referenceRequest(opening.id, 1);
-    const queue = installReferenceRequestQueue([]);
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok(routesWithImage(imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } })))
-    );
-    const pendingImport = deferred<
-      StudioCommandResult<{
-        status: 'cancelled' | 'imported';
-        asset?: StudioAsset;
-        project?: StudioRendererProject;
-      }>
-    >();
-    bridge.chooseAndImportReference.invoke.mockReturnValue(pendingImport.promise);
-
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    fireEvent.click(within(brief).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addCast' }));
-    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
-
-    queue.queue(request);
-    await act(async () => {
-      proposalListeners.forEach((listener) => listener({ projectId: initial.id }));
-    });
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
-    await act(async () => {});
-
-    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(queue.pendingIds()).toEqual([request.id]);
-
-    canonical = afterImport;
-    await act(async () => pendingImport.resolve(ok({ status: 'imported', asset: imported, project: afterImport })));
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('Imported cast')).toBeVisible();
-    expect(queue.pendingIds()).toEqual([request.id]);
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('refetches a stale detach once, keeps the canonical card, and surfaces the canonical error', async () => {
-    const cast = briefReferenceAsset();
-    const initial = project('project-1', { assets: { [cast.id]: cast } });
-    const refreshed = project('project-1', { revision: 3, assets: { [cast.id]: cast } });
-    let canonical = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
-    bridge.detachBriefReference.invoke.mockImplementation(async () => {
-      canonical = refreshed;
-      return stale();
-    });
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    const readsBeforeDetach = bridge.getProject.invoke.mock.calls.length;
-
-    fireEvent.click(
-      within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.removeAccessible' })
-    );
-
-    await waitFor(() =>
-      expect(within(dialog).getByRole('alert')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
-    );
-    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      assetId: cast.id,
-      expectedRevision: 2,
-    });
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeDetach + 1);
-    expect(within(dialog).getByText('Scarf and telescope')).toBeVisible();
-    expect(bridge.detachBriefReference.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('shows the dedicated import error and returns focus without retrying a rejected picker command', async () => {
-    bridge.chooseAndImportReference.invoke.mockRejectedValueOnce(new Error('picker failed'));
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-    const dialog = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    const add = within(dialog).getByRole('button', { name: 'conversation.creativeStudio.briefReferences.addLook' });
-
-    fireEvent.click(add);
-
-    await waitFor(() =>
-      expect(within(dialog).getByRole('alert')).toHaveTextContent(
-        'conversation.creativeStudio.briefReferences.importError'
-      )
-    );
-    expect(add).toHaveFocus();
-    expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce();
-
-    bridge.chooseAndImportReference.invoke.mockResolvedValueOnce(ok({ status: 'cancelled' }));
-    const readsBeforeCancel = bridge.getProject.invoke.mock.calls.length;
-    fireEvent.click(add);
-    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledTimes(2));
-    expect(within(dialog).getByRole('alert')).toHaveTextContent(
-      'conversation.creativeStudio.briefReferences.importError'
-    );
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(readsBeforeCancel);
-  });
-
-  it('imports a first frame through the native managed-asset command and refetches canonical state', async () => {
-    const opening = scene();
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const refreshed = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: {
-        [opening.id]: {
-          ...opening,
-          referenceAssetId: 'asset-reference',
-          assetIds: ['asset-reference'],
-        },
-      },
-      assets: {
-        'asset-reference': {
-          id: 'asset-reference',
-          projectId: 'project-1',
-          sceneId: 'scene-1',
-          mediaKind: 'image',
-          mimeType: 'image/png',
-          managedAsset: { collection: 'imports', fileName: 'asset-reference.png' },
-          byteSize: 128,
-          sha256: 'a'.repeat(64),
-          createdAt: '2026-07-30T00:00:00.000Z',
-        },
-      },
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(refreshed));
-    bridge.chooseAndImportReference.invoke.mockResolvedValueOnce(
-      ok({ status: 'imported', asset: refreshed.assets['asset-reference'] })
-    );
-    renderRoute();
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.write.addReference',
-      })
-    );
-
-    await waitFor(() =>
-      expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        sceneId: 'scene-1',
-        expectedRevision: 2,
-      })
-    );
-    expect(JSON.stringify(bridge.chooseAndImportReference.invoke.mock.calls[0]?.[0])).not.toMatch(
-      /path|data:|base64|https?:/i
-    );
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(4));
-    expect(
-      screen.getByRole('img', {
-        name: 'conversation.creativeStudio.preview.importReference',
-      })
-    ).toHaveAttribute('src', 'weprompt-studio://asset/project-1/asset-reference');
-  });
-
-  it('prefills a generated reference prompt without changing the scene draft when edited', async () => {
-    const opening = scene({ visualPrompt: '  A brushed-steel travel mug  ' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          aspectRatio: '9:16',
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const dialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    const referencePrompt = within(dialog).getByLabelText('conversation.creativeStudio.reference.promptLabel');
-    expect(referencePrompt).toHaveValue(
-      'A single cinematic frame, 9:16, no text, no labels, no collage, no split panels. A brushed-steel travel mug'
-    );
-
-    fireEvent.change(referencePrompt, { target: { value: 'Edited reference-only prompt' } });
-
-    expect(referencePrompt).toHaveValue('Edited reference-only prompt');
-    expect(screen.getByLabelText('conversation.creativeStudio.inspector.visualPromptLabel')).toHaveValue(
-      '  A brushed-steel travel mug  '
-    );
-    expect(bridge.updateScene.invoke).not.toHaveBeenCalled();
-  });
-
-  it('routes a video-scene reference through the existing paid review with its cost disclosure intact', async () => {
-    const opening = scene({ mediaKind: 'video', durationSeconds: 12 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const promptDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    fireEvent.click(
-      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    );
-
-    const reviewDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    expect(within(reviewDialog).getByText('conversation.creativeStudio.reference.reviewTag')).toBeVisible();
-    expect(within(reviewDialog).getByText('conversation.creativeStudio.review.chargeNotice')).toBeVisible();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('shows an authored reference-prompt breach and blocks Confirm before the paid request', async () => {
-    const opening = scene({ mediaKind: 'video', durationSeconds: 12, visualPrompt: 'An ACME billboard at dusk' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          rules: [
-            {
-              id: 'rule_1',
-              scope: 'project',
-              text: 'No competitor logos.',
-              predicate: { kind: 'forbidden_terms', terms: ['acme'] },
-              createdAt: '2026-08-13T00:00:00.000Z',
-            },
+  it('refreshes the shared catalogue after provisioning, so a bound route stops reading Unavailable', async () => {
+    // Binding from our own read is not enough: the workspace keeps its pre-provisioning snapshot,
+    // the bound choice id resolves to no route, and the Brief reports a working route as
+    // "Unavailable" until the user finds Refresh routes. Observed live before this call existed.
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
           ],
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const promptDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    fireEvent.click(
-      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    );
-
-    const reviewDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    expect(within(reviewDialog).getByText('conversation.creativeStudio.rules.breachScene')).toBeInTheDocument();
-    expect(
-      within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
-    ).toBeDisabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('does not breach a reference rule on a term that exists only in the app-authored prefix', async () => {
-    const opening = scene({ mediaKind: 'video', durationSeconds: 12, visualPrompt: 'A paper airplane at sunrise' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          rules: [
-            {
-              id: 'rule_1',
-              scope: 'project',
-              text: 'Do not include typography.',
-              predicate: { kind: 'forbidden_terms', terms: ['text'] },
-              createdAt: '2026-08-13T00:00:00.000Z',
-            },
-          ],
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const promptDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    fireEvent.click(
-      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    );
-
-    const reviewDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    expect(within(reviewDialog).queryByText('conversation.creativeStudio.rules.breachScene')).not.toBeInTheDocument();
-    expect(
-      within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
-    ).toBeEnabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('surfaces a queued request whose scene cannot describe a reference image instead of spending on it', async () => {
-    // `ready` only asks for a non-empty visual prompt, and a visual prompt may be twice as long as
-    // a reference prompt. Main refuses such a submission, so submitting would dismiss the request
-    // and then lose it with nothing on screen.
-    const unusable = scene({ id: 'scene-1', visualPrompt: 'A '.repeat(3 * 1024) });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [unusable.id], scenes: { [unusable.id]: unusable } }))
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(unusable.id, 1)]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    const notice = await screen.findByTestId('reference-exclusion-notice');
-    expect(within(notice).getByText(unusable.title)).toBeVisible();
-    expect(within(notice).getByText(/conversation\.creativeStudio\.reference\.excludedPromptUnusable/)).toBeVisible();
-    // Nothing was paid for, and the request is still on disk for the discard action to consume.
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(
-      within(notice).getByRole('button', { name: 'conversation.creativeStudio.reference.discardExcludedRequests' })
-    );
-    await waitFor(() =>
-      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        requestIds: ['reference_request_1'],
-      })
-    );
-  });
-
-  it('describes each auto-submitted reference scene with its own visual prompt', async () => {
-    // A reference plate is the scene's *first frame*, so one prompt shared across the batch would
-    // paint every scene with the same picture. The batch carries one prompt per scene or it is
-    // not a batch of references at all.
-    const first = scene({ id: 'scene-1', mediaKind: 'video', visualPrompt: 'A bright studio' });
-    const second = scene({
-      id: 'scene-2',
-      title: 'Closing',
-      mediaKind: 'video',
-      visualPrompt: 'A rain-slicked alley at dusk',
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [first.id, second.id],
-          scenes: { [first.id]: first, [second.id]: second },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
-      ok([referenceRequest(first.id, 1), referenceRequest(second.id, 2)])
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          outputRole: 'reference',
-          referencePrompts: [
-            { sceneId: first.id, prompt: buildFirstFramePrompt('A bright studio', '16:9') },
-            { sceneId: second.id, prompt: buildFirstFramePrompt('A rain-slicked alley at dusk', '16:9') },
-          ],
-        })
-      )
-    );
-  });
-
-  it('auto-submits queued assistant requests as one batch with no confirmation step', async () => {
-    const first = scene({ id: 'scene-1', mediaKind: 'video' });
-    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [first.id, second.id],
-          scenes: { [first.id]: first, [second.id]: second },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
-      ok([referenceRequest(first.id, 1), referenceRequest(second.id, 2)])
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: [first.id, second.id],
-        expectedRevision: 2,
-        routes: [
-          { sceneId: first.id, choiceId: 'choice_image', kind: 'image' },
-          { sceneId: second.id, choiceId: 'choice_image', kind: 'image' },
-        ],
-        catalogVersion: 'catalog-1',
-        outputRole: 'reference',
-        referencePrompts: [
-          { sceneId: first.id, prompt: buildFirstFramePrompt(first.visualPrompt, '16:9') },
-          { sceneId: second.id, prompt: buildFirstFramePrompt(second.visualPrompt, '16:9') },
-        ],
-      })
-    );
-    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
-  });
-
-  it('keeps an active-reference Director request queued and opens the exact paid review', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const admitted = imageRoute({
-      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    renderRoute();
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('Scarf and telescope')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('closes an active-reference Director review without consuming it and shows it again after remount', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const queue = installReferenceRequestQueue([request]);
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    const firstMount = renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
-    );
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(queue.pendingIds()).toEqual([request.id]);
-
-    firstMount.view.unmount();
-    renderRoute();
-    expect(await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).toBeVisible();
-    expect(queue.pendingIds()).toEqual([request.id]);
-  });
-
-  it('fails malformed active-reference metadata closed in the Director review', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const malformed = briefReferenceAsset();
-    delete malformed.briefReferenceLabel;
-    const admitted = imageRoute({
-      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [malformed.id]: malformed },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    renderRoute();
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('conversation.creativeStudio.conditioning.malformed')).toBeVisible();
-    expect(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeDisabled();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('consumes exactly the reviewed active-reference request before a human-confirmed spend', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const admitted = imageRoute({
-      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ outputRole: 'reference', sceneIds: [opening.id] })
-      )
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [request.id],
-      expectedRevision: 2,
-      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
-    });
-    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
-      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
-    );
-  });
-
-  it('spends zero when an active-reference request cannot be consumed on Confirm', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const admitted = imageRoute({
-      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-    bridge.dismissReferenceRequests.invoke.mockResolvedValueOnce(failure()).mockResolvedValueOnce(ok(true));
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    expect(await within(review).findByText('conversation.creativeStudio.reference.dismissFailed')).toBeVisible();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
-      projectId: 'project-1',
-      requestIds: [request.id],
-      expectedRevision: 2,
-      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
-    });
-  });
-
-  it('refreshes the review and spends zero when checked consumption finds a revision race', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast },
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: {},
-    });
-    let canonical = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonical));
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([request]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-    bridge.dismissReferenceRequests.invoke
-      .mockImplementationOnce(async () => {
-        canonical = revised;
-        return stale();
-      })
-      .mockResolvedValueOnce(ok(true));
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [request.id],
-      expectedRevision: 2,
-      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
-    });
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
-
-    const refreshedReview = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    expect(within(refreshedReview).queryByText('Scarf and telescope')).not.toBeInTheDocument();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    fireEvent.click(
-      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
-    );
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
-      projectId: 'project-1',
-      requestIds: [request.id],
-      expectedRevision: 3,
-      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
-    });
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ expectedRevision: 3 })
-    );
-  });
-
-  it('keeps recovery modal actions locked and preserves the queued request when Cancel follows recovery', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const queue = installReferenceRequestQueue([request]);
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
-    const canonical = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast },
-    });
-    const recovery = deferred<StudioCommandResult<StudioRendererProject>>();
-    bridge.getProject.invoke.mockResolvedValue(ok(canonical));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-    bridge.dismissReferenceRequests.invoke.mockImplementationOnce(async () => {
-      bridge.getProject.invoke.mockReturnValue(recovery.promise);
-      return invalidPayload();
-    });
-
-    const firstMount = renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    const confirm = within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' });
-    const cancel = within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' });
-    fireEvent.click(confirm);
-
-    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledTimes(1));
-    expect(confirm).toBeDisabled();
-    expect(cancel).toBeDisabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    recovery.resolve(ok(canonical));
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    await waitFor(() => expect(confirm).toBeEnabled());
-    expect(cancel).toBeEnabled();
-    fireEvent.click(cancel);
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledTimes(1);
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(queue.pendingIds()).toContain(request.id);
-
-    firstMount.view.unmount();
-    bridge.getProject.invoke.mockResolvedValue(ok(canonical));
-    renderRoute();
-    expect(await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).toBeVisible();
-  });
-
-  it('refreshes and rejects a stale active-reference confirmation when route capacity changes', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const admitted = imageRoute({
-      constraints: { ...imageRoute().constraints, maxConditioningImages: 1 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.listRoutes.invoke
-      .mockResolvedValueOnce(ok(routesWithImage(admitted)))
-      .mockResolvedValueOnce(ok(routesWithImage()));
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('reopens a stale user-initiated reference review with the current exact inputs immediately', async () => {
-    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProjectUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const look = briefReferenceAsset('brief_look', {
-      briefReferenceLabel: 'Blue hour',
-      briefReferenceRole: 'look',
-    });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast },
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast, [look.id]: look },
-    });
-    let canonicalProject = initial;
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 2 } });
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    renderRoute();
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const prompt = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.reference.dialogTitle' });
-    fireEvent.click(within(prompt).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('Scarf and telescope')).toBeVisible();
-
-    canonicalProject = revised;
-    await act(async () => onProjectUpdate?.({ projectId: initial.id }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    expect(within(review).getByText('Blue hour')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('spends zero when the canonical project changes while the exact review refresh is in flight', async () => {
-    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProjectUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const look = briefReferenceAsset('brief_look', {
-      briefReferenceLabel: 'Blue hour',
-      briefReferenceRole: 'look',
-    });
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 2 } });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast },
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [cast.id]: cast, [look.id]: look },
-    });
-    let canonicalProject = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    const refresh = deferred<StudioCommandResult<StudioRouteCatalog>>();
-    bridge.listRoutes.invoke.mockResolvedValueOnce(ok(routesWithImage(admitted))).mockReturnValueOnce(refresh.promise);
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
-
-    canonicalProject = revised;
-    await act(async () => onProjectUpdate?.({ projectId: initial.id }));
-    refresh.resolve(ok(routesWithImage(admitted)));
-
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    expect(within(review).getByText('Blue hour')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    [
-      'disappears',
-      (queue: ReturnType<typeof installReferenceRequestQueue>, request: StudioReferenceRequest) =>
-        queue.remove(request.id),
-    ],
-    [
-      'is remapped',
-      (queue: ReturnType<typeof installReferenceRequestQueue>, request: StudioReferenceRequest) =>
-        queue.replace({ ...request, sceneId: 'scene-unrelated' }),
-    ],
-  ])('spends zero and consumes nothing when a reviewed Director request %s before Confirm', async (_label, mutate) => {
-    const opening = scene({ mediaKind: 'video' });
-    const unrelatedScene = scene({ id: 'scene-unrelated', title: 'Unrelated request', mediaKind: 'video' });
-    const cast = briefReferenceAsset();
-    const request = referenceRequest(opening.id, 1);
-    const unrelated = referenceRequest('scene-unrelated', 2);
-    const queue = installReferenceRequestQueue([request]);
-    const admitted = imageRoute({ constraints: { ...imageRoute().constraints, maxConditioningImages: 1 } });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id, unrelatedScene.id],
-          scenes: { [opening.id]: opening, [unrelatedScene.id]: unrelatedScene },
-          assets: { [cast.id]: cast },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(admitted)));
-
-    renderRoute();
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    mutate(queue, request);
-    queue.queue(unrelated);
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    expect(await within(review).findByText('conversation.creativeStudio.conditioning.reviewChanged')).toBeVisible();
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [request.id],
-      expectedRevision: 2,
-      expectedRequests: [{ id: request.id, sceneId: request.sceneId }],
-    });
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(queue.pendingIds()).toContain(unrelated.id);
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalledTimes(2));
-    const refreshedReview = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    expect(within(refreshedReview).getByText('Unrelated request')).toBeVisible();
-    expect(queue.pendingIds()).toContain(unrelated.id);
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(
-      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
-    );
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-  });
-
-  it('consumes the reviewed requests after auto-submitting a queued reference batch', async () => {
-    const first = scene({ id: 'scene-1', mediaKind: 'video' });
-    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
-    const requests = [referenceRequest(first.id, 1), referenceRequest(second.id, 2)];
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [first.id, second.id],
-          scenes: { [first.id]: first, [second.id]: second },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok(requests));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: [first.id, second.id],
-        expectedRevision: 2,
-        routes: [
-          { sceneId: first.id, choiceId: 'choice_image', kind: 'image' },
-          { sceneId: second.id, choiceId: 'choice_image', kind: 'image' },
-        ],
-        catalogVersion: 'catalog-1',
-        outputRole: 'reference',
-        referencePrompts: [
-          { sceneId: first.id, prompt: buildFirstFramePrompt(first.visualPrompt, '16:9') },
-          { sceneId: second.id, prompt: buildFirstFramePrompt(second.visualPrompt, '16:9') },
-        ],
-      })
-    );
-    await waitFor(() =>
-      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        requestIds: requests.map(({ id }) => id),
-      })
-    );
-    // Consumed before it is paid for, never after: the queued request on disk is the only record
-    // that survives leaving the project, so a submit that lands first leaves a window where the
-    // plate is charged and the request is still queued for the next mount to charge again.
-    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
-      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
-    );
-  });
-
-  it('consumes a queued reference request before spending, so re-entering cannot pay twice', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    const queue = installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    // The paid call never resolves: the user goes back to the library, or quits, while it is in
-    // flight. Everything the renderer knows about this request dies with the mount, so the request
-    // must already be gone from the queue by the time the money is committed.
-    const inFlightSubmit = deferred<StudioCommandResult<StudioRendererJob[]>>();
-    bridge.submitScenes.invoke.mockReturnValueOnce(inFlightSubmit.promise);
-
-    const { view } = renderRoute();
-
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
-    expect(queue.pendingIds()).toEqual([]);
-
-    view.unmount();
-    renderRoute();
-
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke.mock.calls.length).toBeGreaterThan(1));
-    await act(async () => {});
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('shows a rejected auto-submit in a review the user can discard', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    bridge.submitScenes.invoke.mockResolvedValue(invalidPayload());
-
-    renderRoute();
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('conversation.creativeStudio.errors.invalidPayload')).toBeVisible();
-    expect(within(review).getByLabelText(opening.title)).toBeVisible();
-
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.cancel' }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
-    );
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('retries a rejected zero-reference auto-submit without consuming its queue request twice', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    const request = referenceRequest(opening.id, 1);
-    const queue = installReferenceRequestQueue([request]);
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    bridge.submitScenes.invoke.mockResolvedValueOnce(invalidPayload()).mockResolvedValue(ok([]));
-
-    renderRoute();
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(queue.pendingIds()).toEqual([]);
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(2));
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce();
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledWith({
-      projectId: 'project-1',
-      requestIds: [request.id],
-    });
-    expect(queue.pendingIds()).toEqual([]);
-  });
-
-  /**
-   * One request the renderer could not act on must not close the feature for the rest of the mount.
-   *
-   * The batch is rebuilt from every pending request on each run, so a request that has been through
-   * the paid path but is still queued (its dismissal failed) reappears inside every later batch. A
-   * re-entry guard that asks "does this batch contain anything already attempted?" therefore skips
-   * brand-new requests for unrelated scenes, silently and for good.
-   */
-  it('lets the next queued reference request through after one that could not be consumed', async () => {
-    const first = scene({ id: 'scene-1', mediaKind: 'video' });
-    const second = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [first.id, second.id],
-          scenes: { [first.id]: first, [second.id]: second },
-        })
-      )
-    );
-    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProposalUpdate = listener;
-      return () => {};
-    });
-    const stuck = referenceRequest(first.id, 1);
-    const queue = installReferenceRequestQueue([stuck]);
-    const consume = bridge.dismissReferenceRequests.invoke.getMockImplementation()!;
-    bridge.dismissReferenceRequests.invoke.mockImplementation(async (input: { requestIds: string[] }) =>
-      input.requestIds.includes(stuck.id) ? failure() : consume(input)
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce());
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(queue.pendingIds()).toEqual([stuck.id]);
-
-    queue.queue(referenceRequest(second.id, 2));
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
-    expect(bridge.submitScenes.invoke).toHaveBeenLastCalledWith(
-      expect.objectContaining({
-        mode: 'batch',
-        sceneIds: [second.id],
-        routes: [{ sceneId: second.id, choiceId: 'choice_image', kind: 'image' }],
-        outputRole: 'reference',
-      })
-    );
-  });
-
-  it('auto-submits only guard-ready queued scenes and lets the user discard the excluded request', async () => {
-    const plated = scene({
-      id: 'scene-1',
-      assetIds: ['asset-1'],
-      reviewState: 'needs_selection',
-    });
-    const ready = scene({ id: 'scene-2', title: 'Closing', mediaKind: 'video' });
-    const requests = [referenceRequest(plated.id, 1), referenceRequest(ready.id, 2)];
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [plated.id, ready.id],
-          scenes: { [plated.id]: plated, [ready.id]: ready },
-          assets: { 'asset-1': asset('asset-1') },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok(requests));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: [ready.id],
-        expectedRevision: 2,
-        routes: [{ sceneId: ready.id, choiceId: 'choice_image', kind: 'image' }],
-        catalogVersion: 'catalog-1',
-        outputRole: 'reference',
-        referencePrompts: [{ sceneId: ready.id, prompt: buildFirstFramePrompt(ready.visualPrompt, '16:9') }],
-      })
-    );
-    await waitFor(() =>
-      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        requestIds: [requests[1]!.id],
-      })
-    );
-
-    const notice = await screen.findByTestId('reference-exclusion-notice');
-    expect(within(notice).getByText(plated.title)).toBeVisible();
-    fireEvent.click(
-      within(notice).getByRole('button', {
-        name: 'conversation.creativeStudio.reference.discardExcludedRequests',
-      })
-    );
-
-    await waitFor(() =>
-      expect(bridge.dismissReferenceRequests.invoke).toHaveBeenNthCalledWith(2, {
-        projectId: 'project-1',
-        requestIds: [requests[0]!.id],
-      })
-    );
-    await waitFor(() => expect(screen.queryByTestId('reference-exclusion-notice')).not.toBeInTheDocument());
-  });
-
-  it('names every queued reference scene when none are ready for approval', async () => {
-    const plated = scene({
-      id: 'scene-1',
-      title: 'Already plated',
-      assetIds: ['asset-1'],
-      reviewState: 'needs_selection',
-    });
-    const failedJob = job('job-failed', {
-      sceneId: 'scene-2',
-      status: 'failed',
-      error: {
-        code: 'provider_unavailable',
-        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
-      },
-    });
-    const needsAttention = scene({
-      id: 'scene-2',
-      title: 'Failed closing',
-      jobIds: [failedJob.id],
-      reviewState: 'needs_attention',
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [plated.id, needsAttention.id],
-          scenes: { [plated.id]: plated, [needsAttention.id]: needsAttention },
-          assets: { 'asset-1': asset('asset-1') },
-          jobs: { [failedJob.id]: failedJob },
-        })
-      )
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(
-      ok([referenceRequest(plated.id, 1), referenceRequest(plated.id, 2), referenceRequest(needsAttention.id, 3)])
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    const notice = await screen.findByTestId('reference-exclusion-notice');
-    expect(within(notice).getByText('conversation.creativeStudio.reference.excludedNoneReady')).toBeVisible();
-    expect(within(notice).getAllByText(plated.title)).toHaveLength(1);
-    expect(within(notice).getByText(/conversation\.creativeStudio\.scene\.status\.needs_selection/)).toBeVisible();
-    expect(within(notice).getByText(needsAttention.title)).toBeVisible();
-    expect(within(notice).getByText(/conversation\.creativeStudio\.scene\.status\.needs_attention/)).toBeVisible();
-    const phaseHeading = document.querySelector('[data-studio-phase-heading]');
-    expect(phaseHeading).not.toBeNull();
-    expect(notice.compareDocumentPosition(phaseHeading) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
-    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
-    expect(bridge.dismissReferenceRequests.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  /**
-   * A queued request that cannot be consumed must not be paid for.
-   *
-   * Dismissal is what stops the next mount finding the same request still pending and charging for
-   * the plate again, so a failed dismissal is a failed spend fence, not a cosmetic problem. Nothing
-   * is lost by waiting: the request stays queued for the next mount to pick up.
-   */
-  it('does not spend when a queued reference request cannot be consumed first', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.dismissReferenceRequests.invoke.mockResolvedValue(failure());
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() => expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce());
-    expect(await screen.findByText('conversation.creativeStudio.reference.dismissFailed')).toBeVisible();
-    await act(async () => {});
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    // The request is still queued and every re-read offers it again. Retrying it for the rest of
-    // the mount is what `autoSubmittedReferenceRequestIdsRef` exists to stop: nothing here has
-    // been suppressed, because suppression means "already dealt with", which this is not.
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await act(async () => {});
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledOnce();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  /**
-   * A queued request must be submitted once, not once per job poll.
-   *
-   * The auto-submit effect re-runs whenever `studioJobs` changes, which includes every poll, and
-   * this is a paid path with no spend ceiling behind it. Main keeps offering the request here —
-   * a stale read, a dismissal that has not landed on disk yet — and each re-read must be ignored.
-   *
-   * Deleting either half of the re-entry filter (the suppressed set or the auto-submitted set) is
-   * enough to make this red, which is what the earlier version of this test could not claim.
-   */
-  it('auto-submits a queued reference request once across repeated pending re-reads', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    // `proposalUpdated`, not `projectUpdated`: only this one re-reads the pending queue, which is
-    // what puts the already-submitted request back in front of the effect.
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest(opening.id, 1)]));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce());
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await act(async () => {});
-
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('keeps queued reference approval unavailable while scene drafts are unsaved', async () => {
-    const pending = deferred<StudioCommandResult<StudioReferenceRequest[]>>();
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listPendingReferenceRequests.invoke.mockReturnValue(pending.promise);
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-
-    renderRoute();
-    const prompt = await screen.findByLabelText('conversation.creativeStudio.inspector.visualPromptLabel');
-    fireEvent.change(prompt, { target: { value: 'Unsaved queued-reference edit' } });
-    await act(async () => pending.resolve(ok([referenceRequest(opening.id, 1)])));
-
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke).toHaveBeenCalled());
-    expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('submits an edited reference prompt with the reference role on the image route', async () => {
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute();
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const promptDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    fireEvent.change(within(promptDialog).getByLabelText('conversation.creativeStudio.reference.promptLabel'), {
-      target: { value: 'Edited reference-only prompt' },
-    });
-    fireEvent.click(
-      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    );
-    const reviewDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.review.title',
-    });
-    fireEvent.click(within(reviewDialog).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'single',
-        sceneIds: ['scene-1'],
-        expectedRevision: 2,
-        routes: [{ sceneId: 'scene-1', choiceId: 'choice_image', kind: 'image' }],
-        catalogVersion: 'catalog-1',
-        outputRole: 'reference',
-        referencePrompts: [{ sceneId: 'scene-1', prompt: 'Edited reference-only prompt' }],
-      })
-    );
-  });
-
-  it('does not offer generated references when the image catalog role is not ready', async () => {
-    const videoRoute = imageRoute({
-      choiceId: 'choice_video',
-      providerId: 'provider-video',
-      providerName: 'Video provider',
-      model: 'video-model',
-      kind: 'video',
-    });
-    const opening = scene({ mediaKind: 'video' });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          routing: {
-            storyboard: null,
-            image: project().routing.image,
-            video: {
-              choiceId: videoRoute.choiceId,
-              providerId: videoRoute.providerId,
-              model: videoRoute.model,
-            },
-          },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok({
-        ...routes(),
-        video: {
-          status: 'ready',
-          selected: {
-            choiceId: videoRoute.choiceId,
-            providerId: videoRoute.providerId,
-            model: videoRoute.model,
-          },
-          selectedRoute: videoRoute,
-          selectionIssue: null,
-          options: [videoRoute],
         },
+      ])
+    );
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
+      ok({
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [],
       })
     );
-    renderRoute();
-
-    await screen.findByRole('region', { name: 'Opening' });
-    expect(
-      screen.queryByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    ).not.toBeInTheDocument();
-  });
-
-  it('opens the canonical selected variation from its shot card without selecting another asset', async () => {
-    const first = asset('asset-1');
-    const second = asset('asset-2');
-    const opening = scene({
-      selectedAssetId: first.id,
-      assetIds: [first.id, second.id],
-      reviewState: 'complete',
-    });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      assets: { [first.id]: first, [second.id]: second },
-    });
-    bridge.getProject.invoke.mockResolvedValue(ok(initial));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.openPreview',
-      })
-    );
-    const preview = await screen.findByRole('figure', { name: 'conversation.creativeStudio.preview.title' });
-    expect(within(preview).getByRole('img', { name: 'conversation.creativeStudio.preview.imageAlt' })).toHaveAttribute(
-      'src',
-      'weprompt-studio://asset/project-1/asset-1'
-    );
-    expect(screen.getByText('conversation.creativeStudio.phase.produce.takeRatio')).toBeVisible();
-    expect(bridge.selectAsset.invoke).not.toHaveBeenCalled();
-  });
-
-  it('does not infer a video poster when more than one succeeded job claims the selected primary asset', async () => {
-    const videoAsset: StudioAsset = {
-      ...asset('video-1'),
-      mediaKind: 'video',
-      mimeType: 'video/mp4',
-    };
-    const firstPoster: StudioAsset = {
-      ...asset('poster-1'),
-      managedAsset: { collection: 'thumbnails', fileName: 'poster-1.png' },
-    };
-    const secondPoster: StudioAsset = {
-      ...asset('poster-2'),
-      managedAsset: { collection: 'thumbnails', fileName: 'poster-2.png' },
-    };
-    const firstJob = job('job-1', {
-      provider: {
-        choiceId: 'choice_video',
-        providerId: 'provider-video',
-        model: 'video-model',
-      },
-      outputAssetIds: [videoAsset.id, firstPoster.id],
-    });
-    const secondJob = job('job-2', {
-      provider: firstJob.provider,
-      outputAssetIds: [videoAsset.id, secondPoster.id],
-    });
-    const opening = scene({
-      mediaKind: 'video',
-      selectedAssetId: videoAsset.id,
-      assetIds: [videoAsset.id, firstPoster.id, secondPoster.id],
-      jobIds: [firstJob.id, secondJob.id],
-      reviewState: 'complete',
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: {
-            [videoAsset.id]: videoAsset,
-            [firstPoster.id]: firstPoster,
-            [secondPoster.id]: secondPoster,
-          },
-          jobs: {
-            [firstJob.id]: firstJob,
-            [secondJob.id]: secondJob,
-          },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.openPreview',
-      })
-    );
-    const preview = await screen.findByRole('figure', { name: 'conversation.creativeStudio.preview.title' });
-    const video = within(preview).getByLabelText('conversation.creativeStudio.preview.videoLabel');
-    expect(video).not.toHaveAttribute('poster');
-    expect(screen.getAllByText('conversation.creativeStudio.preview.videoReady')).toHaveLength(2);
-  });
-
-  it('submits one scene only after explicit review without applying the batch duration gate', async () => {
-    const opening = scene({ durationSeconds: 5 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    const generateScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(generateScene).toBeEnabled());
-    fireEvent.click(generateScene);
-
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
-      })
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'single',
-        sceneIds: ['scene-1'],
-        expectedRevision: 2,
-        routes: [
-          {
-            sceneId: 'scene-1',
-            choiceId: 'choice_image',
-            kind: 'image',
-          },
-        ],
-        catalogVersion: 'catalog-1',
-      })
-    );
-  });
-
-  it.each([
-    {
-      state: 'generated',
-      selectedAssetId: 'asset-output',
-    },
-    {
-      state: 'needs selection',
-      selectedAssetId: null,
-    },
-  ])('blocks a blank-prompt $state scene from single-scene review', async ({ selectedAssetId }) => {
-    const output = asset('asset-output');
-    const opening = scene({
-      visualPrompt: '   ',
-      selectedAssetId,
-      assetIds: [output.id],
-      durationSeconds: 5,
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [output.id]: output },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.renderAnother',
-      })
-    ).toBeDisabled();
-    if (selectedAssetId === null) {
-      expect(
-        screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.writeVisual' })
-      ).toBeEnabled();
-    }
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('allows explicit regeneration with a nonblank prompt independently of the batch duration total', async () => {
-    const output = asset('asset-output');
-    const opening = scene({ selectedAssetId: output.id, assetIds: [output.id], durationSeconds: 5 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [output.id]: output },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    const regenerate = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.renderAnother',
-    });
-    await waitFor(() => expect(regenerate).toBeEnabled());
-    fireEvent.click(regenerate);
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('opens the existing paid review from the shot-card action without submitting before confirmation', async () => {
-    const opening = scene({ durationSeconds: 5 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.render',
-      })
-    );
-
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-  });
-
-  it.each([
-    {
-      condition: 'a stored source prompt differs while references and frame settings still match',
-      provenance: {
-        sourceVisualPrompt: 'The manually admitted plate prompt',
-        sourceReferenceAssetIds: ['brief-cast'],
-        sourceAspectRatio: '16:9' as const,
-        sourceResolution: '720p' as const,
-      },
-      warns: false,
-    },
-    {
-      condition: 'known reference IDs differ',
-      provenance: {
-        sourceVisualPrompt: 'The manually admitted plate prompt',
-        sourceReferenceAssetIds: [],
-        sourceAspectRatio: '16:9' as const,
-        sourceResolution: '720p' as const,
-      },
-      warns: true,
-    },
-    {
-      condition: 'legacy provenance is incomplete',
-      provenance: {},
-      warns: false,
-    },
-  ])('keeps a selected first frame usable when $condition', async ({ provenance, warns }) => {
-    const cast = briefReferenceAsset();
-    const plate: StudioAsset = {
-      ...asset('plate-1'),
-      managedAsset: { collection: 'references', fileName: 'plate-1.png' },
-      ...provenance,
-    };
-    const opening = scene({
-      mediaKind: 'video',
-      visualPrompt: 'The current scene visual prompt',
-      referenceAssetId: plate.id,
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          assets: { [cast.id]: cast, [plate.id]: plate },
-          routing: {
-            storyboard: null,
-            image: { choiceId: 'choice_image', providerId: 'provider-image', model: 'image-model' },
-            video: { choiceId: 'choice_video', providerId: 'provider-video', model: 'video-model' },
-          },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithVideo()));
-
-    renderRoute('/studio/project-1/board');
-    const renderScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(renderScene).toBeEnabled());
-    fireEvent.click(renderScene);
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-
-    if (warns) {
-      expect(within(review).getByText('conversation.creativeStudio.conditioning.plateOutOfDate')).toBeVisible();
-    } else {
-      expect(
-        within(review).queryByText('conversation.creativeStudio.conditioning.plateOutOfDate')
-      ).not.toBeInTheDocument();
-    }
-    expect(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })).toBeEnabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('opens and submits the single batch entry point with an 18-second storyboard against a 15-second target', async () => {
-    const opening = scene({ id: 'scene-1', durationSeconds: 6 });
-    const reveal = scene({ id: 'scene-2', title: 'Reveal', durationSeconds: 6 });
-    const closing = scene({ id: 'scene-3', title: 'Closing', durationSeconds: 6 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id, reveal.id, closing.id],
-          scenes: { [opening.id]: opening, [reveal.id]: reveal, [closing.id]: closing },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    const { batchAction, batchControl } = await findBatchAction();
-    expect(batchAction).toBeEnabled();
-    // An off-target storyboard advises; it must not lock the way to the Cut view either.
-    expect(
-      within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' })).getByRole(
-        'button',
-        { name: 'conversation.creativeStudio.phase.nav.cut' }
-      )
-    ).toBeEnabled();
-    expect(within(batchControl).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
-
-    fireEvent.click(batchAction);
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-  });
-
-  it('advises on an off-target storyboard without gating batch generation', async () => {
-    const opening = scene({ durationSeconds: 18 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    bridge.getProject.invoke.mockResolvedValue(ok(initial));
-    bridge.listRoutes.invoke.mockResolvedValue(ok({ ...routesWithImage(), catalogVersion: '0123456789abcdef' }));
-    const { router } = renderRoute();
-
-    // Write no longer carries a pacing bar, so the mismatch rides the shell advisory slot.
-    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.review.durationMismatch');
-
-    await selectStudioView(router, 'board');
-    const { batchAction, batchControl } = await findBatchAction();
-    expect(batchAction).toBeEnabled();
-    expect(within(batchControl).getByText('conversation.creativeStudio.review.durationMismatch')).toBeVisible();
-  });
-
-  it('keeps write actions disabled for the entire reference import mutation', async () => {
-    const opening = scene({ durationSeconds: 10 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    let resolveImport!: (result: StudioCommandResult<{ status: 'cancelled' }>) => void;
-    bridge.getProject.invoke.mockResolvedValue(ok(initial));
-    bridge.listRoutes.invoke.mockResolvedValue(ok({ ...routesWithImage(), catalogVersion: '0123456789abcdef' }));
-    bridge.chooseAndImportReference.invoke.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveImport = resolve;
-      })
-    );
-    renderRoute();
-    const addReference = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.write.addReference',
-    });
-
-    fireEvent.click(addReference);
-    await waitFor(() => expect(bridge.chooseAndImportReference.invoke).toHaveBeenCalledOnce());
-    // Held across the whole in-flight window, not just re-queried after it settles.
-    expect(addReference).toBeDisabled();
-
-    resolveImport(ok({ status: 'cancelled' }));
-    await waitFor(() => expect(addReference).toBeEnabled());
-  });
-
-  it('selects a project engine directly from the live strip', async () => {
-    const opening = scene({ durationSeconds: 10 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 15,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const alternate = imageRoute({
-      choiceId: 'choice_image_alternate',
-      providerId: 'provider-image-alternate',
-      providerName: 'Alternate image provider',
-      model: 'alternate-image-model',
-    });
-    const catalog = routesWithImage();
-    catalog.catalogVersion = '0123456789abcdef';
-    catalog.image.options.push(alternate);
-    bridge.getProject.invoke.mockResolvedValue(ok(initial));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(catalog));
-    renderRoute('/studio/project-1/board');
-
-    const imageEngine = await screen.findByRole('button', { name: 'image-model' });
-    expect(screen.queryByText(/alternate-image-model/)).not.toBeInTheDocument();
-    fireEvent.click(imageEngine);
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getAllByText('conversation.creativeStudio.models.engine.optionLabel')[1]
-    );
-
-    await waitFor(() =>
-      expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
-        projectId: 'project-1',
-        expectedRevision: initial.revision,
-        role: 'image',
-        selection: { choiceId: 'choice_image_alternate' },
-      })
-    );
-  });
-
-  it('pre-arms the only compatible engine without writing until the user chooses it', async () => {
-    const unrouted = project('project-1', { routing: { storyboard: null, image: null, video: null } });
-    bridge.getProject.invoke.mockResolvedValueOnce(ok(unrouted)).mockResolvedValue(ok(project()));
-    bridge.listRoutes.invoke
+    // Empty first, so provisioning fires; populated afterwards, as it would be once a model binds.
+    mocks.bridge.listRoutes.invoke
       .mockResolvedValueOnce(
         ok({
-          ...routes(),
+          image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_1',
+        })
+      )
+      .mockResolvedValue(
+        ok({
           image: {
-            status: 'selection_required' as const,
+            status: 'ready',
             selected: null,
             selectedRoute: null,
             selectionIssue: null,
-            options: [imageRoute()],
+            options: [
+              { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+            ],
           },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_2',
         })
+      );
+    mocks.bridge.getGenerationCapability.invoke
+      .mockImplementationOnce(
+        async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+          supportedCapabilityResult(input, 'catalog_1')
       )
-      .mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
+      .mockImplementation(
+        async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+          supportedCapabilityResult(input, 'catalog_2')
+      );
+    renderStudio();
 
-    const imageEngine = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.models.engine.notSetImage',
-    });
-    expect(imageEngine).toHaveTextContent('image-model');
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(imageEngine);
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-    await waitFor(() =>
-      expect(bridge.updateModelSelection.invoke).toHaveBeenCalledWith({
-        projectId: 'project-1',
-        expectedRevision: unrouted.revision,
-        role: 'image',
-        selection: { choiceId: 'choice_image' },
-      })
-    );
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
+    await waitFor(() => expect(mocks.bridge.saveConnection.invoke).toHaveBeenCalled());
+    // One read for the workspace's own catalogue, one inside provisioning, and one refresh after it.
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke.mock.calls.length).toBeGreaterThanOrEqual(3));
+    expect(mocks.bridge.getGenerationCapability.invoke.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
-  it('exposes ambiguous engine choices in place without guessing or showing the connection door', async () => {
-    const unrouted = project('project-1', { routing: { storyboard: null, image: null, video: null } });
-    bridge.getProject.invoke.mockResolvedValue(ok(unrouted));
-    bridge.listRoutes.invoke.mockResolvedValue(
+  it('writes nothing until the Director has attached, so the bind is not invalidated', async () => {
+    // The Director's bind carries an expected revision. A set_routes landing in between fails it as
+    // "the project changed elsewhere" and the rail reports Director setup as interrupted — which is
+    // exactly what shipping this convenience without the guard did.
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...project(), briefConversationId: null } })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
       ok({
-        ...routes(),
         image: {
-          status: 'selection_required' as const,
+          status: 'ready',
           selected: null,
           selectedRoute: null,
           selectionIssue: null,
-          options: [imageRoute(), imageRoute({ choiceId: 'choice_image_alternate', model: 'alternate-image-model' })],
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
         },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
       })
     );
-    renderRoute('/studio/project-1/board');
+    renderStudio();
 
-    expect(
-      await screen.findByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' })
-    ).toBeVisible();
-    expect(
-      screen.queryByRole('heading', { name: 'conversation.creativeStudio.phase.produce.connectEngine' })
-    ).not.toBeInTheDocument();
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledWith({ projectId: 'project-1' }));
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.saveConnection.invoke).not.toHaveBeenCalled();
   });
 
-  it('opens a canonical batch review from the batch control and submits every exact scene route only after confirmation', async () => {
-    const opening = scene({ id: 'scene-1', durationSeconds: 5 });
-    const closing = scene({ id: 'scene-2', title: 'Closing', durationSeconds: 10 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id, closing.id],
-          scenes: { [opening.id]: opening, [closing.id]: closing },
-        })
-      )
+  it('binds a Studio media model when none exists, so the catalogue stops being empty', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
+    // A route needs a connection binding, not just a configured provider. Without one the catalogue
+    // is empty, the project has nothing to bind, and the only way through is a visit to Settings.
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
+          ],
+        },
+      ])
     );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    const { batchAction } = await findBatchAction();
-    await waitFor(() => expect(batchAction).toBeEnabled());
-    fireEvent.click(batchAction);
-
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.sceneCount');
-    expect(screen.getByRole('button', { name: 'image-model' })).toBeDisabled();
-    expect(screen.getByRole('button', { name: 'image-model' })).toHaveAccessibleDescription(
-      'conversation.creativeStudio.models.engine.lockedDuringReview'
-    );
-    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' }))
-      .getAllByRole('button')
-      .forEach((button) => expect(button).toBeDisabled());
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
+      ok({
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [],
       })
     );
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_2',
+      })
+    );
+    mocks.bridge.listRoutes.invoke.mockResolvedValueOnce(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mocks.bridge.getGenerationCapability.invoke
+      .mockImplementationOnce(
+        async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+          supportedCapabilityResult(input, 'catalog_1')
+      )
+      .mockImplementation(
+        async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+          supportedCapabilityResult(input, 'catalog_2')
+      );
+    renderStudio();
 
     await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: ['scene-1', 'scene-2'],
-        expectedRevision: 2,
-        routes: [
-          {
-            sceneId: 'scene-1',
-            choiceId: 'choice_image',
-            kind: 'image',
-          },
-          {
-            sceneId: 'scene-2',
-            choiceId: 'choice_image',
-            kind: 'image',
-          },
-        ],
-        catalogVersion: 'catalog-1',
+      expect(mocks.bridge.saveConnection.invoke).toHaveBeenCalledWith({
+        providerId: 'p1',
+        integrationId: 'int_img',
+        model: 'img-a',
       })
     );
   });
 
-  it('shows the canonical integration for duplicate provider and model routes before paid confirmation', async () => {
-    const selectedVideo = imageRoute({
-      choiceId: 'choice_video_byteplus',
-      providerId: 'provider-video',
-      providerName: 'Shared video provider',
-      model: 'duplicate-video-model',
-      integrationLabelKey: 'bytePlusSeedance',
-      kind: 'video',
-    });
-    const otherVideo = imageRoute({
-      ...selectedVideo,
-      choiceId: 'choice_video_gateway',
-      integrationLabelKey: 'selfHostedVideoGateway',
-    });
-    const opening = scene({ mediaKind: 'video', durationSeconds: 5 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          routing: {
-            storyboard: null,
-            image: null,
-            video: {
-              choiceId: selectedVideo.choiceId,
-              providerId: selectedVideo.providerId,
-              model: selectedVideo.model,
-            },
-          },
-        })
-      )
+  it('never reconsiders a connection someone already chose', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
+    mocks.bridge.listConnectionCandidates.invoke.mockResolvedValue(
+      ok([
+        {
+          providerId: 'p1',
+          providerName: 'OpenRouter',
+          models: [],
+          integrationModels: [
+            { integrationLabelKey: 'openRouterImage', models: [{ model: 'img-a', health: 'available' }] },
+          ],
+        },
+      ])
     );
-    bridge.listRoutes.invoke.mockResolvedValue(
+    mocks.bridge.listConnections.invoke.mockResolvedValue(
       ok({
-        ...routes(),
+        integrations: [{ integrationId: 'int_img', kind: 'image', labelKey: 'openRouterImage' }],
+        connections: [{ integrationId: 'int_img' }],
+      })
+    );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.listConnections.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.saveConnection.invoke).not.toHaveBeenCalled();
+  });
+
+  it('binds a route of each kind on a project that has none, so Render is reachable', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: attachedProject() }));
+    // Projects are created with both ids null. Without this a finished script meets a Render button
+    // that does nothing until the user finds the Brief form.
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
         video: {
           status: 'ready',
-          selected: {
-            choiceId: selectedVideo.choiceId,
-            providerId: selectedVideo.providerId,
-            model: selectedVideo.model,
-          },
-          selectedRoute: selectedVideo,
-          selectionIssue: null,
-          options: [otherVideo, selectedVideo],
-        },
-      })
-    );
-    renderRoute('/studio/project-1/board');
-
-    const { batchAction } = await findBatchAction();
-    await waitFor(() => expect(batchAction).toBeEnabled());
-    fireEvent.click(batchAction);
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('settings.mediaModels.integrationLabel')).toBeVisible();
-    expect(within(review).getByText('settings.mediaModels.integration.bytePlusSeedance')).toBeVisible();
-    expect(
-      within(review).queryByText('settings.mediaModels.integration.selfHostedVideoGateway')
-    ).not.toBeInTheDocument();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('keeps the batch modal and submit on the same frozen eligible scene enumeration', async () => {
-    const opening = scene({ id: 'scene-eligible', title: 'Eligible opening', durationSeconds: 5 });
-    const reference = scene({
-      id: 'scene-reference',
-      title: 'Reference blocked',
-      durationSeconds: 5,
-      referenceAssetId: 'reference-1',
-    });
-    const video = scene({ id: 'scene-video', title: 'Video without engine', mediaKind: 'video', durationSeconds: 5 });
-    const noFirstFrame = imageRoute({
-      constraints: { ...imageRoute().constraints, supportsFirstFrame: false },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 15,
-          sceneOrder: [opening.id, reference.id, video.id],
-          scenes: { [opening.id]: opening, [reference.id]: reference, [video.id]: video },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(noFirstFrame)));
-    renderRoute('/studio/project-1/board');
-
-    const { batchAction, batchControl } = await findBatchAction();
-    await waitFor(() => expect(batchAction).toBeEnabled());
-    expect(within(batchControl).getAllByText('conversation.creativeStudio.phase.produce.batchExcluded')).toHaveLength(
-      2
-    );
-    fireEvent.click(batchAction);
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    const reviewedShots = within(review).getAllByRole('article');
-    expect(reviewedShots).toHaveLength(1);
-    expect(reviewedShots[0]).toHaveAccessibleName('Eligible opening');
-    expect(within(review).getByText('Image provider')).toBeVisible();
-    expect(within(review).getByText('conversation.creativeStudio.review.excludedFirstFrame')).toBeVisible();
-
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: ['scene-eligible'],
-        expectedRevision: 2,
-        routes: [{ sceneId: 'scene-eligible', choiceId: 'choice_image', kind: 'image' }],
-        catalogVersion: 'catalog-1',
-      })
-    );
-  });
-
-  it('closes a route-blocked review and focuses its existing engine role without selecting or spending', async () => {
-    const opening = scene({ id: 'scene-1', title: 'Queued opening', durationSeconds: 5 });
-    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(review).getByText('conversation.creativeStudio.review.invalidRoute')).toBeVisible();
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-
-    await waitFor(() =>
-      expect(screen.queryByRole('dialog', { name: 'conversation.creativeStudio.review.title' })).not.toBeInTheDocument()
-    );
-    await waitFor(() => expect(document.activeElement?.closest('[data-engine-role="image"]')).not.toBeNull());
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('opens Brief from Cut and focuses the blocked role without selecting or spending', async () => {
-    const opening = scene({ id: 'scene-1', title: 'Cut recovery', durationSeconds: 5 });
-    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
-    renderRoute('/studio/project-1/cut');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-
-    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    const briefImageSlot = within(brief).getByRole('group', {
-      name: 'conversation.creativeStudio.models.engine.roleImage',
-    });
-    const briefScope = briefImageSlot.closest('[data-studio-engine-scope="brief"]');
-    expect(briefScope).not.toBeNull();
-    await waitFor(() => expect(document.activeElement?.closest('[data-studio-engine-scope="brief"]')).toBe(briefScope));
-    expect(document.activeElement?.closest('[data-engine-role="image"]')).not.toBeNull();
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('focuses the already-open Brief engine instead of the obscured phase engine', async () => {
-    const opening = scene({ id: 'scene-1', title: 'Brief recovery', durationSeconds: 5 });
-    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routes()));
-    renderRoute({ pathname: '/studio/project-1/table', state: { openBrief: true } });
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-
-    const brief = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.phase.brief.title' });
-    const briefImageSlot = within(brief).getByRole('group', {
-      name: 'conversation.creativeStudio.models.engine.roleImage',
-    });
-    await waitFor(() => expect(document.activeElement?.closest('[data-engine-role="image"]')).toBe(briefImageSlot));
-    expect(document.activeElement?.closest('[data-studio-engine-scope="brief"]')).not.toBeNull();
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('focuses an actionless unhealthy engine slot after closing its blocked review', async () => {
-    const opening = scene({ id: 'scene-1', title: 'Health recovery', durationSeconds: 5 });
-    const unavailableImage = imageRoute({ health: 'unavailable' });
-    installReferenceRequestQueue([referenceRequest(opening.id, 1)]);
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(project('project-1', { sceneOrder: [opening.id], scenes: { [opening.id]: opening } }))
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(
-      ok({
-        ...routes(),
-        image: {
-          status: 'unavailable',
-          selected: {
-            choiceId: unavailableImage.choiceId,
-            providerId: unavailableImage.providerId,
-            model: unavailableImage.model,
-          },
+          selected: null,
           selectedRoute: null,
-          selectionIssue: { code: 'health' },
-          options: [unavailableImage],
+          selectionIssue: null,
+          options: [
+            { choiceId: 'vid_plain', kind: 'video', health: 'available', constraints: { supportsFirstFrame: false } },
+            { choiceId: 'vid_chain', kind: 'video', health: 'available', constraints: { supportsFirstFrame: true } },
+          ],
         },
+        catalogVersion: 'catalog_1',
       })
     );
-    renderRoute('/studio/project-1/board');
+    renderStudio();
 
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-
-    const healthSlot = await screen.findByRole('group', {
-      name: 'conversation.creativeStudio.models.engine.roleImage',
-    });
-    await waitFor(() => expect(document.activeElement).toBe(healthSlot));
-    expect(within(healthSlot).queryByRole('button')).not.toBeInTheDocument();
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalled());
+    const batch = mocks.bridge.applyAuthoringBatch.invoke.mock.calls[0][0];
+    // The chaining route wins even though the plain one comes first: shots condition on the previous
+    // shot's last frame, and a route without that produces a film with no continuity rather than an
+    // error.
+    expect(batch.operations).toEqual([{ kind: 'set_routes', imageRouteId: 'img_1', videoRouteId: 'vid_chain' }]);
   });
 
-  it('resumes one deferred Director request after a same-project engine selection without duplicate spend', async () => {
-    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProposalUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ id: 'scene-1', title: 'Deferred opening', durationSeconds: 5 });
-    const pendingRequest = referenceRequest(opening.id, 1);
-    const excluded = scene({
-      id: 'scene-excluded',
-      title: 'Already plated',
-      assetIds: ['asset-1'],
-      reviewState: 'needs_selection',
-    });
-    const excludedRequest = referenceRequest(excluded.id, 2);
-    const excludedAsset = { ...asset('asset-1'), sceneId: excluded.id };
-    const unrouted = project('project-1', {
-      sceneOrder: [opening.id, excluded.id],
-      scenes: { [opening.id]: opening, [excluded.id]: excluded },
-      assets: { [excludedAsset.id]: excludedAsset },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id, excluded.id],
-      scenes: { [opening.id]: opening, [excluded.id]: excluded },
-      assets: { [excludedAsset.id]: excludedAsset },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([pendingRequest, excludedRequest]));
-    bridge.updateModelSelection.invoke.mockImplementation(async () => {
-      canonicalProject = routed;
-      return ok(routed);
-    });
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
+  it('leaves a project that already has a route alone', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...attachedProject(), imageRouteId: 'chosen_by_hand' } })
     );
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    const imageEngine = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.models.engine.notSetImage',
-    });
-    fireEvent.click(imageEngine);
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-
-    await waitFor(() =>
-      expect(bridge.updateModelSelection.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        expectedRevision: unrouted.revision,
-        role: 'image',
-        selection: { choiceId: 'choice_image' },
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'ready',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: null,
+          options: [
+            { choiceId: 'img_1', kind: 'image', health: 'available', constraints: { supportsFirstFrame: false } },
+          ],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
       })
     );
+    renderStudio();
+
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalled());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('canonicalizes a retired route to the safe view-less workspace', async () => {
+    const authority = project();
+    mockSupportedProject(authority);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority, { readyEmptyViews: false })));
+    renderStudio('/studio/project_1/write');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/studio\/project_1$/));
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.start.title' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.references' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' })).toBeVisible();
+  });
+
+  it('shows Main-owned blockers in the app bar only after exact status authority installs', async () => {
+    renderStudio();
+
+    const blockers = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>('[data-studio-bar-blockers]');
+      expect(candidate).toHaveAttribute('data-status', 'clear');
+      return candidate!;
+    });
+    expect(blockers).toHaveTextContent('conversation.creativeStudio.workspace.project.blockers:{"count":0}');
+    expect(document.querySelector('[data-studio-bar-ready]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.project.ready'
+    );
+  });
+
+  it('fails the app-bar status closed when Main returns an internally inconsistent aggregate', async () => {
+    const malformed = { ...projectStatus(project()), blockerCount: 1 };
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(malformed));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalled());
+
+    const blockers = document.querySelector<HTMLElement>('[data-studio-bar-blockers]');
+    expect(blockers).toHaveAttribute('data-status', 'unavailable');
+    expect(blockers).toHaveTextContent('conversation.creativeStudio.workspace.project.statusUnavailable');
+    expect(blockers).not.toHaveTextContent('conversation.creativeStudio.workspace.project.blockers');
+  });
+
+  it('opens first-time Director-defined reference work before the Table', async () => {
+    mockSupportedProject(projectWithReferenceHandoff());
+    window.localStorage.setItem('aionui:creative-studio:references-opened:project_1', '1');
+
+    renderStudio('/studio/project_1');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+    expect(
+      screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' })
+    ).toBeVisible();
+  });
+
+  it('restores a remembered explicit view from the view-less project route', async () => {
+    mockSupportedProject(projectWithReferenceHandoff());
+    window.localStorage.setItem('aionui:creative-studio:last-view:project_1', 'board');
+
+    renderStudio('/studio/project_1');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.board' })).toBeVisible();
+  });
+
+  it('keeps a new empty project view-less until its first Director reference plan arrives', async () => {
+    const empty = project();
+    mockSupportedProject(empty);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(empty, { readyEmptyViews: false })));
+    renderStudio('/studio/project_1');
+
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1');
+    expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_1/table');
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.start.title' })).toBeVisible();
+    const board = screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(board).toBeDisabled();
+    expect(document.getElementById(board.getAttribute('aria-describedby')!)).toHaveTextContent(
+      'conversation.creativeStudio.workspace.notReady.board'
+    );
+
+    const updated = projectWithReferenceHandoff();
+    updated.revision = 4;
+    mockSupportedProject(updated);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+    expect(
+      screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' })
+    ).toBeVisible();
+  });
+
+  it('does not steal navigation when reference work arrives after an explicit Table entry', async () => {
+    renderStudio('/studio/project_1/table');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const updated = projectWithReferenceHandoff();
+    updated.revision = 4;
+    mockSupportedProject(updated);
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table');
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
+  });
+
+  it('keeps an explicit chip choice when local storage cannot remember it', async () => {
+    const authority = projectWithReferenceHandoff();
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1');
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+
+    const storageWrite = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new Error('storage unavailable');
+    });
+    try {
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+
+      const updated = structuredClone(authority);
+      updated.revision = 4;
+      mockSupportedProject(updated);
+      act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+      await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+      expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table');
+    } finally {
+      storageWrite.mockRestore();
+    }
+  });
+
+  it('keeps a direct unready URL and explains the same prerequisite as its disabled chip', async () => {
+    const authority = project();
+    mockSupportedProject(authority);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(ok(projectStatus(authority, { readyEmptyViews: false })));
+
+    renderStudio('/studio/project_1/board');
+
+    const surface = await waitFor(() => {
+      const candidate = document.querySelector<HTMLElement>('[data-studio-surface-state="unready"]');
+      expect(candidate).not.toBeNull();
+      return candidate!;
+    });
+    expect(within(surface).getByText('conversation.creativeStudio.workspace.notReady.board')).toBeVisible();
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board');
+    const board = screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(board).toHaveAttribute('aria-current', 'page');
+    expect(board).toBeDisabled();
+    expect(document.getElementById(board.getAttribute('aria-describedby')!)).toHaveTextContent(
+      'conversation.creativeStudio.workspace.notReady.board'
+    );
+  });
+
+  it('shows quiet loading without claiming status is unavailable while readiness is pending', async () => {
+    const status = deferred<ReturnType<typeof ok<StudioProjectStatusV2>>>();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValue(status.promise);
+
+    renderStudio('/studio/project_1/table');
+
+    expect(
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.project.loading' })
+    ).toBeVisible();
+    expect(document.querySelector('[data-studio-bar-blockers]')).toBeNull();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.project.statusUnavailable')).toBeNull();
+
+    await act(async () => status.resolve(ok(projectStatus(project()))));
+    expect(
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })
+    ).toBeVisible();
+  });
+
+  it('keeps an empty, coherent reference plan navigable with completion disabled until references are current', async () => {
+    renderStudio('/studio/project_1/references');
+
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    expect(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.bindShots',
+      })
+    ).toBeDisabled();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+  });
+
+  it('hands a complete References panel to the per-Shot Table binding flow without writing a binding', async () => {
+    mockSupportedProject(projectWithCandidateReference());
+    renderStudio('/studio/project_1/references');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.bindShots',
+      })
+    );
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('adds a background from References through the shared typed amendment operation', async () => {
+    const authority = projectWithReferenceHandoff();
+    authority.references.reference_3!.approvedAssetId = 'asset_reference_3';
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/references');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.addPlace',
+      })
+    );
+    fireEvent.change(
+      screen.getByLabelText('conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.nameLabel'),
+      { target: { value: 'Dai pai dong' } }
+    );
+    fireEvent.change(
+      screen.getByLabelText('conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.promptLabel'),
+      { target: { value: 'A compact food stall beneath a red awning.' } }
+    );
+
+    const amended = structuredClone(authority);
+    amended.revision = 4;
+    amended.referenceOrder.push('reference_background');
+    amended.references.reference_background = {
+      id: 'reference_background',
+      kind: 'background',
+      label: 'Dai pai dong',
+      prompt: 'A compact food stall beneath a red awning.',
+      approvedAssetId: null,
+      supersededAssetIds: [],
+      jobIds: [],
+      createdAt: '2026-01-01T00:00:01.000Z',
+      updatedAt: '2026-01-01T00:00:01.000Z',
+    };
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mockSupportedProject(amended);
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.confirm',
+      })
+    );
+
     await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'batch',
-        sceneIds: [opening.id],
-        expectedRevision: routed.revision,
-        routes: [{ sceneId: opening.id, choiceId: 'choice_image', kind: 'image' }],
-        catalogVersion: 'catalog-1',
-        outputRole: 'reference',
-        referencePrompts: [
-          { sceneId: opening.id, prompt: buildFirstFramePrompt(opening.visualPrompt, routed.aspectRatio) },
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'amend_reference_plan',
+            additions: [
+              {
+                kind: 'background',
+                label: 'Dai pai dong',
+                prompt: 'A compact food stall beneath a red awning.',
+              },
+            ],
+          },
         ],
       })
     );
-    expect(bridge.dismissReferenceRequests.invoke.mock.invocationCallOrder[0]).toBeLessThan(
-      bridge.submitScenes.invoke.mock.invocationCallOrder[0]!
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [pendingRequest.id],
-    });
-
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await act(async () => {});
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
-    expect(await screen.findByTestId('reference-exclusion-notice')).toHaveTextContent(excluded.title);
+    expect(await screen.findByDisplayValue('Dai pai dong')).toBeVisible();
+    expect(screen.getAllByDisplayValue('Hero')).not.toHaveLength(0);
+    expect(amended.shots.shot_3!.referenceBinding).toEqual(authority.shots.shot_3!.referenceBinding);
   });
 
-  it('narrows a deferred Director batch when one frozen request disappears and submits the survivors in order', async () => {
-    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProposalUpdate = listener;
-      return () => {};
+  it('keeps a refused background amendment open and leaves project authority unchanged', async () => {
+    const authority = projectWithReferenceHandoff();
+    authority.references.reference_3!.approvedAssetId = 'asset_reference_3';
+    mockSupportedProject(authority);
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.amendReferencePlanFailed' },
     });
-    const first = scene({ id: 'scene-1', title: 'First survivor' });
-    const removed = scene({ id: 'scene-2', title: 'Removed middle' });
-    const third = scene({ id: 'scene-3', title: 'Third survivor' });
-    const requests = [referenceRequest(first.id, 1), referenceRequest(removed.id, 2), referenceRequest(third.id, 3)];
-    const unrouted = project('project-1', {
-      sceneOrder: [first.id, removed.id, third.id],
-      scenes: { [first.id]: first, [removed.id]: removed, [third.id]: third },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [first.id, removed.id, third.id],
-      scenes: { [first.id]: first, [removed.id]: removed, [third.id]: third },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    const queue = installReferenceRequestQueue(requests);
-    bridge.updateModelSelection.invoke.mockImplementation(async () => {
-      canonicalProject = routed;
-      return ok(routed);
-    });
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
-    );
-    renderRoute('/studio/project-1/board');
+    renderStudio('/studio/project_1/references');
+    await screen.findAllByDisplayValue('Hero');
+    const references = capturedReferenceActions();
 
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-
-    queue.remove(requests[1]!.id);
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke.mock.calls.length).toBeGreaterThan(1));
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' }));
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: [first.id, third.id],
-          routes: [
-            { sceneId: first.id, choiceId: 'choice_image', kind: 'image' },
-            { sceneId: third.id, choiceId: 'choice_image', kind: 'image' },
-          ],
-          outputRole: 'reference',
-        })
+    await expect(
+      invokeStudioAction(() =>
+        references.addBackground({ label: 'Dai pai dong', prompt: 'A compact food stall beneath a red awning.' })
       )
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [requests[0]!.id, requests[2]!.id],
-    });
-  });
+    ).resolves.toBe(false);
 
-  it('releases exact deferred Director mappings after a canonical scene reorder', async () => {
-    const first = scene({ id: 'scene-1', title: 'Now second' });
-    const second = scene({ id: 'scene-2', title: 'Now first' });
-    const requests = [referenceRequest(first.id, 1), referenceRequest(second.id, 2)];
-    const unrouted = project('project-1', {
-      sceneOrder: [first.id, second.id],
-      scenes: { [first.id]: first, [second.id]: second },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [second.id, first.id],
-      scenes: { [first.id]: first, [second.id]: second },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    installReferenceRequestQueue(requests);
-    bridge.updateModelSelection.invoke.mockImplementation(async () => {
-      canonicalProject = routed;
-      return ok(routed);
-    });
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
-    );
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' }));
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: [second.id, first.id],
-          routes: [
-            { sceneId: second.id, choiceId: 'choice_image', kind: 'image' },
-            { sceneId: first.id, choiceId: 'choice_image', kind: 'image' },
-          ],
-          outputRole: 'reference',
-        })
-      )
-    );
-  });
-
-  it('submits an eligible deferred Director sibling while surfacing one that became excluded', async () => {
-    const ready = scene({ id: 'scene-1', title: 'Still eligible' });
-    const newlyExcluded = scene({ id: 'scene-2', title: 'Became plated' });
-    const excludedAsset = { ...asset('asset-2'), sceneId: newlyExcluded.id };
-    const requests = [referenceRequest(ready.id, 1), referenceRequest(newlyExcluded.id, 2)];
-    const unrouted = project('project-1', {
-      sceneOrder: [ready.id, newlyExcluded.id],
-      scenes: { [ready.id]: ready, [newlyExcluded.id]: newlyExcluded },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [ready.id, newlyExcluded.id],
-      scenes: {
-        [ready.id]: ready,
-        [newlyExcluded.id]: {
-          ...newlyExcluded,
-          assetIds: [excludedAsset.id],
-          reviewState: 'needs_selection',
-        },
-      },
-      assets: { [excludedAsset.id]: excludedAsset },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    const queue = installReferenceRequestQueue(requests);
-    bridge.updateModelSelection.invoke.mockImplementation(async () => {
-      canonicalProject = routed;
-      return ok(routed);
-    });
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
-    );
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' }));
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: [ready.id],
-          routes: [{ sceneId: ready.id, choiceId: 'choice_image', kind: 'image' }],
-          outputRole: 'reference',
-        })
-      )
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [requests[0]!.id],
-    });
-    expect(queue.pendingIds()).toEqual([requests[1]!.id]);
-    expect(await screen.findByTestId('reference-exclusion-notice')).toHaveTextContent(newlyExcluded.title);
-  });
-
-  it('keeps a remapped deferred Director ID fail-closed without stranding its exact sibling', async () => {
-    let onProposalUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProposalUpdate = listener;
-      return () => {};
-    });
-    const exact = scene({ id: 'scene-1', title: 'Exact survivor' });
-    const original = scene({ id: 'scene-2', title: 'Original target' });
-    const remapped = scene({ id: 'scene-3', title: 'Remapped target' });
-    const requests = [referenceRequest(exact.id, 1), referenceRequest(original.id, 2)];
-    const unrouted = project('project-1', {
-      sceneOrder: [exact.id, original.id, remapped.id],
-      scenes: { [exact.id]: exact, [original.id]: original, [remapped.id]: remapped },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [exact.id, original.id, remapped.id],
-      scenes: { [exact.id]: exact, [original.id]: original, [remapped.id]: remapped },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    const queue = installReferenceRequestQueue(requests);
-    bridge.updateModelSelection.invoke.mockImplementation(async () => {
-      canonicalProject = routed;
-      return ok(routed);
-    });
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
-    );
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
-
-    queue.replace({ ...requests[1]!, sceneId: remapped.id });
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.listPendingReferenceRequests.invoke.mock.calls.length).toBeGreaterThan(1));
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.models.engine.notSetImage' }));
-    fireEvent.click(
-      within(await screen.findByRole('menu')).getByText('conversation.creativeStudio.models.engine.optionLabel')
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: [exact.id],
-          routes: [{ sceneId: exact.id, choiceId: 'choice_image', kind: 'image' }],
-          outputRole: 'reference',
-        })
-      )
-    );
-    expect(bridge.dismissReferenceRequests.invoke).toHaveBeenCalledExactlyOnceWith({
-      projectId: 'project-1',
-      requestIds: [requests[0]!.id],
-    });
-    expect(queue.pendingIds()).toEqual([requests[1]!.id]);
-
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await act(async () => onProposalUpdate?.({ projectId: 'project-1' }));
-    await act(async () => {});
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledOnce();
-  });
-
-  it('releases a deferred Director request when the canonical engine became valid before Close', async () => {
-    let onProjectUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onProjectUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ id: 'scene-1', title: 'Already recovered opening', durationSeconds: 5 });
-    const pendingRequest = referenceRequest(opening.id, 1);
-    const unrouted = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const selectableCatalog: StudioRouteCatalog = {
-      ...routes(),
-      image: {
-        status: 'selection_required',
-        selected: null,
-        selectedRoute: null,
-        selectionIssue: null,
-        options: [imageRoute()],
-      },
-    };
-    let canonicalProject = unrouted;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listPendingReferenceRequests.invoke.mockResolvedValue(ok([pendingRequest]));
-    bridge.listRoutes.invoke.mockImplementation(async () =>
-      ok(canonicalProject === unrouted ? selectableCatalog : routesWithImage())
-    );
-    renderRoute('/studio/project-1/board');
-
-    const review = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    canonicalProject = routed;
-    await act(async () => onProjectUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(within(review).getByRole('button', { name: 'conversation.creativeStudio.review.setEngines' }));
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: [opening.id],
-          expectedRevision: routed.revision,
-          routes: [{ sceneId: opening.id, choiceId: 'choice_image', kind: 'image' }],
-          outputRole: 'reference',
-        })
-      )
-    );
-  });
-
-  it('opens batch review after a canonical routing update recovers the catalog', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ durationSeconds: 5 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 5,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const revisedRoute = imageRoute({
-      choiceId: 'choice_image_new',
-      providerId: 'provider-image-new',
-      providerName: 'New image provider',
-      model: 'image-model-new',
-    });
-    const revised = project('project-1', {
-      ...initial,
-      revision: 3,
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: revisedRoute.choiceId,
-          providerId: revisedRoute.providerId,
-          model: revisedRoute.model,
-        },
-        video: null,
-      },
-    });
-    let canonicalProject = initial;
-    bridge.getProject.invoke.mockImplementation(async () => ok(canonicalProject));
-    bridge.listRoutes.invoke.mockResolvedValueOnce(failure()).mockResolvedValue(ok(routesWithImage(revisedRoute)));
-    renderRoute('/studio/project-1/board');
-
-    expect(
-      await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })
-    ).toHaveTextContent('conversation.creativeStudio.models.engine.catalogUnloaded');
-    canonicalProject = revised;
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
-    const { batchAction } = await findBatchAction();
-    fireEvent.click(batchAction);
-
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.review.title');
-    expect(screen.queryByText('conversation.creativeStudio.models.loading')).not.toBeInTheDocument();
-  });
-
-  it('withholds stale shot review actions until the route catalog is ready', async () => {
-    const opening = scene({ durationSeconds: 5 });
-    const refresh = deferred<StudioCommandResult<StudioRouteCatalog>>();
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockReturnValueOnce(refresh.promise);
-    renderRoute('/studio/project-1/board');
-
-    expect(
-      await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' })
-    ).toHaveTextContent('conversation.creativeStudio.models.engine.catalogUnloaded');
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
-    expect(screen.getByText('conversation.creativeStudio.models.blocked.catalogUnloaded')).toBeVisible();
-
-    await act(async () => refresh.resolve(ok(routesWithImage())));
-    expect(
-      await screen.findByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })
-    ).toBeEnabled();
-  });
-
-  it('does not build a paid review when route constraints reject a single scene', async () => {
-    const opening = scene({ durationSeconds: 61 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 61,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(await screen.findByText('conversation.creativeStudio.models.blocked.duration')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
-
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('moves the free duration remedy to the exact Table duration control without routing or spending', async () => {
-    const opening = scene({ durationSeconds: 16 });
-    const boundedRoute = imageRoute({
-      constraints: { ...imageRoute().constraints, minDurationSeconds: 4, maxDurationSeconds: 15 },
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 16,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage(boundedRoute)));
-    const { router } = renderRoute('/studio/project-1/board');
-
-    fireEvent.click(
-      await screen.findByRole('button', { name: 'conversation.creativeStudio.models.blocked.actionShorten' })
-    );
-
-    await waitFor(() => expect(router.state.location.pathname).toBe('/studio/project-1/table'));
-    await waitFor(() => expect(document.activeElement).toHaveAttribute('id', 'studio-scene-duration-scene-1'));
-    expect(bridge.updateModelSelection.invoke).not.toHaveBeenCalled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('requires the duplicate-charge acknowledgement path before generating an unresolved scene again', async () => {
-    const unknownJob = job('job-unknown', {
-      status: 'needs_attention',
-      error: {
-        code: 'submission_unknown',
-        messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
-      },
-    });
-    const opening = scene({
-      durationSeconds: 5,
-      jobIds: [unknownJob.id],
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          jobs: { [unknownJob.id]: unknownJob },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
-    const { batchAction } = await findBatchAction();
-    expect(batchAction).toBeDisabled();
-    expect(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.jobs.retry',
-      })
-    ).toBeEnabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
-    const duplicateChargeDialog = await screen.findByRole('dialog');
-    expect(duplicateChargeDialog).toHaveTextContent('conversation.creativeStudio.jobs.retryChargeBody');
-    expect(duplicateChargeDialog).not.toHaveTextContent('conversation.creativeStudio.jobs.retryConfirmationBody');
-    within(screen.getByRole('navigation', { name: 'conversation.creativeStudio.phase.nav.viewsLabel' }))
-      .getAllByRole('button')
-      .forEach((button) => expect(button).toBeDisabled());
-    expect(bridge.retryJob.invoke).not.toHaveBeenCalled();
-  });
-
-  it('keeps every needs-attention scene out of single and batch paid generation', async () => {
-    const attentionJob = job('job-attention', {
-      status: 'needs_attention',
-      error: {
-        code: 'provider_unavailable',
-        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
-      },
-    });
-    const opening = scene({
-      durationSeconds: 5,
-      jobIds: [attentionJob.id],
-      reviewState: 'ready',
-    });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-          jobs: { [attentionJob.id]: attentionJob },
-        })
-      )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('region', { name: 'conversation.creativeStudio.models.engine.label' });
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.produce.render' })).toBeDisabled();
-    const { batchAction } = await findBatchAction();
-    expect(batchAction).toBeDisabled();
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-  });
-
-  it('refreshes the single project catalog owner once when canonical routing changes', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ durationSeconds: 5 });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const sameRouting = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: { storyboard: null, image: null, video: null },
-    });
-    const routed = project('project-1', {
-      revision: 4,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: 'choice_image',
-          providerId: 'provider-image',
-          model: 'image-model',
-        },
-        video: null,
-      },
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(sameRouting))
-      .mockResolvedValue(ok(routed));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
-    const initialRouteRequestCount = bridge.listRoutes.invoke.mock.calls.length;
-
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(initialRouteRequestCount);
-
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(4));
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(initialRouteRequestCount + 1));
-    await act(async () => {});
-    expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(initialRouteRequestCount + 1);
-  });
-
-  it('refreshes a paid review after an external revision and requires a second confirmation', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ durationSeconds: 5 });
-    const revisedOpening = scene({ title: 'Revised opening', durationSeconds: 6 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 5,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 6,
-      sceneOrder: [revisedOpening.id],
-      scenes: { [revisedOpening.id]: revisedOpening },
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: 'choice_image_new',
-          providerId: 'provider-image-new',
-          model: 'image-model-new',
-        },
-        video: null,
-      },
-    });
-    const revisedRoute = imageRoute({
-      choiceId: 'choice_image_new',
-      providerId: 'provider-image-new',
-      providerName: 'New image provider',
-      model: 'image-model-new',
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(revised));
-    bridge.listRoutes.invoke.mockResolvedValueOnce(ok(routesWithImage())).mockResolvedValue(
-      ok({
-        ...routesWithImage(revisedRoute),
-        catalogVersion: 'catalog-2',
-      })
-    );
-    renderRoute('/studio/project-1/board');
-
-    const generateScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(generateScene).toBeEnabled());
-    fireEvent.click(generateScene);
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Opening');
-
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    const routeRequestsBeforeConfirmation = bridge.listRoutes.invoke.mock.calls.length;
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
-      })
-    );
-
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeConfirmation + 1));
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('Revised opening'));
-    expect(screen.getByRole('dialog')).toHaveTextContent('New image provider');
-    expect(screen.getByRole('dialog')).not.toHaveTextContent('weprompt-media-gateway-v1');
-    expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.errors.staleProject');
-
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
-      })
-    );
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          projectId: 'project-1',
-          expectedRevision: 3,
-          catalogVersion: 'catalog-2',
-          routes: [
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'amend_reference_plan',
+          additions: [
             {
-              sceneId: 'scene-1',
-              choiceId: 'choice_image_new',
-              kind: 'image',
+              kind: 'background',
+              label: 'Dai pai dong',
+              prompt: 'A compact food stall beneath a red awning.',
             },
           ],
-        })
-      )
-    );
-  });
-
-  it('refreshes Prompt A to the Director-edited Prompt B before any paid confirmation can submit', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const promptA = scene({ durationSeconds: 5, visualPrompt: 'Prompt A before the Director edit' });
-    const promptB = scene({ durationSeconds: 5, visualPrompt: 'Prompt B from the Director edit' });
-    const initial = project('project-1', {
-      targetDurationSeconds: 5,
-      sceneOrder: [promptA.id],
-      scenes: { [promptA.id]: promptA },
-    });
-    const directorRevision = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 5,
-      sceneOrder: [promptB.id],
-      scenes: { [promptB.id]: promptB },
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(directorRevision));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    const generateScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(generateScene).toBeEnabled());
-    fireEvent.click(generateScene);
-    const originalReview = await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(originalReview).toBeVisible();
-    await waitFor(() =>
-      expect(
-        studioRuleEvaluationHarness.evaluateStudioRules.mock.calls.some(
-          ([, promptText]) => promptText === 'Prompt A before the Director edit'
-        )
-      ).toBe(true)
-    );
-
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-    const firstConfirmation = within(originalReview).getByRole('button', {
-      name: 'conversation.creativeStudio.review.confirm',
-    });
-    await waitFor(() => expect(firstConfirmation).toBeEnabled());
-    studioRuleEvaluationHarness.evaluateStudioRules.mockClear();
-    const routeRequestsBeforeFirstConfirmation = bridge.listRoutes.invoke.mock.calls.length;
-    fireEvent.click(firstConfirmation);
-
-    await waitFor(() =>
-      expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeFirstConfirmation + 1)
-    );
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    const refreshedReview = screen.getByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(refreshedReview).toBeVisible();
-    await waitFor(() =>
-      expect(
-        studioRuleEvaluationHarness.evaluateStudioRules.mock.calls.some(
-          ([, promptText]) => promptText === 'Prompt B from the Director edit'
-        )
-      ).toBe(true)
-    );
-
-    const secondConfirmation = within(refreshedReview).getByRole('button', {
-      name: 'conversation.creativeStudio.review.confirm',
-    });
-    await waitFor(() => expect(secondConfirmation).toBeEnabled());
-    fireEvent.click(secondConfirmation);
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          projectId: 'project-1',
-          expectedRevision: 3,
-          sceneIds: ['scene-1'],
-        })
-      )
-    );
-  });
-
-  it('does not widen a frozen batch when stale-project refresh finds another ready scene', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ id: 'scene-1', title: 'Originally reviewed', durationSeconds: 5 });
-    const later = scene({ id: 'scene-2', title: 'Ready after review', durationSeconds: 5 });
-    const initial = project('project-1', {
-      targetDurationSeconds: 5,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 10,
-      sceneOrder: [opening.id, later.id],
-      scenes: { [opening.id]: opening, [later.id]: later },
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(revised));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
-
-    fireEvent.click((await findBatchAction()).batchAction);
-    expect(await screen.findByRole('dialog')).toHaveTextContent('Originally reviewed');
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-    await waitFor(() =>
-      expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
-    );
-    const refreshedReview = screen.getByRole('dialog');
-    expect(within(refreshedReview).getAllByRole('article')).toHaveLength(1);
-    expect(within(refreshedReview).getByRole('article')).toHaveAccessibleName('Originally reviewed');
-    expect(within(refreshedReview).queryByText('Ready after review')).not.toBeInTheDocument();
-
-    fireEvent.click(
-      within(refreshedReview).getByRole('button', { name: 'conversation.creativeStudio.review.confirm' })
-    );
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({
-          sceneIds: ['scene-1'],
-          routes: [{ sceneId: 'scene-1', choiceId: 'choice_image', kind: 'image' }],
-        })
-      )
-    );
-  });
-
-  it('preserves a reference prompt and image route when refreshing a stale paid review', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ mediaKind: 'video', durationSeconds: 12 });
-    const revisedOpening = scene({
-      title: 'Revised opening',
-      visualPrompt: '   ',
-      mediaKind: 'video',
-      durationSeconds: 12,
-    });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const revisedRoute = imageRoute({
-      choiceId: 'choice_image_new',
-      providerId: 'provider-image-new',
-      providerName: 'New image provider',
-      model: 'image-model-new',
-    });
-    const revised = project('project-1', {
-      revision: 3,
-      sceneOrder: [revisedOpening.id],
-      scenes: { [revisedOpening.id]: revisedOpening },
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: revisedRoute.choiceId,
-          providerId: revisedRoute.providerId,
-          model: revisedRoute.model,
         },
-        video: null,
-      },
+      ],
     });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(revised));
-    bridge.listRoutes.invoke.mockResolvedValueOnce(ok(routesWithImage())).mockResolvedValue(
-      ok({
-        ...routesWithImage(revisedRoute),
-        catalogVersion: 'catalog-2',
-      })
-    );
-    renderRoute('/studio/project-1/table');
-
-    fireEvent.click(await screen.findByRole('button', { name: 'conversation.creativeStudio.reference.generate' }));
-    const promptDialog = await screen.findByRole('dialog', {
-      name: 'conversation.creativeStudio.reference.dialogTitle',
-    });
-    fireEvent.change(within(promptDialog).getByLabelText('conversation.creativeStudio.reference.promptLabel'), {
-      target: { value: 'Preserved edited reference prompt' },
-    });
-    fireEvent.click(
-      within(promptDialog).getByRole('button', { name: 'conversation.creativeStudio.reference.generate' })
-    );
-    await screen.findByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3));
-    const routeRequestsBeforeConfirmation = bridge.listRoutes.invoke.mock.calls.length;
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.review.confirm' }));
-
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeConfirmation + 1));
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
-    const refreshedReview = screen.getByRole('dialog', { name: 'conversation.creativeStudio.review.title' });
-    expect(within(refreshedReview).getByText('conversation.creativeStudio.reference.reviewTag')).toBeVisible();
-    expect(within(refreshedReview).getByText('New image provider')).toBeVisible();
-    const confirm = within(refreshedReview).getByRole('button', {
-      name: 'conversation.creativeStudio.review.confirm',
-    });
-    expect(confirm).toBeEnabled();
-    fireEvent.click(confirm);
-
-    await waitFor(() =>
-      expect(bridge.submitScenes.invoke).toHaveBeenCalledExactlyOnceWith({
-        projectId: 'project-1',
-        mode: 'single',
-        sceneIds: ['scene-1'],
-        expectedRevision: 3,
-        routes: [{ sceneId: 'scene-1', choiceId: 'choice_image_new', kind: 'image' }],
-        catalogVersion: 'catalog-2',
-        outputRole: 'reference',
-        referencePrompts: [{ sceneId: 'scene-1', prompt: 'Preserved edited reference prompt' }],
-      })
-    );
+    expect(await screen.findByText('native.amendReferencePlanFailed')).toBeVisible();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
+    expect(authority.referenceOrder).toEqual(['reference_3']);
   });
 
-  it('cannot reauthorize a scene that began generating while its paid review was open', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    const opening = scene({ durationSeconds: 5 });
-    const runningJob = job('job-running', { status: 'running' });
-    const generatingOpening = scene({
-      durationSeconds: 5,
-      reviewState: 'generating',
-      jobIds: [runningJob.id],
-    });
-    const initial = project('project-1', {
-      targetDurationSeconds: 5,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const generating = project('project-1', {
-      revision: 3,
-      targetDurationSeconds: 5,
-      sceneOrder: [generatingOpening.id],
-      scenes: { [generatingOpening.id]: generatingOpening },
-      jobs: { [runningJob.id]: runningJob },
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(generating));
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    renderRoute('/studio/project-1/board');
+  it('rejects malformed reference prompt inputs before any mutation or spend review', async () => {
+    const authority = projectWithCandidateReference();
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
 
-    const generateScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(generateScene).toBeEnabled());
-    fireEvent.click(generateScene);
-    await screen.findByRole('dialog');
+    await expect(
+      references.addBackground({ label: 'Dai pai dong', prompt: undefined as unknown as string })
+    ).resolves.toBe(false);
+    await expect(references.regenerate('reference_3', undefined as unknown as string)).resolves.toBe(false);
 
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    await screen.findByText('conversation.creativeStudio.jobs.status.running');
-    const routeRequestsBeforeConfirmation = bridge.listRoutes.invoke.mock.calls.length;
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('selects an exact historical reference image and installs the committed revision', async () => {
+    const candidate = projectWithCandidateReference();
+    mockSupportedProject(candidate);
+    renderStudio('/studio/project_1/references');
+    const choose = (
+      await screen.findAllByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.choosePhoto/u,
+      })
+    ).find((button) => !button.hasAttribute('disabled'));
+    expect(choose).toBeDefined();
+    const approved = structuredClone(candidate);
+    approved.revision = 4;
+    approved.references.reference_3!.approvedAssetId = 'asset_reference_3_old';
+    approved.references.reference_3!.supersededAssetIds = ['asset_reference_3'];
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mockSupportedProject(approved);
+
+    fireEvent.click(choose!);
+
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'select_reference_image',
+            referenceId: 'reference_3',
+            assetId: 'asset_reference_3_old',
+          },
+        ],
       })
     );
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.referenceWorkflow.panel.status.current')
+    ).toBeVisible();
+  });
 
-    await waitFor(() => expect(bridge.listRoutes.invoke).toHaveBeenCalledTimes(routeRequestsBeforeConfirmation + 1));
-    expect(bridge.submitScenes.invoke).not.toHaveBeenCalled();
+  it('removes only the exact current reference take, preserves durable history, and retains the final binding', async () => {
+    const authority = projectWithRemovableReferenceTakes();
+    const afterCurrentRemoval = structuredClone(authority);
+    afterCurrentRemoval.revision = 4;
+    afterCurrentRemoval.references.reference_character!.approvedAssetId = 'asset_reference_character_old';
+    afterCurrentRemoval.references.reference_character!.supersededAssetIds = [];
+    const afterFinalRemoval = structuredClone(afterCurrentRemoval);
+    afterFinalRemoval.revision = 5;
+    afterFinalRemoval.references.reference_character!.approvedAssetId = null;
+    const assetsBefore = structuredClone(authority.assets);
+    const jobsBefore = structuredClone(authority.jobs);
+    const bindingBefore = structuredClone(authority.shots.shot_0!.referenceBinding);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValueOnce(projectWorkspaceLoad(afterCurrentRemoval))
+      .mockResolvedValue(projectWorkspaceLoad(afterFinalRemoval));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce(commit(4)).mockResolvedValueOnce(commit(5));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character')
+      )
+    ).resolves.toBe(true);
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character_old')
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls.map(([request]) => request)).toEqual([
+      {
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'remove_reference_image',
+            referenceId: 'reference_character',
+            assetId: 'asset_reference_character',
+          },
+        ],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [
+          {
+            kind: 'remove_reference_image',
+            referenceId: 'reference_character',
+            assetId: 'asset_reference_character_old',
+          },
+        ],
+      },
+    ]);
+    expect(afterFinalRemoval.assets).toEqual(assetsBefore);
+    expect(afterFinalRemoval.jobs).toEqual(jobsBefore);
+    expect(afterFinalRemoval.shots.shot_0!.referenceBinding).toEqual(bindingBefore);
+    expect(afterFinalRemoval.references.reference_character).toMatchObject({
+      approvedAssetId: null,
+      supersededAssetIds: [],
+    });
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails reference-image removal closed before IPC and after refused or malformed durable refreshes', async () => {
+    const authority = projectWithRemovableReferenceTakes();
+    const malformedRefresh = structuredClone(authority);
+    malformedRefresh.revision = 4;
+    malformedRefresh.references.reference_character!.approvedAssetId = 'asset_reference_character_old';
+    malformedRefresh.references.reference_character!.supersededAssetIds = [];
+    delete malformedRefresh.assets.asset_reference_character;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(malformedRefresh));
+    mocks.bridge.applyAuthoringBatch.invoke
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'stale_revision', messageKey: 'native.removeReferenceFailed' },
+      })
+      .mockResolvedValueOnce(commit(4));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(references.removeImage('missing_reference', 'asset_reference_character')).resolves.toBe(false);
+    await expect(references.removeImage('reference_character', 'asset_reference_character_old')).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.removeImage('reference_character', 'asset_reference_character'))
+    ).resolves.toBe(false);
+    expect(await screen.findByText('native.removeReferenceFailed')).toBeVisible();
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().removeImage('reference_character', 'asset_reference_character')
+      )
+    ).resolves.toBe(false);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps reference removal locked while an exact frozen input has free download recovery', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const referenceAsset = authority.assets.asset_reference_character!;
+    const recoverableJob: StudioRendererJobV2 = {
+      ...structuredClone(authority.jobs.job_reference_character!),
+      id: 'job_seed_download_failed',
+      target: { kind: 'shot', shotId: 'shot_0' },
+      status: 'failed',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: true,
+      purpose: 'seed_still',
+      composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+        referenceInputs: [
+          {
+            referenceId: 'reference_character',
+            kind: 'character',
+            assetId: referenceAsset.id,
+            sha256: referenceAsset.sha256,
+          },
+        ],
+      }),
+    };
+    authority.jobs[recoverableJob.id] = recoverableJob;
+    authority.shots.shot_0!.jobIds.push(recoverableJob.id);
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    const remove = screen.getByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+    });
+    expect(remove).toBeDisabled();
+    expect(remove).toHaveAttribute(
+      'title',
+      'conversation.creativeStudio.workspace.referenceWorkflow.panel.removePhotoLocked'
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not lock reference removal for a download failure with no free recovery', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const referenceAsset = authority.assets.asset_reference_character!;
+    const terminalJob: StudioRendererJobV2 = {
+      ...structuredClone(authority.jobs.job_reference_character!),
+      id: 'job_seed_local_download_failed',
+      target: { kind: 'shot', shotId: 'shot_0' },
+      status: 'failed',
+      outputAssetIds: [],
+      outputAssetIdsByRole: { primary: null, poster: null },
+      error: {
+        code: 'download_failed',
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+      purpose: 'seed_still',
+      composition: testComposition({ kind: 'shot', shotId: 'shot_0' }, 'seed_still', {
+        referenceInputs: [
+          {
+            referenceId: 'reference_character',
+            kind: 'character',
+            assetId: referenceAsset.id,
+            sha256: referenceAsset.sha256,
+          },
+        ],
+      }),
+    };
+    authority.jobs[terminalJob.id] = terminalJob;
+    authority.shots.shot_0!.jobIds.push(terminalJob.id);
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
     expect(
       screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+      })
+    ).toBeEnabled();
+  });
+
+  it.each(['shot', 'beat'] as const)(
+    're-reads an exact retained %s Bin owner and navigates to Board without writes or spend',
+    async (ownerKind) => {
+      const initial = projectWithRetainedReferenceDownloadBlocker(ownerKind, 3);
+      const preflight = structuredClone(initial);
+      preflight.revision = 4;
+      mocks.bridge.getProjectWorkspace.invoke
+        .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+        .mockResolvedValue(projectWorkspaceLoad(preflight));
+
+      renderStudio('/studio/project_1/references');
+      await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+      fireEvent.click(
+        screen.getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.removalBlocker.reviewInBoard',
+        })
+      );
+
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+      await waitFor(() =>
+        expect(document.activeElement).toHaveAttribute(
+          'data-bin-focus-key',
+          ownerKind === 'shot' ? 'shot:shot_0' : 'beat:beat_0'
+        )
+      );
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+      expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    {
+      label: 'is no longer binned',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.bin = [];
+      },
+    },
+    {
+      label: 'has a different exact Bin identity',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.bin = [{ kind: 'beat', beatId: 'beat_0', reason: 'lifted' }];
+        authority.beatOrder = [];
+        authority.beats.beat_0!.shotOrder = ['shot_0'];
+      },
+    },
+  ])('does not navigate when the retained Shot $label on fresh authority', async ({ change }) => {
+    const initial = projectWithRetainedReferenceDownloadBlocker('shot', 3);
+    const preflight = structuredClone(initial);
+    preflight.revision = 4;
+    change(preflight);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(preflight));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() => capturedReferenceActions().reviewRetainedShot(retainedShotReviewClaim('shot')))
+    ).resolves.toBe(false);
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references');
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('accepts a higher-revision preflight, retries the exact download, and keeps another blocker visible', async () => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    const otherBlocker = {
+      ...structuredClone(initial.jobs.job_seed_download_failed!),
+      id: 'job_video_still_running',
+      status: 'running' as const,
+      error: null,
+      canRetryDownload: false,
+      purpose: 'video_take' as const,
+      createdAt: '2026-01-01T00:00:02.000Z',
+      updatedAt: '2026-01-01T00:00:02.000Z',
+    };
+    initial.jobs[otherBlocker.id] = otherBlocker;
+    initial.shots.shot_0!.jobIds.push(otherBlocker.id);
+    const preflight = structuredClone(initial);
+    preflight.revision = 5;
+    preflight.shots.shot_lead = {
+      ...structuredClone(preflight.shots.shot_0!),
+      id: 'shot_lead',
+      jobIds: [],
+    };
+    preflight.beats.beat_0!.shotOrder.unshift('shot_lead');
+    preflight.beats.beat_0!.targetSeconds = 8;
+    const recovered = structuredClone(preflight);
+    recovered.revision = 6;
+    recovered.jobs.job_seed_download_failed!.status = 'succeeded';
+    recovered.jobs.job_seed_download_failed!.error = null;
+    recovered.jobs.job_seed_download_failed!.canRetryDownload = false;
+    recovered.jobs.job_seed_download_failed!.updatedAt = '2026-01-01T00:00:01.000Z';
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValueOnce(projectWorkspaceLoad(preflight))
+      .mockResolvedValue(projectWorkspaceLoad(recovered));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue(ok(recovered.jobs.job_seed_download_failed!));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
+        })
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
+    expect(mocks.bridge.retryDownload.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      jobId: 'job_seed_download_failed',
+      expectedRevision: preflight.revision,
+    });
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText(
+        /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removalBlocker\.activeAssetConsumer/u
+      )
+    ).toBeVisible();
+    expect(document.querySelector('[data-reference-removal-blocker="job_video_still_running"]')).not.toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
       })
     ).toBeDisabled();
   });
 
-  it('blocks repeated confirmation after the backend rejects a reviewed route', async () => {
-    const opening = scene({ durationSeconds: 5 });
-    bridge.getProject.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          targetDurationSeconds: 5,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
+  it('keeps the exact removal lock when blocking download recovery is refused', async () => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(structuredClone(initial)));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.retryDownloadFailed' },
+    });
+
+    renderStudio('/studio/project_1/references');
+    const remove = await screen.findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.referenceWorkflow\.panel\.removePhoto:.*@hero-01/u,
+    });
+    expect(remove).toBeDisabled();
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
         })
       )
-    );
-    bridge.listRoutes.invoke.mockResolvedValue(ok(routesWithImage()));
-    bridge.submitScenes.invoke.mockResolvedValue({
-      ok: false,
-      error: {
-        code: 'invalid_route',
-        messageKey: 'conversation.creativeStudio.errors.invalidRoute',
-      },
-    });
-    renderRoute('/studio/project-1/board');
+    ).resolves.toBe(false);
 
-    fireEvent.click(
-      await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.phase.produce.render',
-      })
-    );
-    const confirm = screen.getByRole('button', {
-      name: 'conversation.creativeStudio.review.confirm',
-    });
-    fireEvent.click(confirm);
-
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-    expect(await screen.findByRole('dialog')).toHaveTextContent('conversation.creativeStudio.errors.invalidRoute');
-    expect(confirm).toBeDisabled();
-    fireEvent.click(confirm);
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1);
+    expect(remove).toBeDisabled();
+    expect(await screen.findByText('native.retryDownloadFailed')).toBeVisible();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('keeps paid generation in review after a stale result and never resubmits without another confirmation', async () => {
-    const opening = scene();
-    const initial = project('project-1', {
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-    });
-    const refreshed = project('project-1', {
-      revision: 3,
-      sceneOrder: [opening.id],
-      scenes: { [opening.id]: opening },
-      routing: {
-        storyboard: null,
-        image: {
-          choiceId: 'choice_image_new',
-          providerId: 'provider-image-new',
-          model: 'image-model-new',
-        },
-        video: null,
+  it.each([
+    {
+      label: 'approved reference asset changed',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.references.reference_character!.approvedAssetId = 'asset_reference_background';
       },
-    });
-    const refreshedRoute = imageRoute({
-      choiceId: 'choice_image_new',
-      providerId: 'provider-image-new',
-      providerName: 'New image provider',
-      model: 'image-model-new',
-    });
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValue(ok(refreshed));
-    bridge.listRoutes.invoke
-      .mockResolvedValueOnce(ok(routesWithImage()))
-      .mockResolvedValue(ok({ ...routesWithImage(refreshedRoute), catalogVersion: 'catalog-2' }));
-    bridge.submitScenes.invoke.mockResolvedValueOnce(stale()).mockResolvedValueOnce(ok([]));
-    renderRoute('/studio/project-1/board');
+    },
+    {
+      label: 'Shot no longer owns the job',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.shots.shot_0!.jobIds = authority.shots.shot_0!.jobIds.filter(
+          (jobId) => jobId !== 'job_seed_download_failed'
+        );
+      },
+    },
+    {
+      label: 'job is no longer a failed download recovery',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.status = 'cancelled';
+        authority.jobs.job_seed_download_failed!.error = null;
+        authority.jobs.job_seed_download_failed!.canRetryDownload = false;
+      },
+    },
+    {
+      label: 'job creation identity changed',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.createdAt = '2026-01-01T00:00:09.000Z';
+      },
+    },
+    {
+      label: 'current asset hash no longer matches the frozen input',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.assets.asset_reference_character!.sha256 = 'f'.repeat(64);
+      },
+    },
+    {
+      label: 'frozen composition no longer names the exact pair',
+      change: (authority: StudioRendererProjectV2) => {
+        authority.jobs.job_seed_download_failed!.composition.inputs.referenceInputs[0]!.assetId =
+          'asset_reference_background';
+      },
+    },
+  ])('fails blocking download recovery closed when fresh $label', async ({ change }) => {
+    const initial = projectWithReferenceDownloadBlocker(3);
+    const stale = structuredClone(initial);
+    change(stale);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(stale));
 
-    const generateScene = await screen.findByRole('button', {
-      name: 'conversation.creativeStudio.phase.produce.render',
-    });
-    await waitFor(() => expect(generateScene).toBeEnabled());
-    fireEvent.click(generateScene);
-    fireEvent.click(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
-      })
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().retryBlockingDownload({
+          kind: 'download_recovery',
+          recoveryAction: 'retry_download',
+          referenceId: 'reference_character',
+          assetId: 'asset_reference_character',
+          jobId: 'job_seed_download_failed',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          purpose: 'seed_still',
+          status: 'failed',
+          shotId: 'shot_0',
+          beatId: 'beat_0',
+          beatPosition: 1,
+          shotPosition: 1,
+        })
+      )
+    ).resolves.toBe(false);
+
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('imports an exact reference photo and accepts only a preservation-complete durable refresh', async () => {
+    const authority = projectWithGenerationReferences(1);
+    const importedAssetId = 'asset_reference_character_imported';
+    const refreshed = structuredClone(authority);
+    refreshed.revision = 4;
+    refreshed.references.reference_character!.approvedAssetId = importedAssetId;
+    refreshed.references.reference_character!.supersededAssetIds = ['asset_reference_character'];
+    refreshed.assets[importedAssetId] = {
+      id: importedAssetId,
+      projectId: authority.id,
+      shotId: null,
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'imports', fileName: `${importedAssetId}.png` },
+      byteSize: 32,
+      sha256: 'f'.repeat(64),
+      createdAt: '2026-01-01T00:00:03.000Z',
+      projectReferenceId: 'reference_character',
+      generationReferenceAssetIds: [],
+      producerJobId: null,
+      compositionDigest: null,
+    };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(refreshed));
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: importedAssetId, projectRevision: 4 })
     );
 
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1));
-    await waitFor(() =>
-      expect(screen.getByRole('dialog')).toHaveTextContent('conversation.creativeStudio.errors.staleProject')
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(invokeStudioAction(() => capturedReferenceActions().importPhoto('reference_character'))).resolves.toBe(
+      true
     );
-    await waitFor(() => expect(screen.getByRole('dialog')).toHaveTextContent('New image provider'));
-    expect(screen.getByRole('dialog')).not.toHaveTextContent('weprompt-media-gateway-v1');
-    expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.importReferenceImage.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      referenceId: 'reference_character',
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails reference-photo import closed for invalid, cancelled, refused, stale, and thrown results', async () => {
+    const authority = projectWithGenerationReferences(1);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(projectWorkspaceLoad(authority));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(references.importPhoto('missing_reference')).resolves.toBe(false);
+    expect(mocks.bridge.importReferenceImage.invoke).not.toHaveBeenCalled();
+
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.importReferenceFailed' },
+    });
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('native.importReferenceFailed')).toBeVisible();
+
+    mocks.bridge.importReferenceImage.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: 'stale_import', projectRevision: 4 })
+    );
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+
+    mocks.bridge.importReferenceImage.invoke.mockRejectedValueOnce(new Error('native import failed'));
+    await expect(invokeStudioAction(() => references.importPhoto('reference_character'))).resolves.toBe(false);
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails closed across missing, refused, malformed, and stale reference selections', async () => {
+    const authority = projectWithCandidateReference();
+    const missingReferenceRefresh = structuredClone(authority);
+    missingReferenceRefresh.revision = 4;
+    missingReferenceRefresh.referenceOrder = [];
+    missingReferenceRefresh.references = {};
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(missingReferenceRefresh));
+    mocks.bridge.applyAuthoringBatch.invoke
+      .mockResolvedValueOnce({ ok: false, error: { code: 'stale_revision', messageKey: 'native.approveFailed' } })
+      .mockResolvedValueOnce(commit(9))
+      .mockResolvedValueOnce(commit(4));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    const references = capturedReferenceActions();
+
+    await expect(
+      invokeStudioAction(() => references.selectImage('missing_reference', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    expect(await screen.findByText('native.approveFailed')).toBeVisible();
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    await expect(
+      invokeStudioAction(() => references.selectImage('reference_3', 'asset_reference_3_old'))
+    ).resolves.toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('serializes Cut and reference commands behind one workspace authority lock', async () => {
+    const authority = projectWithCandidateReference();
+    mockSupportedProject(authority);
+    const leader = deferred<ReturnType<typeof ok>>();
+    mocks.bridge.importBedAudio.invoke.mockReturnValueOnce(leader.promise);
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.cutActions).not.toBeNull());
+    const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
+    const references = capturedReferenceActions();
+
+    let pendingImport!: Promise<'cancelled' | 'imported' | 'failed'>;
+    act(() => {
+      pendingImport = cut.importBedAudio();
+    });
+    await waitFor(() => expect(mocks.bridge.importBedAudio.invoke).toHaveBeenCalledTimes(1));
+
+    await expect(cut.importBedAudio()).resolves.toBe('failed');
+    await expect(cut.detachBedAudio('audio_other')).resolves.toBe(false);
+    await expect(projectMenu.createEditorFolder()).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
+    await expect(projectMenu.revealEditorFolder('missing_export')).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy',
+    });
+    await expect(references.selectImage('reference_3', 'asset_reference_3_old')).resolves.toBe(false);
+    await act(async () => {
+      await references.regenerate('reference_3', 'Stable character sheet for the hero');
+    });
+
+    expect(mocks.bridge.detachBedAudio.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.createExport.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.copyExport.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.revealExport.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    await act(async () => {
+      leader.resolve(ok({ status: 'cancelled' as const }));
+      await expect(pendingImport).resolves.toBe('cancelled');
+    });
+  });
+
+  it('opens and prepares regeneration only through the dedicated project-reference seam', async () => {
+    const authority = projectWithCandidateReference();
+    mockSupportedProject(authority);
+    mocks.bridge.prepareProjectReferences.invoke.mockRejectedValueOnce(new Error('stop after exact capture'));
+    renderStudio('/studio/project_1/references');
 
     fireEvent.click(
       await screen.findByRole('button', {
-        name: 'conversation.creativeStudio.review.confirm',
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.action.generateAnother',
       })
     );
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
 
-    await waitFor(() => expect(bridge.submitScenes.invoke).toHaveBeenCalledTimes(2));
-    expect(bridge.submitScenes.invoke.mock.calls[1]?.[0]).toMatchObject({
-      projectId: 'project-1',
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        referenceIds: ['reference_3'],
+      })
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('persists an edited reference prompt before opening review at the committed revision', async () => {
+    const authority = projectWithCandidateReference();
+    const updated = structuredClone(authority);
+    updated.revision = 4;
+    updated.updatedAt = '2026-01-01T00:00:01.000Z';
+    updated.references.reference_3!.prompt = 'Hero character sheet with a blue rain jacket';
+    updated.references.reference_3!.updatedAt = updated.updatedAt;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(updated));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().regenerate('reference_3', '  Hero character sheet with a blue rain jacket  ')
+      )
+    ).resolves.toBe(true);
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
       expectedRevision: 3,
-      catalogVersion: 'catalog-2',
-      routes: [
+      operations: [
         {
-          sceneId: 'scene-1',
-          choiceId: 'choice_image_new',
-          kind: 'image',
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_3',
+          prompt: 'Hero character sheet with a blue rain jacket',
         },
       ],
     });
+    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        referenceIds: ['reference_3'],
+      })
+    );
   });
 
-  it('routes an empty-project add conflict to always-visible recovery controls', async () => {
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(project()))
-      .mockResolvedValueOnce(ok(project('project-1', { revision: 3 })));
-    bridge.updateScene.invoke.mockResolvedValueOnce(stale());
-    renderRoute();
+  it('saves an inline reference name and prompt in one renderer-only typed batch', async () => {
+    const authority = projectWithCandidateReference();
+    const updated = structuredClone(authority);
+    updated.revision = 4;
+    updated.updatedAt = '2026-01-01T00:00:01.000Z';
+    updated.references.reference_3!.label = 'Hero Wong';
+    updated.references.reference_3!.prompt = 'Hero character sheet with a blue rain jacket';
+    updated.references.reference_3!.updatedAt = updated.updatedAt;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(updated));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
 
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.phase.write.addShot' }));
+    await expect(
+      invokeStudioAction(() =>
+        capturedReferenceActions().updateDetails('reference_3', {
+          label: '  Hero Wong  ',
+          prompt: '  Hero character sheet with a blue rain jacket  ',
+        })
+      )
+    ).resolves.toBe(true);
 
-    await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1), { timeout: 5_000 });
-    const scriptTable = screen.getByRole('region', {
-      name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        { kind: 'set_reference_label', referenceId: 'reference_3', label: 'Hero Wong' },
+        {
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_3',
+          prompt: 'Hero character sheet with a blue rain jacket',
+        },
+      ],
     });
-    expect(
-      await within(scriptTable).findByRole(
-        'button',
-        {
-          name: 'conversation.creativeStudio.storyboard.retry',
-        },
-        { timeout: 5_000 }
-      )
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.storyboard.discard',
-      })
-    ).toBeInTheDocument();
+    expect(updated.references.reference_3!.approvedAssetId).toBe(authority.references.reference_3!.approvedAssetId);
+    expect(updated.shots.shot_3!.referenceBinding).toEqual(authority.shots.shot_3!.referenceBinding);
   });
 
-  it('keeps stale scene-save recovery reachable when the canonical refetch removes every scene', async () => {
-    const opening = scene();
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(
-        ok(
-          project('project-1', {
-            sceneOrder: [opening.id],
-            scenes: { [opening.id]: opening },
-          })
-        )
-      )
-      .mockResolvedValueOnce(
-        ok(
-          project('project-1', {
-            sceneOrder: [opening.id],
-            scenes: { [opening.id]: opening },
-          })
-        )
-      )
-      .mockResolvedValueOnce(ok(project('project-1', { revision: 3 })));
-    bridge.updateScene.invoke.mockResolvedValueOnce(stale());
-    renderRoute();
-
-    const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-    fireEvent.change(titleInput, { target: { value: 'Updated opening' } });
-    fireEvent.blur(titleInput);
-
-    await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1), { timeout: 5_000 });
-    expect(
-      await screen.findByRole(
-        'button',
-        {
-          name: 'conversation.creativeStudio.storyboard.retry',
+  it('discloses and blocks an exact project-reference request outside Main route capability', async () => {
+    const authority = projectWithCandidateReference();
+    mockSupportedProject(authority);
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
         },
-        { timeout: 5_000 }
-      )
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', {
-        name: 'conversation.creativeStudio.storyboard.discard',
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
       })
-    ).toBeInTheDocument();
+    );
+    mockGenerationBlock(
+      { target: { kind: 'reference', referenceId: 'reference_3' }, purpose: 'reference_image' },
+      { code: 'duration', role: 'image', seconds: 4 }
+    );
+    renderStudio('/studio/project_1/references');
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.panel.action.generateAnother',
+      })
+    );
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
   });
 
-  it('allows project navigation while a stale scene recovery choice is visible', async () => {
-    const opening = scene();
-    let projectOneFetches = 0;
-    bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) => {
-      if (projectId === 'project-2') return ok(project('project-2'));
-      projectOneFetches += 1;
-      return ok(
-        project('project-1', {
-          revision: projectOneFetches === 1 ? 2 : 3,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
+  it.each([
+    {
+      label: 'an existing request',
+      messageKey: 'conversation.creativeStudio.workspace.gate.errors.pricing.inFlight',
+      configure: (_authority: StudioRendererProjectV2) => {
+        mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(
+          ok([{ ...referenceRequest(), referenceIds: ['reference_3'] }])
+        );
+      },
+    },
+    {
+      label: 'unsaved generative drafts',
+      messageKey: 'conversation.creativeStudio.workspace.controls.saveBeforeReview',
+      configure: (_authority: StudioRendererProjectV2) => {
+        seedWorkspaceDrafts({
+          'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved reference direction.' },
+        });
+      },
+    },
+    {
+      label: 'an unavailable route catalog',
+      messageKey: 'conversation.creativeStudio.workspace.controls.routeCatalogRequired',
+      configure: (_authority: StudioRendererProjectV2) => {
+        mocks.bridge.listRoutes.invoke.mockResolvedValue({
+          ok: false,
+          error: { code: 'storage_error', messageKey: 'native.routesFailed' },
+        });
+      },
+    },
+    {
+      label: 'an unapproved character before a background',
+      messageKey: 'conversation.creativeStudio.workspace.referenceWorkflow.backgrounds.charactersRequired',
+      configure: (authority: StudioRendererProjectV2) => {
+        authority.references.reference_3!.kind = 'background';
+        authority.references.reference_character = {
+          id: 'reference_character',
+          kind: 'character',
+          label: 'Ming',
+          prompt: 'Ming in a red rain jacket.',
+          approvedAssetId: null,
+          supersededAssetIds: [],
+          jobIds: [],
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-01T00:00:00.000Z',
+        };
+        authority.referenceOrder = ['reference_character', 'reference_3'];
+      },
+    },
+  ])('blocks reference regeneration behind $label', async ({ messageKey, configure }) => {
+    const authority = projectWithCandidateReference();
+    configure(authority);
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    await waitFor(() => expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalled());
+
+    await act(async () => {
+      await capturedReferenceActions().regenerate('reference_3', 'Stable character sheet for the hero');
+    });
+
+    expect((await screen.findAllByText(messageKey)).length).toBeGreaterThan(0);
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+  });
+
+  it('discloses Main authority when an unbound image route blocks reference regeneration', async () => {
+    const authority = projectWithCandidateReference();
+    authority.imageRouteId = null;
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'reference', referenceId: 'reference_3' }, purpose: 'reference_image' },
+      { code: 'no_engine', role: 'image' }
+    );
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+
+    await act(async () => {
+      await capturedReferenceActions().regenerate('reference_3', 'Stable character sheet for the hero');
+    });
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+  });
+
+  it('recovers only the exact current reference candidate job and refreshes durable handoffs', async () => {
+    const authority = projectWithReferenceCandidateJob();
+    const recovered = structuredClone(authority);
+    recovered.revision = 4;
+    recovered.jobs.job_reference_3!.status = 'queued_local';
+    recovered.jobs.job_reference_3!.error = null;
+    recovered.jobs.job_reference_3!.canRetry = false;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(recovered));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(recovered.jobs.job_reference_3!));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('button', { name: 'conversation.creativeStudio.jobs.retry' });
+    expect(await capturedReferenceActions().retryJob('reference_3', 'job_not_current', false)).toBe(false);
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        jobId: 'job_reference_3',
+        expectedRevision: 3,
+        acknowledgePossibleDuplicateCharge: false,
+      })
+    );
+    await waitFor(() => expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole('button', { name: 'conversation.creativeStudio.jobs.retry' })).toBeNull();
+    expect(
+      screen.getByText('conversation.creativeStudio.workspace.referenceWorkflow.panel.status.generating')
+    ).toBeVisible();
+  });
+
+  it('rejects refused, mismatched, stale, and missing reference-job recovery authority', async () => {
+    const authority = projectWithReferenceCandidateJob();
+    const missingJob = structuredClone(authority);
+    missingJob.revision = 4;
+    missingJob.references.reference_3!.jobIds = [];
+    missingJob.jobs = {};
+    const exactJob = authority.jobs.job_reference_3!;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValueOnce(projectWorkspaceLoad(authority))
+      .mockResolvedValue(projectWorkspaceLoad(missingJob));
+    mocks.bridge.retryJob.invoke
+      .mockResolvedValueOnce({ ok: false, error: { code: 'storage_error', messageKey: 'native.retryFailed' } })
+      .mockResolvedValueOnce(ok({ ...exactJob, target: { kind: 'reference', referenceId: 'reference_other' } }))
+      .mockResolvedValueOnce(ok(exactJob))
+      .mockResolvedValueOnce(ok(exactJob));
+
+    renderStudio('/studio/project_1/references');
+    await screen.findByRole('button', { name: 'conversation.creativeStudio.jobs.retry' });
+    const references = capturedReferenceActions();
+
+    await expect(invokeStudioAction(() => references.retryJob('reference_3', 'job_reference_3', false))).resolves.toBe(
+      false
+    );
+    await expect(invokeStudioAction(() => references.retryJob('reference_3', 'job_reference_3', false))).resolves.toBe(
+      false
+    );
+    await expect(invokeStudioAction(() => references.retryJob('reference_3', 'job_reference_3', false))).resolves.toBe(
+      false
+    );
+    await expect(invokeStudioAction(() => references.retryJob('reference_3', 'job_reference_3', false))).resolves.toBe(
+      false
+    );
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledTimes(4);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    { label: 'cancelled', status: 'cancelled' as const, error: null },
+    {
+      label: 'poll deadline',
+      status: 'failed' as const,
+      error: {
+        code: 'poll_deadline' as const,
+        messageKey: 'conversation.creativeStudio.jobs.errors.pollDeadline',
+      },
+    },
+  ])('keeps $label project-reference failures eligible for the paid handoff retry', async ({ status, error }) => {
+    const authority = projectWithReferenceCandidateJob({
+      status,
+      error,
+      canCancel: false,
+      canRetry: false,
+      canRetryDownload: false,
+    });
+    mockSupportedProject(authority);
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(
+      ok([
+        {
+          ...handoff('failed'),
+        },
+      ])
+    );
+
+    renderStudio('/studio/project_1/references');
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.handoffs.retryFailed',
+      })
+    );
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'project_references');
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        referenceIds: ['reference_3'],
+      })
+    );
+  });
+
+  it.each([
+    {
+      label: 'attention',
+      status: 'needs_attention' as const,
+      error: {
+        code: 'provider_unavailable' as const,
+        messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+      },
+      canRetryDownload: false,
+    },
+    {
+      label: 'download failure',
+      status: 'failed' as const,
+      error: {
+        code: 'download_failed' as const,
+        messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+      },
+      canRetryDownload: true,
+    },
+    {
+      label: 'dependency failure',
+      status: 'failed' as const,
+      error: {
+        code: 'dependency_failed' as const,
+        messageKey: 'conversation.creativeStudio.jobs.errors.dependencyFailed',
+      },
+      canRetryDownload: false,
+    },
+  ])(
+    'rejects a stale handoff retry claim for an exact $label candidate',
+    async ({ status, error, canRetryDownload }) => {
+      const authority = projectWithReferenceCandidateJob({
+        status,
+        error,
+        canCancel: false,
+        canRetry: status === 'needs_attention',
+        canRetryDownload,
+      });
+      mockSupportedProject(authority);
+      mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(
+        ok([
+          {
+            ...handoff('failed'),
+          },
+        ])
+      );
+
+      renderStudio('/studio/project_1/references');
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'conversation.creativeStudio.workspace.handoffs.retryFailed',
         })
       );
+
+      expect(
+        await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')
+      ).toBeVisible();
+      expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it('explains when the app-bar Render action has no payable Shot', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.renderFilmEmpty')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks the app-bar Render action while visible generation drafts are unsaved', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    seedWorkspaceDrafts({
+      'brief.text': { baseValue: authority.brief, value: 'Visible but unsaved generation direction.' },
     });
-    bridge.updateScene.invoke.mockResolvedValueOnce(stale());
-    const { router } = renderRoute();
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
 
-    const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-    fireEvent.change(titleInput, { target: { value: 'Keep this local title' } });
-    fireEvent.blur(titleInput);
-    const recoveryRow = await screen.findByRole('region', { name: 'Keep this local title' });
-    await within(recoveryRow).findByRole(
-      'button',
-      { name: 'conversation.creativeStudio.storyboard.retry' },
-      { timeout: 5_000 }
-    );
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
 
-    await act(async () => router.navigate('/studio/project-2'));
-
-    expect(router.state.location.pathname).toBe('/studio/project-2/table');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Second film' })).toBeInTheDocument();
-    expect(bridge.getProject.invoke).toHaveBeenCalledWith({ projectId: 'project-2' });
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('persists a typed scene-save failure and allows leaving the project', async () => {
-    const opening = scene();
-    bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
-      ok(
-        project(projectId, {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
+  it('opens one automatically estimated spend gate from the app-bar Render action without spending', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(
+      ok({ baseOnly: boardPromotionQuote(authority, ['shot_0']), withCascade: null })
     );
-    bridge.updateScene.invoke.mockResolvedValueOnce(failure());
-    const { router } = renderRoute();
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
 
-    const titleInput = await screen.findByLabelText('conversation.creativeStudio.inspector.titleLabel');
-    fireEvent.change(titleInput, { target: { value: 'Unsaved typed failure' } });
-    fireEvent.blur(titleInput);
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
 
-    const recoveryRow = await screen.findByRole('region', { name: 'Unsaved typed failure' });
-    expect(
-      within(recoveryRow).getByRole('button', { name: 'conversation.creativeStudio.storyboard.retry' })
-    ).toBeInTheDocument();
-    expect(
-      within(recoveryRow).getByRole('button', { name: 'conversation.creativeStudio.storyboard.discard' })
-    ).toBeInTheDocument();
-    expect(window.sessionStorage.getItem('weprompt.studio.drafts.project-1')).toContain('Unsaved typed failure');
-
-    await act(async () => router.navigate('/studio/project-2'));
-    expect(router.state.location.pathname).toBe('/studio/project-2/table');
-    expect(await screen.findByRole('heading', { level: 1, name: 'Second film' })).toBeInTheDocument();
+    expect(await screen.findByTestId('studio-spend-gate')).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')).toBeVisible();
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('prioritizes a stale non-save conflict before a queued scene-save issue', async () => {
-    const opening = scene();
-    const reveal = scene({ id: 'scene-2', title: 'Reveal' });
-    const initial = project('project-1', {
-      sceneOrder: [opening.id, reveal.id],
-      scenes: { [opening.id]: opening, [reveal.id]: reveal },
+  it('wires exact generation remedies and Board review to the affected route and active Shot editor', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().resolveGenerationBlock('shot_0', { code: 'no_engine', role: 'video' }));
+    const dialog = await screen.findByRole('dialog', { name: BRIEF_RULES_TITLE });
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: VIDEO_ROUTE })).toHaveFocus());
+    expect(within(dialog).getByRole('combobox', { name: IMAGE_ROUTE })).not.toHaveFocus();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close' }));
+
+    await waitFor(() => expect(mocks.workspaceControlsProps?.projectStatus?.projectRevision).toBe(authority.revision));
+    act(() => mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_0'));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    await waitFor(() =>
+      expect(document.querySelector('[data-shot-id="shot_0"]')).toHaveAttribute('data-shot-binding-highlighted', 'true')
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refuses Board reference focus for retained or unknown Shot identities without navigation or spend', async () => {
+    const authority = projectWithRetainedReferenceDownloadBlocker('shot');
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/board');
+    await waitFor(() => expect(mocks.workspaceControlsProps).not.toBeNull());
+
+    act(() => {
+      mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_0');
+      mocks.workspaceControlsProps?.onReviewShotReferenceBinding('shot_unknown');
     });
-    const refreshed = project('project-1', {
-      revision: 8,
-      sceneOrder: [opening.id, reveal.id],
-      scenes: { [opening.id]: opening, [reveal.id]: reveal },
+
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('filters a Main-blocked independent Film anchor out of paid review', async () => {
+    const authority = projectWithGenerationReferences(2, {
+      assignedBackgroundShotIds: ['shot_0', 'shot_1'],
     });
-    const firstSave = deferred<StudioCommandResult<StudioRendererProject>>();
-    bridge.getProject.invoke
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(initial))
-      .mockResolvedValueOnce(ok(refreshed));
-    bridge.updateScene.invoke.mockReturnValueOnce(firstSave.promise);
-    bridge.reorderScenes.invoke.mockResolvedValueOnce(stale()).mockResolvedValueOnce(
-      ok(
-        project('project-1', {
-          revision: 9,
-          sceneOrder: [reveal.id, opening.id],
-          scenes: { [opening.id]: opening, [reveal.id]: reveal },
-        })
-      )
+    authority.shots.shot_1!.chainBreak = 'hard_cut';
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
+      { code: 'no_engine', role: 'image' }
     );
-    renderRoute();
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
 
-    const openingRow = await screen.findByRole('region', { name: 'Opening' });
-    const titleInput = within(openingRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel');
-    fireEvent.change(titleInput, { target: { value: 'Unresolved opening edit' } });
-    fireEvent.blur(titleInput);
-    await waitFor(() => expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1));
-    // Selection moves off the edited row. The pacing bar's shot blocks used to be the handle
-    // for this; ScriptRow selects on focus capture, so focusing the next row is the equivalent.
-    const revealRow = screen.getByRole('region', { name: 'Reveal' });
-    within(revealRow).getByLabelText('conversation.creativeStudio.inspector.titleLabel').focus();
-    await act(async () => firstSave.resolve(failure()));
-    const unresolvedOpeningRow = await screen.findByRole('region', { name: 'Unresolved opening edit' });
-    expect(within(unresolvedOpeningRow).getByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();
-
-    fireEvent.click(
-      screen.getAllByRole('button', {
-        name: 'conversation.creativeStudio.storyboard.moveSceneUpAccessible',
-      })[1]
-    );
-    await waitFor(() => expect(bridge.reorderScenes.invoke).toHaveBeenCalledTimes(1));
-
-    expect(await screen.findByText('conversation.creativeStudio.errors.staleProject')).toBeInTheDocument();
-    const scriptTable = screen.getByRole('region', {
-      name: 'conversation.creativeStudio.phase.write.scriptTableTitle',
-    });
-    const tableFeedback = scriptTable.querySelector('footer');
-    expect(tableFeedback).not.toBeNull();
-    fireEvent.click(
-      within(tableFeedback!).getByRole('button', { name: 'conversation.creativeStudio.storyboard.retry' })
-    );
-    await waitFor(() => expect(bridge.reorderScenes.invoke).toHaveBeenCalledTimes(2));
-
-    expect(bridge.updateScene.invoke).toHaveBeenCalledTimes(1);
-  });
-
-  it('shows not found when the bridge succeeds with no canonical project', async () => {
-    bridge.getProject.invoke.mockResolvedValue(ok(null));
-    renderRoute();
-
-    expect(await screen.findByText('conversation.creativeStudio.project.notFound')).toBeInTheDocument();
-  });
-
-  it('shows the typed command error separately from not found', async () => {
-    bridge.getProject.invoke.mockResolvedValue(failure());
-    renderRoute();
-
-    expect(await screen.findByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();
-    expect(screen.queryByText('conversation.creativeStudio.project.notFound')).not.toBeInTheDocument();
-  });
-
-  it('resets and fetches again when the route project id changes', async () => {
-    const { router } = renderRoute('/studio/project-1');
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-    bridge.getProject.invoke.mockResolvedValue(ok(project('project-2')));
-
-    await act(async () => router.navigate('/studio/project-2'));
-
-    await waitFor(() => expect(bridge.getProject.invoke).toHaveBeenLastCalledWith({ projectId: 'project-2' }));
-  });
-
-  it('queries durable proposals on mount and observes a matching proposal event without manual refresh', async () => {
-    let onProposal: ((event: { projectId: string; proposalId: string }) => void) | undefined;
-    bridge.proposalUpdated.on.mockImplementation(
-      (listener: (event: { projectId: string; proposalId: string }) => void) => {
-        onProposal = listener;
-        return () => {};
-      }
-    );
-    bridge.listProposals.invoke.mockResolvedValueOnce(ok([])).mockResolvedValueOnce(ok([proposal()]));
-    render(<ProjectHookHarness />);
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
 
     await waitFor(() =>
-      expect(bridge.listProposals.invoke).toHaveBeenCalledExactlyOnceWith({ projectId: 'project-1' })
-    );
-    await act(async () => onProposal?.({ projectId: 'other-project', proposalId: 'proposal_1' }));
-    expect(bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
-
-    await act(async () => onProposal?.({ projectId: 'project-1', proposalId: 'proposal_1' }));
-
-    expect(await screen.findByText('Observed proposal')).toBeInTheDocument();
-    expect(bridge.listProposals.invoke).toHaveBeenCalledTimes(2);
-  });
-
-  it('uses matching turn completion only as an additional durable-ledger refetch signal', async () => {
-    let onTurnCompleted: ((event: { session_id: string }) => void) | undefined;
-    bridge.getProject.invoke.mockResolvedValue(ok(project('project-1', { briefConversationId: 'conversation_brief' })));
-    bridge.turnCompleted.on.mockImplementation((listener: (event: { session_id: string }) => void) => {
-      onTurnCompleted = listener;
-      return () => {};
-    });
-    bridge.listProposals.invoke.mockResolvedValueOnce(ok([])).mockResolvedValueOnce(ok([proposal()]));
-    render(<ProjectHookHarness />);
-    await screen.findByText('Launch film');
-
-    await act(async () => onTurnCompleted?.({ session_id: 'conversation_other' }));
-    expect(bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
-    await act(async () => onTurnCompleted?.({ session_id: 'conversation_brief' }));
-
-    expect(await screen.findByText('Observed proposal')).toBeInTheDocument();
-    expect(bridge.listProposals.invoke).toHaveBeenCalledTimes(2);
-  });
-
-  it('flushes a dirty scene draft before switching to another project route', async () => {
-    const opening = scene();
-    bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
-      ok(
-        project(projectId, {
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: opening },
-        })
-      )
-    );
-    bridge.updateScene.invoke.mockResolvedValue(
-      ok(
-        project('project-1', {
-          revision: 3,
-          sceneOrder: [opening.id],
-          scenes: { [opening.id]: { ...opening, title: 'Unsaved project A title' } },
-        })
-      )
-    );
-    const { router } = renderRoute('/studio/project-1');
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-
-    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.inspector.titleLabel'), {
-      target: { value: 'Unsaved project A title' },
-    });
-    await act(async () => router.navigate('/studio/project-2'));
-
-    await waitFor(() =>
-      expect(bridge.updateScene.invoke).toHaveBeenCalledWith({
-        projectId: 'project-1',
-        sceneId: 'scene-1',
-        expectedRevision: 2,
-        scene: expect.objectContaining({ title: 'Unsaved project A title' }),
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
+        cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
       })
     );
   });
 
-  it('refetches only for matching project update events and cleans up', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    const unsubscribe = vi.fn();
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return unsubscribe;
-    });
-    const { view } = renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+  it('shows an all-blocked exact Film intent without allowing preparation', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
+      { code: 'no_engine', role: 'image' }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
 
-    await act(async () => onUpdate?.({ projectId: 'other-project' }));
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(2);
-    await act(async () => onUpdate?.({ projectId: 'project-1' }));
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(3);
-
-    view.unmount();
-    expect(unsubscribe).toHaveBeenCalledTimes(1);
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('keeps the current project visible while a matching event refetches in the background', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
+  it('keeps a blocked downstream video out by excluding its entire continuous Film cascade', async () => {
+    const authority = projectWithGenerationReferences(3, {
+      assignedBackgroundShotIds: ['shot_0', 'shot_1', 'shot_2'],
     });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+    authority.beats.beat_0!.shotOrder = ['shot_0', 'shot_1'];
+    authority.beatOrder = ['beat_0', 'beat_2'];
+    delete authority.beats.beat_1;
+    authority.shots.shot_1!.chainBreak = 'none';
+    authority.shots.shot_2!.chainBreak = 'hard_cut';
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+      { code: 'duration', role: 'video', seconds: 4 }
+    );
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
 
-    const pending = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(pending.promise);
-    act(() => onUpdate?.({ projectId: 'project-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
 
-    expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
-    expect(screen.queryByText('conversation.creativeStudio.project.loading')).not.toBeInTheDocument();
-
-    pending.resolve(ok(project('project-1', { name: 'Updated film', revision: 3 })));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Updated film' })).toBeInTheDocument();
-  });
-
-  it('keeps the current project visible when a background refetch returns a typed error', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-    bridge.getProject.invoke.mockResolvedValueOnce(failure());
-
-    act(() => onUpdate?.({ projectId: 'project-1' }));
-
-    expect(await screen.findByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();
-    expect(screen.getByRole('heading', { level: 1, name: 'Launch film' })).toBeInTheDocument();
-  });
-
-  it('ignores an older matching-event response that resolves after a newer canonical fetch', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-
-    const older = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const newer = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(older.promise).mockReturnValueOnce(newer.promise);
-
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
-    newer.resolve(ok(project('project-1', { name: 'Newest film', revision: 4 })));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Newest film' })).toBeInTheDocument();
-
-    older.resolve(ok(project('project-1', { name: 'Older film', revision: 3 })));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Newest film' })).toBeInTheDocument());
-    expect(screen.queryByRole('heading', { level: 1, name: 'Older film' })).not.toBeInTheDocument();
-  });
-
-  it('adopts a higher revision from an earlier overlapping request even while a later request is pending', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-
-    const earlier = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const later = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
-
-    earlier.resolve(ok(project('project-1', { name: 'Revision five', revision: 5 })));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Revision five' })).toBeInTheDocument();
-
-    later.resolve(ok(project('project-1', { name: 'Revision four', revision: 4 })));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Revision five' })).toBeInTheDocument());
-    expect(screen.queryByRole('heading', { level: 1, name: 'Revision four' })).not.toBeInTheDocument();
-  });
-
-  it('clears a later failed refresh when an earlier overlapping response advances the canonical revision', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
-
-    const earlier = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const later = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
-
-    later.resolve(failure());
-    expect(await screen.findByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();
-
-    earlier.resolve(ok(project('project-1', { name: 'Recovered revision five', revision: 5 })));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Recovered revision five' })).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.queryByText('conversation.creativeStudio.errors.storage')).not.toBeInTheDocument()
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'seed_still' }],
+        cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' }],
+      })
     );
   });
 
-  it('adopts an earlier authoritative absence after a later overlapping refresh fails', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
+  it('never invents or mutates a missing Shot reference binding during paid review', async () => {
+    const authority = projectWithGenerationReferences(1);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: {
+        code: 'pricing_refused',
+        messageKey: 'native.invalidReferenceBinding',
+        reason: 'invalid_reference',
+        details: { kind: 'reference_binding', shotId: 'shot_0', reason: 'unassigned' },
+      },
     });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
 
-    const earlier = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const later = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
 
-    later.resolve(failure());
-    expect(await screen.findByText('conversation.creativeStudio.errors.storage')).toBeInTheDocument();
+    expect(
+      await within(modal).findByText('conversation.creativeStudio.workspace.gate.errors.pricing.invalidReference')
+    ).toBeVisible();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
 
-    earlier.resolve(ok(null));
-    expect(await screen.findByText('conversation.creativeStudio.project.notFound')).toBeInTheDocument();
-    expect(screen.queryByRole('heading', { level: 1, name: 'Launch film' })).not.toBeInTheDocument();
+  it('bypasses free assignment when the seed-still Shot already has one exact approved background', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-background-choice-plan]')).toBeNull();
+
     await waitFor(() =>
-      expect(screen.queryByText('conversation.creativeStudio.errors.storage')).not.toBeInTheDocument()
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith(
+        expect.objectContaining({ projectId: authority.id, expectedRevision: authority.revision })
+      )
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('automatically estimates the exact next 24 missing Board panels without spending', async () => {
+    const authority = projectWithBoardJobs(30, false);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+    await screen.findByTestId('studio-spend-gate');
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: Array.from({ length: 24 }, (_, index) => ({
+          target: { kind: 'shot', shotId: `board_shot_${String(index + 1).padStart(2, '0')}` },
+          purpose: 'board_still',
+        })),
+        cascadeChoices: [],
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('filters an exact Main-blocked Board item while retaining eligible panels', async () => {
+    const authority = projectWithBoardJobs(3, false);
+    mockSupportedProject(authority);
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'board_shot_02' }, purpose: 'board_still' },
+      { code: 'reference_binding', role: 'image', reason: 'unassigned', selectedCount: 0, limit: 3 }
+    );
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="reference_binding"]')).toBeVisible();
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: ['01', '03'].map((suffix) => ({
+          target: { kind: 'shot', shotId: `board_shot_${suffix}` },
+          purpose: 'board_still',
+        })),
+        cascadeChoices: [],
+      })
     );
   });
 
-  it('does not let an older authoritative absence replace a newer canonical project', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+  it('promotes one exact current Board panel for $0 without preparing or confirming provider work', async () => {
+    const initial = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    initial.videoRouteId = 'route_video';
+    initial.shots.board_shot_02!.chainBreak = 'none';
+    const promoted = structuredClone(initial);
+    promoted.revision += 1;
+    promoted.shots.board_shot_01!.seedStillId = 'board_asset_01';
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(promoted));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(promoted.revision));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    const earlier = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const later = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'board_promotion');
+    expect(
+      within(modal)
+        .getAllByRole('listitem')
+        .map((row) => row.getAttribute('data-promotion-stale-shot-id'))
+    ).toEqual(['board_shot_01', 'board_shot_02']);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
 
-    later.resolve(ok(project('project-1', { name: 'Newest film', revision: 4 })));
-    expect(await screen.findByRole('heading', { level: 1, name: 'Newest film' })).toBeInTheDocument();
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction',
+      })
+    );
 
-    earlier.resolve(ok(null));
-    await waitFor(() => expect(screen.getByRole('heading', { level: 1, name: 'Newest film' })).toBeInTheDocument());
-    expect(screen.queryByText('conversation.creativeStudio.project.notFound')).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: initial.id,
+        expectedRevision: initial.revision,
+        operations: [
+          {
+            kind: 'promote_board_panel',
+            shotId: 'board_shot_01',
+            boardAssetId: 'board_asset_01',
+          },
+        ],
+      })
+    );
+    expect(
+      await within(modal).findByText('conversation.creativeStudio.workspace.gate.promotion.promoted')
+    ).toBeVisible();
+    expect(promoted.shots.board_shot_01!.chainBreak).toBe(initial.shots.board_shot_01!.chainBreak);
+    expect(promoted.shots.board_shot_01!.videoAssetId).toBe(initial.shots.board_shot_01!.videoAssetId);
+    expect(promoted.shots.board_shot_02!.videoAssetId).toBe(initial.shots.board_shot_02!.videoAssetId);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('does not let older project data cross a newer authoritative absence', async () => {
-    let onUpdate: ((event: { projectId: string }) => void) | undefined;
-    bridge.projectUpdated.on.mockImplementation((listener: (event: { projectId: string }) => void) => {
-      onUpdate = listener;
-      return () => {};
-    });
-    renderRoute();
-    await screen.findByRole('heading', { level: 1, name: 'Launch film' });
+  it('prepares and confirms atomic paid Board promotion only from its two explicit actions', async () => {
+    const authority = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    authority.videoRouteId = 'route_video';
+    authority.shots.board_shot_02!.chainBreak = 'none';
+    mockSupportedProject(authority);
+    const quote = boardPromotionQuote(authority, ['board_shot_01', 'board_shot_02']);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(ok({ baseOnly: quote, withCascade: null }));
+    mocks.bridge.confirmSubmission.invoke.mockResolvedValue(
+      ok({ projectId: authority.id, projectRevision: authority.revision + 1 })
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    const earlier = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    const later = deferred<StudioCommandResult<StudioRendererProject | null>>();
-    bridge.getProject.invoke.mockReturnValueOnce(earlier.promise).mockReturnValueOnce(later.promise);
-    act(() => {
-      onUpdate?.({ projectId: 'project-1' });
-      onUpdate?.({ projectId: 'project-1' });
-    });
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
 
-    later.resolve(ok(null));
-    expect(await screen.findByText('conversation.creativeStudio.project.notFound')).toBeInTheDocument();
+    fireEvent.click(
+      within(modal).getByRole('radio', {
+        name: /conversation\.creativeStudio\.workspace\.gate\.promotion\.promoteAndRerender/,
+      })
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction',
+      })
+    );
 
-    earlier.resolve(ok(project('project-1', { name: 'Resurrected stale film', revision: 5 })));
-    await waitFor(() => expect(screen.getByText('conversation.creativeStudio.project.notFound')).toBeInTheDocument());
-    expect(screen.queryByRole('heading', { level: 1, name: 'Resurrected stale film' })).not.toBeInTheDocument();
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        boardPromotion: { shotId: 'board_shot_01', boardAssetId: 'board_asset_01' },
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      await within(modal).findByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.gate\.promotion\.confirm/,
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.confirmSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: authority.id,
+        quoteId: quote.id,
+        expectedRevision: authority.revision,
+      })
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
   });
 
-  it('exposes an explicit background refetch for the storyboard editor', async () => {
-    render(<ProjectHookHarness />);
-    await screen.findByText('Launch film');
-    bridge.getProject.invoke.mockResolvedValueOnce(ok(project('project-1', { name: 'Refetched film', revision: 3 })));
+  it('rejects Board draw, style, and Stop callbacks while paid confirmation is locked', async () => {
+    const authority = projectWithBoardJobs(2);
+    authority.jobs.board_job_01!.status = 'needs_attention';
+    authority.jobs.board_job_01!.error = {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    };
+    authority.jobs.board_job_01!.canRetry = true;
+    authority.jobs.board_job_01!.canCancel = true;
+    const secondJobId = authority.shots.board_shot_02!.jobIds[0]!;
+    authority.shots.board_shot_02!.jobIds = [];
+    delete authority.jobs[secondJobId];
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockResolvedValue(
+      ok({
+        baseOnly: {
+          id: 'quote_board',
+          projectId: authority.id,
+          projectRevision: authority.revision,
+          expiresAt: '2026-01-01T01:00:00.000Z',
+          currency: 'USD',
+          baseItems: [
+            {
+              target: { kind: 'shot', shotId: 'board_shot_02' },
+              purpose: 'board_still',
+              route: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+              generationCount: 1,
+              durationSeconds: null,
+              oneGenerationMinorUnits: 3,
+              requestedTotalMinorUnits: 3,
+              composition: testComposition({ kind: 'shot', shotId: 'board_shot_02' }, 'board_still', {
+                projectRevision: authority.revision,
+                boardStyle: authority.boardStyle,
+              }),
+            },
+          ],
+          cascadeItems: [],
+          lowerMinorUnits: 3,
+          upperMinorUnits: 3,
+          budget: { kind: 'no_policy' },
+        },
+        withCascade: null,
+      })
+    );
+    const confirmation = deferred<{
+      ok: true;
+      data: { projectId: string; projectRevision: number };
+    }>();
+    mocks.bridge.confirmSubmission.invoke.mockReturnValue(confirmation.promise);
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Refetch project' }));
+    act(() => capturedBoardActions().drawNext());
+    const modal = await screen.findByTestId('studio-spend-gate');
+    const confirm = await within(modal).findByRole('button', {
+      name: /conversation\.creativeStudio\.workspace\.gate\.confirm/,
+    });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(mocks.bridge.confirmSubmission.invoke).toHaveBeenCalledTimes(1));
 
-    expect(await screen.findByText('Refetched film')).toBeInTheDocument();
-    expect(bridge.getProject.invoke).toHaveBeenCalledTimes(2);
+    act(() => {
+      capturedBoardActions().drawNext();
+      capturedBoardActions().retryJob('board_job_01', false);
+      capturedBoardActions().retryDownload('board_job_01');
+      capturedBoardActions().cancelJob('board_job_01');
+      capturedBoardActions().stop();
+    });
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.retryDownload.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      confirmation.resolve(ok({ projectId: authority.id, projectRevision: authority.revision + 1 }));
+      await confirmation.promise;
+    });
+  });
+
+  it('opens only the requested Beat for a paid Board draw or redraw', async () => {
+    const authority = projectWithBoardJobs(10, false);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawBeat('board_beat_2'));
+    await screen.findByTestId('studio-spend-gate');
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [9, 10].map((shotNumber) => ({
+          target: { kind: 'shot', shotId: `board_shot_${String(shotNumber).padStart(2, '0')}` },
+          purpose: 'board_still',
+        })),
+        cascadeChoices: [],
+      })
+    );
+  });
+
+  it('keeps free Board promotion available while a Main blocker removes the paid rerender choice', async () => {
+    const authority = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    authority.videoRouteId = 'route_video';
+    authority.shots.board_shot_02!.chainBreak = 'none';
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'board_shot_01' }, purpose: 'video_take' },
+      { code: 'first_frame', role: 'video' }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="first_frame"]')).toBeVisible();
+    expect(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction',
+      })
+    ).toBeEnabled();
+    expect(
+      within(modal).queryByRole('radio', {
+        name: /conversation\.creativeStudio\.workspace\.gate\.promotion\.promoteAndRerender/,
+      })
+    ).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty stop sets and forged Beat or panel identities before pricing', async () => {
+    const authority = projectWithBoardJobs(2, false);
+    mockSupportedProject(authority);
+    renderStudio('/studio/project_1/table');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+    const board = capturedBoardActions();
+
+    act(() => board.stop());
+    act(() => board.drawBeat('missing_beat'));
+    act(() => board.redrawBeat('missing_beat'));
+    act(() => board.promotePanel('missing_shot', 'missing_asset'));
+
+    expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+  });
+
+  it('opens only the exact requested Shot for a paid Board redraw', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(3, false), [2]);
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().redrawShot('board_shot_02'));
+    await screen.findByTestId('studio-spend-gate');
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [{ target: { kind: 'shot', shotId: 'board_shot_02' }, purpose: 'board_still' }],
+        cascadeChoices: [],
+      })
+    );
+  });
+
+  it('rejects Redraw for a missing Shot or a partially boarded Beat', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().redrawShot('board_shot_02'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    act(() => capturedBoardActions().redrawBeat('board_beat_1'));
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review while generation-affecting drafts are dirty', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    seedWorkspaceDrafts({
+      'brief.text': { baseValue: authority.brief, value: 'Unsaved replacement brief' },
+    });
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks Board spend review when the Board status is not exact', async () => {
+    const authority = withCurrentBoardPanels(projectWithBoardJobs(2, false), [1]);
+    mockSupportedProject(authority);
+    const pendingStatus = workspaceStatus(authority);
+    pendingStatus.boardPanels[0]!.latestJobId = 'forged_job';
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(pendingStatus));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('discloses Main authority when a missing image route blocks Board spend review', async () => {
+    const authority = projectWithBoardJobs(1, false);
+    authority.imageRouteId = null;
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'board_shot_01' }, purpose: 'board_still' },
+      { code: 'no_engine', role: 'image' }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('removes the dead Board-style editor lock while Main remains quote authority', async () => {
+    const authority = projectWithBoardJobs(2, false);
+    authority.boardStyle = null;
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('Main rejects the malformed style'));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    expect(capturedBoardActions()).not.toHaveProperty('setStyle');
+    act(() => capturedBoardActions().drawNext());
+
+    await screen.findByTestId('studio-spend-gate');
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: authority.id,
+        expectedRevision: authority.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [1, 2].map((index) => ({
+          target: { kind: 'shot', shotId: `board_shot_0${index}` },
+          purpose: 'board_still',
+        })),
+        cascadeChoices: [],
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('stops all 30 exact cancellable Board jobs against sequentially refreshed revisions', async () => {
+    const initial = projectWithBoardJobs(30);
+    const authorities = Array.from({ length: 31 }, (_, cancelledCount) =>
+      withCancelledBoardJobs(initial, cancelledCount)
+    );
+    let workspaceRead = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(async () => {
+      const authority = authorities[Math.min(workspaceRead, 30)]!;
+      workspaceRead += 1;
+      return projectWorkspaceLoad(authority);
+    });
+    mocks.bridge.cancelJob.invoke.mockImplementation(async ({ jobId }: { jobId: string }) => {
+      const shotNumber = Number(jobId.slice(-2));
+      return ok(authorities[shotNumber]!.jobs[jobId]!);
+    });
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().stop());
+
+    await waitFor(() => expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledTimes(30), { timeout: 15_000 });
+    expect(mocks.bridge.cancelJob.invoke.mock.calls.map(([request]) => request)).toEqual(
+      Array.from({ length: 30 }, (_, index) => ({
+        projectId: initial.id,
+        jobId: `board_job_${String(index + 1).padStart(2, '0')}`,
+        expectedRevision: initial.revision + index,
+      }))
+    );
+    expect(workspaceRead).toBe(31);
+  });
+
+  it('stops a busy Board job without cancelling a separate job that needs attention', async () => {
+    const initial = projectWithBoardJobs(2);
+    initial.jobs.board_job_02!.status = 'needs_attention';
+    initial.jobs.board_job_02!.error = {
+      code: 'provider_unavailable',
+      messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+    };
+    initial.jobs.board_job_02!.canRetry = true;
+    initial.jobs.board_job_02!.canCancel = true;
+    const afterBusyCancellation = withCancelledBoardJobs(initial, 1);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(afterBusyCancellation));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(afterBusyCancellation.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().stop());
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      jobId: 'board_job_01',
+      expectedRevision: initial.revision,
+    });
+    expect(afterBusyCancellation.jobs.board_job_02).toMatchObject({
+      status: 'needs_attention',
+      canCancel: true,
+    });
+  });
+
+  it('retries only an exact Board attention job with the required duplicate-charge acknowledgement', async () => {
+    const current = withBoardAttention(projectWithBoardJobs(1), { submissionUnknown: true, canCancel: false });
+    const retried = structuredClone(current);
+    retried.revision += 1;
+    retried.jobs.board_job_01!.status = 'queued_local';
+    retried.jobs.board_job_01!.error = null;
+    retried.jobs.board_job_01!.canRetry = false;
+    retried.jobs.board_job_01!.canCancel = true;
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: retried }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(retried)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(retried)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    await expect(capturedBeatPanelActions().retryGenerationJob('board_job_01', true)).resolves.toBe(false);
+    act(() => capturedBoardActions().retryJob('board_job_01', false));
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+
+    act(() => capturedBoardActions().retryJob('board_job_01', true));
+    await waitFor(() =>
+      expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+        acknowledgePossibleDuplicateCharge: true,
+      })
+    );
+  });
+
+  it('retries an exact Board download failure without opening a fresh paid generation gate', async () => {
+    const current = projectWithBoardJobs(1);
+    const failed = current.jobs.board_job_01!;
+    failed.status = 'failed';
+    failed.error = {
+      code: 'download_failed',
+      messageKey: 'conversation.creativeStudio.jobs.errors.downloadFailed',
+    };
+    failed.canCancel = false;
+    failed.canRetry = false;
+    failed.canRetryDownload = true;
+    const retried = structuredClone(current);
+    retried.revision += 1;
+    retried.jobs.board_job_01!.updatedAt = '2026-01-01T00:00:01.000Z';
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: retried }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(retried)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(retried)));
+    mocks.bridge.retryDownload.invoke.mockResolvedValue(ok(retried.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().drawNext());
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+
+    act(() => capturedBoardActions().retryDownload('board_job_01'));
+    await waitFor(() =>
+      expect(mocks.bridge.retryDownload.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+      })
+    );
+    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('cancels only an exact provider-cancellable Board attention job through the Table owner', async () => {
+    const current = withBoardAttention(projectWithBoardJobs(1), { submissionUnknown: false, canCancel: true });
+    const cancelled = structuredClone(current);
+    cancelled.revision += 1;
+    cancelled.jobs.board_job_01!.status = 'cancelled';
+    cancelled.jobs.board_job_01!.error = null;
+    cancelled.jobs.board_job_01!.canRetry = false;
+    cancelled.jobs.board_job_01!.canCancel = false;
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(cancelled)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(cancelled)));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.board_job_01));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    await expect(capturedBeatPanelActions().cancelGenerationJob('board_job_01')).resolves.toBe(false);
+    act(() => capturedBoardActions().cancelJob('board_job_01'));
+
+    await waitFor(() =>
+      expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: current.id,
+        jobId: 'board_job_01',
+        expectedRevision: current.revision,
+      })
+    );
+  });
+
+  it('opens an exact paid continuity draft without using the free authoring bridge', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    authority.beats.beat_0!.shotOrder.push('shot_1');
+    authority.beats.beat_0!.targetSeconds = 8;
+    authority.shots.shot_1 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_1',
+      shootingScript: 'Shot 2',
+      chainBreak: 'none',
+    };
+    mockSupportedProject(authority);
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'shot_1', hardCut: true, requiresSeedGeneration: true },
+      })
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('discloses a Main capability blocker on exact continuity work and disables prepare', async () => {
+    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    authority.beats.beat_0!.shotOrder.push('shot_1', 'shot_2');
+    authority.beats.beat_0!.targetSeconds = 12;
+    authority.shots.shot_1 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_1',
+      shootingScript: 'Shot 2',
+      chainBreak: 'none',
+    };
+    authority.shots.shot_2 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_2',
+      shootingScript: 'Shot 3',
+      chainBreak: 'none',
+    };
+    mockSupportedProject(authority);
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
+      { code: 'first_frame', role: 'video' }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="first_frame"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('refreshes an open generation gate and clears a stale catalog blocker without reopening it', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    const refreshedCapability = deferred<ReturnType<typeof supportedCapabilityResult>>();
+    let capabilityCall = 0;
+    mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) => {
+        capabilityCall += 1;
+        if (capabilityCall > 1) return refreshedCapability.promise;
+        const imageItems = input.items.filter((item) => item.purpose !== 'video_take');
+        const videoItems = input.items.filter((item) => item.purpose === 'video_take');
+        return ok({
+          projectId: input.projectId,
+          projectRevision: input.expectedRevision,
+          catalogVersion: 'catalog_1',
+          supportedItems: [],
+          blocks: [
+            ...(imageItems.length === 0
+              ? []
+              : [{ block: { code: 'catalog_unloaded' as const, role: 'image' as const }, items: imageItems }]),
+            ...(videoItems.length === 0
+              ? []
+              : [{ block: { code: 'catalog_unloaded' as const, role: 'video' as const }, items: videoItems }]),
+          ],
+        });
+      }
+    );
+    renderStudio();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() =>
+      capturedBeatPanelActions().reviewShot('shot_0', [
+        { shotId: 'shot_0', purpose: 'seed_still' },
+        { shotId: 'shot_0', purpose: 'video_take' },
+      ])
+    );
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeVisible();
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
+
+    const refreshInput = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
+    await act(async () => refreshedCapability.resolve(supportedCapabilityResult(refreshInput)));
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(modal.querySelector('[data-generation-block-code="catalog_unloaded"]')).toBeNull());
+    expect(screen.getByTestId('studio-spend-gate')).toBe(modal);
+  });
+
+  it('uses the exact Main blocker for continuity even when the generic route catalog is unavailable', async () => {
+    const authority = projectWithDraftBatch(1);
+    authority.beats.beat_0!.shotOrder.push('shot_1');
+    authority.beats.beat_0!.targetSeconds = 8;
+    authority.shots.shot_1 = {
+      ...authority.shots.shot_0!,
+      id: 'shot_1',
+      shootingScript: 'Shot 2',
+      chainBreak: 'none',
+    };
+    mockSupportedProject(authority);
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        video: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mockGenerationBlock(
+      { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+      { code: 'no_engine', role: 'video' }
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => capturedBeatPanelActions().reviewContinuity('shot_1', true));
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal.querySelector('[data-generation-block-code="no_engine"]')).toBeVisible();
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.gate.errors.routesUnavailable')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('exposes exactly one level-two heading for the Cut view', async () => {
+    renderStudio('/studio/project_1/cut');
+
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const cutView = document.querySelector<HTMLElement>('main[data-studio-view="cut"]');
+    expect(cutView).not.toBeNull();
+    const headings = within(cutView!).getAllByRole('heading', { level: 2 });
+    expect(headings).toHaveLength(1);
+    expect(headings[0]).toHaveAttribute('id', 'studio-cut-heading');
+  });
+
+  it('routes inline app-bar rename through the revisioned owner and refreshes the title', async () => {
+    const renamed = { ...project(), revision: 4, name: 'Retitled film' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: renamed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.phase.shared.renameProject: Launch film',
+      })
+    );
+    const input = screen.getByRole('textbox', {
+      name: 'conversation.creativeStudio.phase.shared.renameProject',
+    });
+    fireEvent.change(input, { target: { value: 'Retitled film' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { name: 'Retitled film' },
+      })
+    );
+    expect(await screen.findByRole('heading', { name: 'Retitled film' })).toBeVisible();
+  });
+
+  it('refuses an inline owner edit when its edit-start authority is stale', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    const saved = await invokeStudioAction(() =>
+      capturedWorkspaceMutations().editProject(
+        { name: 'Stale overwrite' },
+        { projectId: 'project_1', expectedRevision: 2 }
+      )
+    );
+
+    expect(saved).toBe(false);
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(screen.getByText('conversation.creativeStudio.workspace.controls.draftConflict')).toBeVisible();
+  });
+
+  it('routes the Cut target editor through the revisioned owner and refreshes its readout', async () => {
+    const retargeted = { ...project(), revision: 4, targetDurationSeconds: 45 };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: retargeted }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'common.edit: conversation.creativeStudio.workspace.controls.targetDuration',
+      })
+    );
+    const input = screen.getByRole('spinbutton', {
+      name: 'conversation.creativeStudio.workspace.controls.targetDuration',
+    });
+    fireEvent.change(input, { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: 'common.save' }));
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { targetDurationSeconds: 45 },
+      })
+    );
+    await waitFor(() =>
+      expect(document.querySelector('[data-cut-film]')).toHaveTextContent(
+        'conversation.creativeStudio.workspace.cut.film.ofTarget:{"clock":"0:45"}'
+      )
+    );
+  });
+
+  it('omits the reviewed-output rail section when there are no cards or review errors', async () => {
+    renderStudio();
+
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(document.querySelector('[data-studio-director-reviewed-output]')).toBeNull();
+  });
+
+  it('keeps Film setup drafts and native snapshot counts stable across Table, Board, and Cut navigation', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expectProjectFormsAbsentFromMain('table');
+    let setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const brief = within(setupDialog).getByLabelText(BRIEF);
+    const shell = document.querySelector('[data-studio-workspace-shell]');
+    const directorRail = document.querySelector('[data-studio-director-rail]');
+    const workPanel = document.querySelector('[data-studio-work-panel]');
+    const conversationOwner = document.querySelector('[data-studio-director-conversation-owner]');
+    // The app bar heads the project and both panes sit under it, so the rail and the work panel are
+    // siblings inside the panes row rather than direct children of the shell. What this guards is
+    // unchanged: they are fixed siblings and a view change remounts neither.
+    const panes = document.querySelector('[data-studio-panes]');
+    expect(shell).not.toBeNull();
+    expect(panes?.parentElement).toBe(shell);
+    expect(directorRail?.parentElement).toBe(panes);
+    expect(workPanel?.parentElement).toBe(panes);
+    // The rail's drag handle sits between them, so they are adjacent across it rather than directly.
+    const resizer = document.querySelector('[data-studio-rail-resizer]');
+    expect(resizer?.parentElement).toBe(panes);
+    expect(directorRail?.nextElementSibling).toBe(resizer);
+    expect(resizer?.nextElementSibling).toBe(workPanel);
+    expect(conversationOwner).not.toBeNull();
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
+    const baseline = {
+      project: mocks.bridge.getProject.invoke.mock.calls.length,
+      workspace: mocks.bridge.projectWorkspaceStatusFixture.invoke.mock.calls.length,
+      chain: mocks.bridge.projectWorkspaceChainFixture.invoke.mock.calls.length,
+      routes: mocks.bridge.listRoutes.invoke.mock.calls.length,
+      proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
+      references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
+      handoffs: mocks.bridge.listReferenceGenerationHandoffs.invoke.mock.calls.length,
+      edits: mocks.bridge.editProject.invoke.mock.calls.length,
+      authoring: mocks.bridge.applyAuthoringBatch.invoke.mock.calls.length,
+      rules: mocks.bridge.setRules.invoke.mock.calls.length,
+      acceptProposal: mocks.bridge.acceptProposal.invoke.mock.calls.length,
+      rejectProposal: mocks.bridge.rejectProposal.invoke.mock.calls.length,
+      decideReference: mocks.bridge.decideReferenceRequest.invoke.mock.calls.length,
+      dismissHandoff: mocks.bridge.dismissReferenceGenerationHandoff.invoke.mock.calls.length,
+      undo: mocks.bridge.undoLast.invoke.mock.calls.length,
+      retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
+      cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
+      importSeedStill: mocks.bridge.importSeedStill.invoke.mock.calls.length,
+      parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
+      parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
+      restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
+      restoreShot: mocks.bridge.restoreShot.invoke.mock.calls.length,
+      reorderBin: mocks.bridge.reorderBin.invoke.mock.calls.length,
+      prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
+      confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
+    };
+    fireEvent.change(brief, { target: { value: 'Navigation-only local draft' } });
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
+    const table = screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' });
+    const selectedRow = within(table).getAllByRole('row')[1]!;
+    fireEvent.click(within(selectedRow).getAllByRole('gridcell')[1]!);
+    expect(selectedRow).toHaveAttribute('aria-selected', 'true');
+    const beatDialog = screen.getByRole('dialog');
+    expect(beatDialog).toBeVisible();
+    fireEvent.keyDown(
+      within(beatDialog).getByLabelText('conversation.creativeStudio.workspace.beatPanel.fields.story'),
+      { key: 'Escape' }
+    );
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(selectedRow).toHaveAttribute('aria-selected', 'true');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    expectProjectFormsAbsentFromMain('board');
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    fireEvent.click(screen.getAllByLabelText(/conversation\.creativeStudio\.workspace\.board\.openBeat/)[0]!);
+    expect(screen.getByRole('dialog')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expectProjectFormsAbsentFromMain('cut');
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expectProjectFormsAbsentFromMain('table');
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(setupDialog).getByLabelText(BRIEF)).toHaveValue('Navigation-only local draft');
+    await closeProjectDialog(setupDialog, BRIEF_RULES_TITLE);
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(conversationOwner);
+    expect(
+      within(screen.getByRole('grid', { name: 'conversation.creativeStudio.workspace.table.label' })).getAllByRole(
+        'row'
+      )[1]
+    ).toHaveAttribute('aria-selected', 'true');
+
+    expect({
+      project: mocks.bridge.getProject.invoke.mock.calls.length,
+      workspace: mocks.bridge.projectWorkspaceStatusFixture.invoke.mock.calls.length,
+      chain: mocks.bridge.projectWorkspaceChainFixture.invoke.mock.calls.length,
+      routes: mocks.bridge.listRoutes.invoke.mock.calls.length,
+      proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
+      references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
+      handoffs: mocks.bridge.listReferenceGenerationHandoffs.invoke.mock.calls.length,
+      edits: mocks.bridge.editProject.invoke.mock.calls.length,
+      authoring: mocks.bridge.applyAuthoringBatch.invoke.mock.calls.length,
+      rules: mocks.bridge.setRules.invoke.mock.calls.length,
+      acceptProposal: mocks.bridge.acceptProposal.invoke.mock.calls.length,
+      rejectProposal: mocks.bridge.rejectProposal.invoke.mock.calls.length,
+      decideReference: mocks.bridge.decideReferenceRequest.invoke.mock.calls.length,
+      dismissHandoff: mocks.bridge.dismissReferenceGenerationHandoff.invoke.mock.calls.length,
+      undo: mocks.bridge.undoLast.invoke.mock.calls.length,
+      retryConditioning: mocks.bridge.retryConditioningFrame.invoke.mock.calls.length,
+      cancelWaiting: mocks.bridge.cancelWaitingCascade.invoke.mock.calls.length,
+      importSeedStill: mocks.bridge.importSeedStill.invoke.mock.calls.length,
+      parkShot: mocks.bridge.parkShot.invoke.mock.calls.length,
+      parkBeat: mocks.bridge.parkBeat.invoke.mock.calls.length,
+      restoreBeat: mocks.bridge.restoreBeat.invoke.mock.calls.length,
+      restoreShot: mocks.bridge.restoreShot.invoke.mock.calls.length,
+      reorderBin: mocks.bridge.reorderBin.invoke.mock.calls.length,
+      prepare: mocks.bridge.prepareSubmission.invoke.mock.calls.length,
+      confirm: mocks.bridge.confirmSubmission.invoke.mock.calls.length,
+    }).toEqual(baseline);
+  });
+
+  it('subscribes to all three native streams before fetching their snapshots', async () => {
+    mocks.bridge.projectUpdated.on.mockImplementation(() => {
+      mocks.callOrder.push('subscribe-project');
+      return vi.fn();
+    });
+    mocks.bridge.proposalUpdated.on.mockImplementation(() => {
+      mocks.callOrder.push('subscribe-proposal');
+      return vi.fn();
+    });
+    mocks.bridge.referenceUpdated.on.mockImplementation(() => {
+      mocks.callOrder.push('subscribe-reference');
+      return vi.fn();
+    });
+    mocks.bridge.getProject.invoke.mockImplementation(async () => {
+      mocks.callOrder.push('get-project');
+      return ok({ status: 'supported', project: project() });
+    });
+    mocks.bridge.listProposals.invoke.mockImplementation(async () => {
+      mocks.callOrder.push('list-proposals');
+      return ok(proposalCatalog());
+    });
+    mocks.bridge.listReferenceRequests.invoke.mockImplementation(async () => {
+      mocks.callOrder.push('list-references');
+      return ok([]);
+    });
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockImplementation(async () => {
+      mocks.callOrder.push('list-handoffs');
+      return ok([]);
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    expect(mocks.callOrder.indexOf('subscribe-project')).toBeLessThan(mocks.callOrder.indexOf('get-project'));
+    expect(mocks.callOrder.indexOf('subscribe-proposal')).toBeLessThan(mocks.callOrder.indexOf('list-proposals'));
+    expect(mocks.callOrder.indexOf('subscribe-reference')).toBeLessThan(mocks.callOrder.indexOf('list-references'));
+    expect(mocks.callOrder.indexOf('subscribe-reference')).toBeLessThan(mocks.callOrder.indexOf('list-handoffs'));
+  });
+
+  it('keeps proposals in the workspace inbox while references and handoffs remain Director outputs', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(
+      ok([handoff(), handoff(), handoff('succeeded'), handoff('dismissed')])
+    );
+
+    renderStudio();
+
+    expect(await screen.findByTestId('studio-proposal-proposal_1')).toBeVisible();
+    expect(screen.getByTestId('studio-reference-reference_1')).toBeVisible();
+    expect(screen.getAllByTestId('studio-handoff-handoff_awaiting_spend')).toHaveLength(1);
+    expect(screen.getByTestId('studio-handoff-handoff_succeeded')).toBeVisible();
+    expect(screen.getByTestId('studio-handoff-handoff_dismissed')).toBeVisible();
+    const transcript = screen.getByTestId('message-list-content');
+    const proposalOutput = screen
+      .getByTestId('studio-proposal-proposal_1')
+      .closest('[data-studio-director-reviewed-output]');
+    const referenceOutput = screen
+      .getByTestId('studio-reference-reference_1')
+      .closest('[data-studio-director-reviewed-output]');
+    expect(proposalOutput).toBeNull();
+    expect(transcript).not.toContainElement(screen.getByTestId('studio-proposal-proposal_1'));
+    expect(transcript).toContainElement(referenceOutput);
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.references' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.board' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
+    await screen.findByRole('heading', { name: 'conversation.creativeStudio.workspace.views.cut' });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
+  });
+
+  it('keeps the Board visible while four stale proposals remain available in one collapsed disclosure', async () => {
+    const authority = projectWithBoardJobs(1, false);
+    authority.revision = 4;
+    const staleProposals = Array.from({ length: 4 }, (_, index) =>
+      staleProposal({ ...proposal(), id: `stale_${index + 1}` }, authority.revision)
+    );
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog(staleProposals, authority.revision)));
+
+    renderStudio('/studio/project_1/board');
+
+    expect(await screen.findByTestId('studio-terminal-proposals')).toHaveTextContent('"count":4');
+    expect(screen.queryByTestId('studio-proposal-stale_1')).toBeNull();
+    expect(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.board.openBeat:{"title":"Board Beat 1"}',
+      })
+    ).toBeVisible();
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.showTerminal' })
+    );
+    expect(screen.getByTestId('studio-proposal-stale_1')).toBeVisible();
+    expect(
+      within(screen.getByTestId('studio-proposal-stale_1')).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+      })
+    ).toBeEnabled();
+  });
+
+  it('moves a proposal out of the terminal disclosure when refreshed authority makes it ready', async () => {
+    const authority = { ...project(), revision: 4 };
+    const stale = staleProposal(proposal(), authority.revision);
+    const staleSibling = staleProposal({ ...proposal(), id: 'proposal_2' }, authority.revision);
+    const ready = { ...proposal(), baseRevision: authority.revision };
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([stale, staleSibling], authority.revision)))
+      .mockResolvedValue(ok(proposalCatalog([ready, staleSibling], authority.revision)));
+
+    renderStudio('/studio/project_1/board');
+    expect(await screen.findByTestId('studio-terminal-proposals')).toBeVisible();
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: authority.id }));
+
+    expect(await screen.findByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'ready');
+    expect(screen.queryByTestId('studio-terminal-proposals')).toBeNull();
+    expect(screen.getByTestId('studio-proposal-proposal_2')).toHaveAttribute('data-proposal-state', 'stale');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps the last proposal cards visible but unavailable through refresh and a mismatched catalog', async () => {
+    const mismatch = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockReturnValueOnce(mismatch.promise);
+    renderStudio();
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+    expect(card).toHaveAttribute('data-proposal-state', 'ready');
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'refreshing'));
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+
+    const wrongRevision = { ...proposal(), baseRevision: 4 };
+    await act(async () => {
+      mismatch.resolve(ok(proposalCatalog([wrongRevision], 4)));
+      await mismatch.promise;
+    });
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'unavailable'));
+    expect(card).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.authorityUnavailable')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('retains disabled proposal cards across catalog IPC errors and thrown reads', async () => {
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'storage_error', messageKey: 'native.proposalCatalogFailed' },
+      })
+      .mockRejectedValueOnce(new Error('offline'));
+    renderStudio();
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    expect(await screen.findByText('native.proposalCatalogFailed')).toBeVisible();
+    await waitFor(() => expect(card).toHaveAttribute('data-proposal-state', 'unavailable'));
+    expect(card).toBeVisible();
+    expect(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
+
+    act(() => mocks.listeners.proposalUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(3));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(card).toBeVisible();
+    expect(card).toHaveAttribute('data-proposal-state', 'unavailable');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('ignores a late proposal response instead of rolling the installed inbox backward', async () => {
+    const late = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke
+      .mockResolvedValueOnce(ok(proposalCatalog([proposal()])))
+      .mockReturnValueOnce(late.promise)
+      .mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_1');
+
+    act(() => {
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_1' });
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_1' });
+    });
+    expect(await screen.findByTestId('studio-proposal-proposal_2')).toBeVisible();
+
+    await act(async () => {
+      late.resolve(ok(proposalCatalog([proposal()])));
+      await late.promise;
+    });
+    expect(screen.getByTestId('studio-proposal-proposal_2')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'ready');
+  });
+
+  it('refreshes running handoff progress and thumbnails when project-owned jobs change', async () => {
+    const current = projectWithCandidateReference();
+    mockSupportedProject(current);
+    const queued = {
+      ...handoff('running'),
+      counts: { queued: 1, running: 0, succeeded: 0, failed: 0 },
+      resultAssetIds: [],
+    };
+    const succeeded = {
+      ...queued,
+      status: 'succeeded' as const,
+      counts: { queued: 0, running: 0, succeeded: 1, failed: 0 },
+      resultAssetIds: ['asset_reference_3'],
+      completedAt: '2026-01-01T00:00:04.000Z',
+    };
+    mocks.bridge.listReferenceGenerationHandoffs.invoke
+      .mockResolvedValueOnce(ok([queued]))
+      .mockResolvedValue(ok([succeeded]));
+
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_running'));
+    expect(
+      card.getByText(
+        'conversation.creativeStudio.workspace.handoffs.progress:{"queued":1,"running":0,"succeeded":0,"failed":0}'
+      )
+    ).toBeVisible();
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2));
+    expect(
+      await card.findByText(
+        'conversation.creativeStudio.workspace.handoffs.progress:{"queued":0,"running":0,"succeeded":1,"failed":0}'
+      )
+    ).toBeVisible();
+    expect(
+      await card.findByRole('img', {
+        name: 'conversation.creativeStudio.workspace.referenceWorkflow.previewAlt:{"label":"Hero"}',
+      })
+    ).toHaveAttribute('src', expect.stringContaining('asset_reference_3'));
+  });
+
+  it('blocks handoff review for unsaved generative intent while keeping free dismissal available', async () => {
+    seedWorkspaceDrafts({
+      'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved generation Brief' },
+    });
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff(), handoff('succeeded')]));
+
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
+    await waitFor(() =>
+      expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled()
+    );
+    expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    const dismiss = card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' });
+    expect(dismiss).toBeEnabled();
+    fireEvent.click(dismiss);
+
+    await waitFor(() => expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.getByTestId('studio-handoff-handoff_succeeded')).toBeVisible();
+  });
+
+  it('blocks paid handoff review while the active project has an unsaved structured rule', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Do not render the competitor logo.' },
+    });
+    await closeProjectDialog(dialog, BRIEF_RULES_TITLE);
+
+    const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
+    await waitFor(() =>
+      expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeDisabled()
+    );
+    expect(card.getByText('conversation.creativeStudio.workspace.controls.saveBeforeReview')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps visible revision-matched controls installed while a newer composite snapshot is pending', async () => {
+    const initial = projectWithHandoffShot();
+    const updated = { ...projectWithHandoffShot(), revision: 4, name: 'Updated without a blink' };
+    const pending = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(pending.promise);
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
+    const review = card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' });
+    expect(review).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(review).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toBeVisible();
+
+    await act(async () => {
+      pending.resolve(projectWorkspaceLoad(updated));
+      await pending.promise;
+    });
+    expect(await screen.findByRole('heading', { name: 'Updated without a blink' })).toBeVisible();
+    expect(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })).toBeEnabled();
+    expect(card.queryByText('conversation.creativeStudio.workspace.controls.statusRequired')).toBeNull();
+  });
+
+  it('rejects a successful composite response whose three revisions do not match', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    const authority = project();
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, workspaceStatus(authority), chainStatus(2))
+    );
+
+    renderStudio();
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(screen.queryByTestId('studio-handoff-handoff_awaiting_spend')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses an awaiting-spend handoff whose reference identities are absent from the active project', async () => {
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('automatically estimates an exact project-reference handoff without spending', async () => {
+    mockSupportedProject(projectWithReferenceHandoff());
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const card = within(await screen.findByTestId('studio-handoff-handoff_awaiting_spend'));
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' }));
+
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(
+      within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
+    ).toBeNull();
+    await waitFor(() =>
+      expect(mocks.bridge.prepareProjectReferences.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        referenceIds: ['reference_3'],
+      })
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('decides a generation request without submitting or dismissing it and refreshes both reference lists', async () => {
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke
+      .mockResolvedValueOnce(ok([]))
+      .mockResolvedValue(ok([handoff()]));
+
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.references.generate' })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.decideReferenceRequest.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        requestId: 'reference_1',
+        expectedRevision: 3,
+        outcome: { kind: 'generation_gate' },
+      })
+    );
+    await waitFor(() => expect(screen.getByTestId('studio-handoff-handoff_awaiting_spend')).toBeVisible());
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).not.toHaveBeenCalled();
+  });
+
+  it('records a rejected reference request without creating a paid handoff', async () => {
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValueOnce(ok([referenceRequest()])).mockResolvedValue(ok([]));
+    mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue(
+      ok({
+        schemaVersion: 5,
+        requestId: 'reference_1',
+        projectId: 'project_1',
+        decidedAt: '2026-01-01T00:00:05.000Z',
+        outcome: { kind: 'rejected' as const },
+      })
+    );
+
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.decideReferenceRequest.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        requestId: 'reference_1',
+        expectedRevision: 3,
+        outcome: { kind: 'rejected' },
+      })
+    );
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports and flushes the shared draft owner, preserving drafts when the commit fails', async () => {
+    const initial = project();
+    const revised = { ...project(), revision: 4, resolution: '1080p' as const };
+    mocks.bridge.getProject.invoke.mockResolvedValueOnce(ok({ status: 'supported', project: initial }));
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    const first = renderStudio();
+    let setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(within(setupDialog).getByRole('combobox', { name: RESOLUTION }));
+    fireEvent.click(await screen.findByRole('option', { name: '1080p' }));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork).not.toBeNull());
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      changes: { resolution: '1080p' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+
+    first.unmount();
+    window.sessionStorage.clear();
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: initial }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(3)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(3)));
+    mocks.bridge.editProject.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' },
+    });
+    const second = renderStudio();
+    setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(within(setupDialog).getByRole('combobox', { name: RESOLUTION }));
+    fireEvent.click(await screen.findByRole('option', { name: '1080p' }));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+    second.unmount();
+  });
+
+  it('drops persisted draft values whose runtime type disagrees with project authority', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: 42 },
+      'brief.text': { baseValue: 'A small launch film.', value: 42 },
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    let response: { saved: boolean } | undefined;
+    await act(async () => {
+      response = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(response).toEqual({ saved: true });
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1')).toBeNull()
+    );
+  });
+
+  it('blocks close-save and preserves structured rule drafts across project navigation', async () => {
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Second project' };
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    let briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(BRIEF), {
+      target: { value: 'Keep this unrelated Brief draft too.' },
+    });
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Keep this structured rule draft.' },
+    });
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TERMS), { target: { value: 'Acme, Globex' } });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Keep this unrelated Brief draft too.');
+    expect(within(briefDialog).getByLabelText(RULE_TEXT)).toHaveValue('Keep this structured rule draft.');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to first project' }));
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Keep this unrelated Brief draft too.');
+    expect(within(briefDialog).getByLabelText(RULE_TEXT)).toHaveValue('Keep this structured rule draft.');
+    expect(within(briefDialog).getByLabelText(RULE_TERMS)).toHaveValue('Acme, Globex');
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+  });
+
+  it('keeps the close contract active for stored rule drafts after returning to the library', async () => {
+    renderStudioWithProjectSwitch();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Keep this draft when the project page unmounts.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to library' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio'));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps relocated settings and Brief drafts protected outside their project', async () => {
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Second project' };
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok({ status: 'supported' as const, project: projectId === 'project_2' ? projectB : project() })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(BRIEF), {
+      target: { value: 'Keep this relocated Brief draft.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+
+    fireEvent.click(screen.getByRole('button', { name: 'Return to library' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio'));
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not let a deferred project-A shape continuation reset project-B drafts after direct navigation', async () => {
+    const projectB = {
+      ...project(),
+      id: 'project_2',
+      revision: 4,
+      name: 'Second project',
+    };
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } }, 'project_2', 4);
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
+    const projectACommitted = { ...project(), revision: 4, resolution: '1080p' as const };
+    let projectALoads = 0;
+    const edit = deferred<ReturnType<typeof commit>>();
+    mocks.bridge.editProject.invoke.mockReturnValue(edit.promise);
+    mocks.bridge.getProject.invoke.mockImplementation(async ({ projectId }: { projectId: string }) => {
+      if (projectId === 'project_2') return ok({ status: 'supported' as const, project: projectB });
+      projectALoads += 1;
+      return ok({ status: 'supported' as const, project: projectALoads === 1 ? project() : projectACommitted });
+    });
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...workspaceStatus(4), projectId: 'project_2' } : workspaceStatus(3))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async ({ projectId }: { projectId: string }) =>
+      ok(projectId === 'project_2' ? { ...chainStatus(4), projectId: 'project_2' } : chainStatus(3))
+    );
+
+    renderStudioWithProjectSwitch();
+    const projectADialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(
+      within(projectADialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { resolution: '1080p' },
+      })
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Switch project' }));
+    expect(await screen.findByRole('heading', { name: 'Second project' })).toBeVisible();
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: BRIEF_RULES_TITLE })).toBeNull());
+    const projectBDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const projectBResolution = within(projectBDialog).getByRole('combobox', { name: RESOLUTION });
+    expect(projectBResolution).toHaveTextContent('1080p');
+
+    await act(async () => edit.resolve(commit(4)));
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'Second project' })).toBeVisible());
+
+    expect(projectBResolution).toHaveTextContent('1080p');
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_2')).toContain('1080p');
+  });
+
+  it('continues close-save past locked shape drafts, commits Brief, and discards retired rule drafts', async () => {
+    seedWorkspaceDrafts({
+      'settings.aspectRatio': { baseValue: '16:9', value: '9:16' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'A saved Brief.' },
+      'brief.rules': {
+        baseValue: '[]',
+        value: '[{"id":"rule_1","text":"Keep it bright","predicate":null,"scope":"poison"}]',
+      },
+    });
+    const initial = project();
+    const revision4 = { ...project(), revision: 4, brief: 'A saved Brief.' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: revision4 }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3, true)))
+      .mockResolvedValue(ok(workspaceStatus(4, true)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    let response: { saved: boolean } | undefined;
+    await act(async () => {
+      response = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(response).toEqual({ saved: false });
+    expect(mocks.bridge.editProject.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'set_brief', brief: 'A saved Brief.' }],
+    });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    const persisted = window.sessionStorage.getItem('aionui:creative-studio:v3:workspace-drafts:project_1') ?? '';
+    expect(persisted).toContain('settings.aspectRatio');
+    expect(persisted).not.toContain('brief.rules');
+  });
+
+  it('chains one Film setup save through the refreshed revision authority', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'A combined Film setup brief.' },
+    });
+    const initial = project();
+    const revision4 = { ...initial, revision: 4, resolution: '1080p' as const };
+    const revision5 = { ...revision4, revision: 5, brief: 'A combined Film setup brief.' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
+      .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValueOnce(ok(workspaceStatus(revision4)))
+      .mockResolvedValue(ok(workspaceStatus(revision5)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValueOnce(ok(chainStatus(revision4)))
+      .mockResolvedValue(ok(chainStatus(revision5)));
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(5));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(
+      within(dialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { resolution: '1080p' },
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [{ kind: 'set_brief', brief: 'A combined Film setup brief.' }],
+      })
+    );
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+  });
+
+  it('fails a Film setup chain closed when authority advances before authoring', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'Do not overwrite concurrent authority.' },
+    });
+    const initial = project();
+    const concurrent = {
+      ...initial,
+      revision: 5,
+      resolution: '1080p' as const,
+      brief: 'A concurrent owner brief.',
+    };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: concurrent }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(concurrent)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(concurrent)));
+    mocks.bridge.editProject.invoke.mockResolvedValue(commit(4));
+
+    renderStudio();
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.click(
+      within(dialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.editProject.invoke).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(
+        within(dialog).getAllByText('conversation.creativeStudio.workspace.controls.draftConflict').length
+      ).toBeGreaterThan(0)
+    );
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(within(dialog).getByLabelText(BRIEF)).toHaveValue('Do not overwrite concurrent authority.');
+    expect(within(dialog).getByRole('combobox', { name: RESOLUTION })).toHaveTextContent('1080p');
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+  });
+
+  it('flushes Beat and Shot drafts in revisioned batches without exceeding the mutation limit', async () => {
+    const initial = projectWithDraftBatch(17);
+    const revision4 = { ...initial, revision: 4 };
+    const revision5 = { ...initial, revision: 5 };
+    const entries: Record<string, { baseValue: unknown; value: unknown }> = {};
+    for (let index = 0; index < 17; index += 1) {
+      entries[`beat.beat_${index}.story`] = {
+        baseValue: `Story ${index + 1}`,
+        value: `Revised story ${index + 1}`,
+      };
+      entries[`shot.shot_${index}.shootingScript`] = {
+        baseValue: `Shot ${index + 1}`,
+        value: `Revised shot ${index + 1}`,
+      };
+    }
+    seedWorkspaceDrafts(entries);
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: revision4 }))
+      .mockResolvedValue(ok({ status: 'supported', project: revision5 }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValueOnce(ok(workspaceStatus(revision4)))
+      .mockResolvedValue(ok(workspaceStatus(revision5)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValueOnce(ok(chainStatus(revision4)))
+      .mockResolvedValue(ok(chainStatus(revision5)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce(commit(4)).mockResolvedValueOnce(commit(5));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    // The close bridge has a bounded wire count. Saving still sees and flushes all 34 drafts.
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 24 }));
+    let response: { saved: boolean } | undefined;
+    await act(async () => {
+      response = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(response).toEqual({ saved: true });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls[0]?.[0]).toMatchObject({
+      projectId: 'project_1',
+      expectedRevision: 3,
+    });
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls[0]?.[0].operations).toHaveLength(32);
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls[1]?.[0]).toMatchObject({
+      projectId: 'project_1',
+      expectedRevision: 4,
+    });
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls[1]?.[0].operations).toHaveLength(2);
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+  });
+
+  it('disables every Film setup editor while a deferred shape commit is pending', async () => {
+    const initial = project();
+    const revised = { ...project(), revision: 4, resolution: '1080p' as const };
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
+    const edit = deferred<ReturnType<typeof commit>>();
+    mocks.bridge.editProject.invoke.mockReturnValue(edit.promise);
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    const setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const resolution = within(setupDialog).getByRole('combobox', { name: RESOLUTION });
+    const brief = within(setupDialog).getByLabelText(BRIEF);
+    const rule = within(setupDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
+    fireEvent.click(
+      within(setupDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() => expect(resolution).toHaveAttribute('aria-disabled', 'true'));
+    expect(brief).toBeDisabled();
+    expect(rule).toBeDisabled();
+
+    await act(async () => edit.resolve(commit(4)));
+    await waitFor(() => expect(brief).toBeEnabled());
+  });
+
+  it('fails closed when an inadmissible set-routes operation reaches a Director proposal', async () => {
+    const routeProposal: StudioRendererProposalV2 = {
+      ...proposal(),
+      payload: {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'set_routes', imageRouteId: 'route_new', videoRouteId: null }],
+      },
+      review: { status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null },
+    };
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([routeProposal])));
+
+    renderStudio();
+    const accept = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+
+    expect(accept).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.reviewUnavailable')).toBeVisible();
+    fireEvent.click(accept);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the exact fixed Shot Shooting script from proposal review without mutating, generating, or spending', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([fixedCoverageProposal()])));
+
+    renderStudio();
+    const directEdit = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+    });
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    fireEvent.click(directEdit);
+
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    const field = document.querySelector<HTMLTextAreaElement>('textarea[data-shot-field="shooting-script"]');
+    await waitFor(() => expect(document.activeElement).toBe(field));
+    expect(field).toHaveValue('Shot 1');
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.directorDraftRequest).toBeNull();
+  });
+
+  it('clears an unconsumed proposal Shot-focus intent on view change instead of replaying it later', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([fixedCoverageProposal()])));
+    const focus = vi.spyOn(HTMLTextAreaElement.prototype, 'focus').mockImplementation(() => undefined);
+
+    try {
+      renderStudio();
+      fireEvent.click(
+        await screen.findByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+        })
+      );
+      await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+      expect(focus).toHaveBeenCalled();
+
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      focus.mockRestore();
+
+      fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+      await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+      expect(screen.queryByRole('dialog')).toBeNull();
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    } finally {
+      focus.mockRestore();
+    }
+  });
+
+  it('invalidates a frame-dependent route after save and refreshes it only from the explicit action', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+    });
+    const changed = { ...project(), revision: 4, resolution: '1080p' as const };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: changed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+    fireEvent.click(
+      within(briefDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        changes: { resolution: '1080p' },
+      })
+    );
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+      ).toHaveLength(2)
+    );
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(
+      within(briefDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.refreshRoutes',
+      })
+    );
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+  });
+
+  it('refreshes revision-owned capability while preserving a ready catalog after a paid update', async () => {
+    const initial = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    const changed = { ...initial, revision: 4, name: 'Paid update landed' };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: changed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+    mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) => {
+        if (input.expectedRevision !== 4) return supportedCapabilityResult(input);
+        const blockedItem = input.items.find(
+          (item) => item.target.kind === 'shot' && item.target.shotId === 'shot_0' && item.purpose === 'video_take'
+        )!;
+        return ok({
+          projectId: input.projectId,
+          projectRevision: input.expectedRevision,
+          catalogVersion: 'catalog_1',
+          supportedItems: input.items.filter((item) => !sameCapabilityItem(item, blockedItem)),
+          blocks: [{ block: { code: 'no_engine' as const, role: 'video' as const }, items: [blockedItem] }],
+        });
+      }
+    );
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    expect(await screen.findByRole('heading', { name: 'Paid update landed' })).toBeVisible();
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+    ).toHaveLength(2);
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.getGenerationCapability.invoke.mock.calls[1]?.[0]).toMatchObject({ expectedRevision: 4 });
+    expect(await within(briefDialog).findByText('conversation.creativeStudio.models.blocked.noEngine')).toBeVisible();
+  });
+
+  it('fails closed when route and capability catalog versions do not match', async () => {
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_2',
+      })
+    );
+    mocks.bridge.getGenerationCapability.invoke.mockImplementation(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+        supportedCapabilityResult(input, 'catalog_1')
+    );
+
+    render(<HookProbe projectId='project_1' />);
+
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledOnce());
+    expect(latestHookResult?.routeCatalog).toBeNull();
+    expect(latestHookResult?.generationCapability).toBeNull();
+    expect(latestHookResult?.routeErrorMessageKey).toBe('conversation.creativeStudio.workspace.errors.storage');
+  });
+
+  it('keeps project status pending while the initial route inventory delays its first status read', async () => {
+    const delayedRoutes = deferred<ReturnType<typeof ok>>();
+    mocks.bridge.listRoutes.invoke.mockReturnValueOnce(delayedRoutes.promise);
+
+    render(<HookProbe projectId='project_1' />);
+
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe('project_1'));
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
+    expect(mocks.bridge.getProjectStatus.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      delayedRoutes.resolve(
+        ok({
+          image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'catalog_1',
+        })
+      );
+      await delayedRoutes.promise;
+    });
+
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(3));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+  });
+
+  it('loads detailed project status and refreshes it only after the exact project revision installs', async () => {
+    const initial = project();
+    const revised = { ...project(), revision: 4, name: 'Revision four' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(revised));
+    mocks.bridge.getProjectStatus.invoke
+      .mockResolvedValueOnce(ok(projectStatus(initial)))
+      .mockResolvedValue(ok(projectStatus(revised)));
+
+    render(<HookProbe projectId={initial.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(initial.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      detail: true,
+    });
+
+    act(() => mocks.listeners.projectUpdated?.({ projectId: initial.id }));
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(revised.revision));
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(revised.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenLastCalledWith({ projectId: initial.id, detail: true });
+
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    await act(async () => {
+      await latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() =>
+      expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: initial.id,
+        detail: true,
+      })
+    );
+
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    await act(async () => {
+      await latestHookResult!.refetchAll();
+    });
+    expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: initial.id,
+      detail: true,
+    });
+  });
+
+  it('does not place a deferred read-only status refresh on the workspace mutation completion path', async () => {
+    const authority = project();
+    const delayedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(delayedStatus.promise);
+
+    let refreshed: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      refreshed = await latestHookResult!.refetchProjectWorkspace();
+    });
+
+    expect(refreshed?.revision).toBe(authority.revision);
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
+
+    await act(async () => {
+      delayedStatus.resolve(ok(projectStatus(authority)));
+      await delayedStatus.promise;
+    });
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+  });
+
+  it('marks same-revision status pending while an explicit route refresh is still resolving it', async () => {
+    const authority = project();
+    const delayedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(delayedStatus.promise);
+
+    let refreshPromise!: Promise<boolean>;
+    act(() => {
+      refreshPromise = latestHookResult!.refetchRoutes();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
+
+    await act(async () => {
+      delayedStatus.resolve(ok(projectStatus(authority)));
+      expect(await refreshPromise).toBe(true);
+    });
+    expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision);
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+  });
+
+  it('fails route and status snapshots closed without a false storage error when inventory versions move', async () => {
+    const authority = project();
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(authority.revision));
+    mocks.bridge.listRoutes.invoke.mockResolvedValueOnce(
+      ok({
+        image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_2',
+      })
+    );
+    mocks.bridge.getGenerationCapability.invoke.mockImplementationOnce(
+      async (input: { projectId: string; expectedRevision: number; items: StudioGenerationCapabilityItemV2[] }) =>
+        supportedCapabilityResult(input, 'catalog_2')
+    );
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(projectStatus(authority)));
+
+    await act(async () => {
+      expect(await latestHookResult!.refetchRoutes()).toBe(true);
+    });
+
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+    expect(latestHookResult?.routeCatalog).toBeNull();
+    expect(latestHookResult?.generationCapability).toBeNull();
+    expect(latestHookResult?.routeErrorMessageKey).toBeNull();
+  });
+
+  it('discards delayed status from an obsolete project binding and installs only the current project status', async () => {
+    const projectA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 6, name: 'Project B' };
+    const delayedA = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve(projectWorkspaceLoad(projectId === projectB.id ? projectB : projectA))
+    );
+    mocks.bridge.getProjectStatus.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      projectId === projectA.id ? delayedA.promise : Promise.resolve(ok(projectStatus(projectB)))
+    );
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(true);
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id));
+
+    await act(async () => {
+      delayedA.resolve(ok(projectStatus(projectA)));
+      await delayedA.promise;
+    });
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.projectStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.projectStatus?.projectRevision).toBe(projectB.revision);
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+  });
+
+  it('keeps the latest same-binding status request when an older response arrives last', async () => {
+    const authority = project();
+    const older = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    const latest = { ...projectStatus(authority), blockerCount: 7 };
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(older.promise).mockResolvedValue(ok(latest));
+
+    render(<HookProbe projectId={authority.id} />);
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(1));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: authority.id }));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(latestHookResult?.projectStatus?.blockerCount).toBe(7));
+
+    await act(async () => {
+      older.resolve(ok(projectStatus(authority)));
+      await older.promise;
+    });
+    expect(latestHookResult?.projectStatus?.blockerCount).toBe(7);
+  });
+
+  it('clears status on status-provider failure without demoting the supported project shell', async () => {
+    render(<HookProbe projectId='project_1' />);
+    await waitFor(() => expect(latestHookResult?.projectStatus?.projectRevision).toBe(3));
+    mocks.bridge.getProjectStatus.invoke.mockRejectedValueOnce(new Error('status offline'));
+
+    let refreshed = false;
+    await act(async () => {
+      refreshed = await latestHookResult!.refetchRoutes();
+    });
+
+    expect(refreshed).toBe(true);
+    expect(latestHookResult?.projectStatus).toBeNull();
+    expect(latestHookResult?.projectStatusPending).toBe(false);
+    expect(latestHookResult?.project?.id).toBe('project_1');
+    expect(latestHookResult?.loadState).toBe('supported');
+    expect(latestHookResult?.errorMessageKey).toBeNull();
+  });
+
+  it('coalesces each active composite read into one trailing epoch without starving earlier callers', async () => {
+    const initial = project();
+    const revision4 = { ...project(), revision: 4, name: 'Revision four' };
+    const revision5 = { ...project(), revision: 5, name: 'Revision five' };
+    const revision6 = { ...project(), revision: 6, name: 'Revision six' };
+    const leader = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const firstTrailing = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const secondTrailing = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(leader.promise)
+      .mockReturnValueOnce(firstTrailing.promise)
+      .mockReturnValueOnce(secondTrailing.promise);
+
+    render(<HookProbe projectId='project_1' />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(3));
+
+    let leaderPromise!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leaderPromise = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(latestHookResult?.project?.revision).toBe(3);
+    expect(latestHookResult?.workspaceStatus?.projectRevision).toBe(3);
+    expect(latestHookResult?.chainStatus?.projectRevision).toBe(3);
+
+    let firstWaiter!: Promise<StudioRendererProjectV2 | null>;
+    let sharedWaiter!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      firstWaiter = latestHookResult!.refetchProjectWorkspace();
+      sharedWaiter = latestHookResult!.refetchProjectWorkspace();
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+
+    let leaderResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      leader.resolve(projectWorkspaceLoad(revision4));
+      leaderResult = await leaderPromise;
+    });
+    expect(leaderResult?.revision).toBe(4);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3));
+
+    let secondWaiter!: Promise<StudioRendererProjectV2 | null>;
+    let secondWaiterSettled = false;
+    act(() => {
+      secondWaiter = latestHookResult!.refetchProjectWorkspace();
+      void secondWaiter.then(() => {
+        secondWaiterSettled = true;
+      });
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
+
+    let firstResult: StudioRendererProjectV2 | null = null;
+    let sharedResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      firstTrailing.resolve(projectWorkspaceLoad(revision5));
+      [firstResult, sharedResult] = await Promise.all([firstWaiter, sharedWaiter]);
+    });
+    expect(firstResult?.revision).toBe(5);
+    expect(sharedResult?.revision).toBe(5);
+    expect(secondWaiterSettled).toBe(false);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(4));
+
+    let secondResult: StudioRendererProjectV2 | null = null;
+    await act(async () => {
+      secondTrailing.resolve(projectWorkspaceLoad(revision6));
+      secondResult = await secondWaiter;
+    });
+    expect(secondResult?.revision).toBe(6);
+    expect(latestHookResult?.project?.revision).toBe(6);
+  });
+
+  it('settles an obsolete binding leader and trailing waiter without reviving them after a project switch', async () => {
+    const projectA = project();
+    const projectARevision4 = { ...projectA, revision: 4, name: 'Obsolete project A' };
+    const projectB = { ...project(), id: 'project_2', revision: 8, name: 'Current project B' };
+    const delayedA = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectB.id) return Promise.resolve(projectWorkspaceLoad(projectB));
+      projectAReads += 1;
+      return projectAReads === 1 ? Promise.resolve(projectWorkspaceLoad(projectA)) : delayedA.promise;
+    });
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+
+    let leader!: Promise<StudioRendererProjectV2 | null>;
+    let trailing!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leader = latestHookResult!.refetchProjectWorkspace();
+      trailing = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(projectAReads).toBe(2));
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await expect(Promise.all([leader, trailing])).resolves.toEqual([null, null]);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+
+    await act(async () => {
+      delayedA.resolve(projectWorkspaceLoad(projectARevision4));
+      await delayedA.promise;
+    });
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.project?.revision).toBe(projectB.revision);
+    expect(latestHookResult?.workspaceStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.chainStatus?.projectId).toBe(projectB.id);
+  });
+
+  it('settles a pending composite leader and trailing waiter before an unmounted provider read resolves', async () => {
+    const initial = project();
+    const delayedRevision4 = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockReset()
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockReturnValueOnce(delayedRevision4.promise);
+
+    const view = render(<HookProbe projectId={initial.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(initial.revision));
+
+    let leader!: Promise<StudioRendererProjectV2 | null>;
+    let trailing!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      leader = latestHookResult!.refetchProjectWorkspace();
+      trailing = latestHookResult!.refetchProjectWorkspace();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    try {
+      let settled: Array<StudioRendererProjectV2 | null> = [initial, initial];
+      await act(async () => {
+        view.unmount();
+        settled = await Promise.all([leader, trailing]);
+      });
+      expect(settled).toEqual([null, null]);
+
+      await act(async () => {
+        delayedRevision4.resolve(projectWorkspaceLoad({ ...initial, revision: 4, name: 'Too late' }));
+        await delayedRevision4.promise;
+      });
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+      expect(latestHookResult?.project?.revision).toBe(initial.revision);
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+
+  it('keeps a stale project-A composite callback from displacing the active project-B flight', async () => {
+    const projectA = project();
+    const projectARevision4 = { ...project(), revision: 4, name: 'Late project A' };
+    const projectB = { ...project(), id: 'project_2', revision: 7, name: 'Project B' };
+    const delayedA = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const delayedB = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectA.id) {
+        projectAReads += 1;
+        return projectAReads === 1 ? Promise.resolve(projectWorkspaceLoad(projectA)) : delayedA.promise;
+      }
+      return delayedB.promise;
+    });
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    const staleRefetch = latestHookResult!.refetchProjectWorkspace;
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() =>
+      expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledWith({ projectId: projectB.id })
+    );
+
+    let stalePromise!: Promise<StudioRendererProjectV2 | null>;
+    act(() => {
+      stalePromise = staleRefetch();
+    });
+    delayedA.resolve(projectWorkspaceLoad(projectARevision4));
+    const staleResult = await stalePromise;
+
+    expect(staleResult).toBeNull();
+    expect(projectAReads).toBe(1);
+    expect(latestHookResult?.project?.id).not.toBe(projectA.id);
+    expect(
+      mocks.bridge.getProjectWorkspace.invoke.mock.calls.filter(([input]) => input.projectId === projectB.id)
+    ).toHaveLength(1);
+
+    await act(async () => {
+      delayedB.resolve(projectWorkspaceLoad(projectB));
+      await delayedB.promise;
+    });
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    expect(latestHookResult?.workspaceStatus?.projectId).toBe(projectB.id);
+    expect(latestHookResult?.chainStatus?.projectId).toBe(projectB.id);
+  });
+
+  it('keeps every stale project binding callback inert across an A-to-B-to-A rebinding', async () => {
+    const firstA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 4, name: 'Project B' };
+    const reboundA = { ...project(), revision: 5, name: 'Rebound project A' };
+    let projectAReads = 0;
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) => {
+      if (projectId === projectB.id) return Promise.resolve(projectWorkspaceLoad(projectB));
+      projectAReads += 1;
+      return Promise.resolve(projectWorkspaceLoad(projectAReads === 1 ? firstA : reboundA));
+    });
+
+    const view = render(<HookProbe projectId={firstA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(firstA.revision));
+    const staleCallbacks = {
+      projectWorkspace: latestHookResult!.refetchProjectWorkspace,
+      proposals: latestHookResult!.refetchProposals,
+      references: latestHookResult!.refetchReferences,
+      routes: latestHookResult!.refetchRoutes,
+      exports: latestHookResult!.refetchExports,
+      all: latestHookResult!.refetchAll,
+      installExportCatalog: latestHookResult!.installExportCatalog,
+    };
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    view.rerender(<HookProbe projectId={firstA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(reboundA.revision));
+
+    mocks.bridge.getProjectWorkspace.invoke.mockClear();
+    mocks.bridge.listProposals.invoke.mockClear();
+    mocks.bridge.listReferenceRequests.invoke.mockClear();
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockClear();
+    mocks.bridge.listRoutes.invoke.mockClear();
+    mocks.bridge.listExports.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+
+    let staleProject: StudioRendererProjectV2 | null = reboundA;
+    let staleRouteResult = true;
+    let staleExportResult = true;
+    await act(async () => {
+      [staleProject, staleRouteResult, staleExportResult] = await Promise.all([
+        staleCallbacks.projectWorkspace(),
+        staleCallbacks.routes(),
+        staleCallbacks.exports(),
+      ]);
+      await Promise.all([staleCallbacks.proposals(), staleCallbacks.references(), staleCallbacks.all()]);
+    });
+
+    expect(staleProject).toBeNull();
+    expect(staleRouteResult).toBe(false);
+    expect(staleExportResult).toBe(false);
+    expect(staleCallbacks.installExportCatalog({ revision: 2, artifacts: [] })).toBe(false);
+    expect(mocks.bridge.getProjectWorkspace.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listProposals.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.getProjectStatus.invoke).not.toHaveBeenCalled();
+    expect(latestHookResult?.project?.revision).toBe(reboundA.revision);
+  });
+
+  it('discards delayed proposal, reference, and export results from the previous project binding', async () => {
+    const projectA = project();
+    const projectB = { ...project(), id: 'project_2', revision: 6, name: 'Project B' };
+    const delayedProposals = deferred<{ ok: true; data: StudioRendererProposalCatalogV2 }>();
+    const delayedReferenceRequests = deferred<{ ok: true; data: StudioReferenceRequestV2[] }>();
+    const delayedHandoffs = deferred<{ ok: true; data: StudioRendererReferenceGenerationHandoffV2[] }>();
+    const delayedExports = deferred<{ ok: true; data: StudioRendererExportCatalogV2 }>();
+    mocks.bridge.getProjectWorkspace.invoke.mockImplementation(({ projectId }: { projectId: string }) =>
+      Promise.resolve(projectWorkspaceLoad(projectId === projectB.id ? projectB : projectA))
+    );
+
+    const view = render(<HookProbe projectId={projectA.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectA.id));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(1));
+    mocks.bridge.listProposals.invoke.mockReturnValueOnce(delayedProposals.promise);
+    mocks.bridge.listReferenceRequests.invoke.mockReturnValueOnce(delayedReferenceRequests.promise);
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockReturnValueOnce(delayedHandoffs.promise);
+    mocks.bridge.listExports.invoke.mockReturnValueOnce(delayedExports.promise);
+
+    let proposals!: Promise<StudioRendererProposalCatalogV2 | null>;
+    let references!: Promise<void>;
+    let exports!: Promise<boolean>;
+    act(() => {
+      proposals = latestHookResult!.refetchProposals();
+      references = latestHookResult!.refetchReferences();
+      exports = latestHookResult!.refetchExports();
+    });
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(2));
+
+    view.rerender(<HookProbe projectId={projectB.id} />);
+    await waitFor(() => expect(latestHookResult?.project?.id).toBe(projectB.id));
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(3));
+
+    await act(async () => {
+      delayedProposals.resolve(
+        ok(proposalCatalog([{ ...proposal(), id: 'stale_proposal' }], projectA.revision, projectA.id))
+      );
+      delayedReferenceRequests.resolve(ok([{ ...referenceRequest(), id: 'stale_reference' }]));
+      delayedHandoffs.resolve(ok([{ ...handoff(), handoffId: 'stale_handoff' }]));
+      delayedExports.resolve(ok({ revision: 9, artifacts: [] }));
+      await Promise.all([proposals, references, exports]);
+    });
+
+    expect(latestHookResult?.project?.id).toBe(projectB.id);
+    expect(latestHookResult?.proposals).toEqual([]);
+    expect(latestHookResult?.referenceRequests).toEqual([]);
+    expect(latestHookResult?.referenceGenerationHandoffs).toEqual([]);
+    expect(latestHookResult?.exportCatalog).toEqual({ revision: 1, artifacts: [] });
+  });
+
+  it('keeps export catalog authority sanitized, monotonic, and isolated from an older in-flight list', async () => {
+    const listing = deferred<{ ok: true; data: StudioRendererExportCatalogV2 }>();
+    mocks.bridge.listExports.invoke.mockReturnValueOnce(listing.promise);
+    render(<HookProbe projectId='project_1' />);
+
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledTimes(1));
+    const newest: StudioRendererExportCatalogV2 = {
+      revision: 3,
+      artifacts: [
+        {
+          id: 'export_new',
+          sourceRevision: 3,
+          shape: 'script',
+          folderName: 'export_new',
+          byteSize: 24,
+          payloadFileCount: 1,
+          createdAt: '2026-01-01T00:00:03.000Z',
+        },
+      ],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(newest)).toBe(true);
+    });
+    expect(latestHookResult?.exportCatalog).toEqual(newest);
+
+    await act(async () => {
+      listing.resolve(ok({ revision: 1, artifacts: [] }));
+      await listing.promise;
+    });
+    expect(latestHookResult?.exportCatalog).toEqual(newest);
+
+    const conflicting = {
+      ...newest,
+      artifacts: [{ ...newest.artifacts[0]!, byteSize: 25 }],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(conflicting)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+    expect(latestHookResult?.exportErrorMessageKey).toBe('conversation.creativeStudio.workspace.errors.storage');
+
+    const hostile = {
+      revision: 4,
+      artifacts: [
+        {
+          ...newest.artifacts[0]!,
+          managedExport: { collection: 'exports', fileName: 'private.zip' },
+        },
+      ],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(hostile as unknown as StudioRendererExportCatalogV2)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+
+    const overRetained = {
+      revision: 5,
+      artifacts: Array.from({ length: 6 }, (_, index) => ({
+        ...newest.artifacts[0]!,
+        id: `export_over_${index}`,
+        createdAt: `2026-01-01T00:00:0${index}.000Z`,
+      })),
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(overRetained)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+
+    const futureSource = {
+      revision: 6,
+      artifacts: [{ ...newest.artifacts[0]!, id: 'export_future', sourceRevision: 4 }],
+    };
+    act(() => {
+      expect(latestHookResult?.installExportCatalog(futureSource)).toBe(false);
+    });
+    expect(latestHookResult?.exportCatalog).toBeNull();
+  });
+
+  it('keeps a fresh route catalog and trails capability when project revision advances during refresh', async () => {
+    render(<HookProbe projectId='project_1' />);
+    await waitFor(() => expect(latestHookResult?.generationCapability?.projectRevision).toBe(3));
+
+    const capability = deferred<ReturnType<typeof supportedCapabilityResult>>();
+    mocks.bridge.getGenerationCapability.invoke.mockReturnValueOnce(capability.promise);
+    let refresh!: Promise<boolean>;
+    act(() => {
+      refresh = latestHookResult!.refetchRoutes();
+    });
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
+
+    const changed = { ...project(), revision: 4, name: 'Progress revision' };
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: changed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(ok(workspaceStatus(changed)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(ok(chainStatus(changed)));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(latestHookResult?.project?.revision).toBe(4));
+
+    const staleInput = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
+    await act(async () => {
+      capability.resolve(supportedCapabilityResult(staleInput));
+      await refresh;
+    });
+
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(3));
+    expect(mocks.bridge.getGenerationCapability.invoke.mock.calls[2]?.[0]).toMatchObject({ expectedRevision: 4 });
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(2);
+    expect(latestHookResult?.routeCatalog?.catalogVersion).toBe('catalog_1');
+    expect(latestHookResult?.generationCapability?.projectRevision).toBe(4);
+  });
+
+  it('discards an in-flight catalog when its bound route signature changes', async () => {
+    const catalog = deferred<ReturnType<typeof ok>>();
+    const changed = { ...project(), revision: 4, aspectRatio: '9:16' as const, name: 'New frame' };
+    mocks.bridge.listRoutes.invoke.mockReturnValue(catalog.promise);
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: changed }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(4)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(4)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    expect(await screen.findByRole('heading', { name: 'New frame' })).toBeVisible();
+    await act(async () =>
+      catalog.resolve(
+        ok({
+          image: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+          catalogVersion: 'stale_catalog',
+        })
+      )
+    );
+
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(
+      within(briefDialog).queryByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+    ).not.toBeInTheDocument();
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
+  });
+
+  it('invalidates paid readiness when a non-initial project refresh fails', async () => {
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue({
+        ok: false,
+        error: { code: 'storage_error', messageKey: 'conversation.creativeStudio.workspace.errors.storage' },
+      });
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders not-found and storage-failure load states without mounting a workspace owner', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'not_found', projectId: 'project_1' }));
+    const first = renderStudio();
+    expect(await screen.findByText('conversation.creativeStudio.workspace.project.notFound')).toBeVisible();
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
+    first.unmount();
+
+    mocks.bridge.getProjectWorkspace.invoke.mockClear();
+    mocks.bridge.getProject.invoke.mockRejectedValue(new Error('offline'));
+    renderStudio();
+    expect(await screen.findByRole('alert')).toHaveTextContent('conversation.creativeStudio.workspace.errors.storage');
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBeNull();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('surfaces independent snapshot failures while preserving the supported project shell', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.proposalsFailed' },
+    });
+    mocks.bridge.listReferenceRequests.invoke.mockRejectedValue(new Error('request list offline'));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.handoffsFailed' },
+    });
+    renderStudio();
+
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    await waitFor(() =>
+      expect(
+        within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.ready')
+      ).toHaveLength(2)
+    );
+    mocks.bridge.getProjectWorkspace.invoke.mockRejectedValue(new Error('workspace offline'));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3));
+    expect(screen.getByRole('heading', { name: 'Launch film' })).toBeVisible();
+    expect(screen.getByText('native.proposalsFailed')).toBeVisible();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.errors.storage')).toHaveLength(3);
+    expect(
+      within(briefDialog).getAllByText('conversation.creativeStudio.workspace.controls.routeStatus.unavailable')
+    ).toHaveLength(2);
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(3);
+    expect(mocks.bridge.listRoutes.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('recovers one composite command failure with exactly one bounded retry', async () => {
+    const authority = project();
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.workspaceFailed' },
+    });
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValueOnce(projectWorkspaceLoad(authority));
+
+    renderStudio();
+
+    expect(await screen.findByRole('heading', { name: 'Launch film' })).toBeVisible();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText('native.workspaceFailed')).toBeNull();
+  });
+
+  it('ignores native events for another project identity', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const counts = {
+      project: mocks.bridge.getProject.invoke.mock.calls.length,
+      proposals: mocks.bridge.listProposals.invoke.mock.calls.length,
+      references: mocks.bridge.listReferenceRequests.invoke.mock.calls.length,
+      handoffs: mocks.bridge.listReferenceGenerationHandoffs.invoke.mock.calls.length,
+    };
+
+    act(() => {
+      mocks.listeners.projectUpdated?.({ projectId: 'project_other' });
+      mocks.listeners.proposalUpdated?.({ projectId: 'project_other' });
+      mocks.listeners.referenceUpdated?.({ projectId: 'project_other' });
+    });
+
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(counts.project);
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(counts.proposals);
+    expect(mocks.bridge.listReferenceRequests.invoke).toHaveBeenCalledTimes(counts.references);
+    expect(mocks.bridge.listReferenceGenerationHandoffs.invoke).toHaveBeenCalledTimes(counts.handoffs);
+  });
+
+  it('keeps every explicit refetch inert when no project identity is bound', async () => {
+    render(<HookProbe />);
+    expect(screen.getByTestId('hook-state')).toHaveTextContent('idle');
+
+    await act(async () => {
+      expect(await latestHookResult?.refetchProjectWorkspace()).toBeNull();
+      await latestHookResult?.refetchProposals();
+      await latestHookResult?.refetchReferences();
+      expect(await latestHookResult?.refetchRoutes()).toBe(false);
+      expect(await latestHookResult?.refetchExports()).toBe(false);
+      await latestHookResult?.refetchAll();
+    });
+
+    expect(mocks.bridge.getProjectWorkspace.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listProposals.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listReferenceRequests.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listRoutes.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.listExports.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes projected recovery retry and cancellation through exact revisioned providers', async () => {
+    const projects = [3, 4, 5].map(projectWithRecovery);
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
+      .mockResolvedValue(ok({ status: 'supported', project: projects[2]! }));
+    for (const authority of projects) {
+      mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValueOnce(ok(recoveryStatus(authority)));
+      mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValueOnce(ok(chainStatus(authority)));
+    }
+    mocks.bridge.retryConditioningFrame.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(5));
+
+    renderStudio();
+    const recoveryRow = await screen.findByRole('row', {
+      name: /Recovery Beat/,
+    });
+    fireEvent.click(recoveryRow);
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.beatPanel.recovery.retryFree',
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.retryConditioningFrame.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        dependentShotId: 'dependent_take',
+      })
+    );
+
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelWaiting',
+      })
+    );
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.beatPanel.recovery.cancelConfirm',
+      })
+    );
+    await waitFor(() =>
+      expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        dependentShotId: 'dependent_take',
+      })
+    );
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects an incompatible imported seed against exact authorized work before invoking Main', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().setSeedStill('shot_locked', 'imported_seed');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+  });
+
+  it.each([
+    {
+      path: 'continuity',
+      invoke: (actions: BeatPanelActions) => actions.reviewContinuity('shot_locked', false),
+    },
+    {
+      path: 'Shot generation',
+      invoke: (actions: BeatPanelActions) =>
+        actions.reviewShot('shot_locked', [{ shotId: 'shot_locked', purpose: 'seed_still' }]),
+    },
+    {
+      path: 'first-frame regeneration',
+      invoke: (actions: BeatPanelActions) => actions.reviewSeedStill('shot_locked'),
+    },
+  ])('blocks the ordinary $path review path while authorized work owns the seed', async ({ invoke }) => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    act(() => invoke(capturedBeatPanelActions()));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.beatPanel.seeds.authorizationLocked')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('opens first-frame regeneration only for an exact payable segment head', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+
+    act(() => actions.reviewSeedStill('missing_shot'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    act(() => actions.reviewSeedStill('shot_3'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'generation');
+    await waitFor(() => expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledTimes(1));
+  });
+
+  it('fails first-frame regeneration closed while image capability refreshes against an unavailable route', async () => {
+    const initial = projectWithHandoffShot();
+    const changed = structuredClone(initial);
+    changed.revision = 4;
+    mocks.bridge.listRoutes.invoke.mockResolvedValue(
+      ok({
+        image: {
+          status: 'unavailable',
+          selected: null,
+          selectedRoute: null,
+          selectionIssue: { code: 'health' },
+          options: [],
+        },
+        video: { status: 'ready', selected: null, selectedRoute: null, selectionIssue: null, options: [] },
+        catalogVersion: 'catalog_1',
+      })
+    );
+    mockSupportedProject(initial);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledOnce());
+
+    const capability = deferred<ReturnType<typeof supportedCapabilityResult>>();
+    mocks.bridge.getGenerationCapability.invoke.mockReturnValueOnce(capability.promise);
+    mockSupportedProject(changed);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(2));
+
+    act(() => capturedBeatPanelActions().reviewSeedStill('shot_3'));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.imageRouteBlocked')).toBeVisible();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+
+    const request = mocks.bridge.getGenerationCapability.invoke.mock.calls[1]![0];
+    await act(async () => capability.resolve(supportedCapabilityResult(request)));
+  });
+
+  it('cancels an exact authorized seed wait once and rebuilds rejoin review from the committed revision', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const refreshed = projectWithAuthorizedSeedLock(4);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(refreshed, authorizedSeedLockStatus(refreshed, 'cancelled'), chainStatus(refreshed))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(true);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      dependentShotId: 'shot_locked',
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+    const modal = await screen.findByTestId('studio-spend-gate');
+    expect(modal).toHaveAttribute('data-gate-kind', 'continuity_change');
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+
+    await waitFor(() =>
+      expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledExactlyOnceWith({
+        projectId: 'project_1',
+        expectedRevision: 4,
+        originReferenceHandoffId: null,
+        baseChoices: [],
+        cascadeChoices: [],
+        continuityChange: { shotId: 'shot_locked', hardCut: false, requiresSeedGeneration: false },
+      })
+    );
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports a committed cancellation whose exact reload cannot be confirmed without opening review', async () => {
+    const initial = projectWithAuthorizedSeedLock(3);
+    const unexpected = projectWithAuthorizedSeedLock(5);
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial, authorizedSeedLockStatus(initial), chainStatus(initial)))
+      .mockResolvedValue(
+        projectWorkspaceLoad(unexpected, authorizedSeedLockStatus(unexpected, 'cancelled'), chainStatus(unexpected))
+      );
+    mocks.bridge.cancelWaitingCascade.invoke.mockResolvedValue(commit(4));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinUnconfirmed'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports an unknown cancellation outcome once without retrying or opening review', async () => {
+    const authority = projectWithAuthorizedSeedLock(3);
+    mocks.bridge.getProjectWorkspace.invoke.mockResolvedValue(
+      projectWorkspaceLoad(authority, authorizedSeedLockStatus(authority), chainStatus(authority))
+    );
+    mocks.bridge.cancelWaitingCascade.invoke.mockRejectedValueOnce(new Error('transport stopped after dispatch'));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await capturedBeatPanelActions().cancelAndReviewRejoin('shot_locked');
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.cancelWaitingCascade.invoke).toHaveBeenCalledOnce();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledOnce();
+    expect(
+      await screen.findByText(
+        'conversation.creativeStudio.workspace.beatPanel.recovery.cancelAndReviewRejoinOutcomeUnknown'
+      )
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.errors.storage')).toBeNull();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps seed import cancellation inert and refreshes exact authority after an imported receipt', async () => {
+    const initial = projectWithRecovery(3);
+    const imported = projectWithRecovery(4);
+    const importedSeed = recoveryAsset('imported_seed', 'upstream_seed', 'image');
+    imported.assets[importedSeed.id] = importedSeed;
+    imported.shots.upstream_seed!.assetIds.push(importedSeed.id);
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: imported }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(recoveryStatus(initial)))
+      .mockResolvedValue(ok(recoveryStatus(imported)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(imported)));
+
+    renderStudio();
+    fireEvent.click(await screen.findByRole('row', { name: /Recovery Beat/ }));
+    const seedCard = document.querySelector<HTMLElement>('article[data-shot-id="upstream_seed"]');
+    expect(seedCard).not.toBeNull();
+    const importButton = within(seedCard!).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.beatPanel.firstFrames.import',
+    });
+
+    fireEvent.click(importButton);
+    await waitFor(() =>
+      expect(mocks.bridge.importSeedStill.invoke).toHaveBeenLastCalledWith({
+        projectId: 'project_1',
+        expectedRevision: 3,
+        shotId: 'upstream_seed',
+      })
+    );
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(1);
+
+    mocks.bridge.importSeedStill.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: 'imported_seed', projectRevision: 4 })
+    );
+    fireEvent.click(importButton);
+    await waitFor(() => expect(mocks.bridge.importSeedStill.invoke).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2));
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.importSeedStill.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      shotId: 'upstream_seed',
+    });
+    expect(document.querySelector('[data-asset-id="imported_seed"]')).not.toBeNull();
+  });
+
+  it('routes Cut media changes and project-menu export through exact revisions without paid work', async () => {
+    const projectAt = (revision: number): StudioRendererProjectV2 => {
+      const value = projectWithHandoffShot();
+      value.revision = revision;
+      const current = recoveryAsset('audio_current', null, 'audio');
+      current.durationSeconds = 20;
+      const old = recoveryAsset('audio_old', null, 'audio');
+      old.durationSeconds = 18;
+      value.assets[current.id] = current;
+      value.assets[old.id] = old;
+      value.bedAssetId = revision >= 5 ? current.id : null;
+      if (revision >= 8) {
+        const imported = recoveryAsset('audio_imported', null, 'audio');
+        imported.durationSeconds = 22;
+        value.assets[imported.id] = imported;
+        value.bedAssetId = imported.id;
+      }
+      return value;
+    };
+    const projects = [3, 4, 5, 6, 7, 8].map(projectAt);
+    mocks.bridge.getProject.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[0]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[1]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[2]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[3]! }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: projects[4]! }))
+      .mockResolvedValue(ok({ status: 'supported', project: projects[5]! }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[0]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[1]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[2]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[3]!)))
+      .mockResolvedValueOnce(ok(workspaceStatus(projects[4]!)))
+      .mockResolvedValue(ok(workspaceStatus(projects[5]!)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockReset()
+      .mockResolvedValueOnce(ok(chainStatus(projects[0]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[1]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[2]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[3]!)))
+      .mockResolvedValueOnce(ok(chainStatus(projects[4]!)))
+      .mockResolvedValue(ok(chainStatus(projects[5]!)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    mocks.bridge.setBed.invoke.mockResolvedValue(commit(5));
+    mocks.bridge.detachBedAudio.invoke.mockResolvedValue(ok({ status: 'detached', projectRevision: 6 }));
+    mocks.bridge.importBedAudio.invoke
+      .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
+      .mockResolvedValueOnce(ok({ status: 'imported' as const, assetId: 'audio_imported', projectRevision: 7 }));
+    const catalog1: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [] };
+    const artifact = {
+      id: 'export_1',
+      sourceRevision: 7,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
+      byteSize: 64,
+      payloadFileCount: 1,
+      createdAt: '2026-01-01T00:00:08.000Z',
+    };
+    const catalog2: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [artifact] };
+    const catalog3: StudioRendererExportCatalogV2 = { revision: 3, artifacts: [artifact] };
+    mocks.bridge.listExports.invoke.mockReset().mockResolvedValueOnce(ok(catalog1)).mockResolvedValue(ok(catalog3));
+    mocks.bridge.createExport.invoke.mockResolvedValue(ok(catalog2));
+    mocks.bridge.copyExport.invoke.mockResolvedValue(ok({ status: 'cancelled' as const }));
+    mocks.bridge.revealExport.invoke.mockResolvedValue(ok({ status: 'revealed' as const }));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.cutActions).not.toBeNull());
+    await waitFor(() => expect(mocks.bridge.listExports.invoke).toHaveBeenCalledWith({ projectId: 'project_1' }));
+    const cutApi = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
+
+    let importResult: Awaited<ReturnType<CutActions['importBedAudio']>> | undefined;
+    await act(async () => {
+      importResult = await cutApi.importBedAudio();
+    });
+    expect(importResult).toBe('cancelled');
+    expect(mocks.bridge.importBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+    });
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(1);
+
+    await expectSuccessfulBeatPanelAction(() => cutApi.reorderBeats(['beat_1']));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'reorder_beats', beatOrder: ['beat_1'] }],
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.setBed('audio_current'));
+    expect(mocks.bridge.setBed.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 4,
+      assetId: 'audio_current',
+    });
+    await expectSuccessfulBeatPanelAction(() => cutApi.detachBedAudio('audio_old'));
+    expect(mocks.bridge.detachBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 5,
+      assetId: 'audio_old',
+    });
+    await act(async () => {
+      importResult = await cutApi.importBedAudio();
+    });
+    expect(importResult).toBe('imported');
+    expect(mocks.bridge.importBedAudio.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 6,
+    });
+
+    const projectReadsBeforeExports = mocks.bridge.getProject.invoke.mock.calls.length;
+    await act(async () => {
+      await expect(projectMenu.createEditorFolder()).resolves.toEqual({ ok: true, catalog: catalog2 });
+    });
+    expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 7,
+      expectedCatalogRevision: 1,
+      shape: 'editor_folder',
+    });
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(projectReadsBeforeExports);
+    await waitFor(() => expect(capturedProjectMenuProps().exportCatalog?.revision).toBe(2));
+
+    await expect(capturedProjectMenuProps().revealEditorFolder('export_1')).resolves.toEqual({ ok: true });
+    expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedCatalogRevision: 2,
+      artifactId: 'export_1',
+    });
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps Cut media and project-menu export boundaries fail-closed', async () => {
+    const authority = projectWithHandoffShot();
+    const selectedBed = recoveryAsset('audio_current', null, 'audio');
+    selectedBed.durationSeconds = 20;
+    const detachedBed = recoveryAsset('audio_other', null, 'audio');
+    detachedBed.durationSeconds = 18;
+    authority.assets[selectedBed.id] = selectedBed;
+    authority.assets[detachedBed.id] = detachedBed;
+    authority.bedAssetId = selectedBed.id;
+    mockSupportedProject(authority);
+    const artifact = {
+      id: 'export_1',
+      sourceRevision: authority.revision,
+      shape: 'editor_folder' as const,
+      folderName: 'editor-folder-20260101-000008-000-0123456789abcdef',
+      byteSize: 64,
+      payloadFileCount: 1,
+      createdAt: '2026-01-01T00:00:08.000Z',
+    };
+    const catalog: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [artifact] };
+    mocks.bridge.listExports.invoke
+      .mockResolvedValueOnce(ok(catalog))
+      .mockResolvedValue({ ok: false, error: { code: 'storage_error', messageKey: 'native.exportsFailed' } });
+    mocks.bridge.importBedAudio.invoke
+      .mockResolvedValueOnce({ ok: false, error: { code: 'storage_error', messageKey: 'native.importFailed' } })
+      .mockResolvedValueOnce(
+        ok({ status: 'imported' as const, assetId: 'audio_imported', projectRevision: authority.revision + 1 })
+      );
+    mocks.bridge.detachBedAudio.invoke
+      .mockResolvedValueOnce({ ok: false, error: { code: 'storage_error', messageKey: 'native.detachFailed' } })
+      .mockResolvedValueOnce(ok({ status: 'detached' as const, projectRevision: authority.revision + 1 }));
+    mocks.bridge.createExport.invoke
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'stale_export_catalog', messageKey: 'native.exportFailed' },
+      })
+      .mockResolvedValueOnce(ok({ revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] }));
+    mocks.bridge.copyExport.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.copyFailed' },
+    });
+    mocks.bridge.revealExport.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.revealFailed' },
+    });
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.cutActions).not.toBeNull());
+    const cut = capturedCutActions();
+    const projectMenu = capturedProjectMenuProps();
+
+    await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
+    await expect(invokeStudioAction(cut.importBedAudio)).resolves.toBe('failed');
+    await expect(invokeStudioAction(() => cut.detachBedAudio('audio_current'))).resolves.toBe(false);
+    await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
+    await expect(invokeStudioAction(() => cut.detachBedAudio('audio_other'))).resolves.toBe(false);
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('missing_export'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('export_1'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'native.revealFailed',
+    });
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: true,
+      catalog: { revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] },
+    });
+
+    expect(mocks.bridge.getProject.invoke.mock.calls.length).toBeGreaterThan(1);
+    expect(mocks.bridge.createExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      expectedCatalogRevision: 1,
+      shape: 'editor_folder',
+    });
+  });
+
+  it('keeps one-file Film creation, status, cancellation, and reveal on current local authority', async () => {
+    const initialCatalog: StudioRendererExportCatalogV2 = { revision: 1, artifacts: [] };
+    const filmArtifact = {
+      id: 'film_export_1',
+      sourceRevision: 3,
+      shape: 'film' as const,
+      folderName: 'film-20260827-000008-000-0123456789abcdef',
+      byteSize: 4_096,
+      payloadFileCount: 1,
+      createdAt: '2026-08-27T00:00:08.000Z',
+      film: {
+        nominalDurationSeconds: 8,
+        renderedDurationSeconds: 7.65,
+        transition: { kind: 'dissolve' as const, requestedSeconds: 0.35, seconds: 1 / 3 },
+        trimTails: true,
+        trimmedShotCount: 1,
+      },
+    };
+    const publishedCatalog: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [filmArtifact] };
+    mocks.bridge.listExports.invoke.mockReset().mockResolvedValue(ok(initialCatalog));
+    mocks.bridge.createExport.invoke.mockResolvedValueOnce(ok(publishedCatalog));
+    mocks.bridge.cancelFilmExport.invoke
+      .mockResolvedValueOnce(ok({ status: 'cancellation_refused' as const }))
+      .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
+      .mockRejectedValueOnce(new Error('cancel transport failed'));
+    mocks.bridge.acknowledgeFilmExport.invoke
+      .mockResolvedValueOnce(ok({ status: 'acknowledged' as const }))
+      .mockResolvedValueOnce(ok({ status: 'not_found' as const }))
+      .mockRejectedValueOnce(new Error('acknowledgement transport failed'));
+
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() =>
+      expect(capturedProjectMenuProps().filmExportCapability).toEqual({
+        status: 'ready',
+        encoder: 'h264_videotoolbox',
+      })
+    );
+    const menu = capturedProjectMenuProps();
+
+    await expect(
+      invokeStudioAction(() =>
+        menu.createFilm({
+          renderId: 'film_run_1',
+          transition: { kind: 'dissolve', seconds: 0.35 },
+          trimTails: true,
+        })
+      )
+    ).resolves.toEqual({ ok: true, catalog: publishedCatalog });
+    expect(mocks.bridge.createExport.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      expectedCatalogRevision: 1,
+      shape: 'film',
+      renderId: 'film_run_1',
+      transition: { kind: 'dissolve', seconds: 0.35 },
+      trimTails: true,
+    });
+    await waitFor(() => expect(capturedProjectMenuProps().exportCatalog).toEqual(publishedCatalog));
+
+    mocks.bridge.getFilmExportStatus.invoke
+      .mockReset()
+      .mockResolvedValueOnce(
+        ok({
+          status: 'active' as const,
+          progress: {
+            projectId: 'project_1',
+            renderId: 'film_run_1',
+            phase: 'rendering' as const,
+            progress: 0.5,
+          },
+        })
+      )
+      .mockRejectedValueOnce(new Error('status transport failed'))
+      .mockResolvedValueOnce(
+        ok({
+          status: 'terminal' as const,
+          result: { projectId: 'project_other', renderId: 'film_other', outcome: 'cancelled' as const },
+        })
+      );
+    await expect(menu.getFilmExportStatus()).resolves.toMatchObject({
+      status: 'active',
+      progress: { renderId: 'film_run_1', phase: 'rendering', progress: 0.5 },
+    });
+    await expect(menu.getFilmExportStatus()).resolves.toBeNull();
+    await expect(menu.getFilmExportStatus()).resolves.toBeNull();
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(true);
+    await expect(menu.cancelFilmExport('film_run_1')).resolves.toBe(false);
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('acknowledged');
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBe('not_found');
+    await expect(menu.acknowledgeFilmExport('film_run_1')).resolves.toBeNull();
+    await expect(menu.revealFilm('missing_film')).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
+    });
+    await expect(menu.revealFilm(filmArtifact.id)).resolves.toEqual({ ok: true });
+    expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
+      projectId: 'project_1',
+      expectedCatalogRevision: 2,
+      artifactId: filmArtifact.id,
+    });
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['stale_project', 'conversation.creativeStudio.workspace.filmExport.errors.staleAuthority'],
+    ['stale_export_catalog', 'conversation.creativeStudio.workspace.filmExport.errors.staleCatalog'],
+    ['ffmpeg_unavailable', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
+    ['unsupported_capabilities', 'conversation.creativeStudio.workspace.filmExport.errors.unavailable'],
+    ['render_failed', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
+    ['storage_error', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
+    ['cancelled', 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'],
+    ['invalid_payload', 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'],
+    ['busy', 'conversation.creativeStudio.workspace.filmExport.errors.busy'],
+  ] as const)('maps %s Film export failures to bounded renderer copy', async (code, messageKey) => {
+    mocks.bridge.createExport.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code, messageKey: 'native.untrustedFilmFailure' },
+    });
+    renderStudio('/studio/project_1/cut');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.projectMenuProps).not.toBeNull());
+
+    await expect(
+      invokeStudioAction(() =>
+        capturedProjectMenuProps().createFilm({
+          renderId: 'film_run_error',
+          transition: { kind: 'cut' },
+          trimTails: false,
+        })
+      )
+    ).resolves.toEqual({ ok: false, messageKey });
+  });
+
+  it('rejects a stale renderer hard-cut batch before it reaches the native bridge', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.workspaceMutations).not.toBeNull());
+    const staleApplyAuthoring = capturedWorkspaceMutations().applyAuthoring as unknown as (
+      operations: Array<
+        { kind: 'set_brief'; brief: string } | { kind: 'set_hard_cut'; shotId: string; hardCut: boolean }
+      >
+    ) => Promise<boolean>;
+
+    let result: boolean | undefined;
+    await act(async () => {
+      result = await staleApplyAuthoring([
+        { kind: 'set_brief', brief: 'Do not partially apply this batch.' },
+        { kind: 'set_hard_cut', shotId: 'shot_0', hardCut: true },
+      ]);
+    });
+
+    expect(result).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('routes every captured Beat Panel edit and lifecycle action through revision-pinned providers', async () => {
+    const authority = projectWithDraftBatch(1);
+    let revision = authority.revision;
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({ status: 'supported' as const, project: { ...authority, revision } })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () =>
+      ok(workspaceStatus({ ...authority, revision }))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () =>
+      ok(chainStatus({ ...authority, revision }))
+    );
+    const nextCommit = async () => {
+      revision += 1;
+      return commit(revision);
+    };
+    mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(nextCommit);
+    mocks.bridge.parkShot.invoke.mockImplementation(nextCommit);
+    mocks.bridge.parkBeat.invoke.mockImplementation(nextCommit);
+    mocks.bridge.restoreBeat.invoke.mockImplementation(nextCommit);
+    mocks.bridge.restoreShot.invoke.mockImplementation(nextCommit);
+    mocks.bridge.reorderBin.invoke.mockImplementation(nextCommit);
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const board = capturedBoardActions();
+
+    const duplicateUpdates = [
+      { shotId: 'shot_0', changes: { shootingScript: 'First duplicate' } },
+      { shotId: 'shot_0', changes: { shootingScript: 'Second duplicate' } },
+    ] as const;
+    expect(await actions.saveShot(duplicateUpdates)).toBe(false);
+    const oversizedUpdates = Array.from({ length: 33 }, (_, index) => ({
+      shotId: `shot_${index}`,
+      changes: { shootingScript: `Shot ${index}` },
+    })) as unknown as Parameters<BeatPanelActions['saveShot']>[0];
+    expect(await actions.saveShot(oversizedUpdates)).toBe(false);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+
+    await expectSuccessfulBeatPanelAction(() => actions.saveBeat('beat_0', { story: 'Revised moonlit story' }));
+    await expectSuccessfulBeatPanelAction(() =>
+      actions.saveShot([
+        {
+          shotId: 'shot_0',
+          changes: { shootingScript: 'Revised shooting script', durationSeconds: 8 },
+        },
+      ])
+    );
+    expect(actions).not.toHaveProperty('setHardCut');
+    await expectSuccessfulBeatPanelAction(() => actions.setSeedStill('shot_0', 'seed_asset'));
+    await expectSuccessfulBeatPanelAction(() => actions.dismissSeedStill('shot_0', 'seed_asset'));
+    expect(actions).not.toHaveProperty('selectVideoTake');
+    expect(actions).not.toHaveProperty('removeVideoTake');
+    await expectSuccessfulBeatPanelAction(() => actions.trimShot('shot_0', 1, 2));
+    await expectSuccessfulBeatPanelAction(() => actions.reorderShots('beat_0', ['shot_1', 'shot_0']));
+    expect(actions).not.toHaveProperty('redetachLine');
+    expect(actions).not.toHaveProperty('restoreLine');
+    expect(actions).not.toHaveProperty('selectTake');
+    expect(actions).not.toHaveProperty('parkTake');
+    expect(actions).not.toHaveProperty('addAlternateTake');
+    expect(actions).not.toHaveProperty('restoreTake');
+    await expectSuccessfulBeatPanelAction(() => actions.parkShot('shot_0'));
+    await expectSuccessfulBeatPanelAction(() => actions.parkBeat('beat_0'));
+    expect(board).not.toHaveProperty('reorderBeats');
+    await expectSuccessfulBeatPanelAction(() => board.restoreBeat('beat_2', 'beat_1'));
+    await expectSuccessfulBeatPanelAction(() => board.restoreShot('shot_2', 'shot_1'));
+    expect(board).not.toHaveProperty('restoreTake');
+    await expectSuccessfulBeatPanelAction(() =>
+      board.reorderBin([
+        { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
+        { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
+      ])
+    );
+
+    expect(mocks.bridge.applyAuthoringBatch.invoke.mock.calls.map(([request]) => request)).toEqual([
+      {
+        projectId: 'project_1',
+        expectedRevision: 3,
+        operations: [
+          {
+            kind: 'edit_beat',
+            beatId: 'beat_0',
+            changes: { story: 'Revised moonlit story' },
+          },
+        ],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 4,
+        operations: [
+          {
+            kind: 'edit_shot',
+            shotId: 'shot_0',
+            changes: { shootingScript: 'Revised shooting script', durationSeconds: 8 },
+          },
+        ],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 5,
+        operations: [{ kind: 'set_seed_still', shotId: 'shot_0', assetId: 'seed_asset' }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 6,
+        operations: [{ kind: 'dismiss_seed_still', shotId: 'shot_0', assetId: 'seed_asset' }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 7,
+        operations: [{ kind: 'trim_shot', shotId: 'shot_0', trimInSeconds: 1, trimOutSeconds: 2 }],
+      },
+      {
+        projectId: 'project_1',
+        expectedRevision: 8,
+        operations: [{ kind: 'reorder_shots', beatId: 'beat_0', shotOrder: ['shot_1', 'shot_0'] }],
+      },
+    ]);
+    expect(mocks.bridge.parkShot.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 9,
+      shotId: 'shot_0',
+    });
+    expect(mocks.bridge.parkBeat.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 10,
+      beatId: 'beat_0',
+    });
+    expect(mocks.bridge.restoreBeat.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 11,
+      beatId: 'beat_2',
+      beforeBeatId: 'beat_1',
+    });
+    expect(mocks.bridge.restoreShot.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 12,
+      shotId: 'shot_2',
+      beforeShotId: 'shot_1',
+    });
+    expect(mocks.bridge.reorderBin.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 13,
+      bin: [
+        { kind: 'beat', beatId: 'beat_2', reason: 'lifted' },
+        { kind: 'shot', beatId: 'beat_0', shotId: 'shot_2', reason: 'lifted' },
+      ],
+    });
+    expect(revision).toBe(14);
+  });
+
+  it('projects malformed topology defensively through both render and close-save traversal', async () => {
+    const malformed = projectWithDraftBatch(1);
+    malformed.beatOrder.unshift('missing_beat');
+    malformed.beats.beat_0!.shotOrder.unshift('missing_shot');
+    malformed.referencePlanStatus = 'planned';
+    malformed.referenceOrder = ['missing_reference'];
+    mockSupportedProject(malformed);
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('applies view defaults without remounting and returns focus before hiding the Director', async () => {
+    renderStudio('/studio/project_1/table');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    const content = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    const owner = document.querySelector('[data-studio-director-conversation-owner]');
+    const focusTarget = within(content).getByText('Director focus target');
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(content).toHaveAttribute('aria-hidden', 'false');
+    expect(content).not.toHaveAttribute('inert');
+    expect(screen.queryByRole('separator')).not.toBeNull();
+
+    focusTarget.focus();
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)).toBe(content);
+    expect(document.querySelector('[data-studio-director-conversation-owner]')).toBe(owner);
+    expect(content).toHaveAttribute('aria-hidden', 'true');
+    expect(content).toHaveAttribute('inert');
+    expect(screen.queryByRole('separator')).toBeNull();
+    expect(document.activeElement).toBe(toggle);
+  });
+
+  it('restores a manual rail choice only for its project view during live navigation', async () => {
+    renderStudio('/studio/project_1/board');
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    const content = document.getElementById(toggle.getAttribute('aria-controls')!)!;
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(toggle);
+    await waitFor(() => expect(content).toHaveAttribute('aria-hidden', 'false'));
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'board'))).toBe('false');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.cut' }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    expect(content).toHaveAttribute('inert');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+    expect(content).not.toHaveAttribute('inert');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('sizes the Director rail from the keyboard through an announced separator', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    const resizer = await screen.findByRole('separator', {
+      name: 'conversation.creativeStudio.workspace.director.resize',
+    });
+    expect(resizer).toHaveAttribute('aria-orientation', 'vertical');
+    const before = Number(resizer.getAttribute('aria-valuenow'));
+    expect(before).toBeGreaterThan(0);
+
+    fireEvent.keyDown(resizer, { key: 'ArrowRight' });
+    await waitFor(() => expect(Number(resizer.getAttribute('aria-valuenow'))).toBeGreaterThan(before));
+
+    // The pane itself follows the value, not just the announcement.
+    const rail = document.querySelector<HTMLElement>('[data-studio-director-rail]');
+    expect(rail?.style.inlineSize).toBe(`${resizer.getAttribute('aria-valuenow')}px`);
+
+    fireEvent.keyDown(resizer, { key: 'Home' });
+    await waitFor(() => expect(resizer.getAttribute('aria-valuenow')).toBe(resizer.getAttribute('aria-valuemin')));
+  });
+
+  it('hides the rail separator when the rail is collapsed', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    expect(screen.queryByRole('separator')).not.toBeNull();
+
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!);
+    // A pane with no width to give has nothing to drag.
+    await waitFor(() => expect(screen.queryByRole('separator')).toBeNull());
+  });
+
+  it('reveals reviewed requests without replacing a manually closed rail preference', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    // The app bar carries the real control, so this drives that rather than an injected stand-in.
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]');
+    expect(toggle).not.toBeNull();
+    // Collapse it first: a request made while the rail is shut has to reopen it.
+    fireEvent.click(toggle!);
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
+
+    act(() => actions.requestResplit('beat_1'));
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    expect(toggle).toHaveAttribute('aria-expanded', 'true');
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
+    expect(mocks.directorDraftRequest).toMatchObject({
+      projectId: 'project_1',
+      prompt: 'conversation.creativeStudio.workspace.beatPanel.directorRequestHint',
+    });
+
+    // Now open, a further request waits for the panel-closing commit before moving focus. Focusing
+    // synchronously would let Arco's still-mounted modal focus lock pull it back into the panel.
+    const focusTarget = document.querySelector<HTMLElement>('[data-studio-director-focus-target]')!;
+    focusTarget.focus();
+    let focusDuringRequest: Element | null = null;
+    act(() => {
+      actions.requestResplit('beat_1');
+      focusDuringRequest = document.activeElement;
+    });
+    expect(focusDuringRequest).toBe(focusTarget);
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    expect(window.localStorage.getItem(railPreferenceKey('project_1', 'table'))).toBe('true');
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('ignores a reviewed-request reveal captured for a view that is no longer active', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const tableActions = capturedBeatPanelActions();
+
+    fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+
+    act(() => tableActions.requestResplit('beat_1'));
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(mocks.directorDraftRequest).toBeNull();
+  });
+
+  it('routes the Table recovery action to an editable Director draft without sending, proposing, generating, or spending', async () => {
+    const authority = project();
+    authority.beatOrder = ['beat_gap'];
+    authority.beats.beat_gap = {
+      id: 'beat_gap',
+      title: 'Missing coverage',
+      story: 'A story still needs its coverage plan.',
+      targetSeconds: 4,
+      shotOrder: [],
+    };
+    mockSupportedProject(authority);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.askDirector' })
+    );
+    await waitFor(() =>
+      expect(mocks.directorDraftRequest).toMatchObject({
+        projectId: 'project_1',
+        prompt: 'conversation.creativeStudio.workspace.beatPanel.directorRequestHint',
+      })
+    );
+    expect(mocks.directorDraftRequest?.requestId).toBeGreaterThan(0);
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('sends Add Beat through current revision authority and opens only after the atomic refresh contains it', async () => {
+    let authority = project();
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({ status: 'supported' as const, project: authority })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () => ok(workspaceStatus(authority)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () => ok(chainStatus(authority)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(async (request) => {
+      const operation = request.operations[0];
+      if (operation?.kind !== 'add_beat') throw new Error('Expected add_beat');
+      authority = structuredClone(authority);
+      authority.revision = 4;
+      authority.beatOrder.push(operation.beatId);
+      authority.beats[operation.beatId] = {
+        id: operation.beatId,
+        title: operation.beat.title,
+        story: operation.beat.story,
+        targetSeconds: operation.beat.targetSeconds,
+        shotOrder: [],
+      };
+      return ok({
+        projectId: authority.id,
+        projectRevision: authority.revision,
+        createdBeatIds: [operation.beatId],
+        createdShotIds: [],
+      });
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.table.authoring.addBeat' })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'add_beat',
+          beatId: expect.stringMatching(/^beat_[a-f0-9]{32}$/),
+          beat: { title: '', story: '', targetSeconds: null },
+          beforeBeatId: null,
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(mocks.bridge.getProjectWorkspace.invoke.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('sends Add Shot as a four-second append and refreshes its unassigned identity before opening', async () => {
+    let authority = projectWithHandoffShot();
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({ status: 'supported' as const, project: authority })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () => ok(workspaceStatus(authority)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () => ok(chainStatus(authority)));
+    mocks.bridge.applyAuthoringBatch.invoke.mockImplementation(async (request) => {
+      const operation = request.operations[0];
+      if (operation?.kind !== 'add_shot') throw new Error('Expected add_shot');
+      authority = structuredClone(authority);
+      authority.revision = 4;
+      authority.beats[operation.beatId]!.shotOrder.push(operation.shotId);
+      authority.shots[operation.shotId] = {
+        id: operation.shotId,
+        shootingScript: operation.shot.shootingScript,
+        durationSeconds: operation.shot.durationSeconds,
+        trimInSeconds: null,
+        trimOutSeconds: null,
+        chainBreak: 'none',
+        referenceBinding: unassignedReferenceBinding(),
+        seedStillId: null,
+        dismissedSeedStillIds: [],
+        boardAssetId: null,
+        supersededBoardAssetIds: [],
+        videoAssetId: null,
+        supersededVideoAssetIds: [],
+        assetIds: [],
+        jobIds: [],
+      };
+      return ok({
+        projectId: authority.id,
+        projectRevision: authority.revision,
+        createdBeatIds: [],
+        createdShotIds: [operation.shotId],
+      });
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: /conversation\.creativeStudio\.workspace\.table\.authoring\.addShotForBeat/,
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [
+        {
+          kind: 'add_shot',
+          beatId: 'beat_1',
+          shotId: expect.stringMatching(/^shot_[a-f0-9]{32}$/),
+          shot: { shootingScript: '', durationSeconds: 4 },
+          beforeShotId: null,
+        },
+      ],
+    });
+    await waitFor(() => expect(screen.getByRole('dialog')).toBeVisible());
+    expect(mocks.bridge.getProjectWorkspace.invoke.mock.calls.length).toBeGreaterThanOrEqual(2);
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps captured seed imports fail-closed across native, transport, stale, and concurrent outcomes', async () => {
+    const authority = projectWithDraftBatch(1);
+    mockSupportedProject(authority);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+
+    mocks.bridge.importSeedStill.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.importFailed' },
+    });
+    await expect(invokeBeatPanelImport(() => actions.importSeedStill('shot_0'))).resolves.toBe('failed');
+    expect(await screen.findByText('native.importFailed')).toBeVisible();
+
+    mocks.bridge.importSeedStill.invoke.mockRejectedValueOnce(new Error('picker offline'));
+    await expect(invokeBeatPanelImport(() => actions.importSeedStill('shot_0'))).resolves.toBe('failed');
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+
+    mocks.bridge.importSeedStill.invoke.mockResolvedValueOnce(
+      ok({ status: 'imported' as const, assetId: 'stale_seed', projectRevision: 4 })
+    );
+    await expect(invokeBeatPanelImport(() => actions.importSeedStill('shot_0'))).resolves.toBe('failed');
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2);
+
+    mocks.bridge.importSeedStill.invoke.mockClear();
+    const pendingImport = deferred<ReturnType<typeof ok>>();
+    mocks.bridge.importSeedStill.invoke.mockReturnValueOnce(pendingImport.promise);
+    let firstImport!: Promise<'cancelled' | 'imported' | 'failed'>;
+    act(() => {
+      firstImport = actions.importSeedStill('shot_0');
+    });
+    await waitFor(() => expect(mocks.bridge.importSeedStill.invoke).toHaveBeenCalledTimes(1));
+    await expect(invokeBeatPanelImport(() => actions.importSeedStill('shot_0'))).resolves.toBe('failed');
+    expect(mocks.bridge.importSeedStill.invoke).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      pendingImport.resolve(ok({ status: 'cancelled' as const }));
+      await expect(firstImport).resolves.toBe('cancelled');
+    });
+  });
+
+  it('persists a captured poster only for the exact projected current video', async () => {
+    const authority = projectWithRecovery();
+    mockSupportedProject(authority);
+    mocks.bridge.persistCapturedPoster.invoke.mockResolvedValue(
+      ok(recoveryAsset('captured_poster', 'upstream_take', 'image'))
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const capture = {
+      shotId: 'upstream_take',
+      videoAssetId: 'take_asset',
+      dataUrl: 'data:image/png;base64,cG9zdGVy',
+      width: 1280,
+      height: 720,
+    };
+
+    await expect(invokeStudioAction(() => actions.persistCapturedPoster(capture))).resolves.toBe(true);
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledWith({
+      projectId: authority.id,
+      ...capture,
+    });
+
+    await expect(
+      invokeStudioAction(() => actions.persistCapturedPoster({ ...capture, videoAssetId: 'superseded_video' }))
+    ).resolves.toBe(false);
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects malformed reviewed choice graphs at the captured Beat Panel boundary', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const validChoices = () =>
+      [
+        { shotId: 'shot_3', purpose: 'seed_still' as const },
+        { shotId: 'shot_3', purpose: 'video_take' as const },
+      ] as const;
+
+    act(() => actions.reviewShot('missing_shot', validChoices()));
+    act(() =>
+      actions.reviewShot('shot_3', [validChoices()[0]] as unknown as Parameters<BeatPanelActions['reviewShot']>[1])
+    );
+    for (const choices of [
+      [{ ...validChoices()[0], shotId: 'shot_other' }, validChoices()[1]],
+      [{ ...validChoices()[0], purpose: 'video_take' as const }, validChoices()[1]],
+      [{ ...validChoices()[0], generationCount: 1 }, validChoices()[1]],
+      [validChoices()[0], { ...validChoices()[1], unexpected: 'field' }],
+    ]) {
+      act(() => actions.reviewShot('shot_3', choices as unknown as Parameters<BeatPanelActions['reviewShot']>[1]));
+    }
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.controls.selectionNotPayable')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('reports deterministic failures from each reviewed-output action without auto-retrying', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.acceptFailed' },
+    });
+    mocks.bridge.rejectProposal.invoke.mockRejectedValue(new Error('offline'));
+    mocks.bridge.decideReferenceRequest.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.referenceFailed' },
+    });
+    mocks.bridge.dismissReferenceGenerationHandoff.invoke.mockRejectedValue(new Error('offline'));
+    renderStudio();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    expect(await screen.findByText('native.acceptFailed')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' }));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' }));
+    expect(await screen.findByText('native.referenceFailed')).toBeVisible();
+    expect(mocks.bridge.decideReferenceRequest.invoke).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' }));
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('refuses structural proposal acceptance while local Shot drafts are unsaved', async () => {
+    const draftedProject = projectWithDraftBatch(1);
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mockSupportedProject(draftedProject);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+
+    renderStudio();
+
+    const accept = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    expect(accept).toBeDisabled();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.saveBeforeApply')).toBeVisible();
+    fireEvent.click(accept);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeEnabled();
+  });
+
+  it('accepts the one exact current proposal from human Director chat without entering the spend gate', async () => {
+    mockProposalUntilDecision(proposal());
+    renderStudio();
+
+    await screen.findByTestId('studio-proposal-proposal_1');
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_1',
+    });
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatAccepted')).toBeVisible();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('accepts an exact sibling by full chat ID while generic approval remains ambiguous', async () => {
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? [proposal(), second] : []))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_2');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: 'proposal_2' }));
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_2',
+    });
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects the one exact current proposal from human Director chat', async () => {
+    mockProposalUntilDecision(proposal());
+    renderStudio();
+
+    await screen.findByTestId('studio-proposal-proposal_1');
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null }));
+
+    expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_1',
+    });
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatRejected')).toBeVisible();
+  });
+
+  it('rejects only the proposal named by a full chat ID when ready siblings coexist', async () => {
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.rejectProposal.invoke.mock.calls.length === 0 ? [proposal(), second] : []))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_2');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: 'proposal_2' }));
+
+    expect(mocks.bridge.rejectProposal.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_2',
+    });
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails a full-ID chat decision closed when that exact proposal is not pending', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_1');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: 'proposal_missing' }));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.proposals.chatProposalNotFound')
+    ).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Director chat has no pending proposal', async () => {
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1));
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatNoPending')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when Director chat has more than one pending proposal', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(
+      ok(proposalCatalog([proposal(), { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' }]))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_2');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(
+      await screen.findByText('conversation.creativeStudio.workspace.proposals.chatMultiplePending')
+    ).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('uses the one current ready proposal for generic chat while retaining a stale sibling', async () => {
+    const currentProject = { ...project(), revision: 4 };
+    const current = { ...proposal(), id: 'proposal_current', baseRevision: 4 };
+    const stale = staleProposal(proposal(), 4);
+    mockSupportedProject(currentProject);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      ok(proposalCatalog(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? [current, stale] : [stale], 4))
+    );
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_current');
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_current',
+    });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'stale');
+  });
+
+  it('fails closed while another reviewed proposal action is in progress', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    mocks.bridge.acceptProposal.invoke.mockReturnValue(new Promise(() => {}));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null }));
+
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('globally disables sibling proposal, reference, and handoff actions during a card decision', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    mocks.bridge.listReferenceRequests.invoke.mockResolvedValue(ok([referenceRequest()]));
+    mocks.bridge.listReferenceGenerationHandoffs.invoke.mockResolvedValue(ok([handoff()]));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const firstAccept = within(firstCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    fireEvent.click(firstAccept);
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    expect(firstAccept).toHaveClass('arco-btn-loading');
+    expect(
+      within(secondCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(
+      within(secondCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.generate' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.references.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.review' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.handoffs.dismiss' })
+    ).toBeDisabled();
+    expect(within(secondCard).getByRole('button', { name: /workspace\.proposals\.accept/ })).not.toHaveClass(
+      'arco-btn-loading'
+    );
+
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+    await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.decideReferenceRequest.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.dismissReferenceGenerationHandoff.invoke).not.toHaveBeenCalled();
+  });
+
+  it('fails a re-entrant card-to-card race visibly before React can paint the global disabled state', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const firstAccept = within(firstCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    const siblingReject = within(secondCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.reject',
+    });
+
+    act(() => {
+      firstAccept.click();
+      siblingReject.click();
+    });
+
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+    await waitFor(() => expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1));
+  });
+
+  it('uses the same global latch when chat starts first and exposes only its exact card as loading', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal(), second])));
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    const secondCard = screen.getByTestId('studio-proposal-proposal_2');
+    const siblingReject = within(secondCard).getByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.reject',
+    });
+
+    let chatDecision!: Promise<void>;
+    act(() => {
+      chatDecision = capturedDirectorProposalIntent()({ decision: 'accept', proposalId: 'proposal_1' });
+      siblingReject.click();
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(
+      within(firstCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toHaveClass('arco-btn-loading');
+    expect(siblingReject).toBeDisabled();
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+      await chatDecision;
+    });
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      proposalId: 'proposal_1',
+    });
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('latches a proposal decision synchronously against a re-entrant chat decision', async () => {
+    const acceptance = deferred<{
+      ok: true;
+      data: {
+        proposal: StudioRendererProposalV2;
+        project: StudioRendererProjectV2;
+        applied: boolean;
+      };
+    }>();
+    mockProposalUntilDecision(proposal());
+    mocks.bridge.acceptProposal.invoke.mockReturnValue(acceptance.promise);
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_1');
+
+    let firstDecision!: Promise<void>;
+    await act(async () => {
+      firstDecision = capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null });
+      await capturedDirectorProposalIntent()({ decision: 'reject', proposalId: null });
+    });
+
+    expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(
+      screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDecisionBusy').length
+    ).toBeGreaterThan(0);
+
+    await act(async () => {
+      acceptance.resolve(
+        ok({
+          proposal: { ...proposal(), status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
+          project: project(),
+          applied: true,
+        })
+      );
+      await firstDecision;
+    });
+  });
+
+  it('fails closed when the sole pending proposal is stale', async () => {
+    mockSupportedProject({ ...project(), revision: 4 });
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([stale], 4)));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(1));
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatStale')).toBeVisible();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('blocks only a rule proposal when the active rule draft for that proposal is dirty', async () => {
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([pinRuleProposal()])));
+    renderStudio();
+    await screen.findByTestId('studio-proposal-proposal_rule');
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(briefDialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Keep this rule draft local.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+
+    await act(async () => capturedDirectorProposalIntent()({ decision: 'accept', proposalId: null }));
+
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.chatDirty').length).toBeGreaterThan(0);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rechecks a workspace draft created while proposal authority is refreshing before accept IPC', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(BRIEF), { target: { value: 'Draft created during refresh.' } });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+
+    expect(
+      (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.saveBeforeApply')).length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('rechecks an active rule draft created while proposal authority is refreshing before accept IPC', async () => {
+    const refresh = deferred<ReturnType<typeof projectWorkspaceLoad>>();
+    const ruleProposal = pinRuleProposal();
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(project()))
+      .mockReturnValueOnce(refresh.promise)
+      .mockResolvedValue(projectWorkspaceLoad(project()));
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([ruleProposal])));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    const dialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    fireEvent.change(within(dialog).getByLabelText(RULE_TEXT), {
+      target: { value: 'Rule draft created during refresh.' },
+    });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 }));
+    await act(async () => {
+      refresh.resolve(projectWorkspaceLoad(project()));
+      await refresh.promise;
+    });
+
+    expect(
+      (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst')).length
+    ).toBeGreaterThan(0);
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('keeps an independent rule-pin proposal actionable while local Shot drafts are unsaved', async () => {
+    const draftedProject = projectWithDraftBatch(1);
+    const ruleProposal = pinRuleProposal();
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mockSupportedProject(draftedProject);
+    mockProposalUntilDecision(ruleProposal);
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: { ...ruleProposal, status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
+        project: draftedProject,
+        applied: true,
+      })
+    );
+
+    renderStudio();
+    const accept = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    expect(accept).toBeEnabled();
+    fireEvent.click(accept);
+
+    await waitFor(() =>
+      expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        proposalId: 'proposal_rule',
+      })
+    );
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+  });
+
+  it("does not let another project's persisted drafts block this project's mutation proposal", async () => {
+    seedWorkspaceDrafts(
+      { 'shot.other.shootingScript': { baseValue: 'Old', value: 'Other project draft' } },
+      'project_2'
+    );
+    mockProposalUntilDecision(proposal());
+    renderStudio();
+    const accept = await screen.findByRole('button', {
+      name: 'conversation.creativeStudio.workspace.proposals.accept',
+    });
+    expect(accept).toBeEnabled();
+    fireEvent.click(accept);
+
+    await waitFor(() =>
+      expect(mocks.bridge.acceptProposal.invoke).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        proposalId: 'proposal_1',
+      })
+    );
+  });
+
+  it('keeps an accepted sibling visible as stale and offers an exact re-propose action', async () => {
+    const first = proposal();
+    const second = { ...proposal(), id: 'proposal_2', createdAt: '2026-01-01T00:00:02.000Z' };
+    const advanced = { ...project(), revision: 4 };
+    const staleSecond = staleProposal(second, 4);
+    mocks.bridge.getProject.invoke.mockImplementation(async () =>
+      ok({
+        status: 'supported' as const,
+        project: mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced,
+      })
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockImplementation(async () =>
+      ok(workspaceStatus(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced))
+    );
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockImplementation(async () =>
+      ok(chainStatus(mocks.bridge.acceptProposal.invoke.mock.calls.length === 0 ? project() : advanced))
+    );
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.acceptProposal.invoke.mock.calls.length === 0
+        ? ok(proposalCatalog([first, second], 3))
+        : ok(proposalCatalog([staleSecond], 4))
+    );
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: { ...first, status: 'accepted', decidedAt: '2026-01-01T00:00:05.000Z' },
+        project: advanced,
+        applied: true,
+      })
+    );
+    renderStudio();
+    const firstCard = await screen.findByTestId('studio-proposal-proposal_1');
+    fireEvent.click(
+      within(firstCard).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('studio-proposal-proposal_2')).toHaveAttribute('data-proposal-state', 'stale')
+    );
+    expect(screen.queryByTestId('studio-proposal-proposal_1')).toBeNull();
+    expect(
+      within(screen.getByTestId('studio-proposal-proposal_2')).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+      })
+    ).toBeEnabled();
+  });
+
+  it.each(['terminal', 'missing'] as const)(
+    'does not prefill when the exact proposal becomes %s before a clean re-propose refresh',
+    async (outcome) => {
+      const advanced = { ...project(), revision: 4 };
+      const stale = staleProposal(proposal(), 4);
+      const terminal = {
+        ...stale,
+        status: 'rejected' as const,
+        decidedAt: '2026-01-01T00:00:05.000Z',
+      };
+      mockSupportedProject(advanced);
+      mocks.bridge.listProposals.invoke
+        .mockResolvedValueOnce(ok(proposalCatalog([stale], 4)))
+        .mockResolvedValue(ok(proposalCatalog(outcome === 'terminal' ? [terminal] : [], 4)));
+      renderStudio('/studio/project_1/board');
+      fireEvent.click(
+        within(await screen.findByTestId('studio-proposal-proposal_1')).getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+        })
+      );
+
+      expect(
+        await screen.findByText('conversation.creativeStudio.workspace.proposals.chatProposalNotFound')
+      ).toBeVisible();
+      expect(mocks.directorDraftRequest).toBeNull();
+      expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['error', 'mismatch'] as const)(
+    'does not prefill when a clean re-propose refresh returns a catalog %s',
+    async (outcome) => {
+      const advanced = { ...project(), revision: 4 };
+      const stale = staleProposal(proposal(), 4);
+      mockSupportedProject(advanced);
+      mocks.bridge.listProposals.invoke
+        .mockResolvedValueOnce(ok(proposalCatalog([stale], 4)))
+        .mockResolvedValueOnce(
+          outcome === 'error'
+            ? { ok: false, error: { code: 'storage_error', messageKey: 'native.proposalCatalogFailed' } }
+            : ok(proposalCatalog([stale], 5))
+        );
+      renderStudio('/studio/project_1/board');
+      fireEvent.click(
+        within(await screen.findByTestId('studio-proposal-proposal_1')).getByRole('button', {
+          name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
+        })
+      );
+
+      expect(
+        (await screen.findAllByText('conversation.creativeStudio.workspace.proposals.authorityUnavailable')).length
+      ).toBeGreaterThan(0);
+      expect(mocks.directorDraftRequest).toBeNull();
+      expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+      expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    }
+  );
+
+  it('prefills an editable exact-ID re-propose turn without applying or sending it', async () => {
+    const advanced = { ...project(), revision: 4 };
+    const stale = staleProposal(proposal(), 4);
+    mockSupportedProject(advanced);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([stale], 4)));
+    renderStudio('/studio/project_1/board');
+    const card = await screen.findByTestId('studio-proposal-proposal_1');
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.director.show' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    );
+    fireEvent.click(
+      within(card).getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    );
+
+    await waitFor(() => expect(mocks.directorDraftRequest).not.toBeNull());
+    expect(mocks.directorDraftRequest?.prompt).toContain('proposals.reproposalPrompt');
+    expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1');
+    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.director.hide' })).toHaveAttribute(
+      'aria-expanded',
+      'true'
+    );
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('saves only the proposal-scoped workspace drafts, then requests an updated proposal without accepting', async () => {
+    const initial = projectWithDraftBatch(1);
+    const revised = structuredClone(initial);
+    revised.revision = 4;
+    revised.shots.shot_0!.shootingScript = 'Unsaved local script';
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: revised }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(revised)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(revised)));
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.getProject.invoke.mock.calls.length <= 1
+        ? ok(proposalCatalog([proposal()], 3))
+        : ok(proposalCatalog([stale], 4))
+    );
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(4));
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated',
+      })
+    );
+
+    await waitFor(() => expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1'));
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      operations: [{ kind: 'edit_shot', shotId: 'shot_0', changes: { shootingScript: 'Unsaved local script' } }],
+    });
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
+  it('does not queue a re-propose turn when saving the conflicting workspace draft fails', async () => {
+    const initial = projectWithDraftBatch(1);
+    seedWorkspaceDrafts({
+      'shot.shot_0.shootingScript': { baseValue: 'Shot 1', value: 'Unsaved local script' },
+    });
+    mockSupportedProject(initial);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'stale_revision', messageKey: 'native.saveFailed' },
+    });
+    renderStudio();
+    fireEvent.click(
+      await screen.findByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated',
+      })
+    );
+
+    await waitFor(() => expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledOnce());
+    expect(mocks.directorDraftRequest).toBeNull();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
+  });
+
+  it('retains a proposal as stale when fresh authority advances before acceptance', async () => {
+    const current = project();
+    const advanced = { ...project(), revision: 4 };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: advanced }));
+    const stale = staleProposal(proposal(), 4);
+    mocks.bridge.listProposals.invoke.mockImplementation(async () =>
+      mocks.bridge.getProject.invoke.mock.calls.length > 1
+        ? ok(proposalCatalog([stale], 4))
+        : ok(proposalCatalog([proposal()], 3))
+    );
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(advanced)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(advanced)));
+    renderStudio();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.proposals.chatStale')).toBeVisible();
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'stale');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeEnabled();
+    expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.getProject.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.listProposals.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
+    expect(mocks.bridge.projectWorkspaceChainFixture.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a shape draft dirty when the post-commit snapshot is older than the commit receipt', async () => {
+    seedWorkspaceDrafts({ 'settings.resolution': { baseValue: '720p', value: '1080p' } });
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: project() }));
+    renderStudio();
+    const setupDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const resolution = within(setupDialog).getByRole('combobox', { name: RESOLUTION });
+    fireEvent.click(
+      within(setupDialog).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.controls.saveBrief',
+      })
+    );
+
+    expect(await within(setupDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(resolution).toHaveTextContent('1080p');
+    expect(mocks.bridge.editProject.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+  });
+
+  it('stops a chained close-save when another writer advances past the commit receipt', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved local Brief.' },
+    });
+    const concurrentlyAdvanced = {
+      ...project(),
+      revision: 5,
+      resolution: '1080p' as const,
+      brief: 'A concurrent Brief.',
+    };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValue(ok({ status: 'supported', project: concurrentlyAdvanced }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockResolvedValue(ok(workspaceStatus(concurrentlyAdvanced)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValue(ok(chainStatus(concurrentlyAdvanced)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      changes: { resolution: '1080p' },
+    });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
+  });
+
+  it('coalesces an update during close-save refresh and retains the next draft when authority advances', async () => {
+    seedWorkspaceDrafts({
+      'settings.resolution': { baseValue: '720p', value: '1080p' },
+      'brief.text': { baseValue: 'A small launch film.', value: 'Unsaved local Brief.' },
+    });
+    const committed = { ...project(), revision: 4, resolution: '1080p' as const };
+    const concurrentlyAdvanced = {
+      ...committed,
+      revision: 5,
+      brief: 'A concurrent Brief.',
+    };
+    const stalledWorkspaceResult = ok(workspaceStatus(4));
+    const stalledWorkspace = deferred<typeof stalledWorkspaceResult>();
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: project() }))
+      .mockResolvedValueOnce(ok({ status: 'supported', project: committed }))
+      .mockResolvedValue(ok({ status: 'supported', project: concurrentlyAdvanced }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(3)))
+      .mockReturnValueOnce(stalledWorkspace.promise)
+      .mockResolvedValue(ok(workspaceStatus(5)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(3)))
+      .mockResolvedValueOnce(ok(chainStatus(4)))
+      .mockResolvedValue(ok(chainStatus(5)));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1));
+    let flushPromise: Promise<{ saved: boolean }> | undefined;
+    act(() => {
+      flushPromise = mocks.closeHandlers.flushUnsavedWork?.();
+    });
+    expect(flushPromise).toBeDefined();
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+
+    act(() => {
+      mocks.listeners.projectUpdated?.({ projectId: 'project_1' });
+    });
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2);
+
+    let saved: { saved: boolean } | undefined;
+    act(() => {
+      stalledWorkspace.resolve(stalledWorkspaceResult);
+    });
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(4));
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await act(async () => {
+      saved = await flushPromise;
+    });
+
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.editProject.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      changes: { resolution: '1080p' },
+    });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
+      projectId: 'project_1',
+      expectedRevision: 4,
+      operations: [{ kind: 'set_brief', brief: 'Unsaved local Brief.' }],
+    });
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 1 });
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    expect(within(briefDialog).getByLabelText(BRIEF)).toHaveValue('Unsaved local Brief.');
+  });
+
+  it('silently discards a retired brief.rules draft without treating it as unsaved work', async () => {
+    seedWorkspaceDrafts({
+      'brief.rules': {
+        baseValue: '[]',
+        value: '[{"id":"rule_1","text":"Legacy raw JSON","predicate":null,"scope":"poison"}]',
+      },
+    });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    expect(window.sessionStorage.getItem('aionui:creative-studio:v2:workspace-drafts:project_1') ?? '').not.toContain(
+      'brief.rules'
+    );
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
+  });
+
+  it('retires active and inactive Beat target drafts without blocking close-save', async () => {
+    seedWorkspaceDrafts({
+      'beat.beat_0.targetSeconds': { baseValue: 4, value: 8 },
+    });
+    seedWorkspaceDrafts(
+      {
+        'beat.beat_9.targetSeconds': { baseValue: 12, value: 16 },
+      },
+      'project_2',
+      4
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
+  });
+
+  it.each([
+    ['beat.beat_0.story', 'Story 1', 42, 0, true],
+    ['shot.shot_0.durationSeconds', 4, 1.5, 1, false],
+    ['shot.shot_0.shootingScript', 'Shot 1', 42, 0, true],
+  ])(
+    'refuses or discards malformed dynamic authoring draft %s',
+    async (key, baseValue, value, expectedDirtyCount, expectedSaved) => {
+      seedWorkspaceDrafts({ [key]: { baseValue, value } });
+      mockSupportedProject(projectWithDraftBatch(1));
+      renderStudio();
+      await screen.findByRole('heading', { name: 'Launch film' });
+      await waitFor(() =>
+        expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: expectedDirtyCount })
+      );
+
+      let saved: { saved: boolean } | undefined;
+      await act(async () => {
+        saved = await mocks.closeHandlers.flushUnsavedWork?.();
+      });
+
+      expect(saved).toEqual({ saved: expectedSaved });
+      expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+      expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: expectedDirtyCount });
+    }
+  );
+
+  it('clears semantically unchanged Beat and Shot drafts without issuing authoring work', async () => {
+    seedWorkspaceDrafts({
+      'beat.beat_0.story': { baseValue: 'Stale story base', value: 'Story 1' },
+      'shot.shot_0.shootingScript': { baseValue: 'Stale Shot base', value: 'Shot 1' },
+    });
+    mockSupportedProject(projectWithDraftBatch(2));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 }));
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 0 });
+  });
+
+  it('rejects an invalid spend currency during close-save without issuing authoring work', async () => {
+    seedWorkspaceDrafts({
+      'brief.spendCurrency': { baseValue: '', value: 'US' },
+      'brief.spendMajorUnits': { baseValue: '', value: '12.34' },
+    });
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 }));
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: false });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.closeHandlers.hasUnsavedWork?.()).toEqual({ dirtyDraftCount: 2 });
+  });
+
+  it('recognizes an exact canonical rule snapshot without issuing a duplicate native mutation', async () => {
+    const governed = project();
+    governed.rules = [
+      {
+        id: 'rule_prose',
+        scope: 'project',
+        text: 'Keep the launch clean.',
+        predicate: null,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'rule_terms',
+        scope: 'project',
+        text: 'Avoid product marks.',
+        predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ];
+    const exactDrafts: StudioBriefRuleDraft[] = governed.rules.map(({ id, text, predicate }) => ({
+      id,
+      text,
+      predicate,
+    }));
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    let adopted = false;
+    await act(async () => {
+      adopted = await capturedWorkspaceMutations().setRules(() => exactDrafts, 'exact-rule-snapshot');
+    });
+
+    expect(adopted).toBe(true);
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not mistake sparse or near-matching rule drafts for an adopted canonical snapshot', async () => {
+    const governed = project();
+    governed.rules = [
+      {
+        id: 'rule_prose',
+        scope: 'project',
+        text: 'Keep the launch clean.',
+        predicate: null,
+        createdAt: '2026-01-01T00:00:01.000Z',
+      },
+      {
+        id: 'rule_terms',
+        scope: 'project',
+        text: 'Avoid product marks.',
+        predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        createdAt: '2026-01-01T00:00:02.000Z',
+      },
+    ];
+    const exactDrafts: StudioBriefRuleDraft[] = governed.rules.map(({ id, text, predicate }) => ({
+      id,
+      text,
+      predicate,
+    }));
+    const sparseDrafts = Array<StudioBriefRuleDraft>(exactDrafts.length);
+    sparseDrafts[1] = exactDrafts[1]!;
+    const nearMatches: ReadonlyArray<readonly [string, StudioBriefRuleDraft[]]> = [
+      ['shorter', [exactDrafts[0]!]],
+      ['sparse', sparseDrafts],
+      ['different-id', [{ ...exactDrafts[0]!, id: 'rule_other' }, exactDrafts[1]!]],
+      ['different-text', [{ ...exactDrafts[0]!, text: 'Keep only one launch clean.' }, exactDrafts[1]!]],
+      [
+        'prose-became-executable',
+        [{ ...exactDrafts[0]!, predicate: { kind: 'forbidden_terms', terms: ['logo'] } }, exactDrafts[1]!],
+      ],
+      ['predicate-removed', [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: null }]],
+      [
+        'future-predicate-kind',
+        [
+          exactDrafts[0]!,
+          {
+            ...exactDrafts[1]!,
+            predicate: { kind: 'future_rule', terms: ['logo', 'watermark'] } as unknown as NonNullable<
+              StudioBriefRuleDraft['predicate']
+            >,
+          },
+        ],
+      ],
+      [
+        'different-term-count',
+        [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: { kind: 'forbidden_terms', terms: ['logo'] } }],
+      ],
+      [
+        'different-term',
+        [exactDrafts[0]!, { ...exactDrafts[1]!, predicate: { kind: 'forbidden_terms', terms: ['logo', 'brand'] } }],
+      ],
+    ];
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
+    mocks.bridge.setRules.invoke.mockResolvedValue({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.ruleMismatch' },
+    });
+
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    const results: boolean[] = [];
+    const attemptNearMatch = async (index: number): Promise<void> => {
+      const attempt = nearMatches[index];
+      if (attempt === undefined) return;
+      const [label, drafts] = attempt;
+      results.push(await capturedWorkspaceMutations().setRules(() => drafts, `near-match-${label}`));
+      await attemptNearMatch(index + 1);
+    };
+    await act(async () => {
+      await attemptNearMatch(0);
+    });
+
+    expect(results).toEqual(nearMatches.map(() => false));
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(nearMatches.length);
+    expect(mocks.bridge.setRules.invoke.mock.calls.map(([request]) => request.rules)).toEqual(
+      nearMatches.map(([, drafts]) => drafts)
+    );
+  });
+
+  it('keeps typed rule input and idempotently recognizes an ambiguously adopted rule on retry', async () => {
+    const initial = project();
+    const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const textInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
+    const termsInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.termsLabel');
+    fireEvent.change(textInput, { target: { value: 'Keep every frame bright' } });
+    fireEvent.change(termsInput, { target: { value: 'logo, watermark' } });
+    fireEvent.click(within(briefDialog).getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+
+    expect(await within(briefDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.setRules.invoke.mock.calls[0]?.[0]).toMatchObject({
+      projectId: 'project_1',
+      expectedRevision: 3,
+      rules: [
+        {
+          text: 'Keep every frame bright',
+          predicate: { kind: 'forbidden_terms', terms: ['logo', 'watermark'] },
+        },
+      ],
+    });
+    expect(textInput).toHaveValue('Keep every frame bright');
+    expect(termsInput).toHaveValue('logo, watermark');
+    expect(document.querySelector('[data-studio-project-rule]')).toBeNull();
+
+    const submittedRule = mocks.bridge.setRules.invoke.mock.calls[0]?.[0].rules[0];
+    expect(submittedRule?.id).toMatch(/^[A-Za-z0-9_]+$/);
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...omittedRuleSnapshot, rules: [submittedRule] } })
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+    expect(await within(briefDialog).findByText('Keep every frame bright')).toBeVisible();
+    await waitFor(() => expect(textInput).toHaveValue(''));
+    expect(termsInput).toHaveValue('');
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+    expect(
+      within(briefDialog).queryByText('conversation.creativeStudio.workspace.errors.storage')
+    ).not.toBeInTheDocument();
+  });
+
+  it('does not let delayed rule adoption clear a newer action error', async () => {
+    const initial = project();
+    const omittedRuleSnapshot = { ...project(), revision: 4, rules: [] };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: initial }))
+      .mockResolvedValue(ok({ status: 'supported', project: omittedRuleSnapshot }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(initial)))
+      .mockResolvedValue(ok(workspaceStatus(omittedRuleSnapshot)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(initial)))
+      .mockResolvedValue(ok(chainStatus(omittedRuleSnapshot)));
+
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+    const textInput = within(briefDialog).getByLabelText('conversation.creativeStudio.rules.textLabel');
+    fireEvent.change(textInput, { target: { value: 'Retain the correlated failure.' } });
+    fireEvent.click(within(briefDialog).getByRole('button', { name: 'conversation.creativeStudio.rules.add' }));
+    expect(await within(briefDialog).findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValueOnce({
+      ok: false,
+      error: { code: 'storage_error', messageKey: 'native.newerActionFailure' },
+    });
+    let saved = true;
+    await act(async () => {
+      saved = await capturedBeatPanelActions().saveBeat('beat_0', { story: 'A later story edit.' });
+    });
+    expect(saved).toBe(false);
+    expect(await within(briefDialog).findByText('native.newerActionFailure')).toBeVisible();
+
+    const submittedRule = mocks.bridge.setRules.invoke.mock.calls[0]?.[0].rules[0]!;
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'supported', project: { ...omittedRuleSnapshot, rules: [submittedRule] } })
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: 'project_1' }));
+
+    expect(await within(briefDialog).findByText('Retain the correlated failure.')).toBeVisible();
+    await waitFor(() => expect(textInput).toHaveValue(''));
+    expect(within(briefDialog).getByText('native.newerActionFailure')).toBeVisible();
+    expect(mocks.bridge.setRules.invoke).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders authoritative rules and spend policy in Film setup without legacy JSON mutation', async () => {
+    const governed = {
+      ...project(),
+      spendPolicy: { currency: 'USD', maxPerBatchMinorUnits: 1_234 },
+      rules: [
+        {
+          id: 'rule_1',
+          text: 'Avoid marks',
+          predicate: { kind: 'forbidden_terms' as const, terms: ['logo'] },
+        },
+      ],
+    };
+    mocks.bridge.getProject.invoke.mockResolvedValue(ok({ status: 'supported', project: governed }));
+    renderStudio();
+    const briefDialog = await openProjectDialog(BRIEF_RULES_TITLE);
+
+    expect(within(briefDialog).getByText('Avoid marks')).toBeVisible();
+    expect(within(briefDialog).getByText('logo')).toBeVisible();
+    expect(within(briefDialog).getByLabelText('conversation.creativeStudio.workspace.controls.spendCap')).toHaveValue(
+      '12.34'
+    );
+    expect(
+      within(briefDialog).queryByLabelText('conversation.creativeStudio.workspace.controls.rules')
+    ).not.toBeInTheDocument();
+
+    let saved: { saved: boolean } | undefined;
+    await act(async () => {
+      saved = await mocks.closeHandlers.flushUnsavedWork?.();
+    });
+
+    expect(saved).toEqual({ saved: true });
+    expect(mocks.bridge.setRules.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+  });
+
+  it('recovers only the exact current attention job and refreshes its committed revision', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    const recovered = projectWithAttentionJob('queued_remote');
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: recovered }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(recovered)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(recovered)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(recovered.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    let retried = false;
+    await act(async () => {
+      retried = await capturedBeatPanelActions().retryGenerationJob('job_attention', false);
+    });
+
+    expect(retried).toBe(true);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+      acknowledgePossibleDuplicateCharge: false,
+    });
+    expect(mocks.bridge.projectWorkspaceStatusFixture.invoke).toHaveBeenCalledTimes(2);
+
+    await expect(capturedBeatPanelActions().retryGenerationJob('job_attention', false)).resolves.toBe(false);
+    await expect(capturedBeatPanelActions().cancelGenerationJob('forged_job')).resolves.toBe(false);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledTimes(1);
+    expect(mocks.bridge.cancelJob.invoke).not.toHaveBeenCalled();
+  });
+
+  it('requires the exact unknown-submission acknowledgement before unlocking a replacement quote', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    current.jobs.job_attention!.error = {
+      code: 'submission_unknown',
+      messageKey: 'conversation.creativeStudio.jobs.errors.submissionUnknown',
+    };
+    current.jobs.job_attention!.canCancel = false;
+    const acknowledged = projectWithAttentionJob('failed');
+    acknowledged.jobs.job_attention!.error = { ...current.jobs.job_attention!.error };
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: acknowledged }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(acknowledged)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(acknowledged)));
+    mocks.bridge.retryJob.invoke.mockResolvedValue(ok(acknowledged.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    await expect(capturedBeatPanelActions().retryGenerationJob('job_attention', false)).resolves.toBe(false);
+    expect(mocks.bridge.retryJob.invoke).not.toHaveBeenCalled();
+
+    let acknowledgedResult = false;
+    await act(async () => {
+      acknowledgedResult = await capturedBeatPanelActions().retryGenerationJob('job_attention', true);
+    });
+    expect(acknowledgedResult).toBe(true);
+    expect(mocks.bridge.retryJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+      acknowledgePossibleDuplicateCharge: true,
+    });
+  });
+
+  it('cancels only the exact current provider-cancellable attention job', async () => {
+    const current = projectWithAttentionJob('needs_attention');
+    const cancelled = projectWithAttentionJob('cancelled');
+    mocks.bridge.getProject.invoke
+      .mockResolvedValueOnce(ok({ status: 'supported', project: current }))
+      .mockResolvedValue(ok({ status: 'supported', project: cancelled }));
+    mocks.bridge.projectWorkspaceStatusFixture.invoke
+      .mockResolvedValueOnce(ok(workspaceStatus(current)))
+      .mockResolvedValue(ok(workspaceStatus(cancelled)));
+    mocks.bridge.projectWorkspaceChainFixture.invoke
+      .mockResolvedValueOnce(ok(chainStatus(current)))
+      .mockResolvedValue(ok(chainStatus(cancelled)));
+    mocks.bridge.cancelJob.invoke.mockResolvedValue(ok(cancelled.jobs.job_attention));
+
+    renderStudio();
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    let cancelledResult = false;
+    await act(async () => {
+      cancelledResult = await capturedBeatPanelActions().cancelGenerationJob('job_attention');
+    });
+    expect(cancelledResult).toBe(true);
+    expect(mocks.bridge.cancelJob.invoke).toHaveBeenCalledExactlyOnceWith({
+      projectId: 'project_1',
+      jobId: 'job_attention',
+      expectedRevision: 3,
+    });
+  });
+
+  it('renders the unsupported prototype state without fabricating a project', async () => {
+    mocks.bridge.getProject.invoke.mockResolvedValue(
+      ok({ status: 'unsupported_prototype_schema', projectId: 'project_1' })
+    );
+
+    renderStudio();
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.project.unsupportedPrototype')).toBeVisible();
+    expect(screen.queryByRole('heading', { name: 'Launch film' })).not.toBeInTheDocument();
+    expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(1);
   });
 });

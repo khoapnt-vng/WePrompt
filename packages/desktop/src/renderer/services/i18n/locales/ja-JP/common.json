@@ -92,6 +92,14 @@
       "diagnosticsReportFailed": "診断パッケージを保存できませんでした",
       "runtimeComponentDescription": "このインストールには必要な組み込み実行コンポーネントが不足しているため、{{resource}} を起動できません。最新版の WePrompt パッケージを再インストールしてください。再インストール後も続く場合は、セキュリティソフトまたはウイルス対策ソフトが WePrompt コンポーネントを隔離していないか確認してください。"
     },
+    "genericFailure": {
+      "title": "ローカルバックエンドを起動できませんでした",
+      "description": "WePrompt はローカル起動を完了できませんでした。WePrompt を再起動してください。問題が解消しない場合は、サポート用に診断パッケージを保存してください。",
+      "sendDiagnostics": "診断情報を保存",
+      "diagnosticsSent": "診断情報を保存しました",
+      "diagnosticsReportSuccess": "診断パッケージを保存しました",
+      "diagnosticsReportFailed": "診断パッケージを保存できませんでした"
+    },
     "packageArchitectureMismatch": {
       "title": "WePrompt パッケージのアーキテクチャが一致しません",
       "description": "この WePrompt パッケージは {{packageArch}} 用ですが、この Mac は {{deviceArch}} です。承認済みの社内配布チャネルから {{expectedArch}} インストーラーを取得し、WePrompt を閉じてからそのパッケージをインストールしてください。",

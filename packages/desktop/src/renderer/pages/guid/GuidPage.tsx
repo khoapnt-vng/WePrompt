@@ -24,7 +24,7 @@ import GuidModelSelector from './components/GuidModelSelector';
 import { useGuidAssistantSelection } from './hooks/useGuidAssistantSelection';
 import { useGuidInput } from './hooks/useGuidInput';
 import { useGuidModelSelection } from './hooks/useGuidModelSelection';
-import { useGuidSend } from './hooks/useGuidSend';
+import { useGuidSend, type GuidManagedPresentationSourceChange } from './hooks/useGuidSend';
 import { useTypewriterPlaceholder } from './hooks/useTypewriterPlaceholder';
 import { getWorkspaceBasename, readProjects } from '@/renderer/pages/conversation/projects/projectStorage';
 import { ensureBackendMcpCatalog } from '@/renderer/hooks/mcp/catalog';
@@ -177,7 +177,9 @@ const GuidPage: React.FC = () => {
   const presentationDraftClientRequestIdRef = useRef<string | null>(null);
   const presentationDraftExpiredRef = useRef(false);
   const presentationRecoveryStartedRef = useRef(false);
-  const retireManagedPresentationAttemptRef = useRef<(succeeded: boolean) => Promise<void>>(async () => {});
+  const retireManagedPresentationAttemptRef = useRef<
+    (change: GuidManagedPresentationSourceChange | null) => Promise<void>
+  >(async () => {});
   if (presentationDraftClientRequestIdRef.current === null) {
     presentationDraftClientRequestIdRef.current = readGuidPresentationDraftClientRequestId();
   }
@@ -287,7 +289,7 @@ const GuidPage: React.FC = () => {
     const result = await presentationSources.pickSources();
     if (presentationRunEligibleRef.current && result?.ok && result.status === 'selected') {
       presentationDraftExpiredRef.current = false;
-      await retireManagedPresentationAttemptRef.current(true);
+      await retireManagedPresentationAttemptRef.current({ kind: 'added' });
       guidInput.setFiles([]);
       setShowPresentationSourceReselect(false);
     }
@@ -300,7 +302,7 @@ const GuidPage: React.FC = () => {
       const result = await presentationSources.grantExternalDrop(files);
       if (presentationRunEligibleRef.current && result?.ok && result.status === 'granted') {
         presentationDraftExpiredRef.current = false;
-        await retireManagedPresentationAttemptRef.current(true);
+        await retireManagedPresentationAttemptRef.current({ kind: 'added' });
         guidInput.setFiles([]);
         setShowPresentationSourceReselect(false);
       }
@@ -311,9 +313,18 @@ const GuidPage: React.FC = () => {
   const handlePresentationSourceRevoke = useCallback(
     (grantId: string): void => {
       void presentationSources.revoke(grantId).then(async (result) => {
-        if (result?.ok) {
+        if (
+          result?.ok &&
+          (result.status === 'revoked' || result.status === 'already_revoked') &&
+          result.grantId === grantId &&
+          result.queueUnboundAtRevoke === true
+        ) {
           presentationDraftExpiredRef.current = false;
-          await retireManagedPresentationAttemptRef.current(true);
+          await retireManagedPresentationAttemptRef.current({
+            kind: 'revoked',
+            grantId,
+            queueUnboundAtRevoke: true,
+          });
         }
       });
     },

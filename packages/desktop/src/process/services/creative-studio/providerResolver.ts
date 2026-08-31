@@ -19,11 +19,17 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { isImageGenSupported, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
 import { getBytePlusSeedanceModelSpec, isSupportedBytePlusSeedanceProvider } from './adapters/bytePlusSeedanceAdapter';
-import { getOpenRouterVideoModelSpec, isSupportedOpenRouterVideoProvider } from './adapters/openRouterVideoAdapter';
+import {
+  getDefaultOpenRouterVideoCatalog,
+  isSupportedOpenRouterVideoProvider,
+  type OpenRouterVideoCatalog,
+  type OpenRouterVideoModelSpec,
+} from './adapters/openRouterVideoAdapter';
 
 export type StudioProviderResolverDeps = {
   listProviders: () => Promise<IProvider[]>;
   listConnections: () => Promise<StudioConnectionBinding[]>;
+  openRouterVideoCatalog?: OpenRouterVideoCatalog;
 };
 
 export type StudioGenerationRouteCatalog = {
@@ -72,7 +78,7 @@ const isUnsafeTextCharacter = (character: string): boolean => {
 };
 
 const isSafeProviderId = (value: string): boolean => SAFE_ID.test(value);
-const isSafeModel = (value: string): boolean =>
+const isSafeProviderModel = (value: string): boolean =>
   value.length > 0 && value.length <= 256 && value === value.trim() && !Array.from(value).some(isUnsafeTextCharacter);
 const providerIsConfigured = (provider: IProvider): boolean => {
   const apiKey = typeof provider.api_key === 'string' ? provider.api_key.trim() : '';
@@ -109,6 +115,14 @@ const modelHealth = (provider: IProvider, model: string): StudioGenerationRoute[
   return provider.model_health?.[model]?.status === 'healthy' ? 'available' : 'unknown';
 };
 
+const connectionCandidateModels = (provider: IProvider, models: readonly string[]) =>
+  [...new Set(models.filter((model) => isSafeProviderModel(model) && available(provider, model)))]
+    .map((model) => ({
+      model,
+      health: modelHealth(provider, model),
+    }))
+    .toSorted((left, right) => left.model.localeCompare(right.model));
+
 const imageConstraints = (model: string, capabilities: StudioConnectionCapabilities): StudioRouteConstraints => ({
   aspectRatios: [...ALL_RATIOS],
   resolutions: [...ALL_RESOLUTIONS],
@@ -134,21 +148,6 @@ const seedanceConstraints = (model: string): StudioRouteConstraints | null => {
     : null;
 };
 
-const openRouterConstraints = (model: string): StudioRouteConstraints | null => {
-  const spec = getOpenRouterVideoModelSpec(model);
-  return spec
-    ? {
-        aspectRatios: [...spec.ratios],
-        resolutions: [...spec.resolutions],
-        minDurationSeconds: spec.minDuration,
-        maxDurationSeconds: spec.maxDuration,
-        supportsFirstFrame: spec.supportsFirstFrame,
-        maxConditioningImages: 0,
-        silentOutput: !spec.supportsAudio,
-      }
-    : null;
-};
-
 const bindingConstraints = (capabilities: StudioConnectionCapabilities): StudioRouteConstraints | null => {
   if (
     !capabilities.aspectRatios?.length ||
@@ -163,10 +162,58 @@ const bindingConstraints = (capabilities: StudioConnectionCapabilities): StudioR
     resolutions: [...capabilities.resolutions].toSorted(),
     minDurationSeconds: capabilities.minDurationSeconds,
     maxDurationSeconds: capabilities.maxDurationSeconds,
+    ...(capabilities.supportedDurationSeconds === undefined
+      ? {}
+      : { supportedDurationSeconds: [...capabilities.supportedDurationSeconds] }),
     supportsFirstFrame: capabilities.supportsFirstFrame ?? false,
     maxConditioningImages: 0,
     silentOutput: capabilities.audioModes?.includes('none') ?? false,
   };
+};
+
+const admittedOpenRouterConstraints = (
+  binding: StudioConnectionBinding,
+  constraints: StudioRouteConstraints,
+  spec: OpenRouterVideoModelSpec
+): StudioRouteConstraints | null => {
+  const durations = constraints.supportedDurationSeconds;
+  if (
+    constraints.resolutions.length === 0 ||
+    !constraints.resolutions.every((resolution) => spec.resolutions.includes(resolution)) ||
+    constraints.aspectRatios.length === 0 ||
+    !constraints.aspectRatios.every((ratio) => spec.ratios.includes(ratio)) ||
+    (constraints.supportsFirstFrame && !spec.supportsFirstFrame) ||
+    (!constraints.silentOutput && !spec.supportsAudio) ||
+    binding.capabilities.maxConditioningImages !== 0 ||
+    binding.capabilities.cancellationPolicy !== 'none'
+  ) {
+    return null;
+  }
+  if (durations === undefined) {
+    const narrowed = spec.durations.filter(
+      (duration) => duration >= constraints.minDurationSeconds && duration <= constraints.maxDurationSeconds
+    );
+    if (narrowed.length === 0) return null;
+    return {
+      ...constraints,
+      minDurationSeconds: narrowed[0]!,
+      maxDurationSeconds: narrowed.at(-1)!,
+      supportedDurationSeconds: [...narrowed],
+    };
+  }
+  return durations.length > 0 &&
+    durations.every(
+      (duration, index) =>
+        Number.isInteger(duration) &&
+        duration >= 4 &&
+        duration <= 15 &&
+        spec.durations.includes(duration) &&
+        (index === 0 || durations[index - 1]! < duration)
+    ) &&
+    constraints.minDurationSeconds === durations[0] &&
+    constraints.maxDurationSeconds === durations.at(-1)
+    ? constraints
+    : null;
 };
 
 const bindingMediaKind = (binding: StudioConnectionBinding): StudioMediaKind | null => {
@@ -190,7 +237,9 @@ const diagnosticIdentity = (diagnostic: Exclude<StudioGenerationRouteDiagnostic,
 
 const resolveBindingRoute = (
   binding: StudioConnectionBinding,
-  providers: IProvider[]
+  providers: IProvider[],
+  openRouterVideoCatalog: OpenRouterVideoCatalog,
+  openRouterCatalogReady: boolean
 ): StudioGenerationRouteDiagnostic => {
   const provider = providers.find((candidate) => candidate.id === binding.providerId);
   const kind = bindingMediaKind(binding);
@@ -200,7 +249,7 @@ const resolveBindingRoute = (
     adapterId: binding.adapterId,
     model: binding.model,
   });
-  if (!provider || !isSafeProviderId(provider.id) || !isSafeModel(binding.model) || !kind) {
+  if (!provider || !isSafeProviderId(provider.id) || !isSafeProviderModel(binding.model) || !kind) {
     return retired();
   }
   if (!providerIsConfigured(provider)) {
@@ -231,18 +280,21 @@ const resolveBindingRoute = (
   if (binding.adapterId === 'byteplus-seedance-v1' && !isSupportedBytePlusSeedanceProvider(provider, binding.model)) {
     return retired();
   }
-  if (binding.adapterId === 'openrouter-video-v1' && !isSupportedOpenRouterVideoProvider(provider, binding.model)) {
-    return retired();
-  }
-  const constraints =
+  if (binding.adapterId === 'openrouter-video-v1' && !isSupportedOpenRouterVideoProvider(provider)) return retired();
+  let constraints =
     binding.adapterId === IMAGE_ADAPTER
       ? imageConstraints(binding.model, binding.capabilities)
       : binding.adapterId === 'byteplus-seedance-v1'
         ? seedanceConstraints(binding.model)
-        : binding.adapterId === 'openrouter-video-v1'
-          ? openRouterConstraints(binding.model)
-          : bindingConstraints(binding.capabilities);
+        : bindingConstraints(binding.capabilities);
   if (!constraints) return retired();
+  if (binding.adapterId === 'openrouter-video-v1') {
+    const spec = openRouterCatalogReady ? openRouterVideoCatalog.getModelSpec(binding.model) : null;
+    if (spec === null) return retired();
+    const admitted = admittedOpenRouterConstraints(binding, constraints, spec);
+    if (admitted === null) return retired();
+    constraints = admitted;
+  }
   // Only the host-locked OpenRouter adapter may surface audio-capable output;
   // every other adapter retains the existing silent-only security invariant.
   if (!constraints.silentOutput && binding.adapterId !== 'openrouter-video-v1') return retired();
@@ -269,8 +321,29 @@ const resolveBindingRoute = (
 
 /** Resolves fresh provider rows and validated bindings into generation-only routes. */
 export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): StudioProviderResolver => {
+  const openRouterVideoCatalog = deps.openRouterVideoCatalog ?? getDefaultOpenRouterVideoCatalog();
+  const refreshOpenRouterCatalog = async (providers: IProvider[]): Promise<boolean> => {
+    const provider = providers
+      .filter(
+        (candidate) =>
+          isSupportedOpenRouterVideoProvider(candidate) &&
+          isSafeProviderId(candidate.id) &&
+          candidate.enabled !== false &&
+          providerIsConfigured(candidate)
+      )
+      .toSorted((left, right) => left.id.localeCompare(right.id))[0];
+    if (provider === undefined) return false;
+    try {
+      await openRouterVideoCatalog.refresh(provider, new AbortController().signal);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
   const listConnectionCandidates = async (): Promise<StudioConnectionCandidate[]> => {
     const providers = await deps.listProviders();
+    const openRouterCatalogReady = await refreshOpenRouterCatalog(providers);
     return providers
       .filter(
         (provider) => isSafeProviderId(provider.id) && provider.enabled !== false && providerIsConfigured(provider)
@@ -278,22 +351,27 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
       .map((provider) => ({
         providerId: provider.id,
         providerName: sanitizedProviderName(provider),
-        models: [...new Set(provider.models.filter((model) => isSafeModel(model) && available(provider, model)))]
-          .map((model) => ({
-            model,
-            health: modelHealth(provider, model),
-          }))
-          .toSorted((left, right) => left.model.localeCompare(right.model)),
+        models: connectionCandidateModels(provider, provider.models),
+        integrationModels: [
+          {
+            integrationLabelKey: 'openRouterVideo' as const,
+            models:
+              isSupportedOpenRouterVideoProvider(provider) && openRouterCatalogReady
+                ? connectionCandidateModels(provider, openRouterVideoCatalog.listModels())
+                : [],
+          },
+        ],
       }))
       .toSorted((left, right) => left.providerId.localeCompare(right.providerId));
   };
 
   const listGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> => {
     const [providers, connections] = await Promise.all([deps.listProviders(), deps.listConnections()]);
+    const openRouterCatalogReady = await refreshOpenRouterCatalog(providers);
     const uniqueRoutes = new Map<string, StudioGenerationRoute>();
     const rejected = new Map<string, Exclude<StudioGenerationRouteDiagnostic, { status: 'available' }>>();
     for (const binding of connections) {
-      const diagnostic = resolveBindingRoute(binding, providers);
+      const diagnostic = resolveBindingRoute(binding, providers, openRouterVideoCatalog, openRouterCatalogReady);
       if (diagnostic.status === 'available') {
         const route = diagnostic.route;
         const identity = routeIdentity(route);

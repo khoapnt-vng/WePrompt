@@ -4,368 +4,777 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import type {
-  StudioCommandResult,
-  StudioEditableScene,
-  StudioProposal,
-  StudioProposalAcceptance,
-  StudioRendererProject,
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  type StudioProposalReviewGroupV2,
+  type StudioRendererProjectV2,
+  type StudioRendererProposalV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { DirectorProposalCard } from '@renderer/pages/studio/components/Shell/DirectorProposalCard';
-import type { UseStoryboardEditorResult } from '@renderer/pages/studio/hooks/useStoryboardEditor';
-
-const FIELD_SEPARATOR_KEY = 'conversation.creativeStudio.brief.proposalFieldSeparator';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    // The separator resolves to its real en-US value; every other key echoes so assertions read as keys.
     t: (key: string, values?: Record<string, unknown>) =>
-      key === FIELD_SEPARATOR_KEY
-        ? ', '
-        : values
-          ? `${key}(${Object.entries(values)
-              .map(([name, value]) => `${name}=${String(value)}`)
-              .join(',')})`
-          : key,
+      values
+        ? `${key}(${Object.entries(values)
+            .map(([name, value]) => `${name}=${String(value)}`)
+            .join(',')})`
+        : key,
   }),
 }));
 
-const summary = (added: number, removed: number, changed: number): string =>
-  `conversation.creativeStudio.brief.proposalSummary(added=${added},removed=${removed},changed=${changed})`;
+const timestamp = '2026-08-24T00:00:00.000Z';
 
-const sceneChange = (position: number, ...fields: string[]): string =>
-  `conversation.creativeStudio.brief.proposalSceneChange(position=${position},fields=${fields
-    .map((field) => `conversation.creativeStudio.brief.proposalField.${field}`)
-    .join(', ')})`;
-
-const editableScene = (overrides: Partial<StudioEditableScene> = {}): StudioEditableScene => ({
-  title: 'Opening',
-  purpose: 'Introduce',
-  visualPrompt: 'A sunrise',
-  narration: 'Old narration',
-  onScreenText: '',
-  mediaKind: 'image',
-  durationSeconds: 10,
-  referenceAssetId: null,
-  ...overrides,
-});
-
-const project = (overrides: Partial<StudioRendererProject> = {}): StudioRendererProject => ({
-  schemaVersion: 1,
-  revision: 4,
-  id: 'project-1',
-  name: 'Launch film',
-  brief: 'Launch it',
+const project = (): StudioRendererProjectV2 => ({
+  schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION,
+  revision: 7,
+  id: 'project_1',
+  name: 'Night market film',
+  brief: 'Ming and Mei reunite.',
   rules: [],
+  briefConversationId: null,
   aspectRatio: '16:9',
-  targetDurationSeconds: 10,
+  targetDurationSeconds: 30,
   resolution: '1080p',
-  sceneOrder: ['scene-1'],
-  scenes: {
-    'scene-1': {
-      id: 'scene-1',
-      ...editableScene(),
-      selectedAssetId: null,
-      assetIds: [],
-      jobIds: [],
-      reviewState: 'draft',
-    },
-  },
+  boardStyle: null,
+  beatOrder: [],
+  beats: {},
+  shots: {},
+  referencePlanStatus: 'unplanned',
+  referenceOrder: [],
+  references: {},
+  bin: [],
+  bedAssetId: null,
+  spendPolicy: null,
+  imageRouteId: null,
+  videoRouteId: null,
   assets: {},
   jobs: {},
-  routing: { storyboard: null, image: null, video: null },
-  createdAt: '2026-08-11T00:00:00.000Z',
-  updatedAt: '2026-08-11T00:00:00.000Z',
-  ...overrides,
+  createdAt: timestamp,
+  updatedAt: timestamp,
 });
 
-/**
- * `propose_storyboard` is a whole-script replace that mints fresh scene ids on every call, so a redraft
- * never shares an id with the script it redrafts. This fixture is that real shape, not a stable-id ideal.
- */
-const proposal = (overrides: Partial<StudioProposal> = {}): StudioProposal => ({
-  schemaVersion: 1,
-  id: 'proposal-1',
-  projectId: 'project-1',
-  status: 'pending',
-  baseRevision: 4,
-  payload: {
-    kind: 'replace_storyboard',
-    sceneOrder: ['proposed-1'],
-    scenes: { 'proposed-1': editableScene({ narration: 'New narration' }) },
+const projectWithShot = (shootingScript = ''): StudioRendererProjectV2 => {
+  const value = project();
+  value.beatOrder = ['beat_1'];
+  value.beats.beat_1 = {
+    id: 'beat_1',
+    title: 'Arrival',
+    story: 'Ming arrives.',
+    targetSeconds: null,
+    shotOrder: ['shot_1'],
+  };
+  value.shots.shot_1 = {
+    id: 'shot_1',
+    shootingScript,
+    durationSeconds: 4,
+    trimInSeconds: null,
+    trimOutSeconds: null,
+    chainBreak: 'none',
+    referenceBinding: { status: 'unassigned', characterReferenceIds: [], backgroundReferenceId: null },
+    seedStillId: null,
+    dismissedSeedStillIds: [],
+    boardAssetId: null,
+    supersededBoardAssetIds: [],
+    videoAssetId: null,
+    supersededVideoAssetIds: [],
+    assetIds: [],
+    jobIds: [],
+  };
+  return value;
+};
+
+const reviewGroups = (): StudioProposalReviewGroupV2[] => [
+  {
+    change: 'edited',
+    subject: {
+      kind: 'project',
+      id: 'project_1',
+      title: 'Night market film',
+      position: null,
+      ownerBeatId: null,
+      ownerBeatTitle: null,
+    },
+    fields: [
+      {
+        key: 'brief',
+        before: { kind: 'text', value: 'Ming and Mei reunite.' },
+        after: { kind: 'text', value: 'Ming and Mei reconcile over midnight tea.' },
+      },
+    ],
   },
-  createdAt: '2026-08-11T01:00:00.000Z',
+  {
+    change: 'added',
+    subject: {
+      kind: 'beat',
+      id: 'beat_reunion',
+      title: 'Reunion',
+      position: 1,
+      ownerBeatId: null,
+      ownerBeatTitle: null,
+    },
+    fields: [
+      { key: 'title', before: null, after: { kind: 'text', value: 'Reunion' } },
+      {
+        key: 'story',
+        before: null,
+        after: { kind: 'text', value: 'Ming finds Mei at their old dai pai dong.' },
+      },
+      {
+        key: 'placement',
+        before: null,
+        after: {
+          kind: 'placement',
+          value: 'active',
+          position: 1,
+          ownerBeatId: null,
+          ownerBeatTitle: null,
+        },
+      },
+    ],
+  },
+  {
+    change: 'added',
+    subject: {
+      kind: 'shot',
+      id: 'shot_arrival',
+      title: null,
+      position: 1,
+      ownerBeatId: 'beat_reunion',
+      ownerBeatTitle: 'Reunion',
+    },
+    fields: [
+      {
+        key: 'shootingScript',
+        before: null,
+        after: {
+          kind: 'text',
+          value: 'Slow dolly in. Ming steps beneath the red awning; Mei looks up.',
+        },
+      },
+      { key: 'durationSeconds', before: null, after: { kind: 'number', value: 5 } },
+    ],
+  },
+];
+
+const proposal = (
+  review: StudioRendererProposalV2['review'] = { status: 'ready', groups: reviewGroups() }
+): StudioRendererProposalV2 => ({
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+  id: 'proposal_1',
+  projectId: 'project_1',
+  status: 'pending',
+  baseRevision: 7,
+  payload: {
+    kind: 'mutation_batch',
+    operations: [
+      { kind: 'set_brief', brief: 'Ming and Mei reconcile over midnight tea.' },
+      {
+        kind: 'add_beat',
+        beatId: 'beat_reunion',
+        beat: { title: 'Reunion', story: 'Ming finds Mei at their old dai pai dong.', targetSeconds: 10 },
+        beforeBeatId: null,
+      },
+    ],
+  },
+  createdAt: timestamp,
   decidedAt: null,
-  ...overrides,
+  review,
 });
 
-const success = <T,>(data: T): StudioCommandResult<T> => ({ ok: true, data });
-const acceptResult = (): StudioProposalAcceptance => ({
-  project: project(),
-  proposal: { ...proposal(), status: 'accepted' },
+const paidRecoveryProposal = (expiresAt = '2099-08-24T01:00:00.000Z'): StudioRendererProposalV2 => ({
+  ...proposal({ status: 'ready', groups: [] }),
+  payload: {
+    kind: 'paid_recovery',
+    blocker: {
+      cause: 'generation_timeout',
+      where: { kind: 'shot', beatId: 'beat_1', shotId: 'shot_1', beatPosition: 1, shotPosition: 2, jobId: null },
+      remedy: {
+        kind: 'proposal',
+        prepare: {
+          kind: 'generation',
+          baseChoices: [],
+          cascadeChoices: [],
+          continuityChange: null,
+        },
+        estimatedMinorUnits: null,
+        currency: null,
+      },
+    },
+    quote: {
+      quoteId: 'quote_1',
+      projectRevision: 7,
+      expiresAt,
+      currency: 'USD',
+      lowerMinorUnits: 125,
+      upperMinorUnits: 250,
+      itemCount: 2,
+      includesCascade: true,
+    },
+  },
 });
-const editor = (overrides: Partial<UseStoryboardEditorResult> = {}): UseStoryboardEditorResult =>
-  ({
-    hasUnsavedSceneDrafts: false,
-    flushAllSceneDrafts: vi.fn(async () => ({ failed: [], dirtied: [] })),
-    ...overrides,
-  }) as UseStoryboardEditorResult;
 
-describe('DirectorProposalCard', () => {
-  const acceptProposal = vi.fn(async () => success(acceptResult()));
-  const rejectProposal = vi.fn(async () => success({ ...proposal(), status: 'rejected' as const }));
-  const repropose = vi.fn(async () => {});
+describe('DirectorProposalCard semantic review', () => {
+  const onAccept = vi.fn(async () => undefined);
+  const onReject = vi.fn(async () => undefined);
+  const onRequestUpdated = vi.fn(async () => undefined);
+  const onReviewRuleDrafts = vi.fn();
 
-  const renderCard = (overrides: { project?: StudioRendererProject; proposal?: StudioProposal } = {}): void => {
+  beforeEach(() => {
+    onAccept.mockClear();
+    onReject.mockClear();
+    onRequestUpdated.mockClear();
+    onReviewRuleDrafts.mockClear();
+  });
+
+  const renderCard = (value = proposal(), overrides: Partial<React.ComponentProps<typeof DirectorProposalCard>> = {}) =>
     render(
       <DirectorProposalCard
-        project={overrides.project ?? project()}
-        proposal={overrides.proposal ?? proposal()}
-        editor={editor()}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
+        project={project()}
+        proposal={value}
+        pending={false}
+        onAccept={onAccept}
+        onReject={onReject}
+        {...overrides}
       />
+    );
+
+  const openReview = (): void => {
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reviewDetails' })
     );
   };
 
-  beforeEach(() => {
-    acceptProposal.mockClear();
-    rejectProposal.mockClear();
-    repropose.mockClear();
-  });
-
-  it('shows a rule pin as the rule itself, with its enforced words, and no shot diff', () => {
-    renderCard({
-      proposal: proposal({
-        payload: {
-          kind: 'pin_rule',
-          rule: { text: 'Keep the kits generic.', predicate: { kind: 'forbidden_terms', terms: ['acme', 'globex'] } },
-        },
-      }),
-    });
-
-    expect(screen.getByText('conversation.creativeStudio.rules.proposalTitle')).toBeInTheDocument();
-    expect(screen.getByText('conversation.creativeStudio.rules.proposalBody')).toBeInTheDocument();
-    expect(screen.getByText('Keep the kits generic.')).toBeInTheDocument();
-    // `fieldSeparator` is the one key the mock resolves for real, so the joined terms read as ', '.
-    expect(screen.getByText('conversation.creativeStudio.rules.proposalTerms(terms=acme, globex)')).toBeInTheDocument();
-    // Nothing from the storyboard branch: no diff summary, no per-scene change list, no scene titles.
-    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
-  });
-
-  it('does not compute a shot diff for a rule pin, even at a stale revision', () => {
-    renderCard({
-      project: project({ revision: 9 }),
-      proposal: proposal({
-        baseRevision: 3,
-        payload: { kind: 'pin_rule', rule: { text: 'Keep the kits generic.', predicate: null } },
-      }),
-    });
-
-    // The storyboard branch would render proposalDiffUnavailable here, because revision 9 ≠ base 3.
-    expect(screen.queryByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).not.toBeInTheDocument();
-    expect(screen.getByText('conversation.creativeStudio.rules.proposalTitle')).toBeInTheDocument();
-  });
-
-  it('accepts a rule pin without flushing unrelated scene drafts', async () => {
-    const flushAllSceneDrafts = vi.fn(async () => ({ failed: ['scene-1'], dirtied: [] }));
-    render(
-      <DirectorProposalCard
-        project={project()}
-        proposal={proposal({
-          payload: { kind: 'pin_rule', rule: { text: 'Keep the kits generic.', predicate: null } },
-        })}
-        editor={editor({ hasUnsavedSceneDrafts: true, flushAllSceneDrafts })}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
-      />
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
-
-    await waitFor(() =>
-      expect(acceptProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
-    );
-    expect(flushAllSceneDrafts).not.toHaveBeenCalled();
-  });
-
-  it('names the one field a same-length redraft rewrites instead of reporting a wholesale replacement', () => {
+  it('leads with a bounded edit count and keeps the field review collapsed until requested', () => {
     renderCard();
 
-    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
-    expect(screen.getByText(sceneChange(1, 'narration'))).toBeInTheDocument();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.mutationCount(count=3)')).toBeVisible();
+    expect(screen.queryByTestId('studio-proposal-semantic-review')).not.toBeInTheDocument();
+
+    openReview();
+    expect(screen.getByTestId('studio-proposal-semantic-review')).toBeVisible();
   });
 
-  it('lists every rewritten field of a shot', () => {
-    renderCard({
-      proposal: proposal({
-        payload: {
-          kind: 'replace_storyboard',
-          sceneOrder: ['proposed-1'],
-          scenes: { 'proposed-1': editableScene({ title: 'Cold open', narration: 'New narration' }) },
-        },
-      }),
-    });
-
-    expect(screen.getByText(sceneChange(1, 'title', 'narration'))).toBeInTheDocument();
-  });
-
-  it('counts shots the proposal adds beyond the current script', () => {
-    renderCard({
-      proposal: proposal({
-        payload: {
-          kind: 'replace_storyboard',
-          sceneOrder: ['proposed-1', 'proposed-2'],
-          scenes: { 'proposed-1': editableScene(), 'proposed-2': editableScene({ title: 'Finale' }) },
-        },
-      }),
-    });
-
-    expect(screen.getByText(summary(1, 0, 0))).toBeInTheDocument();
-    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
-  });
-
-  it('says so plainly when a proposal changes nothing at all', () => {
-    renderCard({
-      proposal: proposal({
-        payload: {
-          kind: 'replace_storyboard',
-          sceneOrder: ['proposed-1'],
-          scenes: { 'proposed-1': editableScene() },
-        },
-      }),
-    });
-
-    expect(screen.getByText('conversation.creativeStudio.brief.proposalNoChanges')).toBeInTheDocument();
-    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
-  });
-
-  it('renders the diff main froze rather than recomputing one against the current script', () => {
-    renderCard({
-      // The script has moved on, so a recompute here would be a guess; main's frozen diff is the truth.
-      project: project({ revision: 9 }),
-      proposal: proposal({
-        diff: { added: 0, removed: 0, changed: [{ position: 2, fields: ['onScreenText'] }] },
-      }),
-    });
-
-    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
-    expect(screen.getByText(sceneChange(2, 'onScreenText'))).toBeInTheDocument();
-  });
-
-  it('admits the summary is unknowable for a legacy proposal the script has already outrun', () => {
-    renderCard({ project: project({ revision: 9 }), proposal: proposal() });
-
-    expect(screen.getByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).toBeInTheDocument();
-    expect(screen.queryByText(/proposalSummary/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/proposalSceneChange/)).not.toBeInTheDocument();
-  });
-
-  it('still computes a legacy proposal locally while the script stands where it was drafted', () => {
-    renderCard({ proposal: proposal({ diff: undefined }) });
-
-    expect(screen.getByText(summary(0, 0, 1))).toBeInTheDocument();
-    expect(screen.getByText(sceneChange(1, 'narration'))).toBeInTheDocument();
-  });
-
-  it('ignores a malformed diff from the boundary instead of rendering it', () => {
-    renderCard({
-      project: project({ revision: 9 }),
-      proposal: proposal({ diff: { added: 1, removed: 0 } as StudioProposal['diff'] }),
-    });
-
-    expect(screen.getByText('conversation.creativeStudio.brief.proposalDiffUnavailable')).toBeInTheDocument();
-  });
-
-  it('lists the proposed scene titles', () => {
-    renderCard({
-      proposal: proposal({
-        payload: {
-          kind: 'replace_storyboard',
-          sceneOrder: ['proposed-1', 'proposed-2'],
-          scenes: { 'proposed-1': editableScene(), 'proposed-2': editableScene({ title: 'Finale' }) },
-        },
-      }),
-    });
-
-    expect(screen.getByText('Opening')).toBeInTheDocument();
-    expect(screen.getByText('Finale')).toBeInTheDocument();
-  });
-
-  it('accept invokes acceptProposal and removes the resolved card', async () => {
+  it('renders the complete proposal ID as labelled, selectable code with bidirectional isolation', () => {
     renderCard();
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
-
-    await waitFor(() =>
-      expect(acceptProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
-    );
-    expect(screen.queryByText('conversation.creativeStudio.brief.proposalTitle')).not.toBeInTheDocument();
+    const id = screen.getByText('proposal_1');
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.proposalId')).toBeVisible();
+    expect(id.tagName).toBe('BDI');
+    expect(id).toHaveAttribute('dir', 'auto');
+    expect(id.parentElement?.tagName).toBe('CODE');
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveTextContent('proposal_1');
   });
 
-  it('stale accept fails closed and offers re-propose', async () => {
-    const staleAccept = vi.fn(
-      async (): Promise<StudioCommandResult<StudioProposalAcceptance>> => ({
-        ok: false,
-        error: { code: 'stale_project', messageKey: 'conversation.creativeStudio.errors.staleProject' },
+  it('shows full main-derived Brief, Story, and Shooting script text with human subject/field labels', () => {
+    renderCard();
+    openReview();
+
+    expect(screen.getByText('Ming and Mei reunite.')).toBeVisible();
+    expect(screen.getByText('Ming and Mei reconcile over midnight tea.')).toBeVisible();
+    expect(screen.getByText('Ming finds Mei at their old dai pai dong.')).toBeVisible();
+    expect(screen.getByText('Slow dolly in. Ming steps beneath the red awning; Mei looks up.')).toBeVisible();
+    expect(screen.getByText(/workspace\.proposals\.subject\.beat/)).toHaveTextContent('Reunion');
+    expect(screen.getByText(/workspace\.proposals\.subject\.shot/)).not.toHaveTextContent('shot_arrival');
+    expect(screen.getByText(/workspace\.proposals\.ownerBeat/)).toHaveTextContent('Reunion');
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.story')).toBeVisible();
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.shootingScript')).toBeVisible();
+  });
+
+  it('shows a reference-prompt proposal as an exact human-labelled before/after review', () => {
+    const value = proposal({
+      status: 'ready',
+      groups: [
+        {
+          change: 'edited',
+          subject: {
+            kind: 'reference',
+            id: 'reference_ming',
+            title: 'Ming',
+            position: 1,
+            ownerBeatId: null,
+            ownerBeatTitle: null,
+          },
+          fields: [
+            {
+              key: 'prompt',
+              before: { kind: 'text', value: 'Ming beneath the red awning.' },
+              after: { kind: 'text', value: 'Ming in his charcoal raincoat beneath the red awning.' },
+            },
+          ],
+        },
+      ],
+    });
+    value.payload = {
+      kind: 'mutation_batch',
+      operations: [
+        {
+          kind: 'set_reference_prompt',
+          referenceId: 'reference_ming',
+          prompt: 'Ming in his charcoal raincoat beneath the red awning.',
+        },
+      ],
+    };
+    const { container } = renderCard(value);
+    openReview();
+
+    expect(screen.getByText(/workspace\.proposals\.subject\.reference/)).toHaveTextContent('Ming');
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.field.prompt')).toBeVisible();
+    expect(screen.getByText('Ming beneath the red awning.')).toBeVisible();
+    expect(screen.getByText('Ming in his charcoal raincoat beneath the red awning.')).toBeVisible();
+    expect(container).not.toHaveTextContent('set_reference_prompt');
+    expect(container).not.toHaveTextContent('reference_ming');
+  });
+
+  it('never substitutes raw mutation operation names for the semantic review', () => {
+    const { container } = renderCard();
+    openReview();
+
+    expect(container).not.toHaveTextContent('set_brief');
+    expect(container).not.toHaveTextContent('add_beat');
+    expect(container).not.toHaveTextContent('mutation_batch');
+    expect(container).not.toHaveTextContent('project_1');
+    expect(container).not.toHaveTextContent('beat_reunion');
+    expect(container).not.toHaveTextContent('shot_arrival');
+    expect(container.querySelector('[data-proposal-subject-id="beat_reunion"]')).not.toBeNull();
+    expect(container.querySelector('[data-proposal-change="added"]')).not.toBeNull();
+  });
+
+  it('reserves before/after labels for edits and renders additions as direct values', () => {
+    const groups = reviewGroups();
+    groups[1]!.fields[1]!.after = { kind: 'text', value: '' };
+    renderCard(proposal({ status: 'ready', groups }));
+    openReview();
+
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.before')).toHaveLength(1);
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.after')).toHaveLength(1);
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.emptyAuthoredField')).toBeVisible();
+  });
+
+  it('resolves reorder identifiers to the human titles already present in the review', () => {
+    const groups = reviewGroups();
+    groups.unshift({
+      change: 'reordered',
+      subject: {
+        kind: 'project',
+        id: 'project_1',
+        title: 'Night market film',
+        position: null,
+        ownerBeatId: null,
+        ownerBeatTitle: null,
+      },
+      fields: [
+        {
+          key: 'order',
+          before: { kind: 'text_list', values: [] },
+          after: { kind: 'text_list', values: ['beat_reunion'] },
+        },
+      ],
+    });
+    const { container } = renderCard(proposal({ status: 'ready', groups }));
+    openReview();
+
+    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).toHaveTextContent('Reunion');
+    expect(container).not.toHaveTextContent('beat_reunion');
+    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).not.toBeNull();
+  });
+
+  it('shows forbidden terms in the exact pinned-rule review', () => {
+    renderCard(
+      proposal({
+        status: 'ready',
+        groups: [
+          {
+            change: 'edited',
+            subject: {
+              kind: 'project',
+              id: 'project_1',
+              title: 'Night market film',
+              position: null,
+              ownerBeatId: null,
+              ownerBeatTitle: null,
+            },
+            fields: [
+              {
+                key: 'rules',
+                before: { kind: 'rule_list', values: [] },
+                after: {
+                  kind: 'rule_list',
+                  values: [{ text: 'Keep brands fictional.', forbiddenTerms: ['Acme', 'Globex'] }],
+                },
+              },
+            ],
+          },
+        ],
       })
     );
-    const currentProject = project();
-    render(
+    openReview();
+
+    expect(screen.getByText('Keep brands fictional.')).toBeVisible();
+    expect(screen.getByText(/conversation\.creativeStudio\.rules\.proposalTerms/)).toHaveTextContent('Acme, Globex');
+  });
+
+  it('disables Accept and explains a stale or reducer-rejected review while keeping Reject available', () => {
+    const { rerender } = renderCard(proposal({ status: 'stale', groups: [], baseRevision: 7, currentRevision: 8 }));
+
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewStale');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).not.toHaveClass('arco-btn-primary');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeEnabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toHaveClass('arco-btn-primary');
+
+    rerender(
       <DirectorProposalCard
-        project={currentProject}
-        proposal={proposal()}
-        editor={editor()}
-        acceptProposal={staleAccept}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
+        project={project()}
+        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null })}
+        pending={false}
+        onAccept={onAccept}
+        onReject={onReject}
       />
     );
-
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
-
-    expect(await screen.findByText('conversation.creativeStudio.brief.proposalStale')).toBeInTheDocument();
-    expect(currentProject.revision).toBe(4);
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalRepropose' }));
-    expect(repropose).toHaveBeenCalledOnce();
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewUnavailable');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
   });
 
-  it('reject invokes rejectProposal and removes the resolved card', async () => {
-    renderCard();
+  it('honors an independent dirty-draft acceptance blocker without hiding review text', () => {
+    renderCard(proposal(), {
+      acceptBlockedMessageKey: 'conversation.creativeStudio.workspace.proposals.saveBeforeApply',
+    });
+    openReview();
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalReject' }));
-
-    await waitFor(() =>
-      expect(rejectProposal).toHaveBeenCalledWith({ projectId: 'project-1', proposalId: 'proposal-1' })
-    );
-    expect(screen.queryByText('conversation.creativeStudio.brief.proposalTitle')).not.toBeInTheDocument();
+    expect(screen.getByText('Ming finds Mei at their old dai pai dong.')).toBeVisible();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.saveBeforeApply');
   });
 
-  it('flushes unsaved drafts first and refuses acceptance when the flush fails', async () => {
-    const flushAllSceneDrafts = vi.fn(async () => ({ failed: ['scene-1'], dirtied: [] }));
-    render(
+  it('renders exact refreshing, unavailable, and stale authority states without losing the card', async () => {
+    const { rerender } = renderCard(proposal(), { authorityState: 'refreshing', onRequestUpdated });
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'refreshing');
+    expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.refreshing');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
+
+    rerender(
       <DirectorProposalCard
         project={project()}
         proposal={proposal()}
-        editor={editor({ hasUnsavedSceneDrafts: true, flushAllSceneDrafts })}
-        acceptProposal={acceptProposal}
-        rejectProposal={rejectProposal}
-        onRepropose={repropose}
+        pending={false}
+        authorityState='unavailable'
+        authorityVerified={false}
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
       />
     );
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveAttribute('data-proposal-state', 'unavailable');
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.authorityUnavailable');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeDisabled();
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeDisabled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' }));
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={proposal({ status: 'unavailable', groups: [], reason: 'reducer_rejected', refusal: null })}
+        pending={false}
+        authorityState='unavailable'
+        authorityVerified
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+      />
+    );
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.proposals.reviewUnavailable');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    ).toBeEnabled();
 
-    expect(await screen.findByText('conversation.creativeStudio.brief.proposalFlushRefused')).toBeInTheDocument();
-    expect(flushAllSceneDrafts).toHaveBeenCalledOnce();
-    expect(acceptProposal).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'conversation.creativeStudio.brief.proposalAccept' })).toBeEnabled();
+    const stale = proposal({ status: 'stale', groups: [], baseRevision: 7, currentRevision: 8 });
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={stale}
+        pending={false}
+        authorityState='stale'
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.requestUpdated' })
+    );
+    await waitFor(() => expect(onRequestUpdated).toHaveBeenCalledWith('proposal_1', false));
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' })
+    ).toBeEnabled();
+  });
+
+  it('explains owned fixed work truthfully and offers bounded direct Shot editing without accepting', () => {
+    const fixedProject = projectWithShot();
+    fixedProject.shots.shot_1!.assetIds = ['asset_1'];
+    const onEditShotsDirectly = vi.fn();
+    renderCard(
+      proposal({
+        status: 'unavailable',
+        groups: [],
+        reason: 'reducer_rejected',
+        refusal: {
+          reasonCode: 'dependency_blocked',
+          operationKind: 'apply_coverage',
+          subjects: [
+            {
+              subject: {
+                kind: 'shot',
+                id: 'shot_1',
+                title: null,
+                position: 1,
+                ownerBeatId: 'beat_1',
+                ownerBeatTitle: 'Arrival',
+              },
+              fixedReasons: ['owned_asset'],
+            },
+          ],
+        },
+      }),
+      { project: fixedProject, onEditShotsDirectly }
+    );
+
+    const alert = screen.getByRole('alert');
+    expect(
+      screen.getByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverageFixedWork')
+    ).toBeVisible();
+    expect(screen.queryByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverage')).toBeNull();
+    expect(alert).toHaveTextContent('workspace.proposals.refusal.fixedReason.owned_asset');
+    expect(alert).not.toHaveTextContent('shot_1');
+    expect(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    ).toBeDisabled();
+
+    fireEvent.click(
+      screen.getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.proposals.refusal.editShotsDirectly',
+      })
+    );
+    expect(onEditShotsDirectly).toHaveBeenCalledOnce();
+    expect(onEditShotsDirectly).toHaveBeenCalledWith('beat_1', ['shot_1']);
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('uses Shooting-script-specific coverage guidance when that is an exact fixed reason', () => {
+    const fixedProject = projectWithShot('An existing authored Shot.');
+    renderCard(
+      proposal({
+        status: 'unavailable',
+        groups: [],
+        reason: 'reducer_rejected',
+        refusal: {
+          reasonCode: 'dependency_blocked',
+          operationKind: 'apply_coverage',
+          subjects: [
+            {
+              subject: {
+                kind: 'shot',
+                id: 'shot_1',
+                title: null,
+                position: 1,
+                ownerBeatId: 'beat_1',
+                ownerBeatTitle: 'Arrival',
+              },
+              fixedReasons: ['shooting_script'],
+            },
+          ],
+        },
+      }),
+      { project: fixedProject }
+    );
+
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverage')).toBeVisible();
+    expect(
+      screen.queryByText('conversation.creativeStudio.workspace.proposals.refusal.applyCoverageFixedWork')
+    ).toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.refusal.fixedReason.shooting_script'
+    );
+  });
+
+  it('scopes dirty-draft recovery to saving workspace edits or reviewing rule edits', async () => {
+    const { rerender } = renderCard(proposal(), {
+      draftBlocker: 'workspace',
+      onRequestUpdated,
+      onReviewRuleDrafts,
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.saveAndRequestUpdated' })
+    );
+    await waitFor(() => expect(onRequestUpdated).toHaveBeenCalledWith('proposal_1', true));
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={{
+          ...proposal(),
+          payload: { kind: 'pin_rule', rule: { text: 'Keep brands fictional.', predicate: null } },
+        }}
+        pending={false}
+        draftBlocker='rules'
+        onAccept={onAccept}
+        onReject={onReject}
+        onRequestUpdated={onRequestUpdated}
+        onReviewRuleDrafts={onReviewRuleDrafts}
+      />
+    );
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reviewRuleDrafts' })
+    );
+    expect(onReviewRuleDrafts).toHaveBeenCalledOnce();
+    expect(screen.getByRole('status')).toHaveTextContent('workspace.proposals.reviewRuleDraftsFirst');
+  });
+
+  it('renders list and placement edge states, empty reviews, decision errors, and hides decided records', () => {
+    const edgeGroups: StudioProposalReviewGroupV2[] = [
+      {
+        change: 'reordered',
+        subject: {
+          kind: 'shot',
+          id: 'shot_edge',
+          title: null,
+          position: null,
+          ownerBeatId: 'beat_edge',
+          ownerBeatTitle: null,
+        },
+        fields: [
+          {
+            key: 'order',
+            before: { kind: 'text_list', values: ['shot_before'] },
+            after: { kind: 'text_list', values: [] },
+          },
+          {
+            key: 'placement',
+            before: {
+              kind: 'placement',
+              value: 'bin',
+              position: null,
+              ownerBeatId: 'beat_edge',
+              ownerBeatTitle: null,
+            },
+            after: null,
+          },
+        ],
+      },
+    ];
+    const { rerender } = renderCard(proposal({ status: 'ready', groups: edgeGroups }), {
+      errorMessageKey: 'conversation.creativeStudio.workspace.errors.storage',
+    });
+    openReview();
+
+    expect(screen.queryByText('shot_before')).not.toBeInTheDocument();
+    expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.emptyAuthoredField')).toHaveLength(1);
+    expect(screen.queryByText(/beat_edge/)).not.toBeInTheDocument();
+    expect(document.querySelector('[data-owner-beat-id="beat_edge"]')).not.toBeNull();
+    expect(screen.getByRole('alert')).toHaveTextContent('workspace.errors.storage');
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={proposal({ status: 'ready', groups: [] })}
+        pending={false}
+        onAccept={onAccept}
+        onReject={onReject}
+      />
+    );
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.noChanges')).toBeVisible();
+
+    rerender(
+      <DirectorProposalCard
+        project={project()}
+        proposal={{ ...proposal(), status: 'accepted', decidedAt: timestamp }}
+        pending={false}
+        onAccept={onAccept}
+        onReject={onReject}
+      />
+    );
+    expect(screen.queryByTestId('studio-proposal-proposal_1')).not.toBeInTheDocument();
+  });
+
+  it('keeps Accept and Reject as the only deterministic decision actions', async () => {
+    renderCard();
+    const card = within(screen.getByTestId('studio-proposal-proposal_1'));
+
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' }));
+    fireEvent.click(card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.reject' }));
+    await waitFor(() => {
+      expect(onAccept).toHaveBeenCalledWith('proposal_1');
+      expect(onReject).toHaveBeenCalledWith('proposal_1');
+    });
+  });
+
+  it('shows a bounded paid-recovery review and exposes only its explicit spend action', async () => {
+    const onPaidRecoveryAction = vi.fn(async () => undefined);
+    renderCard(paidRecoveryProposal(), {
+      project: projectWithShot(),
+      onPaidRecoveryAction,
+    });
+    const card = within(screen.getByTestId('studio-proposal-proposal_1'));
+
+    expect(card.getByTestId('studio-paid-recovery-review')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.board.shot.blocker.cause.generationTimeout'
+    );
+    expect(card.getByTestId('studio-paid-recovery-review')).toHaveTextContent('beat=Arrival,shot=2');
+    expect(
+      card.getByTestId('studio-paid-recovery-review').querySelector('[data-paid-recovery-price] bdi')
+    ).toHaveTextContent('$1.25');
+    expect(card.queryByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })).toBeNull();
+
+    fireEvent.click(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.confirm' })
+    );
+    await waitFor(() => expect(onPaidRecoveryAction).toHaveBeenCalledWith('proposal_1'));
+    expect(onAccept).not.toHaveBeenCalled();
+  });
+
+  it('requires an expired persisted paid-recovery quote to be refreshed before it can be confirmed', async () => {
+    const onPaidRecoveryAction = vi.fn(async () => undefined);
+    renderCard(paidRecoveryProposal('2020-08-24T01:00:00.000Z'), { onPaidRecoveryAction });
+    const card = within(screen.getByTestId('studio-proposal-proposal_1'));
+
+    expect(card.getByRole('alert')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.paidRecovery.expired'
+    );
+    expect(
+      card.queryByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.confirm' })
+    ).toBeNull();
+    fireEvent.click(
+      card.getByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.paidRecovery.refresh' })
+    );
+    await waitFor(() => expect(onPaidRecoveryAction).toHaveBeenCalledWith('proposal_1'));
+    expect(onAccept).not.toHaveBeenCalled();
   });
 });
