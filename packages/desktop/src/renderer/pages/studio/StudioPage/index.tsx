@@ -35,10 +35,10 @@ import {
   type StudioRendererProposalV2,
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
-import { StudioLibrary } from './components/Library';
-import { DirectorProposals, type DirectorProposalsProps } from './components/Shell/DirectorProposals';
-import type { DirectorProposalChatIntent } from './components/Workspace/DirectorRail';
-import { createStudioDirectorToolOutcomeInterpreter } from './components/Workspace/DirectorRail/turnRecap';
+import { StudioLibrary } from '../components/Library';
+import { DirectorProposals, type DirectorProposalsProps } from '../components/Shell/DirectorProposals';
+import type { DirectorProposalChatIntent } from '../components/Workspace/DirectorRail';
+import { createStudioDirectorToolOutcomeInterpreter } from '../components/Workspace/DirectorRail/turnRecap';
 import {
   SpendGateModal,
   boardGateDraft,
@@ -81,16 +81,16 @@ import {
   type WorkspaceReviewedOutput,
   type WorkspaceDirectorDraftRequest,
   type WorkspaceShellHandle,
-} from './components/Workspace';
+} from '../components/Workspace';
 import {
   generationBlockForItem,
   generationBlockGroupsForItems,
   generationCapabilityIsCurrent,
-} from './components/Workspace/Gate/generationBlockers';
-import { deriveReferenceRemovalBlockers } from './components/Workspace/Views/References/referenceRemovalBlockers';
-import { useStudioProject } from './hooks/useStudioProject';
-import { StudioPlaybackAudioProvider } from './hooks/useStudioPlaybackAudio';
-import { StudioShotAudioAnalysisProvider } from './hooks/useStudioShotAudioAnalysis';
+} from '../components/Workspace/Gate/generationBlockers';
+import { deriveReferenceRemovalBlockers } from '../components/Workspace/Views/References/referenceRemovalBlockers';
+import { useStudioProject } from '../hooks/useStudioProject';
+import { StudioPlaybackAudioProvider } from '../hooks/useStudioPlaybackAudio';
+import { StudioShotAudioAnalysisProvider } from '../hooks/useStudioShotAudioAnalysis';
 import {
   parseStudioView,
   rememberStudioView,
@@ -100,8 +100,8 @@ import {
   studioViewPath,
   type StudioViewReadiness,
   type StudioView,
-} from './studioPhaseRoute';
-import styles from './StudioPage.module.css';
+} from '../studioPhaseRoute';
+import styles from '../StudioPage.module.css';
 
 type StudioReferenceDecisionIntent = { kind: 'rejected' } | { kind: 'generation_gate' };
 

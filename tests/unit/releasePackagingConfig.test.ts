@@ -671,7 +671,7 @@ describe('release packaging configuration', () => {
       testReadDesignDoc: legFor('docs/design/creative-studio-2-programme-plan.md'),
       testReadGateRecord: legFor('docs/design/creative-studio-2-gates/phase-1.md'),
       testFixtureCorpus: legFor('tests/eval/fixture/corpus/quy-dinh-bao-mat-thong-tin.md'),
-      sourceFile: legFor('packages/desktop/src/renderer/pages/studio/StudioPage.tsx'),
+      sourceFile: legFor('packages/desktop/src/renderer/pages/studio/StudioPage/index.tsx'),
       prosePlusSource: legFor('docs/prds/x.md', 'packages/desktop/src/main.ts'),
     };
 
