@@ -182,13 +182,15 @@ A Piece has one immutable id and one mutable human-facing handle. Handles are Un
 slugs. One Main-owned normalizer has two explicit modes:
 
 - **derive** for a new generated/imported Piece: preserve letters, marks, and numbers from every
-  script; fold whitespace and ordinary punctuation to `_`; discard unsafe controls/invisible
-  spoofing characters and path separators; truncate safely to both scalar and UTF-8 bounds; use the
+  script; preserve Persian ZWNJ (U+200C) only when directly between a supported fa-IR dual-joining
+  letter and a supported fa-IR right- or dual-joining letter; fold whitespace and ordinary
+  punctuation to `_`; discard unsafe controls/other invisible spoofing characters and path
+  separators; truncate safely to both scalar and UTF-8 bounds without orphaning that joiner; use the
   locale-independent fallback `piece`; and add a bounded collision suffix;
 - **rename** for text a person explicitly submits: apply the same Unicode normalization and ordinary
-  punctuation folding, but reject unsafe controls/invisibles/path separators, an empty result,
-  over-bound text, or a collision instead of silently deleting, truncating, falling back, or adding a
-  suffix.
+  punctuation folding, but reject ZWJ, bidi controls, other unsafe controls/invisibles/path
+  separators, an ineffective or non-adjacent ZWNJ, an empty result, over-bound text, or a collision
+  instead of silently deleting, truncating, falling back, or adding a suffix.
 
 Both modes resolve against current handles, retained aliases, and active reservations. Render the
 handle inside a bidi-isolated element with `dir="auto"`; do not force `dir="ltr"` on Persian, Arabic,
@@ -214,6 +216,11 @@ Pilot 1 has no public `create_piece` or `delete_piece` mutation. Creation belong
 confirm/import transactions above. Deletion semantics require a later product ruling because Jobs,
 authorizations, assets, and provenance must not be orphaned. Presentation removal is not byte
 deletion and must not be disguised as it.
+
+The 96-Piece ceiling is therefore an explicit Pilot project-lifetime limit. It is never an eviction
+policy. Main refuses a 97th create or import before quote or spend, rechecks capacity atomically at
+commit, and the canvas directs the person to start another project. Completed replacement,
+presentation removal, and superseded provenance remain a separately versioned Phase 6 contract.
 
 Each asset has exactly one legal owner kind, with project-owned audio treated separately when that
 later modality returns. For a Piece image:

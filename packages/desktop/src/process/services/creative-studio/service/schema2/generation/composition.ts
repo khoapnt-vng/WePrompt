@@ -46,14 +46,29 @@ const ADAPTER_IDS: ReadonlySet<StudioProviderAdapterId> = new Set([
 
 export type StudioGenerationCompositionInputV2 = Omit<StudioGenerationCompositionInputSnapshotV2, 'schemaVersion'>;
 
-const assertSafeId: (value: unknown, field: string) => asserts value is string = (value, field) => {
+// Schema 5 historically relied on RegExp.test coercion here. Keep that observable behavior frozen;
+// schema-6 inputs use the strict guard below instead.
+const assertSafeIdV2 = (value: string, field: string): void => {
+  if (!SAFE_STUDIO_ID.test(value)) throw new TypeError(`${field} must be a safe Studio ID`);
+};
+
+const assertSafeIdV3: (value: unknown, field: string) => asserts value is string = (value, field) => {
   if (typeof value !== 'string' || !SAFE_STUDIO_ID.test(value)) {
     throw new TypeError(`${field} must be a safe Studio ID`);
   }
 };
 
-const cloneRoute = (route: StudioMediaModelRef): StudioMediaModelRef => {
-  assertSafeId(route.providerId, 'route.providerId');
+const cloneRouteV2 = (route: StudioMediaModelRef): StudioMediaModelRef => {
+  assertSafeIdV2(route.providerId, 'route.providerId');
+  if (!ADAPTER_IDS.has(route.adapterId)) throw new TypeError('route.adapterId is invalid');
+  if (route.model.length === 0 || route.model !== route.model.trim() || route.model.length > 256) {
+    throw new TypeError('route.model must be a nonempty trimmed model name');
+  }
+  return { providerId: route.providerId, adapterId: route.adapterId, model: route.model };
+};
+
+const cloneRouteV3 = (route: StudioMediaModelRef): StudioMediaModelRef => {
+  assertSafeIdV3(route.providerId, 'route.providerId');
   if (typeof route.adapterId !== 'string' || !ADAPTER_IDS.has(route.adapterId)) {
     throw new TypeError('route.adapterId is invalid');
   }
@@ -110,8 +125,8 @@ const cloneReferenceInputs = (
   const referenceIds = new Set<string>();
   const assetIds = new Set<string>();
   return inputs.map((input) => {
-    assertSafeId(input.referenceId, 'referenceInputs[].referenceId');
-    assertSafeId(input.assetId, 'referenceInputs[].assetId');
+    assertSafeIdV2(input.referenceId, 'referenceInputs[].referenceId');
+    assertSafeIdV2(input.assetId, 'referenceInputs[].assetId');
     if (input.kind !== 'character' && input.kind !== 'background') {
       throw new TypeError('referenceInputs[].kind is invalid');
     }
@@ -229,15 +244,15 @@ export const composeStudioGenerationV2 = (input: StudioGenerationCompositionInpu
   }
   const source = cloneSource(input.source);
   if (source.kind === 'shot') {
-    assertSafeId(source.beatId, 'source.beatId');
-    assertSafeId(source.shotId, 'source.shotId');
+    assertSafeIdV2(source.beatId, 'source.beatId');
+    assertSafeIdV2(source.shotId, 'source.shotId');
     if (source.story.length > STUDIO_MAX_STORY_LENGTH) throw new RangeError('story exceeds the Studio bound');
     if (source.shootingScript.length > STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) {
       throw new RangeError('shootingScript exceeds the Studio bound');
     }
     if (input.purpose === 'reference_image') throw new TypeError('reference_image requires a reference source');
   } else {
-    assertSafeId(source.referenceId, 'source.referenceId');
+    assertSafeIdV2(source.referenceId, 'source.referenceId');
     if (source.prompt.length === 0 || source.prompt.length > STUDIO_MAX_REFERENCE_PROMPT_LENGTH) {
       throw new RangeError('reference prompt is empty or exceeds the Studio bound');
     }
@@ -261,7 +276,7 @@ export const composeStudioGenerationV2 = (input: StudioGenerationCompositionInpu
     referenceInputs: cloneReferenceInputs(input.referenceInputs),
     aspectRatio: input.aspectRatio,
     resolution: input.resolution,
-    route: cloneRoute(input.route),
+    route: cloneRouteV2(input.route),
     boardStyle: input.boardStyle,
     instructionProfile: derivedProfile,
   };
@@ -553,7 +568,7 @@ export const composeStudioPieceGenerationV3 = (
     throw new TypeError('Piece source is invalid');
   }
   if (snapshot.source.kind !== 'piece') throw new TypeError('piece_image requires a Piece source');
-  assertSafeId(snapshot.source.pieceId, 'source.pieceId');
+  assertSafeIdV3(snapshot.source.pieceId, 'source.pieceId');
   if (!validatePieceSettingsV3(snapshot.source.settings)) throw new TypeError('Piece photo settings are invalid');
   const words = normalizeStudioPieceWordsV3(snapshot.source.words);
   if (!isDenseArrayV3(snapshot.conditioningInputs, 0)) {
@@ -561,7 +576,7 @@ export const composeStudioPieceGenerationV3 = (
   }
   if (snapshot.purpose !== 'piece_image') throw new TypeError('Piece sources require piece_image');
   if (!isSafePieceModelV3(snapshot.route.model)) throw new TypeError('Piece photo route model is invalid');
-  const route = cloneRoute(snapshot.route);
+  const route = cloneRouteV3(snapshot.route);
   const profile = deriveStudioPieceInstructionProfileV3(route);
   if (snapshot.instructionProfile !== profile) throw new TypeError('instructionProfile is not canonical');
   const settings = {

@@ -10,9 +10,11 @@ import { describe, expect, it } from 'vitest';
 import type { StudioPiecePhotoSettingsV3 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
+  createStudioAutomaticReferenceRetryJobId,
   createStudioAuthoringFingerprintV3,
   createStudioPieceQuotedGenerationIdV3,
   createStudioQuotedGenerationId,
+  studioGenerationTargetKey,
   studioPieceGenerationTargetKeyV3,
 } from '@/process/services/creative-studio/service/schema2/generation/submissionIdentity';
 
@@ -102,6 +104,34 @@ describe('createStudioQuotedGenerationId', () => {
     );
   });
 
+  it('preserves the schema-5 ID coercion behavior from before the schema-6 helpers were added', () => {
+    expect(studioGenerationTargetKey({ kind: 'shot', shotId: 102 } as never)).toBe('shot:102');
+    expect(
+      createStudioQuotedGenerationId({
+        projectId: 101,
+        projectRevision: 7,
+        target: { kind: 'shot', shotId: 102 },
+        purpose: 'video_take',
+      } as never)
+    ).toBe(
+      createStudioQuotedGenerationId({
+        projectId: '101',
+        projectRevision: 7,
+        target: { kind: 'shot', shotId: '102' },
+        purpose: 'video_take',
+      })
+    );
+    expect(
+      createStudioAutomaticReferenceRetryJobId({ authorizationId: 201, itemId: 202, idempotencyKey: 203 } as never)
+    ).toBe(
+      createStudioAutomaticReferenceRetryJobId({
+        authorizationId: '201',
+        itemId: '202',
+        idempotencyKey: '203',
+      })
+    );
+  });
+
   it.each([
     [
       {
@@ -177,6 +207,14 @@ describe('inactive Piece identities and authoring fingerprint', () => {
         projectId: { toString: () => 'project_1' },
       } as never)
     ).toThrow(TypeError);
+    for (const malformed of [
+      { ...base, projectId: 101 },
+      { ...base, reservationId: 102 },
+      { ...base, quoteId: 103 },
+      { ...base, target: { ...base.target, pieceId: 104 } },
+    ]) {
+      expect(() => createStudioPieceQuotedGenerationIdV3(malformed as never)).toThrow(TypeError);
+    }
   });
 
   it('accepts a full project, ignores declared runtime fields, and rejects undeclared fields', () => {

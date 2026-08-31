@@ -45,6 +45,14 @@ const MARK = /^\p{M}$/u;
 const ORDINARY_SEPARATOR = /^[\p{P}\p{Z}]$/u;
 const UNSAFE = /^[\p{Cc}\p{Cf}\p{Cs}\p{Co}]$/u;
 const DEFAULT_IGNORABLE = /^\p{Default_Ignorable_Code_Point}$/u;
+const PERSIAN_ZWNJ = '\u200C';
+
+// UAX #31 ContextJ rule A1 admits ZWNJ only after a Left/Dual_Joining character
+// and before a Right/Dual_Joining character. These audited sets intentionally cover
+// only the fa-IR alphabet supported by the Pilot. Direct adjacency is required: marks
+// beside the joiner, ZWJ, bidi controls, and every other default-ignorable stay unsafe.
+const PERSIAN_DUAL_JOINING = new Set('بپتثجچحخسشصضطظعغفقکگلمنهی');
+const PERSIAN_RIGHT_JOINING = new Set('ادذرزژو');
 const MAX_NAMESPACE_ENTRIES = STUDIO_MAX_PIECES_V3 * (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 2);
 
 const utf8Length = (value: string): number => Buffer.byteLength(value, 'utf8');
@@ -56,6 +64,18 @@ const appendSeparator = (parts: string[]): void => {
   if (parts.length > 0 && parts.at(-1) !== '_') parts.push('_');
 };
 
+const isContextualPersianZwnj = (scalars: readonly string[], index: number): boolean => {
+  const preceding = scalars[index - 1];
+  const following = scalars[index + 1];
+  return (
+    scalars[index] === PERSIAN_ZWNJ &&
+    preceding !== undefined &&
+    following !== undefined &&
+    PERSIAN_DUAL_JOINING.has(preceding) &&
+    (PERSIAN_DUAL_JOINING.has(following) || PERSIAN_RIGHT_JOINING.has(following))
+  );
+};
+
 const normalizedHandleBody = (input: string, mode: StudioPieceHandleModeV3): string => {
   let normalized: string;
   try {
@@ -64,9 +84,19 @@ const normalizedHandleBody = (input: string, mode: StudioPieceHandleModeV3): str
     return fail('invalid_input');
   }
 
+  const scalars = [...normalized];
   const parts: string[] = [];
   let markHasBase = false;
-  for (const scalar of normalized) {
+  for (const [index, scalar] of scalars.entries()) {
+    if (scalar === PERSIAN_ZWNJ) {
+      if (isContextualPersianZwnj(scalars, index)) {
+        parts.push(scalar);
+        markHasBase = false;
+      } else if (mode === 'rename') {
+        return fail('unsafe_character');
+      }
+      continue;
+    }
     if (scalar === '/' || scalar === '\\' || UNSAFE.test(scalar) || DEFAULT_IGNORABLE.test(scalar)) {
       if (mode === 'rename') return fail('unsafe_character');
       continue;
@@ -136,9 +166,16 @@ export const truncateStudioPieceHandleV3 = (value: string, suffix = ''): string 
   }
 
   const clusters: string[] = [];
+  let pendingJoiner = '';
   for (const scalar of value) {
-    if (MARK.test(scalar) && clusters.length > 0) clusters[clusters.length - 1] += scalar;
-    else clusters.push(scalar);
+    if (scalar === PERSIAN_ZWNJ) {
+      pendingJoiner = scalar;
+    } else if (MARK.test(scalar) && clusters.length > 0 && pendingJoiner.length === 0) {
+      clusters[clusters.length - 1] += scalar;
+    } else {
+      clusters.push(`${pendingJoiner}${scalar}`);
+      pendingJoiner = '';
+    }
   }
   const retained: string[] = [];
   let scalars = suffixScalars;

@@ -124,6 +124,13 @@ replacement, edited retry wording/settings, regeneration of a completed Piece, o
 imported Piece; those need a later reviewed product contract. A person who wants different wording
 uses Create photo and receives a sibling Piece.
 
+That sibling model makes the 96-Piece bound an explicit Pilot project-lifetime capacity, not an
+eviction threshold. Main must refuse a 97th generated or imported Piece before admitting a prepared
+session, exposing a quote, or spending, and must recheck the same bound under the project queue at
+confirmation/import commit. The renderer explains that the Pilot project is full and directs the
+person to start another project. Raising the bound would only postpone the same limit; completed
+replacement, presentation removal, and retained superseded provenance remain Phase 6 decisions.
+
 Pilot 1 renders each Piece as a one-member stills block. The later canvas grammar's allowance for a
 stills block with up to twelve members means an aggregation of up to twelve distinct Pieces; it does
 not change the invariant that one Piece owns exactly one photograph.
@@ -165,10 +172,13 @@ with explicit `derive` and `rename` modes. Their common pipeline:
 1. normalize with Unicode NFKC;
 2. apply locale-independent Unicode lowercase;
 3. retain Unicode letters, combining marks, and decimal numbers from every script;
-4. replace runs of whitespace or ordinary punctuation with one underscore and trim edge underscores;
+4. retain Persian ZWNJ (U+200C) only in the UAX #31 A1 context used by the supported fa-IR
+   alphabet: directly after a dual-joining letter and directly before a right- or dual-joining
+   letter; ZWJ, bidi controls, adjacent combining marks, and all other invisibles remain unsafe;
+5. replace runs of whitespace or ordinary punctuation with one underscore and trim edge underscores;
    and
-5. measure both Unicode scalar count and UTF-8 byte count without cutting a scalar or combining
-   sequence.
+6. measure both Unicode scalar count and UTF-8 byte count without cutting a scalar, combining
+   sequence, or contextual joiner from its following letter.
 
 `derive` discards unsafe controls, bidi/invisible spoofing characters, and `/` or `\` path
 separators; safely truncates to the documented bounds; uses locale-independent `piece` when nothing
@@ -181,7 +191,8 @@ stored form. `priorHandles` is dense, unique, and bounded. No alias is silently 
 documented limit is reached, another rename is refused unless it returns to an existing alias.
 Immutable Piece ids, not aliases, remain the permanent provenance reference. Tests must cover
 Vietnamese, Persian, Cyrillic, Japanese, Korean, Traditional Chinese, composed/decomposed accents,
-RTL text, emoji-only derived fallback, derived boundary truncation, explicit over-bound refusal,
+RTL text, valid and ineffective Persian ZWNJ contexts, ZWJ/bidi refusal, emoji-only derived fallback,
+derived boundary truncation without an orphan joiner, explicit over-bound refusal,
 unsafe-character/path refusal, collisions against both a current handle and an alias, rename-back,
 and refusal at the alias cap.
 
@@ -637,6 +648,9 @@ Focused tests must include:
   existing Piece/lineage unchanged, appends no auth/Job, and cannot dispatch;
 - successful commit is durable before dispatch, and a dispatch throw leaves a recoverable queued Job;
 - concurrent duplicate confirmation admits one authorization and one Job;
+- at 95 Pieces, two concurrent create/import attempts admit exactly the 96th Piece; the losing 97th
+  attempt receives the typed `catalog_capacity` refusal before quote or spend, and confirmation
+  rechecks capacity under the project queue;
 - authoring changes, cap removal, cap reduction, currency change, expiry, malformed cache data, and
   route/rate changes refuse before spend;
 - a retry cannot reuse the prior quote or authorization and exposes a fresh exact price;
@@ -686,7 +700,9 @@ Scenarios, each starting with zero Beat and Shot records:
    every nonterminal durable state;
 5. stale/expired/duplicate confirmation and runtime-only revision movement;
 6. corrupt one schema-6 manifest or export catalog while a second project remains fully usable; and
-7. unsupported schema-5 deletion and quarantined schema-6 deletion.
+7. concurrent create/import at the 95→96 boundary, proving the 97th attempt produces no quote,
+   authorization, Job, provider call, or spend; and
+8. unsupported schema-5 deletion and quarantined schema-6 deletion.
 
 Assertions use the persisted manifest, managed bytes, export payload, and public projections. No
 test may declare success merely because the adapter was called.
@@ -730,6 +746,8 @@ approval is not an acceptable substitute.
    current.
    Show retry only for the exact incomplete generated states allowed by §2.2; completed and imported
    Pieces expose no replacement/regeneration action.
+   A `catalog_capacity` refusal is announced before any quote or spend and explains that this Pilot
+   project has reached 96 Pieces and another project is required.
 7. Rename uses an Arco `Input` with a fixed visual `#`, preserves text direction correctly, reports
    collision/bound refusals, and offers the existing undo mechanism.
 8. Export is available from the project menu only when a current Piece asset exists. It invokes the

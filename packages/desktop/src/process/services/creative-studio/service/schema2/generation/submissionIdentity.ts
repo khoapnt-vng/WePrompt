@@ -36,7 +36,13 @@ export type StudioQuotedGenerationIdentityInput = {
   purpose: StudioQuotedGeneration['purpose'];
 };
 
-const assertSafeId: (value: unknown, field: string) => asserts value is string = (value, field) => {
+// Schema 5 historically relied on RegExp.test coercion here. Keep that observable behavior frozen;
+// schema-6 inputs use the strict guard below instead.
+const assertSafeIdV2 = (value: string, field: string): void => {
+  if (!SAFE_STUDIO_ID.test(value)) throw new TypeError(`${field} must be a safe Studio ID`);
+};
+
+const assertSafeIdV3: (value: unknown, field: string) => asserts value is string = (value, field) => {
   if (typeof value !== 'string' || !SAFE_STUDIO_ID.test(value)) {
     throw new TypeError(`${field} must be a safe Studio ID`);
   }
@@ -44,13 +50,13 @@ const assertSafeId: (value: unknown, field: string) => asserts value is string =
 
 export const studioGenerationTargetKey = (target: StudioGenerationTargetV2): string => {
   const id = target.kind === 'shot' ? target.shotId : target.referenceId;
-  assertSafeId(id, target.kind === 'shot' ? 'shotId' : 'referenceId');
+  assertSafeIdV2(id, target.kind === 'shot' ? 'shotId' : 'referenceId');
   return `${target.kind}:${id}`;
 };
 
 /** Returns the deterministic identity of one quoted target/purpose pair at one project revision. */
 export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIdentityInput): string => {
-  assertSafeId(input.projectId, 'projectId');
+  assertSafeIdV2(input.projectId, 'projectId');
   const targetKey = studioGenerationTargetKey(input.target);
   if (!Number.isSafeInteger(input.projectRevision) || input.projectRevision < 1) {
     throw new RangeError('projectRevision must be a positive safe integer');
@@ -82,9 +88,9 @@ export const createStudioAutomaticReferenceRetryJobId = (input: {
   itemId: string;
   idempotencyKey: string;
 }): string => {
-  assertSafeId(input.authorizationId, 'authorizationId');
-  assertSafeId(input.itemId, 'itemId');
-  assertSafeId(input.idempotencyKey, 'idempotencyKey');
+  assertSafeIdV2(input.authorizationId, 'authorizationId');
+  assertSafeIdV2(input.itemId, 'itemId');
+  assertSafeIdV2(input.idempotencyKey, 'idempotencyKey');
   const canonical = [
     AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE,
     input.authorizationId,
@@ -182,7 +188,7 @@ export const studioPieceGenerationTargetKeyV3 = (target: StudioPieceGenerationTa
   if (!exactDataRecordV3(target, ['kind', 'pieceId']) || target.kind !== 'piece') {
     throw new TypeError('target must be an exact Piece target');
   }
-  assertSafeId(target.pieceId, 'pieceId');
+  assertSafeIdV3(target.pieceId, 'pieceId');
   return `piece:${target.pieceId}`;
 };
 
@@ -202,9 +208,9 @@ export const createStudioPieceQuotedGenerationIdV3 = (input: {
   if (!exactDataRecordV3(input, ['projectId', 'reservationId', 'quoteId', 'quoteRevision', 'target', 'purpose'])) {
     throw new TypeError('quoted generation identity input must be exact');
   }
-  assertSafeId(input.projectId, 'projectId');
-  assertSafeId(input.reservationId, 'reservationId');
-  assertSafeId(input.quoteId, 'quoteId');
+  assertSafeIdV3(input.projectId, 'projectId');
+  assertSafeIdV3(input.reservationId, 'reservationId');
+  assertSafeIdV3(input.quoteId, 'quoteId');
   positiveSafeIntegerV3(input.quoteRevision, 'quoteRevision');
   if (input.purpose !== 'piece_image') throw new TypeError('purpose must be piece_image');
   const canonical = [
@@ -481,7 +487,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
   ) {
     throw new TypeError('authoring project payload is invalid');
   }
-  assertSafeId(project.id, 'projectId');
+  assertSafeIdV3(project.id, 'projectId');
   positiveSafeIntegerV3(project.authoringRevision, 'authoringRevision');
   if (!isDensePlainArrayV3(project.pieceOrder, STUDIO_MAX_PIECES_V3)) {
     throw new TypeError('pieceOrder is invalid');
@@ -489,7 +495,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
   const handleNamespace = new Set<string>();
   const seenPieces = new Set<string>();
   const pieces = project.pieceOrder.map((pieceId) => {
-    assertSafeId(pieceId, 'pieceOrder[]');
+    assertSafeIdV3(pieceId, 'pieceOrder[]');
     if (seenPieces.has(pieceId)) throw new TypeError('pieceOrder must be unique');
     seenPieces.add(pieceId);
     const piece = Object.hasOwn(project.pieces, pieceId) ? project.pieces[pieceId] : undefined;
@@ -527,7 +533,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
 
   let preparedPayload: Record<string, unknown>;
   if (prepared.mode === 'create') {
-    assertSafeId(prepared.reservedPieceId, 'reservedPieceId');
+    assertSafeIdV3(prepared.reservedPieceId, 'reservedPieceId');
     if (
       !isCanonicalStudioPieceHandleV3(prepared.proposedHandle) ||
       handleNamespace.has(prepared.proposedHandle) ||
@@ -547,8 +553,8 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
       settings: { ...prepared.settings },
     };
   } else {
-    assertSafeId(prepared.existingPieceId, 'existingPieceId');
-    assertSafeId(prepared.sourceJobId, 'sourceJobId');
+    assertSafeIdV3(prepared.existingPieceId, 'existingPieceId');
+    assertSafeIdV3(prepared.sourceJobId, 'sourceJobId');
     if (!Object.hasOwn(project.pieces, prepared.existingPieceId)) {
       throw new TypeError('retry authoring arm is invalid');
     }
@@ -565,7 +571,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
     const jobIds = new Set<string>();
     const parents = new Set<string>();
     const lineage = targetPiece.jobIds.map((jobId, index) => {
-      assertSafeId(jobId, 'Piece.jobIds[]');
+      assertSafeIdV3(jobId, 'Piece.jobIds[]');
       if (jobIds.has(jobId)) throw new TypeError('retry lineage must be unique');
       const job = Object.hasOwn(persistedJobMap, jobId) ? persistedJobMap[jobId] : undefined;
       if (
@@ -581,7 +587,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
       }
       const retryOfJobIdValue = job.retryOfJobId;
       const retryReasonValue = job.retryReason;
-      if (retryOfJobIdValue !== null) assertSafeId(retryOfJobIdValue, 'jobs[].retryOfJobId');
+      if (retryOfJobIdValue !== null) assertSafeIdV3(retryOfJobIdValue, 'jobs[].retryOfJobId');
       if (retryReasonValue !== null && !validPieceRetryReasonV3(retryReasonValue)) {
         throw new TypeError('retry lineage topology is invalid');
       }

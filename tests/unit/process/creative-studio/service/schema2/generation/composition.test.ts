@@ -136,6 +136,21 @@ describe('canonical schema-5 generation composition', () => {
     expect(studioGenerationCompositionDigestV2(composition)).toBe(studioGenerationCompositionDigestV2(same));
   });
 
+  it('preserves the schema-5 ID coercion behavior from before the schema-6 helpers were added', () => {
+    const composition = composeStudioGenerationV2({
+      ...composeBoard().inputs,
+      schemaVersion: undefined as never,
+      source: { ...shotSource, beatId: 101, shotId: 102 },
+      referenceInputs: [{ ...references[0]!, referenceId: 103, assetId: 104 }],
+      route: { ...route, providerId: 105 },
+    } as never);
+
+    expect(composition.inputs.source).toMatchObject({ beatId: 101, shotId: 102 });
+    expect(composition.inputs.referenceInputs[0]).toMatchObject({ referenceId: 103, assetId: 104 });
+    expect(composition.inputs.route.providerId).toBe(105);
+    expect(composition.prompt).toContain('Character 103: preserve the approved identity');
+  });
+
   it('matches frozen historical prompt bytes to authority without current-code recomposition', () => {
     const historical = composeBoard();
     historical.prompt = historical.prompt.replace(
@@ -602,6 +617,24 @@ describe('inactive schema-2 Piece generation composition', () => {
         ...input,
         route: { ...pieceRoute, model: 'image-model\nOUTPUT' },
       })
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        source: { ...input.source, pieceId: 101 },
+      } as never)
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        route: { ...pieceRoute, providerId: 102 },
+      } as never)
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        route: { ...pieceRoute, model: 103 },
+      } as never)
     ).toThrow(TypeError);
   });
 

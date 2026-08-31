@@ -61,6 +61,7 @@ describe('schema-6 Unicode Piece handles', () => {
   it.each([
     ['Vietnamese', 'Ảnh đêm', 'ảnh_đêm'],
     ['Persian', 'شب تهران', 'شب_تهران'],
+    ['Persian ZWNJ', 'عکس‌های شب', 'عکس‌های_شب'],
     ['Cyrillic', 'Ана идёт', 'ана_идёт'],
     ['Japanese', '東京・夜', '東京_夜'],
     ['Korean', '서울 밤', '서울_밤'],
@@ -76,6 +77,46 @@ describe('schema-6 Unicode Piece handles', () => {
     expect(normalizeStudioPieceHandleV3('Ánh đêm', 'rename')).toBe('ánh_đêm');
   });
 
+  it('preserves a contextual Persian ZWNJ across derive, import, rename, and canonical checks', () => {
+    const handle = 'عکس‌های';
+    expect(normalizeStudioPieceHandleV3(handle, 'derive')).toBe(handle);
+    expect(normalizeStudioPieceHandleV3(handle, 'rename')).toBe(handle);
+    expect(deriveStudioPieceHandleV3(handle)).toBe(handle);
+    expect(deriveStudioPieceHandleFromImportFileNameV3(`${handle}.png`)).toBe(handle);
+    expect(isCanonicalStudioPieceHandleV3(handle)).toBe(true);
+    expect(resolveStudioPieceRenameV3(catalogue('photo'), 'piece_1', handle)).toEqual({
+      handle,
+      priorHandles: ['photo'],
+    });
+  });
+
+  it('refuses ineffective or ambiguous joiner contexts and keeps ZWJ and bidi controls unsafe', () => {
+    for (const value of [
+      '\u200Cسه',
+      'سه\u200C',
+      'ا\u200Cب',
+      'د\u200Cه',
+      'و\u200Cی',
+      'س\u200Cء',
+      'a\u200Cب',
+      'س\u200Ca',
+      'س\u200Dه',
+      'س\u202Eه',
+      'سَ\u200Cه',
+      'س\u200Cَه',
+    ]) {
+      expect(() => normalizeStudioPieceHandleV3(value, 'rename'), value).toThrow(
+        expect.objectContaining({ code: 'unsafe_character' })
+      );
+      expect(isCanonicalStudioPieceHandleV3(value), value).toBe(false);
+    }
+  });
+
+  it('discards a malformed joiner during derivation without admitting it into the stored form', () => {
+    expect(deriveStudioPieceHandleV3('photo\u200C')).toBe('photo');
+    expect(deriveStudioPieceHandleV3('س\u200Dه')).toBe('سه');
+  });
+
   it('uses a locale-independent fallback, truncates safely, and reserves room for suffixes', () => {
     expect(deriveStudioPieceHandleV3('🎬✨')).toBe('piece');
     const long = `a${'\u0301'.repeat(80)}${'b'.repeat(80)}`;
@@ -87,6 +128,17 @@ describe('schema-6 Unicode Piece handles', () => {
     const collision = deriveStudioPieceHandleV3(boundary, [boundary]);
     expect(collision.endsWith('_2')).toBe(true);
     expect([...collision]).toHaveLength(STUDIO_MAX_PIECE_HANDLE_SCALARS_V3);
+
+    const overBoundaryWithJoiner = `${'a'.repeat(STUDIO_MAX_PIECE_HANDLE_SCALARS_V3 - 2)}س\u200Cه`;
+    const truncatedJoiner = deriveStudioPieceHandleV3(overBoundaryWithJoiner);
+    expect(truncatedJoiner.endsWith('\u200C')).toBe(false);
+    expect(isCanonicalStudioPieceHandleV3(truncatedJoiner)).toBe(true);
+
+    const exactBoundaryWithJoiner = `${'a'.repeat(STUDIO_MAX_PIECE_HANDLE_SCALARS_V3 - 3)}س\u200Cه`;
+    const suffixedJoiner = deriveStudioPieceHandleV3(exactBoundaryWithJoiner, [exactBoundaryWithJoiner]);
+    expect(suffixedJoiner.endsWith('_2')).toBe(true);
+    expect(suffixedJoiner.includes('\u200C')).toBe(false);
+    expect(isCanonicalStudioPieceHandleV3(suffixedJoiner)).toBe(true);
   });
 
   it('refuses explicit overflow, unsafe path/invisible input, empty input, and discarded symbols', () => {
@@ -135,6 +187,7 @@ describe('schema-6 Unicode Piece handles', () => {
 
   it('suffixes derived collisions against current handles, aliases, and active reservations', () => {
     expect(deriveStudioPieceHandleV3('Ảnh đêm', ['ảnh_đêm', 'ảnh_đêm_2'])).toBe('ảnh_đêm_3');
+    expect(deriveStudioPieceHandleV3('عکس‌های', ['عکس‌های'])).toBe('عکس‌های_2');
   });
 
   it('derives distinct new and import handles from one persisted and active-reservation namespace', () => {
