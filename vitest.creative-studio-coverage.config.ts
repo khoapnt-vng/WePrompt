@@ -79,6 +79,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/store/contracts.ts',
   'packages/desktop/src/process/services/creative-studio/store/index.ts',
   'packages/desktop/src/process/services/creative-studio/store/projectRecords.ts',
+  'packages/desktop/src/process/services/creative-studio/store/projectTransactions.ts',
   'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/StudioMediaModelsSection.tsx',
   'packages/desktop/src/renderer/pages/conversation/Messages/components/MessageToolGroupSummary.tsx',
   'packages/desktop/src/renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose.ts',
