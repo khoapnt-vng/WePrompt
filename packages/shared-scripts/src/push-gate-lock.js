@@ -33,7 +33,7 @@
  * gate's runtime rather than a heartbeat — keep it far above how long the gate can honestly take.
  */
 
-const { spawnSync } = require('node:child_process');
+const { execFileSync, spawnSync } = require('node:child_process');
 const { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync } = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -320,6 +320,47 @@ const withPushGateLock = (options, run) => {
     release();
   }
 };
+
+/**
+ * `node push-gate-lock.js [--lock <path>] <command> [args...]`
+ *
+ * Holds the gate around one command, for callers that are not the push gate itself -- chiefly
+ * `just test-coverage-creative-studio`, which runs that same six-minute suite and so contends for
+ * the same cores. Exits with the command's own status, so a caller cannot mistake a failed suite
+ * for a failed lock.
+ *
+ * Nothing here nests: `just push` reaches the suite through the selector, never through this. Two
+ * locks deep would be a deadlock that only the staleness ceiling could break, half an hour later.
+ *
+ * `--lock` exists so this file's own tests never touch the real machine lock, which would block the
+ * very gate running them. A relocated lock is announced rather than applied quietly: two runs
+ * pointed at different paths do not exclude each other, and that must not be left to inference.
+ */
+const main = (argv) => {
+  const usage = () => {
+    report('usage: push-gate-lock [--lock <path>] <command> [args...]');
+    process.exitCode = 2;
+  };
+
+  let lockPath = DEFAULT_LOCK_PATH;
+  let rest = argv;
+  if (rest[0] === '--lock') {
+    if (rest.length < 2) return usage();
+    lockPath = rest[1];
+    rest = rest.slice(2);
+    report(`holding ${lockPath} rather than the machine default`);
+  }
+  if (rest.length === 0) return usage();
+
+  const [command, ...args] = rest;
+  try {
+    withPushGateLock({ lockPath }, () => execFileSync(command, args, { stdio: 'inherit' }));
+  } catch (error) {
+    process.exitCode = typeof error.status === 'number' && error.status !== 0 ? error.status : 1;
+  }
+};
+
+if (require.main === module) main(process.argv.slice(2));
 
 module.exports = {
   DEFAULT_LOCK_PATH,

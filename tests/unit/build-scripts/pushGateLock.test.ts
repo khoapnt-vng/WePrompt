@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
@@ -237,7 +237,7 @@ describe('push gate lock', () => {
     };
 
     /** Polls rather than sleeping a fixed span, so a loaded machine slows the test instead of failing it. */
-    const waitFor = async (condition: () => boolean, timeoutMs = 60_000): Promise<boolean> => {
+    const waitFor = async (condition: () => boolean, timeoutMs = 30_000): Promise<boolean> => {
       const deadline = Date.now() + timeoutMs;
       while (Date.now() < deadline) {
         if (condition()) return true;
@@ -392,6 +392,100 @@ describe('push gate lock', () => {
         'recovering enter',
         'recovering exit',
       ]);
+    });
+  });
+
+  /*
+   * `just test-coverage-creative-studio` runs the same six-minute suite the push gate runs, so it
+   * contends for the same cores and has to queue behind a gate rather than run beside it. It reaches
+   * the lock through this entry point rather than through the selector, which only ever decides what
+   * the *push* needs.
+   */
+  describe('running a command under the lock from the command line', () => {
+    let workspace: string;
+    let lockPath: string;
+    let marker: string;
+
+    beforeEach(() => {
+      workspace = mkdtempSync(path.join(tmpdir(), 'push-gate-lock-'));
+      lockPath = path.join(workspace, 'gate.lock');
+      marker = path.join(workspace, 'the-command-ran');
+    });
+
+    afterEach(() => {
+      rmSync(workspace, { recursive: true, force: true });
+    });
+
+    /** Always via --lock: a test that took the real machine lock would block the gate running it. */
+    const runCli = (...args: string[]) => {
+      const done = spawnSync(process.execPath, [LOCK_MODULE, '--lock', lockPath, ...args], { encoding: 'utf8' });
+      return { code: done.status, stderr: done.stderr ?? '' };
+    };
+
+    const touchMarker = [process.execPath, '-e', ''];
+
+    it('runs the command it is given', () => {
+      const ran = runCli(process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ok')`);
+
+      expect(ran.code).toBe(0);
+      expect(existsSync(marker)).toBe(true);
+    });
+
+    it('gives the lock back once the command is done', () => {
+      runCli(...touchMarker);
+
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    it("fails with the command's own status rather than its own", () => {
+      const ran = runCli(process.execPath, '-e', 'process.exit(3)');
+
+      expect(ran.code).toBe(3);
+    });
+
+    it('releases the lock when the command fails', () => {
+      runCli(process.execPath, '-e', 'process.exit(3)');
+
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    it('refuses to run with no command at all', () => {
+      const done = spawnSync(process.execPath, [LOCK_MODULE], { encoding: 'utf8' });
+
+      expect(done.status).not.toBe(0);
+      expect(done.stderr).toMatch(/usage/);
+    });
+
+    it('says so when it is pointed at a lock other than the machine default', () => {
+      const ran = runCli(...touchMarker);
+
+      expect(ran.stderr).toMatch(new RegExp(`${lockPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+    });
+
+    it('queues behind a gate that is already running instead of joining it', async () => {
+      const holder = spawn(
+        process.execPath,
+        [LOCK_MODULE, '--lock', lockPath, process.execPath, '-e', 'setTimeout(() => {}, 1500)'],
+        { stdio: ['ignore', 'ignore', 'ignore'] }
+      );
+      const holds = async () => {
+        const deadline = Date.now() + 30_000;
+        while (Date.now() < deadline) {
+          try {
+            if (JSON.parse(readFileSync(lockPath, 'utf8')).pid === holder.pid) return true;
+          } catch {
+            // not written yet
+          }
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return false;
+      };
+      expect(await holds()).toBe(true);
+
+      const queued = runCli(...touchMarker);
+
+      expect(queued.code).toBe(0);
+      expect(queued.stderr).toMatch(new RegExp(`waiting for another push gate[^\n]*${holder.pid}`));
     });
   });
 

@@ -57,6 +57,41 @@ Every triage block also carries a claimant field. `Unclaimed` is intentional at 
 checkpoint; the implementing agent replaces it before the first code edit. A phase destination is
 not a claim, and the list must not imply that paused or absent agents own work they have not reserved.
 
+### Tranche 0 — the prerequisite, before any CS4 phase starts
+
+Four entries block the CS4 base. They are not part of a phase; they are the gate in front of phase 1,
+and they must land somewhere mergeable on its own, **not on the CS4 branch** — a fix trapped behind a
+cutover that deletes four views can never be merged independently.
+
+| Entry       | Why it blocks the base                                                                                                                                                                                                                                                                             |
+| ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **BUG-190** | CS4's creation model is "a Director invokes capabilities", and every capability is a new tool on the same built-in server. If consent is per-tool rather than per-server, every new capability stops the Director dead on a permission prompt — which would make phase 5 unusable by construction. |
+| **BUG-163** | CS4 keeps the Director rail and its conversation binding unchanged, and the cutover must itself rewrite `DIRECTOR_PRESET_RULES`. A rules rewrite that cannot recover an interrupted conversation would strand every existing project on the first launch after cutover.                            |
+| **BUG-162** | The dishonest-completion sentence is app chrome in the shared conversation renderer, not Director prose, so it survives the cutover untouched and would report CS4's own failures as successes.                                                                                                    |
+| **BUG-176** | A target-size defect whose rule — a control's hit area is the control — becomes a phase-5 canvas acceptance criterion. Fixing the rule before the canvas is drawn is cheaper than discovering it on every block kind.                                                                              |
+
+**Tranche 0 is done when all four are fixed and merged into whatever CS4 branches from.** Phase 1
+does not start before that.
+
+### Evidence that closes an absorbed entry
+
+An `absorb` entry stays open until its destination phase produces evidence. "The phase shipped" is not
+evidence. What counts, by phase:
+
+| Phase                         | What closes an entry absorbed into it                                                                            |
+| ----------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **1 · contracts**             | A test in the contract suite that fails without the change and passes with it, named in the entry.               |
+| **2 · fixtures + extraction** | A fixture captured from a running backend replays the entry's reproduction.                                      |
+| **3 · storage + projections** | A main-process test asserting the rule at the write boundary, so it cannot be deleted with a renderer component. |
+| **4 · photo E2E**             | The Pilot 1 journey exercises the path the entry describes.                                                      |
+| **5 · canvas UI**             | A DOM or accessibility test on the new surface, plus the twelve locales if the entry involves copy.              |
+| **6 · film + modalities**     | The entry's own reproduction, re-run against the new surface.                                                    |
+
+**The BUG-182 rule generalises: check whether the cutover deletes the FIX rather than the defect.**
+Its guard and its only regression test both live inside a component CS4 removes, so closing it at
+cutover would tick the entry at the moment the product regresses. Any entry whose evidence lives only
+in a doomed file needs its evidence moved before that file dies.
+
 ## How this list is shared
 
 Two agents work this list — one finds and files, one fixes — plus whoever is reviewing. It is a

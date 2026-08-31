@@ -302,6 +302,11 @@ const sources = (): StudioFilmVerifiedSourceV2[] => [
  * nothing and only prevents false failures; a genuine hang still fails, just later. The
  * assertions are untouched by it. Do not lower this toward the global default without
  * re-measuring under full-suite load.
+ *
+ * Nor may a case carry its own timeout: a per-test ceiling overrides the suite's rather than
+ * tightening it, so a leftover cap silently keeps that case outside this raise. One sat at 30s,
+ * from before this ceiling existed, until 2026-08-30 -- the sibling film.test.ts lost a gate run
+ * to the same oversight at 15s.
  */
 const FAKE_FFMPEG_TIMEOUT_MS = 120_000;
 
@@ -756,7 +761,7 @@ describe('schema-2 film runtime', { timeout: FAKE_FFMPEG_TIMEOUT_MS }, () => {
     await expect(readdir(invalidEncoding.root)).resolves.not.toEqual(
       expect.arrayContaining([expect.stringMatching(/^weprompt-film-/u)])
     );
-  }, 30_000);
+  });
 
   it('preserves a replaced output inode and rejects it when publication reopens the film', async () => {
     const binaries = await fakeFfmpegPair();
