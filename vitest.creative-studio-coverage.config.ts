@@ -77,6 +77,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts',
   'packages/desktop/src/process/services/creative-studio/service/v2Service.ts',
   'packages/desktop/src/process/services/creative-studio/store/contracts.ts',
+  'packages/desktop/src/process/services/creative-studio/store/deletionAuthority.ts',
   'packages/desktop/src/process/services/creative-studio/store/index.ts',
   'packages/desktop/src/process/services/creative-studio/store/projectRecords.ts',
   'packages/desktop/src/process/services/creative-studio/store/projectTransactions.ts',
