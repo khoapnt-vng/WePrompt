@@ -2995,6 +2995,105 @@ describe('AionrsSendBox', () => {
     expect(messageErrorMock).toHaveBeenCalledWith(messageKey);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
+  describe('managed presentation route changes mid-flight', () => {
+    // The composer captures its presentation conversation id when a drain begins and re-checks it
+    // against a live ref after every await. Nothing in the suite moved the route while a request
+    // was in flight, so every one of those guards was unexercised. These three drive the awaits
+    // that can spend money or mutate the queue for a conversation the person has already left.
+    const OTHER_CONVERSATION_ID = 'a1b2c3d4';
+
+    const leaveConversation = async (rerender: (ui: React.ReactElement) => void) => {
+      presentationQueueItemsState.current = [];
+      await act(async () => {
+        rerender(<AionrsSendBox conversation_id={OTHER_CONVERSATION_ID} modelSelection={modelSelection} />);
+      });
+    };
+
+    it('does not start a run for a conversation the composer has left during allocation', async () => {
+      featureEnabledState.current = true;
+      presentationQueueItemsState.current = [
+        presentationQueueItem('queue-queued', 'request-queued', { state: 'queued' }),
+      ];
+      const allocation = createDeferred<void>();
+      presentationControllerMock.allocateClaimed.mockImplementation(
+        async (_queueItemId: string, start: (request: Record<string, unknown>) => Promise<Record<string, unknown>>) => {
+          await allocation.promise;
+          return start({ conversation_id: 'd0921953', client_request_id: 'request-queued' });
+        }
+      );
+
+      const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+      await waitFor(() => expect(presentationControllerMock.allocateClaimed).toHaveBeenCalledTimes(1));
+
+      await leaveConversation(rerender);
+      await act(async () => {
+        allocation.resolve();
+        await allocation.promise;
+      });
+
+      expect(presentationStartInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('abandons a claimed recovery whose authority lookup returns after the route changed', async () => {
+      featureEnabledState.current = true;
+      presentationQueueItemsState.current = [
+        presentationQueueItem('queue-claimed', 'request-claimed', {
+          state: 'claimed',
+          claimedAt: '2026-08-05T00:00:01.000Z',
+        }),
+      ];
+      const lookup = createDeferred<Record<string, unknown>>();
+      presentationGetInvokeMock.mockReturnValueOnce(lookup.promise);
+
+      const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+      await waitFor(() =>
+        expect(presentationGetInvokeMock).toHaveBeenCalledWith({
+          conversation_id: 'd0921953',
+          client_request_id: 'request-claimed',
+        })
+      );
+
+      await leaveConversation(rerender);
+      await act(async () => {
+        lookup.resolve({ ok: true, run: { runId: 'run-claimed', revision: 3 } });
+        await lookup.promise;
+      });
+
+      expect(presentationControllerMock.transition).not.toHaveBeenCalled();
+      expect(sendBoxProps.current?.managedPresentationSubmission?.progress ?? null).toBeNull();
+    });
+
+    it('does not claim a dispatch whose authority lookup returns after the route changed', async () => {
+      featureEnabledState.current = true;
+      presentationQueueItemsState.current = [
+        presentationQueueItem('queue-committed', 'request-committed', {
+          state: 'committed',
+          runId: 'run-committed',
+          revision: 5,
+          postInvoked: false,
+        }),
+      ];
+      const lookup = createDeferred<Record<string, unknown>>();
+      presentationGetInvokeMock.mockReturnValueOnce(lookup.promise);
+
+      const { rerender } = render(<AionrsSendBox conversation_id='d0921953' modelSelection={modelSelection} />);
+      await waitFor(() =>
+        expect(presentationGetInvokeMock).toHaveBeenCalledWith({
+          conversation_id: 'd0921953',
+          run_id: 'run-committed',
+        })
+      );
+
+      await leaveConversation(rerender);
+      await act(async () => {
+        lookup.resolve({ ok: true, run: { runId: 'run-committed', revision: 5, dispatchStatus: 'committed' } });
+        await lookup.promise;
+      });
+
+      expect(presentationClaimInvokeMock).not.toHaveBeenCalled();
+      expect(presentationDispatchInvokeMock).not.toHaveBeenCalled();
+    });
+  });
 });
 
 describe('AionrsChat human-submit bridge', () => {
