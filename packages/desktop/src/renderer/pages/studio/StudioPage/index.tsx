@@ -5,7 +5,7 @@
  */
 
 import { Button, Spin } from '@arco-design/web-react';
-import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { pickDefaultRoutes } from '@/common/types/project/creativeStudioDefaultRoutes';
 import { planStudioConnections } from '@/common/types/project/creativeStudioConnectionPlan';
 import { exactStudioProjectStatusV2 } from '@/common/types/project/creativeStudioProjectSummary';
@@ -14,7 +14,6 @@ import { Link, Navigate, useNavigate, useParams } from 'react-router-dom';
 
 import { ipcBridge } from '@/common';
 import {
-  STUDIO_MAX_DIRTY_DRAFTS_REPORTED,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   type StudioBriefRuleDraft,
@@ -28,7 +27,6 @@ import {
   SpendGateModal,
   hasGenerationAffectingWorkspaceDrafts,
   buildStudioBarStats,
-  countStoredStudioRuleDrafts,
   countStoredWorkspaceDrafts,
   projectWorkspace,
   useWorkspaceDrafts,
@@ -58,6 +56,12 @@ import {
   type StudioView,
 } from '../studioPhaseRoute';
 import styles from '../StudioPage.module.css';
+import {
+  StudioCloseResponse,
+  useStudioCloseContractOwner,
+  useStudioCloseContractPublication,
+  type StudioCloseContract,
+} from './closeContract';
 import { projectDraftValues, useStudioDraftCommandCoordinator } from './draftCommands';
 import { useStudioMediaViewAdapters } from './mediaViewAdapters';
 import { useStudioProjectCommandRunners, useStudioWorkspaceExclusiveCommand } from './projectCommands';
@@ -79,29 +83,6 @@ import {
   useStudioHandoffSpendReview,
   useStudioSpendOrchestration,
 } from './spendOrchestration';
-
-type StudioCloseContract = {
-  dirtyDraftCount: number;
-  saveAll: () => Promise<boolean>;
-};
-
-const StudioCloseResponse: React.FC<{ resolve: () => StudioCloseContract }> = ({ resolve }) => {
-  const resolveRef = useRef(resolve);
-  resolveRef.current = resolve;
-  useEffect(() => {
-    const disposeHasUnsavedWork = ipcBridge.creativeStudio.hasUnsavedWork.provider(() => ({
-      dirtyDraftCount: Math.min(resolveRef.current().dirtyDraftCount, STUDIO_MAX_DIRTY_DRAFTS_REPORTED),
-    }));
-    const disposeFlushUnsavedWork = ipcBridge.creativeStudio.flushUnsavedWork.provider(async () => ({
-      saved: await resolveRef.current().saveAll(),
-    }));
-    return () => {
-      disposeHasUnsavedWork();
-      disposeFlushUnsavedWork();
-    };
-  }, []);
-  return null;
-};
 
 const hasAdoptedRuleDrafts = (project: StudioRendererProjectV2, drafts: readonly StudioBriefRuleDraft[]): boolean =>
   project.rules.length === drafts.length &&
@@ -1200,14 +1181,12 @@ const StudioProjectPage: React.FC<{
     inactiveWorkspaceDraftDirtyCount,
   });
 
-  useLayoutEffect(() => {
-    if (project === null) {
-      onCloseContractChange(null);
-      return;
-    }
-    onCloseContractChange({ dirtyDraftCount: closeDirtyDraftCount, saveAll: flushAllWorkspaceDrafts });
-    return () => onCloseContractChange(null);
-  }, [closeDirtyDraftCount, flushAllWorkspaceDrafts, onCloseContractChange, project]);
+  useStudioCloseContractPublication({
+    project,
+    closeDirtyDraftCount,
+    flushAllWorkspaceDrafts,
+    onCloseContractChange,
+  });
 
   const {
     proposalDraftBlocker,
@@ -1558,18 +1537,7 @@ const StudioProjectPage: React.FC<{
 const StudioPage: React.FC = () => {
   const { id, view } = useParams<{ id?: string; view?: string }>();
   const routeView = parseStudioView(view);
-  const projectCloseContractRef = useRef<StudioCloseContract | null>(null);
-  const updateProjectCloseContract = useCallback((contract: StudioCloseContract | null): void => {
-    projectCloseContractRef.current = contract;
-  }, []);
-  const resolveCloseContract = useCallback(
-    (): StudioCloseContract =>
-      projectCloseContractRef.current ?? {
-        dirtyDraftCount: countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts(),
-        saveAll: async () => countStoredStudioRuleDrafts() + countStoredWorkspaceDrafts() === 0,
-      },
-    []
-  );
+  const { updateProjectCloseContract, resolveCloseContract } = useStudioCloseContractOwner();
   return (
     <>
       <StudioCloseResponse resolve={resolveCloseContract} />

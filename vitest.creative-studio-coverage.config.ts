@@ -89,6 +89,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/conversation/Messages/components/toolActivity/buildTurnClose.ts',
   'packages/desktop/src/renderer/pages/conversation/platforms/aionrs/AionrsChat.tsx',
   'packages/desktop/src/renderer/pages/conversation/platforms/aionrs/AionrsSendBox.tsx',
+  'packages/desktop/src/renderer/pages/studio/StudioPage/closeContract.ts',
   'packages/desktop/src/renderer/pages/studio/StudioPage/draftCommands.ts',
   'packages/desktop/src/renderer/pages/studio/StudioPage/index.tsx',
   'packages/desktop/src/renderer/pages/studio/StudioPage/mediaViewAdapters.ts',
