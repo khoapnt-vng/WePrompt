@@ -90,6 +90,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/conversation/platforms/aionrs/AionrsChat.tsx',
   'packages/desktop/src/renderer/pages/conversation/platforms/aionrs/AionrsSendBox.tsx',
   'packages/desktop/src/renderer/pages/studio/StudioPage/index.tsx',
+  'packages/desktop/src/renderer/pages/studio/StudioPage/projectCommands.ts',
   'packages/desktop/src/renderer/pages/studio/components/PlaybackAudio/index.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Library/Composer.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Library/ProjectCard.tsx',
