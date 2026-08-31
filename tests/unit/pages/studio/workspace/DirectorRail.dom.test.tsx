@@ -9,7 +9,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
-import type { IMessageToolGroup } from '@/common/chat/chatLib';
+import type { IMessageAcpToolCall, IMessageToolGroup } from '@/common/chat/chatLib';
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import { coalesceToolCalls } from '@/common/chat/toolActivity/coalesceToolCalls';
 import type { CoalescedStep } from '@/common/chat/toolActivity/types';
@@ -454,7 +454,16 @@ describe('Studio Director turn recap', () => {
   const paidRecoveryProposal = pendingProposalRecord({
     payload: {
       kind: 'paid_recovery',
-      blocker: {},
+      blocker: {
+        cause: 'reference_generation_required',
+        where: { kind: 'project' },
+        remedy: {
+          kind: 'proposal',
+          prepare: { kind: 'project_references', referenceIds: ['reference_1'] },
+          estimatedMinorUnits: null,
+          currency: null,
+        },
+      },
       quote: {
         quoteId: 'quote_1',
         projectRevision: 3,
@@ -914,6 +923,117 @@ describe('Studio Director turn recap', () => {
     expect(studioToolOutcome({ interpreter, name: 'studio_get_project_status', output: '{"status":' })).toBe('unknown');
   });
 
+  it('correlates a compacted proposal lookup only through its exact input and current catalogue', () => {
+    const truncatedLookup = (interpreter: ToolOutcomeInterpreter, toolInput: string) =>
+      studioToolObservation({
+        interpreter,
+        name: 'studio_get_proposal',
+        toolInput,
+        output: '{"schemaVersion":10,"status":"answered",',
+        truncated: true,
+      });
+    const exactInput = JSON.stringify({ proposalId: 'proposal_1' });
+    const pending = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
+    const pendingLookup = truncatedLookup(pending, exactInput);
+
+    expect(pendingLookup).toBe('pending_review');
+    expect(summarizeTurnDomainOutcomes(['committed', pendingLookup])).toBe('pending_review');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter(
+          'project_1',
+          4,
+          proposalCatalog({ status: 'accepted', review: 'stale', projectRevision: 4 })
+        ),
+        exactInput
+      )
+    ).toBe('committed');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog({ status: 'rejected' })),
+        exactInput
+      )
+    ).toBe('refused');
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter(
+          'project_1',
+          4,
+          proposalCatalog({ review: 'stale', projectRevision: 4 })
+        ),
+        exactInput
+      )
+    ).toBe('needs_revision');
+
+    expect(truncatedLookup(pending, JSON.stringify({ proposalId: 'proposal_other' }))).toBe('unknown');
+    expect(truncatedLookup(pending, JSON.stringify({ proposalId: 'proposal_1', extra: true }))).toBe('unknown');
+    expect(truncatedLookup(pending, '{"proposalId":')).toBe('unknown');
+    expect(truncatedLookup(createStudioDirectorToolOutcomeInterpreter('project_1', 3, null), exactInput)).toBe(
+      'unknown'
+    );
+    expect(
+      truncatedLookup(
+        createStudioDirectorToolOutcomeInterpreter('project_1', 4, proposalCatalog({ projectRevision: 3 })),
+        exactInput
+      )
+    ).toBe('unknown');
+  });
+
+  it('correlates compacted ACP proposal snapshots across normalize and coalesce only when every input agrees', () => {
+    const acpSnapshot = (input: {
+      messageId: string;
+      rawInput?: Record<string, unknown>;
+      status: 'in_progress' | 'completed';
+      truncated?: boolean;
+    }): IMessageAcpToolCall =>
+      ({
+        id: input.messageId,
+        conversation_id: 'conversation_1',
+        type: 'acp_tool_call',
+        content: {
+          sessionId: 'session_1',
+          ...(input.truncated ? { _compact: { truncated: true, original_size: 8192, preview_chars: 4096 } } : {}),
+          update: {
+            sessionUpdate: 'tool_call_update',
+            tool_call_id: 'proposal-lookup-1',
+            status: input.status,
+            title: 'studio_get_proposal',
+            kind: 'custom',
+            rawInput: input.rawInput,
+            ...(input.status === 'completed'
+              ? { rawOutput: { result: '{"schemaVersion":10,"status":"answered",' } }
+              : {}),
+          },
+        },
+      }) as unknown as IMessageAcpToolCall;
+    const outcome = (...inputs: Array<Record<string, unknown> | undefined>) => {
+      const messages = inputs.map((rawInput, index) =>
+        acpSnapshot({
+          messageId: `proposal-lookup-message-${index}`,
+          rawInput,
+          status: index === inputs.length - 1 ? 'completed' : 'in_progress',
+          truncated: index === inputs.length - 1,
+        })
+      );
+      const step = coalesceToolCalls(normalizeToolMessages(messages))[0]!;
+      const interpreted = createStudioDirectorToolOutcomeInterpreter(
+        'project_1',
+        3,
+        proposalCatalog()
+      )({
+        step,
+        status: step.status,
+      });
+      return typeof interpreted === 'string' ? interpreted : interpreted.outcome;
+    };
+
+    expect(outcome({ proposalId: 'proposal_1' }, undefined)).toBe('pending_review');
+    expect(outcome({ proposalId: 'proposal_1' }, { proposalId: 'proposal_1' })).toBe('pending_review');
+    expect(outcome({ proposalId: 'proposal_1' }, { proposalId: 'proposal_other' })).toBe('unknown');
+    expect(outcome({ proposalId: 'proposal_1', extra: true }, undefined)).toBe('unknown');
+    expect(outcome(undefined)).toBe('unknown');
+  });
+
   it('reports failed and canceled transport before inspecting output', () => {
     const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', 3, proposalCatalog());
     expect(studioToolOutcome({ interpreter, status: 'error', output: recordedProposal })).toBe('failed');
@@ -940,6 +1060,46 @@ describe('Studio Director turn recap', () => {
   ] as const)('fails closed for %s', (_label, revision, catalog) => {
     const interpreter = createStudioDirectorToolOutcomeInterpreter('project_1', revision, catalog);
     expect(studioToolOutcome({ interpreter, output: recordedProposal })).toBe('unknown');
+  });
+
+  it('fails both ordinary and compacted proposal reads closed for malformed catalogue authority', () => {
+    const missingPayload = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    delete missingPayload.proposals[0]!.payload;
+
+    const missingReviewGroups = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    missingReviewGroups.proposals[0]!.review = { status: 'ready' };
+
+    const acceptedWithoutReview = structuredClone(proposalCatalog({ status: 'accepted' })) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    acceptedWithoutReview.proposals[0]!.review = {};
+
+    const extraProposalKey = structuredClone(proposalCatalog()) as unknown as {
+      proposals: Array<Record<string, unknown>>;
+    };
+    extraProposalKey.proposals[0]!.unexpected = true;
+
+    for (const catalog of [missingPayload, missingReviewGroups, acceptedWithoutReview, extraProposalKey]) {
+      const interpreter = createStudioDirectorToolOutcomeInterpreter(
+        'project_1',
+        3,
+        catalog as unknown as StudioRendererProposalCatalogV2
+      );
+      expect(studioToolOutcome({ interpreter, output: recordedProposal })).toBe('unknown');
+      expect(
+        studioToolOutcome({
+          interpreter,
+          name: 'studio_get_proposal',
+          toolInput: JSON.stringify({ proposalId: 'proposal_1' }),
+          output: '{"schemaVersion":10,"status":"answered",',
+          truncated: true,
+        })
+      ).toBe('unknown');
+    }
   });
 
   it('fails closed for ambiguous, non-Studio, malformed, and truncated results', () => {

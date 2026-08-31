@@ -121,6 +121,8 @@ const PROPOSAL_RECORD_KEYS = [
   'createdAt',
   'decidedAt',
 ] as const;
+const RENDERER_PROPOSAL_KEYS = [...PROPOSAL_RECORD_KEYS, 'review'] as const;
+const PROPOSAL_CATALOG_KEYS = ['projectId', 'projectRevision', 'proposals'] as const;
 const REJECTION_CODES = new Set([
   'malformed_record',
   'unsupported_version',
@@ -252,6 +254,8 @@ const buildProposalOutcomeIndex = (
   if (
     !isSafeRevision(projectRevision) ||
     catalog === null ||
+    !isRecord(catalog) ||
+    !hasExactKeys(catalog, PROPOSAL_CATALOG_KEYS) ||
     catalog.projectId !== projectId ||
     catalog.projectRevision !== projectRevision ||
     !Array.isArray(catalog.proposals)
@@ -262,13 +266,18 @@ const buildProposalOutcomeIndex = (
   const outcomes = new Map<string, TurnDomainOutcome>();
   for (const proposal of catalog.proposals) {
     if (
+      !isRecord(proposal) ||
+      !hasExactKeys(proposal, RENDERER_PROPOSAL_KEYS) ||
       proposal.schemaVersion !== STUDIO_PROPOSAL_SCHEMA_VERSION_V2 ||
       !isSafeId(proposal.id) ||
       proposal.projectId !== projectId ||
       !isSafeRevision(proposal.baseRevision) ||
+      !isProposalPayload(proposal.payload) ||
       !isSafeTimestamp(proposal.createdAt) ||
       (proposal.status === 'pending' ? proposal.decidedAt !== null : !isSafeTimestamp(proposal.decidedAt)) ||
-      !isRecord(proposal.review) ||
+      !['pending', 'accepted', 'rejected', 'expired'].includes(String(proposal.status)) ||
+      (typeof proposal.decidedAt === 'string' && Date.parse(proposal.decidedAt) < Date.parse(proposal.createdAt)) ||
+      !isProposalReview(proposal.review, proposal.baseRevision, projectRevision) ||
       outcomes.has(proposal.id)
     ) {
       return null;
@@ -299,6 +308,25 @@ const buildProposalOutcomeIndex = (
   return outcomes;
 };
 
+const truncatedProposalLookupOutcome = (
+  calls: Parameters<ToolOutcomeInterpreter>[0]['step']['calls'],
+  proposals: ProposalOutcomeIndex
+): TurnDomainOutcome => {
+  if (proposals === null) return 'unknown';
+  const proposalIds = new Set<string>();
+  let sawInput = false;
+  for (const call of calls) {
+    if (call.input === undefined) continue;
+    sawInput = true;
+    const parsed = parseExactRecord(call.input);
+    if (parsed === null || !hasExactKeys(parsed, ['proposalId']) || !isSafeId(parsed.proposalId)) return 'unknown';
+    proposalIds.add(parsed.proposalId);
+    if (proposalIds.size > 1) return 'unknown';
+  }
+  if (!sawInput || proposalIds.size !== 1) return 'unknown';
+  return proposals.get([...proposalIds][0]!) ?? 'unknown';
+};
+
 const hasReceiptIdentity = (value: Record<string, unknown>, projectId: string): value is ReceiptIdentity =>
   value.schemaVersion === STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2 &&
   isSafeId(value.commandId) &&
@@ -317,7 +345,7 @@ const hasPendingProposalIdentity = (
   isSafeTimestamp(value.createdAt) &&
   value.decidedAt === null;
 
-const isProposalPayload = (value: unknown): boolean => {
+function isProposalPayload(value: unknown): boolean {
   if (!isRecord(value)) return false;
   if (value.kind === 'mutation_batch') {
     return hasExactKeys(value, ['kind', 'operations']) && Array.isArray(value.operations);
@@ -350,7 +378,39 @@ const isProposalPayload = (value: unknown): boolean => {
     isNonnegativeSafeInteger(quote.itemCount) &&
     typeof quote.includesCascade === 'boolean'
   );
-};
+}
+
+// The recap consumes only review status and revision authority. Validate that exact envelope here;
+// display-only groups/refusal details stay opaque instead of duplicating Main's proposal reducer.
+function isProposalReview(value: unknown, proposalBaseRevision: number, projectRevision: number): boolean {
+  if (!isRecord(value)) return false;
+  if (value.status === 'ready') {
+    return (
+      hasExactKeys(value, ['status', 'groups']) &&
+      proposalBaseRevision === projectRevision &&
+      Array.isArray(value.groups)
+    );
+  }
+  if (value.status === 'stale') {
+    return (
+      hasExactKeys(value, ['status', 'groups', 'currentRevision', 'baseRevision']) &&
+      Array.isArray(value.groups) &&
+      value.groups.length === 0 &&
+      value.currentRevision === projectRevision &&
+      value.baseRevision === proposalBaseRevision &&
+      proposalBaseRevision !== projectRevision
+    );
+  }
+  return (
+    value.status === 'unavailable' &&
+    hasExactKeys(value, ['status', 'groups', 'reason', 'refusal']) &&
+    proposalBaseRevision === projectRevision &&
+    Array.isArray(value.groups) &&
+    value.groups.length === 0 &&
+    value.reason === 'reducer_rejected' &&
+    (value.refusal === null || isRecord(value.refusal))
+  );
+}
 
 const isPendingProposalRecord = (
   value: unknown,
@@ -719,8 +779,11 @@ export const createStudioDirectorToolOutcomeInterpreter = (
     ) {
       // These exact queries cannot change project state. Renderer compaction of
       // their completed output must not conceal a separate durable mutation or
-      // turn routine pending review into a false failure. Queries that can
-      // resolve mutation/proposal uncertainty deliberately remain fail-closed.
+      // turn routine pending review into a false failure. Proposal lookups need
+      // one unambiguous retained input plus the exact current renderer catalogue.
+      if (tool === 'studio_get_proposal') {
+        return truncatedProposalLookupOutcome(input.step.calls, proposals);
+      }
       return OBSERVATION_ONLY_TOOLS.has(tool) ? 'observed' : 'unknown';
     }
     if (
