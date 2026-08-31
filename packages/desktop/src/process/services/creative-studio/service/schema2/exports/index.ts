@@ -6,3 +6,4 @@
 
 export * from './catalog';
 export * from './editorFolder';
+export * from './pieceManifestV3';

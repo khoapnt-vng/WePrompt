@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { createEmptyStudioProjectV2 } from './factories';
+export { createEmptyStudioProjectV2, createEmptyStudioProjectV3 } from './factories';
 export * from './exports';
 export * from './generation';
 export * from './pricing';
@@ -34,9 +34,14 @@ export {
   type StudioMutationApplyResultV2,
   type StudioMutationReasonV2,
 } from './mutations';
+export * from './mutations/deletionClaimsV3';
+export * from './mutations/pieceCatalogV3';
+export * from './mutations/pieceHandles';
 export {
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,
   validateStudioProjectV2,
+  validateStudioProjectV3,
+  validateStudioPieceExportManifestV3,
   validateStudioProposedShotV2,
 } from './validation';

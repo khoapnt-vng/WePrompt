@@ -56,6 +56,12 @@ introduce an ordered-work concept.
 - Crash-safe replacement, bounded traversal, startup replay, manifest/brief correlation, and
   per-project failure isolation remain mandatory.
 
+The later block-grammar commission's statement that the canvas arrives beside the four CS3 views is
+not an adopted schedule change. The block grammar is accepted as a presentation specification only.
+Production remains wholly on schema 5 and the four views through Phase 4; Phase 5 selects schema 6
+and the canvas together and removes those views in the same cutover. There is no production interval
+with a schema-6 canvas beside schema-5 film views, and no dual-schema project reader.
+
 The schema-6 project root contains only Pilot-relevant project identity and Director binding,
 `revision`, `authoringRevision`, name, brief/rules, Piece order and Piece map, assets, Jobs, spend
 policy and authorizations, undo history, and timestamps. Optional integrations use explicit `null`
@@ -81,6 +87,19 @@ A Piece is the durable owner of one standalone photograph. Pilot 1 supports exac
   outcome → `submission_unknown`, detected variation grid → `variation_grid`, and cancelled
   predecessor → `cancelled`. The schema-5 production reader keeps its former enum until the Phase 5
   cutover.
+
+  | Exact predecessor state                                                          | Fresh paid-retry result        |
+  | -------------------------------------------------------------------------------- | ------------------------------ |
+  | `failed` or `needs_attention` with `submission_unknown`                          | `submission_unknown`           |
+  | `failed` with `variation_grid`                                                   | `variation_grid`               |
+  | `cancelled`                                                                      | `cancelled`                    |
+  | `failed` with another non-null error except `download_failed` or `poll_deadline` | `provider_failure`             |
+  | `download_failed` or `poll_deadline`                                             | no fresh Job; recover same Job |
+  | active, succeeded, missing-error, or other `needs_attention` state               | ineligible                     |
+
+  `download_failed` retains the existing same-Job byte-download recovery. `poll_deadline`
+  retains the existing same-Job provider-status recovery. Neither may mint a second paid Job.
+
 - **Confirm new generation:** under the project queue, Main claims the `create` reservation,
   re-derives the request and quote, checks authoring and spend authority, and atomically writes the
   Piece, authorization, and queued Job. Dispatch begins only after that commit succeeds.
@@ -104,6 +123,10 @@ Pilot 1 exposes retry only for an incomplete generated Piece. It does not expose
 replacement, edited retry wording/settings, regeneration of a completed Piece, or generation over an
 imported Piece; those need a later reviewed product contract. A person who wants different wording
 uses Create photo and receives a sibling Piece.
+
+Pilot 1 renders each Piece as a one-member stills block. The later canvas grammar's allowance for a
+stills block with up to twelve members means an aggregation of up to twelve distinct Pieces; it does
+not change the invariant that one Piece owns exactly one photograph.
 
 Renderer and Director preparation call the same typed Main service. Main exposes admitted sessions
 through an ephemeral renderer-safe `preparedPhotoQuotes` activity projection keyed by
@@ -175,6 +198,34 @@ project queue; no raw path crosses into renderer state or persisted provenance. 
 basenames use `piece`. Concurrent same-name imports receive deterministic suffixes, and explicit
 rename remains available afterward.
 
+#### Exact Pilot 1 shape and bounds
+
+These values are part of schema 6 and are not implementation suggestions:
+
+| Surface              | Exact bound or key set                                                                                                                                                                                                                                         |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Project root         | Exact keys: `schemaVersion`, `revision`, `authoringRevision`, `id`, `name`, `brief`, `rules`, `forgeProjectId`, `briefConversationId`, `pieceOrder`, `pieces`, `spendPolicy`, `spendAuthorizations`, `undoHistory`, `assets`, `jobs`, `createdAt`, `updatedAt` |
+| Piece                | Exact keys: `id`, `kind`, `handle`, `priorHandles`, `currentAssetId`, `jobIds`, `createdAt`, `updatedAt`; `kind` is exactly `photograph`                                                                                                                       |
+| Safe identity        | ASCII `[A-Za-z0-9_-]{1,256}`; Main mints every durable identity                                                                                                                                                                                                |
+| Project text         | Name: 1–256 JavaScript code units, trimmed; brief: 0–16,384 code units                                                                                                                                                                                         |
+| Rules                | At most 24; rule text at most 240 code units; at most 8 forbidden terms, each at most 64 code units                                                                                                                                                            |
+| Piece catalogue      | At most 96 Pieces and 96 assets                                                                                                                                                                                                                                |
+| Handle namespace     | Current handle at most 48 Unicode scalars and 192 UTF-8 bytes; at most 20 retained aliases per Piece                                                                                                                                                           |
+| Job lineage          | At most 32 Jobs per Piece, 3,072 Jobs total, and 3,072 spend authorizations                                                                                                                                                                                    |
+| Undo                 | At most 20 entries; a schema-6 entry contains exactly one Piece-catalog patch                                                                                                                                                                                  |
+| Generation text      | Normalized authored words and frozen composed prompt are each at most 32,768 code units; provider model is 1–256 trimmed code units                                                                                                                            |
+| Photo request        | Aspect ratio is one of `16:9`, `9:16`, `1:1`, `4:3`, `3:4`; resolution is `720p` or `1080p`; exactly one output; no conditioning inputs                                                                                                                        |
+| Image asset          | MIME is `image/jpeg`, `image/png`, or `image/webp`; verified bytes are 1–52,428,800                                                                                                                                                                            |
+| Prepared-photo cache | Five-minute TTL; at most 4 sessions/project and 16 globally; at most 8 MiB/session, 16 MiB/project, and 64 MiB globally                                                                                                                                        |
+| Deletion claims      | Five-minute TTL and at most 64 active claims                                                                                                                                                                                                                   |
+| Export 3             | Canonical manifest at most 1 MiB; relative path at most 1,024 UTF-8 bytes and depth 4; each segment at most 256 scalars and 512 UTF-8 bytes                                                                                                                    |
+| Timestamp            | Exact canonical 24-character UTC ISO-8601 with milliseconds, for example `2026-08-30T00:00:00.000Z`                                                                                                                                                            |
+
+Dense-array rules, exact map-key/id equality, finite safe integers, lowercase SHA-256 digests,
+managed relative paths, and no accessors, proxies, sparse arrays, undeclared keys, or inherited data
+apply throughout. These bounds may change only with an explicit schema decision and corresponding
+boundary tests.
+
 ### 2.4 Two revision authorities
 
 Schema 6 separates storage concurrency from authored meaning:
@@ -209,6 +260,12 @@ only when the safe projection requires it. Main retrieves every authority field 
 recomputes them, and rejects any missing, extra, or mismatched acknowledgement; renderer and Director
 cannot echo a replacement fingerprint into authority.
 
+On a successful commit, the persisted authorization retains the exact quote and its `reservationId`
+so Main can rederive the quoted item id after cache loss or restart; a coordinated rewrite of quote,
+Job, binding, and receipt ids is still invalid. The authorization also freezes the exact cancellation
+policy selected by Main, and the persisted Job must match it. Neither authority is reconstructed from
+current defaults.
+
 `authoringFingerprintVersion: 1` is SHA-256 over a domain-separated canonical encoding named
 `weprompt:studio-authoring:v1`. Map keys sort lexically and arrays retain semantic order. Its common
 payload contains project id, `authoringRevision`, project name, brief/rules, Director binding, spend
@@ -217,7 +274,9 @@ mode-discriminated: `create` adds the reserved Piece id, proposed handle and ord
 normalized words and request-scoped settings; `retry` adds `existingPieceId`, `sourceJobId`, and the
 target Piece's ordered immutable Job-lineage projection—each `jobId`, `retryOfJobId`, and
 `retryReason`—plus the copied words and settings, and has no proposed handle or new Piece/order
-identity. Retryable status and current terminal state remain separate confirmation gates. The
+identity. Main derives that projection from the target Piece's persisted `jobIds` and Job records;
+no renderer, Director, prepared-session caller, or fingerprint caller supplies replacement lineage.
+Retryable status and current terminal state remain separate confirmation gates. The
 fingerprint excludes Job progress/status/error text, receipts, current-asset publication caused by
 runtime completion, timestamps, and storage `revision`. Route, rate, composition, and request-plan
 equality remain separate frozen quote checks. Phase 6 proposal review must use the same
@@ -341,7 +400,10 @@ target-union edit must not be merged.
 Composition 2 validation checks exact shape, bounds, digest, and internal stored-to-stored consistency.
 It does **not** regenerate an old prompt using current code and compare text. Prompt-template changes
 advance the instruction profile for new work; they never mutate or invalidate the recorded prompt of
-an existing Job.
+an existing Job. The current composer emits `weprompt-image-v1.piece-image.v1`; stored provenance
+accepts canonical positive versions in the `weprompt-image-v1.piece-image.vN` namespace so a future
+current profile can advance while retaining every earlier profile. New composition rejects a caller
+that requests anything except the current profile.
 
 ---
 
@@ -350,6 +412,14 @@ an existing Job.
 The phases below are dependency ordered. Do not start Phase 3 runtime work until the Phase 1 contract
 tests and Phase 2 equivalence tests are green. Do not start the canvas before the headless lifecycle
 passes.
+
+**Shared Tranche 0 branch rule.** BUG-162 and BUG-163 repair behavior that is still owned by the
+shared CS3 production base. Each fix must be implemented and reviewed independently on the current
+shared CS3 base (`codex/creative-studio-table-board-ui-design`), pass its CS3 gates there, and only
+then reach CS4 by merging the shared base that contains it. Do not author either fix first as a
+CS4-local patch, and do not treat the present branch arrangement, a duplicated local diff, or a
+claimant label as evidence that this sequence has happened. BUG-190 is not part of that shared code
+tranche; it is the external-backed Phase 5 entry prerequisite defined below.
 
 ### Phase 0 — amend the contract and stabilize the base
 
@@ -360,30 +430,22 @@ passes.
    destination, claimant, and acceptance oracle. The committed count is 3 fix-before, 26 absorb, 1
    superseded, 0 defer.
 2. Capture the behavior baseline described in §6 before the first runtime edit.
-3. Fix BUG-190 at the actual built-in-tool trust boundary. Test that an existing and a newly added
-   read-only Studio tool run without per-tool consent, while the equivalent untrusted external tool
-   still requires consent.
-   - The 2026-08-30 implementation audit found that this boundary does not exist in WePrompt or the
-     pinned Aionrs approval input: every MCP call is reduced to one `mcp` category. Phase 1 remains
-     blocked until an AionCore/Aionrs release propagates backend-authenticated Studio server identity
-     plus read-only tool annotation, passes the trusted/untrusted oracle, and is pinned with verified
-     provenance. No renderer auto-click, bare-name allowlist, or global MCP approval is an acceptable
-     substitute.
-4. Fix BUG-162 by deriving the turn recap from durable outcomes, not successful tool transport.
+3. Fix BUG-162 by deriving the turn recap from durable outcomes, not successful tool transport.
    Queued spend, pending review, refusal, cancellation, and actual commit must produce distinct
    truthful recaps.
-5. Complete BUG-163 with its remaining live restart/recovery verification. Preserve the existing
+4. Complete BUG-163 with its remaining live restart/recovery verification. Preserve the existing
    conversation and history, distrust the update echo, prove exact readback, and keep retry bounded.
-6. Inventory every exhaustive branch for target kind, purpose, composition source, asset ownership,
+5. Inventory every exhaustive branch for target kind, purpose, composition source, asset ownership,
    quote/authorization, Job lifecycle, projection, export, IPC parser, and Director tool schema. Save
    the inventory in the implementation change description; missing a branch is a Phase 1 blocker.
 
-**Focused evidence:** the tests named by BUG-190/162/163, plus a live Director recovery pass for
-BUG-163. Do not mark an entry closed from unit evidence alone when its acceptance oracle requires the
-running application.
+**Focused evidence:** the tests named by BUG-162/163, plus a live Director recovery pass for BUG-163.
+Do not mark an entry closed from unit evidence alone when its acceptance oracle requires the running
+application.
 
-**Exit:** all three base blockers satisfy their bug-list evidence, the triage is complete, and the
-real baseline fixture is committed. No CS4 production path exists yet.
+**Exit:** both shared-base blockers satisfy their bug-list evidence on the shared CS3 base, that base
+has been merged into CS4, the triage is complete, and the real baseline fixture is committed. BUG-190
+is not a Phase 0 or Phase 1 exit condition. No CS4 production path exists yet.
 
 ### Phase 1 — freeze schema-6 and cross-contract authority
 
@@ -394,14 +456,21 @@ Primary files to inspect and change:
 - `packages/desktop/src/common/types/project/creativeStudioTypes.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/validation.ts`
-- `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/pieceHandles.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/pieceCatalogV3.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/mutations/deletionClaimsV3.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/generation/composition.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/generation/generationRequest.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/generation/submissionIdentity.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/authorization.ts`
 - `packages/desktop/src/process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache.ts`
-- `packages/desktop/src/process/services/creative-studio/service/directorCommandContracts.ts`
+- `packages/desktop/src/process/services/creative-studio/service/schema2/exports/pieceManifestV3.ts`
+
+The Director-facing command and MCP surface remains provisional in this phase. Phase 1 may define
+pure Piece-domain types that a later Director adapter will consume, but it must not freeze or bump the
+Director command contract, add or register a Studio MCP tool, or count a provisional Director shape
+as Phase 1 exit evidence. Phase 5 owns that surface after BUG-190's entry prerequisite passes.
 
 Work, in order:
 
@@ -429,6 +498,8 @@ Work, in order:
 8. Define renderer-safe canvas inventory, capability activity, and provenance projections. Provider
    ids, adapter ids, hashes used only for internal proof, absolute paths, authorization ids, and
    idempotency keys stay in Main unless a reviewed UI requirement explicitly needs a safe form.
+   Phase 1 freezes the projection types; Phase 3 builds the projections and must use the shared
+   handle helper rather than implementing a second normalizer.
 9. Define export schema 3's exact Piece manifest, but do not bump the export constant or expose the
    exporter until Phase 3.
 
@@ -440,7 +511,9 @@ Focused tests must prove:
 - all Unicode and alias cases in §2.3;
 - import basenames and concurrent new/import reservations derive distinct Unicode-safe handles while
   explicit rename rejects instead of silently rewriting invalid input;
-- runtime Job progress changes `revision` only, while rename changes both revisions;
+- schema-6 validation and fingerprint tests admit a canonical runtime Job-progress change with only
+  `revision` advanced, while the Phase-1 rename reducer advances both revisions; Phase 3 must prove
+  the same runtime rule through the public Job-transition path once that path exists;
 - runtime activity does not stale a quote or direct action, while an authored input or policy change
   does;
 - canonical authoring fingerprints are stable across map insertion order, differ across the
@@ -453,7 +526,8 @@ Focused tests must prove:
 - Job retry lineage requires null predecessor/reason together for `create`, an exact retryable
   same-Piece/same-purpose predecessor plus reason for `retry`, one child per predecessor, and no
   cycles; status-to-reason mapping includes cancelled → `cancelled` and never overloads
-  `provider_failure`;
+  `provider_failure`; `download_failed` and `poll_deadline` remain same-Job recovery and cannot mint
+  a fresh paid retry;
 - duplicate-charge acknowledgement/timestamp are present together exactly for a confirmed
   `submission_unknown` retry and are false/null for every other Job;
 - fixed-price photo quotes require equal lower/upper amounts and variable-price routes fail closed;
@@ -621,6 +695,18 @@ test may declare success merely because the adapter was called.
 dependencies. There is still no claim that the renderer journey works.
 
 ### Phase 5 — canvas, Director integration, and actual renderer E2E
+
+**Entry prerequisite — BUG-190.** Phases 1–4 may proceed without it because they register no
+production Director MCP tool. Before Phase 5 freezes the Director command surface, registers a new
+Studio tool, or cuts the Director over to the canvas, the trusted-read boundary must exist and pass
+its oracle. The 2026-08-30 runtime audit established that the Director uses Aionrs, not ACP; the
+pinned path reduces every MCP proxy to the single `mcp` approval category, and **Allow always**
+therefore covers mutating Studio tools and external MCP tools as well. AionCore/Aionrs must propagate
+both backend-authenticated built-in Studio server identity and MCP `readOnlyHint`; WePrompt must pin
+that reviewed release with checksum and provenance evidence. An existing and a newly added read-only
+Studio tool must then run without consent while an equivalent external or mutating tool still
+prompts. A renderer auto-click, bare server-name allowlist, caller-forgeable trust flag, or global MCP
+approval is not an acceptable substitute.
 
 **Purpose:** expose exactly the accepted Pilot and remove the superseded four-room workspace.
 

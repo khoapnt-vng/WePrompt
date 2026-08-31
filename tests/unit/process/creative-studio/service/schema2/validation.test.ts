@@ -11,16 +11,22 @@ import {
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
+  STUDIO_MAX_JOBS_PER_PIECE_V3,
+  STUDIO_MAX_PIECES_V3,
+  STUDIO_MAX_PIECE_HANDLE_SCALARS_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_STORY_LENGTH,
   STUDIO_MAX_UNDO_ENTRIES,
+  STUDIO_MAX_UNDO_ENTRIES_V3,
   STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION,
   type StudioAssetV2,
+  type StudioAssetV3,
   type StudioBeat,
   type StudioConditioningInputSnapshot,
   type StudioFixedShotReasonV2,
@@ -28,7 +34,13 @@ import {
   type StudioGenerationRequestPlan,
   type StudioGenerationTargetV2,
   type StudioJobV2,
+  type StudioPieceGenerationCompositionV3,
+  type StudioPieceGenerationRequestPlanV3,
+  type StudioPieceJobV3,
+  type StudioPieceSpendAuthorizationV3,
+  type StudioPieceSubmissionQuoteV3,
   type StudioProjectV2,
+  type StudioProjectV3,
   type StudioQuotedGeneration,
   type StudioShot,
   type StudioSpendAuthorization,
@@ -37,17 +49,24 @@ import {
   calculateStudioQuoteTotals,
   composeStudioGenerationV2,
   createStudioFrameExtractionId,
+  createStudioPieceQuotedGenerationIdV3,
   createStudioQuotedGenerationId,
   deriveStudioInstructionProfileV2,
   recomposeStudioGenerationV2,
   studioGenerationCompositionDigestV2,
+  studioPieceGenerationCompositionDigestV3,
+  studioPieceGenerationCompositionsEqualV3,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,
+  validateStudioPieceExportManifestV3,
   validateStudioProjectV2,
+  validateStudioProjectV3,
   validateStudioProposedShotV2,
+  studioPieceRetryReasonForPredecessorV3,
 } from '@/process/services/creative-studio/service/schema2/validation';
+import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
 import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
@@ -55,6 +74,484 @@ const confirmedAt = '2026-08-17T00:00:01.000Z';
 const expiresAt = '2026-08-17T00:05:00.000Z';
 const digest = 'a'.repeat(64);
 const provider = { providerId: 'provider_1', adapterId: 'weprompt-image-v1', model: 'model_1' } as const;
+const timestampV3 = '2026-08-30T00:00:00.000Z';
+const confirmedAtV3 = '2026-08-30T00:00:01.000Z';
+const completedAtV3 = '2026-08-30T00:00:02.000Z';
+const retryChainAtV3 = '2026-08-30T00:01:00.000Z';
+const expiresAtV3 = '2026-08-30T00:05:00.000Z';
+
+const makeEmptyProjectV3 = (): StudioProjectV3 =>
+  createEmptyStudioProjectV3({ name: 'Pilot', brief: 'A quiet portrait' }, 'project_v3', timestampV3);
+
+const addImportedPieceV3 = (project: StudioProjectV3, pieceId: string, handle: string): void => {
+  const assetId = `asset_${pieceId}`;
+  const asset: StudioAssetV3 = {
+    id: assetId,
+    projectId: project.id,
+    pieceId,
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'imports', fileName: `${assetId}.png` },
+    byteSize: 8,
+    sha256: digest,
+    width: 800,
+    height: 600,
+    createdAt: completedAtV3,
+    origin: 'imported',
+    producerJobId: null,
+    compositionDigest: null,
+  };
+  project.pieceOrder.push(pieceId);
+  project.pieces[pieceId] = {
+    id: pieceId,
+    kind: 'photograph',
+    handle,
+    priorHandles: [],
+    currentAssetId: assetId,
+    jobIds: [],
+    createdAt: confirmedAtV3,
+    updatedAt: completedAtV3,
+  };
+  project.assets[assetId] = asset;
+  project.revision += 1;
+  project.authoringRevision += 1;
+  project.updatedAt = completedAtV3;
+};
+
+const makeCompositionV3 = (
+  pieceId: string,
+  projectRevisionAtPreparation = 1,
+  authoringRevision = 1,
+  prompt = 'A quiet portrait, soft window light.'
+): StudioPieceGenerationCompositionV3 => ({
+  inputs: {
+    schemaVersion: 2,
+    projectRevisionAtPreparation,
+    authoringRevision,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: digest,
+    brief: 'A quiet portrait',
+    rules: [],
+    source: {
+      kind: 'piece',
+      pieceId,
+      words: 'A quiet portrait',
+      settings: { aspectRatio: '4:3', resolution: '1080p' },
+    },
+    purpose: 'piece_image',
+    conditioningInputs: [],
+    route: provider,
+    instructionProfile: 'weprompt-image-v1.piece-image.v1',
+  },
+  prompt,
+});
+
+const makeGeneratedProjectV3 = (): StudioProjectV3 => {
+  const project = makeEmptyProjectV3();
+  const pieceId = 'piece_1';
+  const jobId = 'job_1';
+  const assetId = 'asset_1';
+  const composition = makeCompositionV3(pieceId);
+  const requestPlan: StudioPieceGenerationRequestPlanV3 = {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      settings: { aspectRatio: '4:3', resolution: '1080p' },
+      conditioningInputs: [],
+    },
+  };
+  const target = { kind: 'piece' as const, pieceId };
+  const itemId = createStudioPieceQuotedGenerationIdV3({
+    projectId: project.id,
+    reservationId: 'reservation_1',
+    quoteId: 'quote_1',
+    quoteRevision: 1,
+    target,
+    purpose: 'piece_image',
+  });
+  const quote: StudioPieceSubmissionQuoteV3 = {
+    id: 'quote_1',
+    reservationId: 'reservation_1',
+    quoteRevision: 1,
+    projectId: project.id,
+    projectRevisionAtPreparation: 1,
+    authoringRevision: 1,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: digest,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    item: {
+      id: itemId,
+      target,
+      purpose: 'piece_image',
+      routeId: 'route_1',
+      generationCount: 1,
+      requestPlan,
+      rateUnit: 'generation',
+      rateMinorUnits: 125,
+    },
+    lowerMinorUnits: 125,
+    upperMinorUnits: 125,
+    expiresAt: expiresAtV3,
+  };
+  const authorization: StudioPieceSpendAuthorizationV3 = {
+    id: 'authorization_1',
+    quote,
+    confirmedAt: confirmedAtV3,
+    projectRevisionAtAuthorization: 2,
+    cancellationPolicy: 'queued_and_running',
+    providerBinding: { itemId, provider },
+    idempotencyKey: { itemId, key: 'idempotency_1' },
+  };
+  const receipt = {
+    authorizationId: authorization.id,
+    quoteId: quote.id,
+    quoteRevision: quote.quoteRevision,
+    itemId: quote.item.id,
+    jobId,
+    purpose: 'piece_image',
+    routeId: quote.item.routeId,
+    currency: quote.currency,
+    rateUnit: 'generation',
+    rateMinorUnits: quote.item.rateMinorUnits,
+    generationCount: 1,
+    totalMinorUnits: quote.item.rateMinorUnits,
+    recordedAt: completedAtV3,
+  } as const;
+  const job: StudioPieceJobV3 = {
+    id: jobId,
+    projectId: project.id,
+    target: { kind: 'piece', pieceId },
+    purpose: 'piece_image',
+    status: 'succeeded',
+    provider,
+    idempotencyKey: 'idempotency_1',
+    providerJobId: 'provider_job_1',
+    remoteStartedAt: confirmedAtV3,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetId: assetId,
+    error: null,
+    progress: 100,
+    retryOfJobId: null,
+    retryReason: null,
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    authorizationId: authorization.id,
+    authorizationItemId: quote.item.id,
+    composition,
+    requestPlan,
+    spendReceipt: receipt,
+    authoringRevision: 1,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: digest,
+    projectRevisionAtPreparation: 1,
+    projectRevisionAtAuthorization: 2,
+    createdAt: confirmedAtV3,
+    updatedAt: completedAtV3,
+  };
+  const asset: StudioAssetV3 = {
+    id: assetId,
+    projectId: project.id,
+    pieceId,
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'assets', fileName: 'asset_1.png' },
+    byteSize: 8,
+    sha256: 'c'.repeat(64),
+    width: 800,
+    height: 600,
+    createdAt: completedAtV3,
+    origin: 'generated',
+    producerJobId: jobId,
+    compositionDigest: studioPieceGenerationCompositionDigestV3(composition),
+  };
+  project.revision = 3;
+  project.authoringRevision = 2;
+  project.updatedAt = completedAtV3;
+  project.pieceOrder = [pieceId];
+  project.pieces[pieceId] = {
+    id: pieceId,
+    kind: 'photograph',
+    handle: 'quiet_portrait',
+    priorHandles: [],
+    currentAssetId: assetId,
+    jobIds: [jobId],
+    createdAt: confirmedAtV3,
+    updatedAt: completedAtV3,
+  };
+  project.spendAuthorizations = [authorization];
+  project.assets[assetId] = asset;
+  project.jobs[jobId] = job;
+  return project;
+};
+
+const makeRetryProjectV3 = (): StudioProjectV3 => {
+  const project = makeGeneratedProjectV3();
+  const firstJob = project.jobs.job_1!;
+  firstJob.status = 'failed';
+  firstJob.outputAssetId = null;
+  firstJob.error = { code: 'timeout', messageKey: 'timeout' };
+  firstJob.progress = null;
+  firstJob.spendReceipt = null;
+  delete project.assets.asset_1;
+  project.pieces.piece_1!.currentAssetId = null;
+
+  const composition = makeCompositionV3('piece_1', 3, 2);
+  const requestPlan: StudioPieceGenerationRequestPlanV3 = {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      settings: { aspectRatio: '4:3', resolution: '1080p' },
+      conditioningInputs: [],
+    },
+  };
+  const target = { kind: 'piece' as const, pieceId: 'piece_1' };
+  const itemId = createStudioPieceQuotedGenerationIdV3({
+    projectId: project.id,
+    reservationId: 'reservation_2',
+    quoteId: 'quote_2',
+    quoteRevision: 1,
+    target,
+    purpose: 'piece_image',
+  });
+  const quote: StudioPieceSubmissionQuoteV3 = {
+    id: 'quote_2',
+    reservationId: 'reservation_2',
+    quoteRevision: 1,
+    projectId: project.id,
+    projectRevisionAtPreparation: 3,
+    authoringRevision: 2,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: digest,
+    rateCardDigest: 'b'.repeat(64),
+    currency: 'USD',
+    item: {
+      id: itemId,
+      target,
+      purpose: 'piece_image',
+      routeId: 'route_1',
+      generationCount: 1,
+      requestPlan,
+      rateUnit: 'generation',
+      rateMinorUnits: 125,
+    },
+    lowerMinorUnits: 125,
+    upperMinorUnits: 125,
+    expiresAt: '2026-08-30T00:06:00.000Z',
+  };
+  const authorization: StudioPieceSpendAuthorizationV3 = {
+    id: 'authorization_2',
+    quote,
+    confirmedAt: '2026-08-30T00:00:04.000Z',
+    projectRevisionAtAuthorization: 4,
+    cancellationPolicy: 'queued_and_running',
+    providerBinding: { itemId, provider },
+    idempotencyKey: { itemId, key: 'idempotency_2' },
+  };
+  project.jobs.job_2 = {
+    id: 'job_2',
+    projectId: project.id,
+    target: { kind: 'piece', pieceId: 'piece_1' },
+    purpose: 'piece_image',
+    status: 'queued_local',
+    provider,
+    idempotencyKey: 'idempotency_2',
+    providerJobId: null,
+    remoteStartedAt: null,
+    cancellationPolicy: 'queued_and_running',
+    outputAssetId: null,
+    error: null,
+    progress: null,
+    retryOfJobId: 'job_1',
+    retryReason: 'provider_failure',
+    duplicateChargeAcknowledged: false,
+    duplicateChargeAcknowledgedAt: null,
+    authorizationId: authorization.id,
+    authorizationItemId: quote.item.id,
+    composition,
+    requestPlan,
+    spendReceipt: null,
+    authoringRevision: 2,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: digest,
+    projectRevisionAtPreparation: 3,
+    projectRevisionAtAuthorization: 4,
+    createdAt: authorization.confirmedAt,
+    updatedAt: authorization.confirmedAt,
+  };
+  project.spendAuthorizations.push(authorization);
+  project.pieces.piece_1!.jobIds.push('job_2');
+  project.pieces.piece_1!.updatedAt = authorization.confirmedAt;
+  project.revision = 4;
+  project.updatedAt = authorization.confirmedAt;
+  return project;
+};
+
+const extendRetryChainV3 = (project: StudioProjectV3, totalJobs: number): void => {
+  for (let index = project.pieces.piece_1!.jobIds.length + 1; index <= totalJobs; index += 1) {
+    const predecessorId = `job_${index - 1}`;
+    const predecessor = project.jobs[predecessorId]!;
+    predecessor.status = 'failed';
+    predecessor.error = { code: 'timeout', messageKey: 'timeout' };
+    predecessor.progress = null;
+    predecessor.providerJobId = null;
+    predecessor.remoteStartedAt = null;
+    predecessor.spendReceipt = null;
+    predecessor.updatedAt = retryChainAtV3;
+
+    const projectRevisionAtPreparation = project.revision + 1;
+    const projectRevisionAtAuthorization = projectRevisionAtPreparation + 1;
+    const jobId = `job_${index}`;
+    const reservationId = `reservation_${index}`;
+    const quoteId = `quote_${index}`;
+    const authorizationId = `authorization_${index}`;
+    const idempotencyKey = `idempotency_${index}`;
+    const target = { kind: 'piece' as const, pieceId: 'piece_1' };
+    const composition = makeCompositionV3('piece_1', projectRevisionAtPreparation, 2);
+    const requestPlan: StudioPieceGenerationRequestPlanV3 = {
+      kind: 'resolved',
+      snapshot: {
+        composition,
+        settings: { aspectRatio: '4:3', resolution: '1080p' },
+        conditioningInputs: [],
+      },
+    };
+    const itemId = createStudioPieceQuotedGenerationIdV3({
+      projectId: project.id,
+      reservationId,
+      quoteId,
+      quoteRevision: 1,
+      target,
+      purpose: 'piece_image',
+    });
+    const quote: StudioPieceSubmissionQuoteV3 = {
+      id: quoteId,
+      reservationId,
+      quoteRevision: 1,
+      projectId: project.id,
+      projectRevisionAtPreparation,
+      authoringRevision: 2,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: digest,
+      rateCardDigest: 'b'.repeat(64),
+      currency: 'USD',
+      item: {
+        id: itemId,
+        target,
+        purpose: 'piece_image',
+        routeId: 'route_1',
+        generationCount: 1,
+        requestPlan,
+        rateUnit: 'generation',
+        rateMinorUnits: 125,
+      },
+      lowerMinorUnits: 125,
+      upperMinorUnits: 125,
+      expiresAt: expiresAtV3,
+    };
+    const authorization: StudioPieceSpendAuthorizationV3 = {
+      id: authorizationId,
+      quote,
+      confirmedAt: retryChainAtV3,
+      projectRevisionAtAuthorization,
+      cancellationPolicy: 'queued_and_running',
+      providerBinding: { itemId, provider },
+      idempotencyKey: { itemId, key: idempotencyKey },
+    };
+    project.spendAuthorizations.push(authorization);
+    project.jobs[jobId] = {
+      id: jobId,
+      projectId: project.id,
+      target,
+      purpose: 'piece_image',
+      status: 'queued_local',
+      provider,
+      idempotencyKey,
+      providerJobId: null,
+      remoteStartedAt: null,
+      cancellationPolicy: 'queued_and_running',
+      outputAssetId: null,
+      error: null,
+      progress: null,
+      retryOfJobId: predecessorId,
+      retryReason: 'provider_failure',
+      duplicateChargeAcknowledged: false,
+      duplicateChargeAcknowledgedAt: null,
+      authorizationId,
+      authorizationItemId: itemId,
+      composition,
+      requestPlan,
+      spendReceipt: null,
+      authoringRevision: 2,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: digest,
+      projectRevisionAtPreparation,
+      projectRevisionAtAuthorization,
+      createdAt: retryChainAtV3,
+      updatedAt: retryChainAtV3,
+    };
+    project.pieces.piece_1!.jobIds.push(jobId);
+    project.pieces.piece_1!.updatedAt = retryChainAtV3;
+    project.revision = projectRevisionAtAuthorization;
+    project.updatedAt = retryChainAtV3;
+  }
+};
+
+const reorderCompositionKeysV3 = (
+  composition: StudioPieceGenerationCompositionV3
+): StudioPieceGenerationCompositionV3 => ({
+  prompt: composition.prompt,
+  inputs: {
+    instructionProfile: composition.inputs.instructionProfile,
+    route: {
+      model: composition.inputs.route.model,
+      adapterId: composition.inputs.route.adapterId,
+      providerId: composition.inputs.route.providerId,
+    },
+    conditioningInputs: [],
+    purpose: composition.inputs.purpose,
+    source: {
+      settings: {
+        resolution: composition.inputs.source.settings.resolution,
+        aspectRatio: composition.inputs.source.settings.aspectRatio,
+      },
+      words: composition.inputs.source.words,
+      pieceId: composition.inputs.source.pieceId,
+      kind: composition.inputs.source.kind,
+    },
+    rules: structuredClone(composition.inputs.rules),
+    brief: composition.inputs.brief,
+    authoringFingerprint: composition.inputs.authoringFingerprint,
+    authoringFingerprintVersion: composition.inputs.authoringFingerprintVersion,
+    authoringRevision: composition.inputs.authoringRevision,
+    projectRevisionAtPreparation: composition.inputs.projectRevisionAtPreparation,
+    schemaVersion: composition.inputs.schemaVersion,
+  },
+});
+
+const makeGeneratedProjectWithJobStatusV3 = (status: StudioPieceJobV3['status']): StudioProjectV3 => {
+  const project = makeGeneratedProjectV3();
+  if (status === 'succeeded') return project;
+
+  const job = project.jobs.job_1!;
+  job.status = status;
+  job.outputAssetId = null;
+  job.spendReceipt = null;
+  job.progress = status === 'running' ? 50 : null;
+  job.error =
+    status === 'failed'
+      ? { code: 'timeout', messageKey: 'timeout' }
+      : status === 'needs_attention'
+        ? { code: 'submission_unknown', messageKey: 'submission_unknown' }
+        : null;
+  if (status === 'queued_local' || status === 'submitting') {
+    job.providerJobId = null;
+    job.remoteStartedAt = null;
+  }
+  delete project.assets.asset_1;
+  project.pieces.piece_1!.currentAssetId = null;
+  return project;
+};
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
   id,
@@ -2249,5 +2746,655 @@ describe('proposal row validators', () => {
     delete sparseReasons[3];
     expect(validateStudioFixedShotReviewV2({ shotId: 'shot_1', reasons: sparseReasons })).toBe(false);
     expect(validateStudioFixedShotReviewsV2([row, { shotId: 'shot_1', reasons: ['owned_job'] }])).toBe(false);
+  });
+});
+
+describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
+  it('accepts its factory project and rejects schema crossover, defaults, extra keys, and sparse arrays', () => {
+    const project = makeEmptyProjectV3();
+    expect(validateStudioProjectV3(project)).toBe(true);
+    expect(validateStudioProjectV2(project)).toBe(false);
+    expect(validateStudioProjectV3(makeProject())).toBe(false);
+
+    const missingRequiredNull = { ...project } as Record<string, unknown>;
+    delete missingRequiredNull.forgeProjectId;
+    expect(validateStudioProjectV3(missingRequiredNull)).toBe(false);
+    expect(validateStudioProjectV3({ ...project, aspectRatio: '16:9' })).toBe(false);
+
+    const sparse = makeEmptyProjectV3();
+    addImportedPieceV3(sparse, 'piece_1', 'ảnh_đêm');
+    delete sparse.pieceOrder[0];
+    expect(validateStudioProjectV3(sparse)).toBe(false);
+  });
+
+  it('accepts the exact 256-byte safe identity bound and rejects empty, non-ASCII, or 257-byte ids', () => {
+    const maximumId = 'p'.repeat(256);
+    expect(
+      validateStudioProjectV3(createEmptyStudioProjectV3({ name: 'Pilot', brief: '' }, maximumId, timestampV3))
+    ).toBe(true);
+    for (const projectId of ['', 'ảnh', 'p'.repeat(257)]) {
+      const project = makeEmptyProjectV3();
+      project.id = projectId;
+      expect(validateStudioProjectV3(project), projectId.length).toBe(false);
+    }
+  });
+
+  it('accepts the exact schema-6 image byte ceiling and rejects one byte over', () => {
+    const project = makeEmptyProjectV3();
+    addImportedPieceV3(project, 'piece_1', 'photo');
+    project.assets.asset_piece_1!.byteSize = STUDIO_MAX_IMAGE_ASSET_BYTES_V3;
+    expect(validateStudioProjectV3(project)).toBe(true);
+    project.assets.asset_piece_1!.byteSize += 1;
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('accepts 20 exact one-patch undo entries and rejects 21', () => {
+    const project = makeEmptyProjectV3();
+    addImportedPieceV3(project, 'piece_1', 'photo');
+    project.undoHistory = Array.from({ length: STUDIO_MAX_UNDO_ENTRIES_V3 }, (_unused, index) => ({
+      id: `undo_${index + 1}`,
+      sourceRevision: project.revision,
+      sourceAuthoringRevision: project.authoringRevision,
+      label: 'rename_piece',
+      patches: [
+        {
+          kind: 'piece_catalog' as const,
+          pieceId: 'piece_1',
+          before: { handle: `prior_${index + 1}`, priorHandles: [] },
+          afterDigest: digest,
+        },
+      ],
+    }));
+    expect(validateStudioProjectV3(project)).toBe(true);
+    project.undoHistory.push({
+      id: 'undo_21',
+      sourceRevision: project.revision,
+      sourceAuthoringRevision: project.authoringRevision,
+      label: 'rename_piece',
+      patches: [
+        {
+          kind: 'piece_catalog',
+          pieceId: 'piece_1',
+          before: { handle: 'prior_21', priorHandles: [] },
+          afterDigest: digest,
+        },
+      ],
+    });
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('accepts 32 coherent Jobs and authorizations for one Piece and rejects 33', () => {
+    const project = makeRetryProjectV3();
+    extendRetryChainV3(project, STUDIO_MAX_JOBS_PER_PIECE_V3);
+    expect(project.jobs).toHaveProperty(`job_${STUDIO_MAX_JOBS_PER_PIECE_V3}`);
+    expect(project.spendAuthorizations).toHaveLength(STUDIO_MAX_JOBS_PER_PIECE_V3);
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    extendRetryChainV3(project, STUDIO_MAX_JOBS_PER_PIECE_V3 + 1);
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('enforces the named Piece bound instead of accepting an unbounded map', () => {
+    const project = makeEmptyProjectV3();
+    for (let index = 0; index <= STUDIO_MAX_PIECES_V3; index += 1) {
+      addImportedPieceV3(project, `piece_${index}`, `piece_${index}`);
+    }
+    expect(project.pieceOrder).toHaveLength(STUDIO_MAX_PIECES_V3 + 1);
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('accepts canonical multilingual handles and rejects noncanonical, over-bound, or ambiguous namespaces', () => {
+    const project = makeEmptyProjectV3();
+    addImportedPieceV3(project, 'piece_vi', 'ảnh_đêm');
+    addImportedPieceV3(project, 'piece_fa', 'شب_تهران');
+    addImportedPieceV3(project, 'piece_ja', '東京_夜');
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const decomposed = structuredClone(project);
+    decomposed.pieces.piece_vi!.handle = 'a\u0301nh_đêm';
+    expect(validateStudioProjectV3(decomposed)).toBe(false);
+
+    const uppercase = structuredClone(project);
+    uppercase.pieces.piece_vi!.handle = 'Ảnh_đêm';
+    expect(validateStudioProjectV3(uppercase)).toBe(false);
+
+    const overBound = structuredClone(project);
+    overBound.pieces.piece_vi!.handle = 'a'.repeat(STUDIO_MAX_PIECE_HANDLE_SCALARS_V3 + 1);
+    expect(validateStudioProjectV3(overBound)).toBe(false);
+
+    const aliasCollision = structuredClone(project);
+    aliasCollision.pieces.piece_fa!.priorHandles = ['ảnh_đêm'];
+    expect(validateStudioProjectV3(aliasCollision)).toBe(false);
+  });
+
+  it('requires exact bidirectional imported and generated Piece ownership', () => {
+    const imported = makeEmptyProjectV3();
+    addImportedPieceV3(imported, 'piece_1', 'imported_photo');
+    expect(validateStudioProjectV3(imported)).toBe(true);
+
+    const wrongImportedOwner = structuredClone(imported);
+    wrongImportedOwner.assets.asset_piece_1!.pieceId = 'piece_missing';
+    expect(validateStudioProjectV3(wrongImportedOwner)).toBe(false);
+
+    const ownerlessImportedAsset = structuredClone(imported);
+    ownerlessImportedAsset.pieces.piece_1!.currentAssetId = null;
+    expect(validateStudioProjectV3(ownerlessImportedAsset)).toBe(false);
+
+    const generated = makeGeneratedProjectV3();
+    expect(validateStudioProjectV3(generated)).toBe(true);
+
+    const wrongProducerOwner = structuredClone(generated);
+    wrongProducerOwner.jobs.job_1!.target.pieceId = 'piece_missing';
+    expect(validateStudioProjectV3(wrongProducerOwner)).toBe(false);
+
+    const wrongDigest = structuredClone(generated);
+    (wrongDigest.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest = digest;
+    expect(validateStudioProjectV3(wrongDigest)).toBe(false);
+  });
+
+  it('requires identity-derived managed image names with exact MIME extensions and unique managed paths', () => {
+    const exactMimeCases = [
+      { mimeType: 'image/jpeg', fileName: 'asset_piece_1.jpg' },
+      { mimeType: 'image/png', fileName: 'asset_piece_1.png' },
+      { mimeType: 'image/webp', fileName: 'asset_piece_1.webp' },
+    ] as const;
+    for (const { mimeType, fileName } of exactMimeCases) {
+      const project = makeEmptyProjectV3();
+      addImportedPieceV3(project, 'piece_1', 'photo');
+      project.assets.asset_piece_1!.mimeType = mimeType;
+      project.assets.asset_piece_1!.managedAsset.fileName = fileName;
+      expect(validateStudioProjectV3(project), `${mimeType} -> ${fileName}`).toBe(true);
+    }
+
+    const invalidNames = [
+      'asset_piece_1.jpeg',
+      'asset_piece_1.PNG',
+      'asset_piece_1.webp',
+      '../asset_piece_1.png',
+      'folder/asset_piece_1.png',
+      'folder\\asset_piece_1.png',
+      'asset_piece_1.png\u0000',
+      'asset_piece_1.\u0001png',
+      'asset_piece_1.png.',
+      ' asset_piece_1.png',
+    ];
+    for (const fileName of invalidNames) {
+      const project = makeEmptyProjectV3();
+      addImportedPieceV3(project, 'piece_1', 'photo');
+      project.assets.asset_piece_1!.managedAsset.fileName = fileName;
+      expect(validateStudioProjectV3(project), fileName).toBe(false);
+    }
+
+    const duplicatePath = makeEmptyProjectV3();
+    addImportedPieceV3(duplicatePath, 'piece_1', 'first');
+    addImportedPieceV3(duplicatePath, 'piece_2', 'second');
+    duplicatePath.assets.asset_piece_2!.managedAsset.fileName =
+      duplicatePath.assets.asset_piece_1!.managedAsset.fileName;
+    expect(validateStudioProjectV3(duplicatePath)).toBe(false);
+  });
+
+  it('does not impose schema-6 canonical image names on schema 5', () => {
+    const project = makeProject();
+    const asset = addHumanSeed(project);
+    asset.managedAsset.fileName = 'legacy-safe-name.jpeg';
+    expect(validateStudioProjectV2(project)).toBe(true);
+  });
+
+  it('validates historical prompt bytes by stored consistency without recomposing current wording', () => {
+    const historical = makeGeneratedProjectV3();
+    const oldPrompt = 'Historical provider wording that the current composer does not produce.';
+    const historicalProfile = 'weprompt-image-v1.piece-image.v2';
+    historical.jobs.job_1!.composition.prompt = oldPrompt;
+    historical.jobs.job_1!.composition.inputs.instructionProfile = historicalProfile;
+    historical.jobs.job_1!.requestPlan.snapshot.composition.prompt = oldPrompt;
+    historical.jobs.job_1!.requestPlan.snapshot.composition.inputs.instructionProfile = historicalProfile;
+    historical.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition.prompt = oldPrompt;
+    historical.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition.inputs.instructionProfile =
+      historicalProfile;
+    (historical.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest =
+      studioPieceGenerationCompositionDigestV3(historical.jobs.job_1!.composition);
+    expect(validateStudioProjectV3(historical)).toBe(true);
+
+    const mismatched = structuredClone(historical);
+    mismatched.spendAuthorizations[0]!.quote.item.requestPlan = structuredClone(
+      mismatched.spendAuthorizations[0]!.quote.item.requestPlan
+    );
+    mismatched.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition.prompt = 'Changed quote only';
+    expect(validateStudioProjectV3(mismatched)).toBe(false);
+  });
+
+  it('uses canonical V3 composition equality and digests without depending on object insertion order', () => {
+    const project = makeGeneratedProjectV3();
+    const original = project.jobs.job_1!.composition;
+    const reordered = reorderCompositionKeysV3(original);
+
+    expect(JSON.stringify(reordered)).not.toBe(JSON.stringify(original));
+    expect(studioPieceGenerationCompositionsEqualV3(original, reordered)).toBe(true);
+    expect(studioPieceGenerationCompositionDigestV3(reordered)).toBe(
+      studioPieceGenerationCompositionDigestV3(original)
+    );
+
+    project.jobs.job_1!.composition = reordered;
+    project.jobs.job_1!.requestPlan.snapshot.composition = structuredClone(reordered);
+    project.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition = structuredClone(reordered);
+    (project.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest =
+      studioPieceGenerationCompositionDigestV3(reordered);
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const changed = structuredClone(reordered);
+    changed.prompt = `${changed.prompt} Changed.`;
+    expect(studioPieceGenerationCompositionsEqualV3(original, changed)).toBe(false);
+    expect(studioPieceGenerationCompositionDigestV3(changed)).not.toBe(
+      studioPieceGenerationCompositionDigestV3(original)
+    );
+  });
+
+  it('enforces the exact status-dependent Piece Job lifecycle matrix', () => {
+    const validStatuses: StudioPieceJobV3['status'][] = [
+      'queued_local',
+      'submitting',
+      'queued_remote',
+      'running',
+      'needs_attention',
+      'succeeded',
+      'failed',
+      'cancelled',
+    ];
+    for (const status of validStatuses) {
+      expect(validateStudioProjectV3(makeGeneratedProjectWithJobStatusV3(status)), status).toBe(true);
+    }
+
+    const cancelledBeforeSubmission = makeGeneratedProjectWithJobStatusV3('cancelled');
+    cancelledBeforeSubmission.jobs.job_1!.providerJobId = null;
+    cancelledBeforeSubmission.jobs.job_1!.remoteStartedAt = null;
+    expect(validateStudioProjectV3(cancelledBeforeSubmission)).toBe(true);
+
+    const failedBeforeSubmission = makeGeneratedProjectWithJobStatusV3('failed');
+    failedBeforeSubmission.jobs.job_1!.providerJobId = null;
+    failedBeforeSubmission.jobs.job_1!.remoteStartedAt = null;
+    failedBeforeSubmission.jobs.job_1!.error = { code: 'invalid_request', messageKey: 'invalid_request' };
+    expect(validateStudioProjectV3(failedBeforeSubmission)).toBe(true);
+
+    const corruptions: Array<(project: StudioProjectV3) => void> = [
+      (project) => {
+        project.jobs.job_1!.providerJobId = 'provider_job_1';
+        project.jobs.job_1!.remoteStartedAt = confirmedAtV3;
+      },
+      (project) => {
+        project.jobs.job_1!.progress = 1;
+      },
+      (project) => {
+        project.jobs.job_1!.providerJobId = null;
+        project.jobs.job_1!.remoteStartedAt = null;
+      },
+      (project) => {
+        project.jobs.job_1!.providerJobId = null;
+        project.jobs.job_1!.remoteStartedAt = null;
+      },
+      (project) => {
+        project.jobs.job_1!.error = null;
+      },
+      (project) => {
+        project.jobs.job_1!.error = null;
+      },
+      (project) => {
+        project.jobs.job_1!.error = { code: 'timeout', messageKey: 'timeout' };
+      },
+      (project) => {
+        project.jobs.job_1!.spendReceipt = null;
+      },
+    ];
+    const invalidStatuses: StudioPieceJobV3['status'][] = [
+      'queued_local',
+      'submitting',
+      'queued_remote',
+      'running',
+      'needs_attention',
+      'failed',
+      'cancelled',
+      'succeeded',
+    ];
+    for (let index = 0; index < invalidStatuses.length; index += 1) {
+      const project = makeGeneratedProjectWithJobStatusV3(invalidStatuses[index]!);
+      corruptions[index]!(project);
+      expect(validateStudioProjectV3(project), invalidStatuses[index]).toBe(false);
+    }
+
+    const halfRemoteIdentity = makeGeneratedProjectWithJobStatusV3('needs_attention');
+    halfRemoteIdentity.jobs.job_1!.remoteStartedAt = null;
+    expect(validateStudioProjectV3(halfRemoteIdentity)).toBe(false);
+
+    const wrongErrorState = makeGeneratedProjectWithJobStatusV3('needs_attention');
+    wrongErrorState.jobs.job_1!.error = { code: 'variation_grid', messageKey: 'variation_grid' };
+    expect(validateStudioProjectV3(wrongErrorState)).toBe(false);
+  });
+
+  it('rejects authorization, Job, acknowledgement, remote, and receipt timestamps outside their authority window', () => {
+    const corruptions: Array<(project: StudioProjectV3) => void> = [
+      (project) => {
+        project.spendAuthorizations[0]!.confirmedAt = '2026-08-29T23:59:59.000Z';
+      },
+      (project) => {
+        project.jobs.job_1!.createdAt = timestampV3;
+        project.jobs.job_1!.remoteStartedAt = timestampV3;
+      },
+      (project) => {
+        project.jobs.job_1!.remoteStartedAt = timestampV3;
+      },
+      (project) => {
+        project.jobs.job_1!.remoteStartedAt = '2026-08-30T00:00:03.000Z';
+      },
+      (project) => {
+        project.jobs.job_1!.spendReceipt!.recordedAt = timestampV3;
+      },
+      (project) => {
+        project.jobs.job_1!.spendReceipt!.recordedAt = '2026-08-30T00:00:03.000Z';
+      },
+    ];
+    for (const corrupt of corruptions) {
+      const project = makeGeneratedProjectV3();
+      corrupt(project);
+      expect(validateStudioProjectV3(project)).toBe(false);
+    }
+
+    const makeAcknowledgedRetry = (): StudioProjectV3 => {
+      const project = makeRetryProjectV3();
+      project.jobs.job_1!.status = 'needs_attention';
+      project.jobs.job_1!.error = { code: 'submission_unknown', messageKey: 'submission_unknown' };
+      project.jobs.job_2!.retryReason = 'submission_unknown';
+      project.jobs.job_2!.duplicateChargeAcknowledged = true;
+      project.jobs.job_2!.duplicateChargeAcknowledgedAt = '2026-08-30T00:00:04.000Z';
+      return project;
+    };
+    expect(validateStudioProjectV3(makeAcknowledgedRetry())).toBe(true);
+
+    const acknowledgementBeforeAuthorization = makeAcknowledgedRetry();
+    acknowledgementBeforeAuthorization.jobs.job_2!.duplicateChargeAcknowledgedAt = '2026-08-30T00:00:03.000Z';
+    expect(validateStudioProjectV3(acknowledgementBeforeAuthorization)).toBe(false);
+
+    const acknowledgementAfterJobCreation = makeAcknowledgedRetry();
+    acknowledgementAfterJobCreation.jobs.job_2!.duplicateChargeAcknowledgedAt = '2026-08-30T00:00:05.000Z';
+    expect(validateStudioProjectV3(acknowledgementAfterJobCreation)).toBe(false);
+  });
+
+  it('fails closed on cross-contract quote, authorization, receipt, Job, and Piece mismatches', () => {
+    const corruptions: Array<(project: StudioProjectV3) => void> = [
+      (project) => {
+        project.spendAuthorizations[0]!.quote.item.target.pieceId = 'piece_missing';
+      },
+      (project) => {
+        project.spendAuthorizations[0]!.providerBinding.itemId = 'item_missing';
+      },
+      (project) => {
+        const itemId = `item_${'f'.repeat(64)}`;
+        const authorization = project.spendAuthorizations[0]!;
+        authorization.quote.item.id = itemId;
+        authorization.providerBinding.itemId = itemId;
+        authorization.idempotencyKey.itemId = itemId;
+        project.jobs.job_1!.authorizationItemId = itemId;
+        project.jobs.job_1!.spendReceipt!.itemId = itemId;
+      },
+      (project) => {
+        project.jobs.job_1!.cancellationPolicy = 'none';
+      },
+      (project) => {
+        const authorization = project.spendAuthorizations[0]!;
+        authorization.id = authorization.quote.id;
+        project.jobs.job_1!.authorizationId = authorization.id;
+        project.jobs.job_1!.spendReceipt!.authorizationId = authorization.id;
+      },
+      (project) => {
+        project.jobs.job_1!.authorizationId = 'authorization_missing';
+      },
+      (project) => {
+        project.jobs.job_1!.spendReceipt!.totalMinorUnits += 1;
+      },
+      (project) => {
+        project.pieces.piece_1!.jobIds = [];
+      },
+      (project) => {
+        project.jobs.job_1!.requestPlan.snapshot.settings.aspectRatio = '16:9';
+      },
+      (project) => {
+        project.spendAuthorizations[0]!.projectRevisionAtAuthorization = 1;
+        project.jobs.job_1!.projectRevisionAtAuthorization = 1;
+      },
+      (project) => {
+        project.assets.asset_1!.createdAt = timestampV3;
+      },
+      (project) => {
+        const words = 'A  quiet portrait';
+        project.jobs.job_1!.composition.inputs.source.words = words;
+        project.jobs.job_1!.requestPlan.snapshot.composition.inputs.source.words = words;
+        project.spendAuthorizations[0]!.quote.item.requestPlan.snapshot.composition.inputs.source.words = words;
+        (project.assets.asset_1 as Extract<StudioAssetV3, { origin: 'generated' }>).compositionDigest =
+          studioPieceGenerationCompositionDigestV3(project.jobs.job_1!.composition);
+      },
+    ];
+    for (const corrupt of corruptions) {
+      const project = makeGeneratedProjectV3();
+      corrupt(project);
+      expect(validateStudioProjectV3(project)).toBe(false);
+    }
+  });
+
+  it('requires same-Piece retry lineage, copied words/settings, one child, and exact reason mapping', () => {
+    const project = makeRetryProjectV3();
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    const wrongPiece = structuredClone(project);
+    wrongPiece.jobs.job_2!.target.pieceId = 'piece_missing';
+    expect(validateStudioProjectV3(wrongPiece)).toBe(false);
+
+    const editedRetry = structuredClone(project);
+    editedRetry.jobs.job_2!.composition.inputs.source.words = 'Edited retry wording';
+    editedRetry.jobs.job_2!.requestPlan.snapshot.composition.inputs.source.words = 'Edited retry wording';
+    editedRetry.spendAuthorizations[1]!.quote.item.requestPlan.snapshot.composition.inputs.source.words =
+      'Edited retry wording';
+    expect(validateStudioProjectV3(editedRetry)).toBe(false);
+
+    const wrongReason = structuredClone(project);
+    wrongReason.jobs.job_2!.retryReason = 'cancelled';
+    expect(validateStudioProjectV3(wrongReason)).toBe(false);
+
+    const cycle = structuredClone(project);
+    cycle.jobs.job_1!.retryOfJobId = 'job_2';
+    cycle.jobs.job_1!.retryReason = 'provider_failure';
+    expect(validateStudioProjectV3(cycle)).toBe(false);
+
+    const duplicateChild = structuredClone(project);
+    const duplicateAuthorization = structuredClone(duplicateChild.spendAuthorizations[1]!);
+    duplicateAuthorization.id = 'authorization_3';
+    duplicateAuthorization.quote.id = 'quote_3';
+    duplicateAuthorization.quote.item.id = 'item_3';
+    duplicateAuthorization.providerBinding.itemId = 'item_3';
+    duplicateAuthorization.idempotencyKey = { itemId: 'item_3', key: 'idempotency_3' };
+    duplicateChild.spendAuthorizations.push(duplicateAuthorization);
+    duplicateChild.jobs.job_3 = {
+      ...structuredClone(duplicateChild.jobs.job_2!),
+      id: 'job_3',
+      authorizationId: 'authorization_3',
+      authorizationItemId: 'item_3',
+      idempotencyKey: 'idempotency_3',
+    };
+    duplicateChild.pieces.piece_1!.jobIds.push('job_3');
+    duplicateChild.revision += 1;
+    expect(validateStudioProjectV3(duplicateChild)).toBe(false);
+  });
+
+  it('derives paid-retry reasons without turning download or poll recovery into a new charge', () => {
+    const ordinaryProviderFailures: StudioPieceJobV3['error'][] = [
+      { code: 'invalid_request', messageKey: 'invalid_request' },
+      { code: 'content_rejected', messageKey: 'content_rejected' },
+      { code: 'auth', messageKey: 'auth' },
+      { code: 'quota', messageKey: 'quota' },
+      { code: 'rate_limited', messageKey: 'rate_limited' },
+      { code: 'provider_unavailable', messageKey: 'provider_unavailable' },
+      { code: 'timeout', messageKey: 'timeout' },
+      { code: 'no_output', messageKey: 'no_output' },
+      { code: 'unsupported', messageKey: 'unsupported' },
+      { code: 'unknown', messageKey: 'unknown' },
+    ];
+    for (const error of ordinaryProviderFailures) {
+      expect(studioPieceRetryReasonForPredecessorV3({ status: 'failed', error })).toBe('provider_failure');
+    }
+
+    expect(
+      studioPieceRetryReasonForPredecessorV3({
+        status: 'needs_attention',
+        error: { code: 'submission_unknown', messageKey: 'submission_unknown' },
+      })
+    ).toBe('submission_unknown');
+    expect(
+      studioPieceRetryReasonForPredecessorV3({
+        status: 'failed',
+        error: { code: 'variation_grid', messageKey: 'variation_grid' },
+      })
+    ).toBe('variation_grid');
+    expect(studioPieceRetryReasonForPredecessorV3({ status: 'cancelled', error: null })).toBe('cancelled');
+
+    for (const code of ['download_failed', 'poll_deadline'] as const) {
+      expect(
+        studioPieceRetryReasonForPredecessorV3({ status: 'failed', error: { code, messageKey: code } })
+      ).toBeNull();
+      const project = makeRetryProjectV3();
+      project.jobs.job_1!.error = { code, messageKey: code };
+      if (code === 'download_failed') {
+        project.jobs.job_1!.spendReceipt = makeGeneratedProjectV3().jobs.job_1!.spendReceipt;
+      }
+      expect(validateStudioProjectV3(project)).toBe(false);
+    }
+
+    expect(
+      studioPieceRetryReasonForPredecessorV3({
+        status: 'needs_attention',
+        error: { code: 'timeout', messageKey: 'timeout' },
+      })
+    ).toBeNull();
+    expect(studioPieceRetryReasonForPredecessorV3({ status: 'succeeded', error: null })).toBeNull();
+    expect(studioPieceRetryReasonForPredecessorV3({ status: 'queued_local', error: null })).toBeNull();
+  });
+
+  it('requires duplicate-charge acknowledgement and timestamp exactly for submission-unknown retry', () => {
+    const project = makeRetryProjectV3();
+    project.jobs.job_1!.status = 'needs_attention';
+    project.jobs.job_1!.error = { code: 'submission_unknown', messageKey: 'submission_unknown' };
+    project.jobs.job_2!.retryReason = 'submission_unknown';
+    project.jobs.job_2!.duplicateChargeAcknowledged = true;
+    project.jobs.job_2!.duplicateChargeAcknowledgedAt = '2026-08-30T00:00:04.000Z';
+    expect(validateStudioProjectV3(project)).toBe(true);
+
+    project.jobs.job_2!.duplicateChargeAcknowledged = false;
+    project.jobs.job_2!.duplicateChargeAcknowledgedAt = null;
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('rejects accessors and proxies without invoking input code', () => {
+    const project = makeEmptyProjectV3();
+    let getterCalls = 0;
+    Object.defineProperty(project, 'pieces', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return {};
+      },
+    });
+    expect(validateStudioProjectV3(project)).toBe(false);
+    expect(getterCalls).toBe(0);
+    expect(validateStudioProjectV3(new Proxy(makeEmptyProjectV3(), {}))).toBe(false);
+  });
+});
+
+describe('validateStudioPieceExportManifestV3', () => {
+  it('requires the exact Piece kind, handle-at-export, asset timestamp, and imported provenance', () => {
+    const manifest = {
+      schemaVersion: 3,
+      exportId: 'export_1',
+      projectId: 'project_v3',
+      sourceRevision: 2,
+      piece: { id: 'piece_1', kind: 'photograph', handleAtExport: 'ảnh_đêm' },
+      asset: {
+        id: 'asset_1',
+        sha256: digest,
+        mimeType: 'image/png',
+        byteSize: 8,
+        width: 800,
+        height: 600,
+        createdAt: completedAtV3,
+        relativePath: 'ảnh_đêm.png',
+      },
+      provenance: { origin: 'imported' },
+      exportedAt: '2026-08-30T00:00:03.000Z',
+    };
+    expect(validateStudioPieceExportManifestV3(manifest)).toBe(true);
+    expect(validateStudioPieceExportManifestV3({ ...manifest, piece: { ...manifest.piece, kind: 'video' } })).toBe(
+      false
+    );
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        piece: { id: 'piece_1', kind: 'photograph' },
+      })
+    ).toBe(false);
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        asset: { ...manifest.asset, createdAt: '2026-08-30T00:00:04.000Z' },
+      })
+    ).toBe(false);
+    expect(validateStudioPieceExportManifestV3({ ...manifest, unexpected: true })).toBe(false);
+  });
+
+  it('requires internally consistent generated provenance without exposing a legacy film shape', () => {
+    const project = makeGeneratedProjectV3();
+    const job = project.jobs.job_1!;
+    const authorization = project.spendAuthorizations[0]!;
+    const asset = project.assets.asset_1!;
+    if (asset.origin !== 'generated' || job.spendReceipt === null) throw new Error('expected generated fixture');
+    const manifest = {
+      schemaVersion: 3,
+      exportId: 'export_1',
+      projectId: project.id,
+      sourceRevision: project.revision,
+      piece: { id: 'piece_1', kind: 'photograph', handleAtExport: 'quiet_portrait' },
+      asset: {
+        id: asset.id,
+        sha256: asset.sha256,
+        mimeType: asset.mimeType,
+        byteSize: asset.byteSize,
+        width: asset.width,
+        height: asset.height,
+        createdAt: asset.createdAt,
+        relativePath: 'quiet_portrait.png',
+      },
+      provenance: {
+        origin: 'generated',
+        producerJobId: job.id,
+        provider: job.provider,
+        composition: job.composition,
+        requestPlan: job.requestPlan,
+        authorizationId: authorization.id,
+        quoteId: authorization.quote.id,
+        quoteRevision: authorization.quote.quoteRevision,
+        receipt: job.spendReceipt,
+      },
+      exportedAt: '2026-08-30T00:00:03.000Z',
+    };
+    expect(validateStudioPieceExportManifestV3(manifest)).toBe(true);
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        provenance: { ...manifest.provenance, quoteId: 'quote_other' },
+      })
+    ).toBe(false);
+    expect(
+      validateStudioPieceExportManifestV3({
+        ...manifest,
+        provenance: {
+          ...manifest.provenance,
+          provider: { ...manifest.provenance.provider, model: 'model_other' },
+        },
+      })
+    ).toBe(false);
   });
 });

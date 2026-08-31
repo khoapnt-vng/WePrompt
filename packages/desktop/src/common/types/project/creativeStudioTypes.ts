@@ -1683,6 +1683,476 @@ export type CreateStudioProjectInputV2 = {
   resolution: StudioResolution;
 };
 
+/**
+ * Inactive Creative Studio 4 Pilot contracts.
+ *
+ * These discriminators are intentionally separate from the schema-5 constants above. Phase 1
+ * freezes the new shapes without widening any production schema-5 union or switching a live
+ * reader/writer to the new contract.
+ */
+export const STUDIO_PROJECT_SCHEMA_VERSION_V3 = 6 as const;
+export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3 = 6 as const;
+export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3 = 2 as const;
+export const STUDIO_EXPORT_SCHEMA_VERSION_V3 = 3 as const;
+export const STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 = 1 as const;
+export const STUDIO_MAX_PIECES_V3 = 96;
+export const STUDIO_MAX_PIECE_HANDLE_SCALARS_V3 = 48;
+export const STUDIO_MAX_PIECE_HANDLE_UTF8_BYTES_V3 = 192;
+export const STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 = 20;
+export const STUDIO_MAX_JOBS_PER_PIECE_V3 = 32;
+export const STUDIO_MAX_ASSETS_V3 = STUDIO_MAX_PIECES_V3;
+export const STUDIO_MAX_JOBS_V3 = STUDIO_MAX_PIECES_V3 * STUDIO_MAX_JOBS_PER_PIECE_V3;
+export const STUDIO_MAX_SPEND_AUTHORIZATIONS_V3 = STUDIO_MAX_JOBS_V3;
+export const STUDIO_MAX_UNDO_ENTRIES_V3 = 20;
+/** Schema-6 owns this limit; later schema-5 changes must not silently alter the Pilot contract. */
+export const STUDIO_MAX_IMAGE_ASSET_BYTES_V3 = 50 * 1024 * 1024;
+
+export type StudioPieceKindV2 = 'photograph';
+export type StudioPieceImagePurposeV3 = 'piece_image';
+export type StudioPieceGenerationTargetV3 = { kind: 'piece'; pieceId: string };
+
+export type StudioPiecePhotoSettingsV3 = {
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+};
+
+export type StudioPieceGenerationSourceV3 = {
+  kind: 'piece';
+  pieceId: string;
+  words: string;
+  settings: StudioPiecePhotoSettingsV3;
+};
+
+export type StudioPieceGenerationCompositionInputSnapshotV3 = {
+  schemaVersion: typeof STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3;
+  projectRevisionAtPreparation: number;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V3;
+  authoringFingerprint: string;
+  brief: string;
+  rules: StudioBriefRule[];
+  source: StudioPieceGenerationSourceV3;
+  purpose: StudioPieceImagePurposeV3;
+  conditioningInputs: [];
+  route: StudioMediaModelRef;
+  instructionProfile: string;
+};
+
+/** The prompt is immutable historical provider input and is never validated by recomposition. */
+export type StudioPieceGenerationCompositionV3 = {
+  inputs: StudioPieceGenerationCompositionInputSnapshotV3;
+  prompt: string;
+};
+
+export type StudioPieceGenerationRequestSnapshotV3 = {
+  composition: StudioPieceGenerationCompositionV3;
+  settings: StudioPiecePhotoSettingsV3;
+  conditioningInputs: [];
+};
+
+export type StudioPieceGenerationRequestPlanV3 = {
+  kind: 'resolved';
+  snapshot: StudioPieceGenerationRequestSnapshotV3;
+};
+
+export type StudioPieceQuotedGenerationV3 = {
+  id: string;
+  target: StudioPieceGenerationTargetV3;
+  purpose: StudioPieceImagePurposeV3;
+  routeId: string;
+  generationCount: 1;
+  requestPlan: StudioPieceGenerationRequestPlanV3;
+  rateUnit: 'generation';
+  rateMinorUnits: number;
+};
+
+export type StudioPieceSubmissionQuoteV3 = {
+  id: string;
+  reservationId: string;
+  quoteRevision: number;
+  projectId: string;
+  projectRevisionAtPreparation: number;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V3;
+  authoringFingerprint: string;
+  rateCardDigest: string;
+  currency: string;
+  item: StudioPieceQuotedGenerationV3;
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  expiresAt: string;
+};
+
+export type StudioPieceSpendAuthorizationV3 = {
+  id: string;
+  quote: StudioPieceSubmissionQuoteV3;
+  confirmedAt: string;
+  projectRevisionAtAuthorization: number;
+  cancellationPolicy: StudioCancellationPolicy;
+  providerBinding: {
+    itemId: string;
+    provider: StudioProviderRef;
+  };
+  idempotencyKey: {
+    itemId: string;
+    key: string;
+  };
+};
+
+export type StudioPieceSpendReceiptV3 = {
+  authorizationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  itemId: string;
+  jobId: string;
+  purpose: StudioPieceImagePurposeV3;
+  routeId: string;
+  currency: string;
+  rateUnit: 'generation';
+  rateMinorUnits: number;
+  generationCount: 1;
+  totalMinorUnits: number;
+  recordedAt: string;
+};
+
+export type StudioPieceJobRetryReasonV3 = 'provider_failure' | 'submission_unknown' | 'variation_grid' | 'cancelled';
+
+export type StudioPieceJobErrorCodeV3 =
+  | 'invalid_request'
+  | 'content_rejected'
+  | 'auth'
+  | 'quota'
+  | 'rate_limited'
+  | 'provider_unavailable'
+  | 'timeout'
+  | 'poll_deadline'
+  | 'no_output'
+  | 'variation_grid'
+  | 'submission_unknown'
+  | 'download_failed'
+  | 'unsupported'
+  | 'unknown';
+
+export type StudioPieceJobErrorV3 = {
+  code: StudioPieceJobErrorCodeV3;
+  messageKey: string;
+};
+
+export type StudioPieceJobV3 = {
+  id: string;
+  projectId: string;
+  target: StudioPieceGenerationTargetV3;
+  purpose: StudioPieceImagePurposeV3;
+  status: StudioJobStatus;
+  provider: StudioProviderRef;
+  idempotencyKey: string;
+  providerJobId: string | null;
+  remoteStartedAt: string | null;
+  cancellationPolicy: StudioCancellationPolicy;
+  outputAssetId: string | null;
+  error: StudioPieceJobErrorV3 | null;
+  progress: number | null;
+  retryOfJobId: string | null;
+  retryReason: StudioPieceJobRetryReasonV3 | null;
+  duplicateChargeAcknowledged: boolean;
+  duplicateChargeAcknowledgedAt: string | null;
+  authorizationId: string;
+  authorizationItemId: string;
+  composition: StudioPieceGenerationCompositionV3;
+  requestPlan: StudioPieceGenerationRequestPlanV3;
+  spendReceipt: StudioPieceSpendReceiptV3 | null;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V3;
+  authoringFingerprint: string;
+  projectRevisionAtPreparation: number;
+  projectRevisionAtAuthorization: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StudioPieceAssetBaseV3 = {
+  id: string;
+  projectId: string;
+  pieceId: string;
+  mediaKind: 'image';
+  mimeType: string;
+  byteSize: number;
+  sha256: string;
+  width: number;
+  height: number;
+  createdAt: string;
+};
+
+export type StudioPieceImportedAssetV3 = StudioPieceAssetBaseV3 & {
+  origin: 'imported';
+  managedAsset: { collection: 'imports'; fileName: string };
+  producerJobId: null;
+  compositionDigest: null;
+};
+
+export type StudioPieceGeneratedAssetV3 = StudioPieceAssetBaseV3 & {
+  origin: 'generated';
+  managedAsset: { collection: 'assets'; fileName: string };
+  producerJobId: string;
+  compositionDigest: string;
+};
+
+export type StudioAssetV3 = StudioPieceImportedAssetV3 | StudioPieceGeneratedAssetV3;
+
+export type StudioPieceV2 = {
+  id: string;
+  kind: StudioPieceKindV2;
+  handle: string;
+  priorHandles: string[];
+  currentAssetId: string | null;
+  jobIds: string[];
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioPieceCatalogUndoPatchV3 = {
+  kind: 'piece_catalog';
+  pieceId: string;
+  before: {
+    handle: string;
+    priorHandles: string[];
+  };
+  /** Digest of the complete ordered Piece handle/alias namespace after the mutation. */
+  afterDigest: string;
+};
+
+export type StudioUndoEntryV3 = {
+  id: string;
+  sourceRevision: number;
+  sourceAuthoringRevision: number;
+  label: string;
+  patches: StudioPieceCatalogUndoPatchV3[];
+};
+
+export type StudioProjectV3 = {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION_V3;
+  revision: number;
+  authoringRevision: number;
+  id: string;
+  name: string;
+  brief: string;
+  rules: StudioBriefRule[];
+  forgeProjectId: string | null;
+  briefConversationId: string | null;
+  pieceOrder: string[];
+  pieces: Record<string, StudioPieceV2>;
+  spendPolicy: StudioSpendPolicy | null;
+  spendAuthorizations: StudioPieceSpendAuthorizationV3[];
+  undoHistory: StudioUndoEntryV3[];
+  assets: Record<string, StudioAssetV3>;
+  jobs: Record<string, StudioPieceJobV3>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type CreateStudioProjectInputV3 = {
+  name: string;
+  brief: string;
+  forgeProjectId?: string;
+};
+
+export type StudioPieceReservationLineageJobV3 = {
+  jobId: string;
+  retryOfJobId: string | null;
+  retryReason: StudioPieceJobRetryReasonV3 | null;
+};
+
+type StudioPreparedPhotoReservationBaseV3 = {
+  reservationId: string;
+  projectId: string;
+  targetPieceId: string;
+  jobId: string;
+  authorizationId: string;
+  authorizationItemId: string;
+  idempotencyKey: string;
+  words: string;
+  settings: StudioPiecePhotoSettingsV3;
+  provider: StudioProviderRef;
+  cancellationPolicy: StudioCancellationPolicy;
+  quote: StudioPieceSubmissionQuoteV3;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V3;
+  authoringFingerprint: string;
+  projectRevisionAtPreparation: number;
+  preparedAt: string;
+  expiresAt: string;
+};
+
+export type StudioPreparedPhotoReservationV3 =
+  | (StudioPreparedPhotoReservationBaseV3 & {
+      mode: 'create';
+      proposedHandle: string;
+      orderIndex: number;
+    })
+  | (StudioPreparedPhotoReservationBaseV3 & {
+      mode: 'retry';
+      sourceJobId: string;
+      lineage: StudioPieceReservationLineageJobV3[];
+      retryReason: StudioPieceJobRetryReasonV3;
+    });
+
+type StudioRendererPreparedPhotoQuoteBaseV3 = {
+  reservationId: string;
+  projectId: string;
+  quoteId: string;
+  quoteRevision: number;
+  targetPieceId: string;
+  words: string;
+  settings: StudioPiecePhotoSettingsV3;
+  currency: string;
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  spendPolicyClassification: 'within_cap' | 'no_policy' | 'currency_mismatch' | 'over_cap';
+  expiresAt: string;
+  requiresExplicitHumanAction: boolean;
+  duplicateChargeAcknowledgementRequired: boolean;
+};
+
+export type StudioRendererPreparedPhotoQuoteV3 =
+  | (StudioRendererPreparedPhotoQuoteBaseV3 & {
+      mode: 'create';
+      proposedHandle: string;
+    })
+  | (StudioRendererPreparedPhotoQuoteBaseV3 & {
+      mode: 'retry';
+      proposedHandle: null;
+    });
+
+export type StudioConfirmPreparedPhotoRequestV3 = {
+  reservationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  explicitHumanConfirmation: boolean;
+  duplicateChargeAcknowledged: boolean;
+};
+
+export type StudioMutationOperationV3 =
+  | { kind: 'edit_project'; name: string }
+  | { kind: 'set_brief'; brief: string }
+  | { kind: 'set_rules'; rules: StudioBriefRuleDraft[] }
+  | { kind: 'set_spend_policy'; policy: StudioSpendPolicy | null }
+  | { kind: 'rename_piece'; pieceId: string; handle: string }
+  | { kind: 'undo_last'; entryId: string };
+
+export type StudioMutationBatchV3 = {
+  schemaVersion: typeof STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3;
+  projectId: string;
+  expectedAuthoringRevision: number;
+  operations: StudioMutationOperationV3[];
+};
+
+export type StudioMutationBatchResultV3 = {
+  projectId: string;
+  revision: number;
+  authoringRevision: number;
+};
+
+export type StudioRendererPieceCurrentProvenanceV3 =
+  | {
+      origin: 'imported';
+      createdAt: string;
+    }
+  | {
+      origin: 'generated';
+      createdAt: string;
+      producerJobId: string;
+      model: string;
+      instructionProfile: string;
+      recordedSpend: {
+        currency: string;
+        totalMinorUnits: number;
+      };
+    };
+
+export type StudioRendererPieceAssetV3 = {
+  id: string;
+  mediaKind: 'image';
+  mimeType: string;
+  width: number;
+  height: number;
+  byteSize: number;
+  provenance: StudioRendererPieceCurrentProvenanceV3;
+};
+
+export type StudioRendererPieceV3 = {
+  id: string;
+  kind: StudioPieceKindV2;
+  handle: string;
+  priorHandles: string[];
+  currentAsset: StudioRendererPieceAssetV3 | null;
+  state: 'queued' | 'running' | 'needs_attention' | 'failed' | 'cancelled' | 'current';
+};
+
+export type StudioRendererCanvasInventoryV3 = {
+  projectId: string;
+  revision: number;
+  authoringRevision: number;
+  pieces: StudioRendererPieceV3[];
+};
+
+export type StudioRendererPieceActivityJobV3 = {
+  jobId: string;
+  pieceId: string;
+  status: StudioJobStatus;
+  progress: number | null;
+  error: StudioPieceJobErrorV3 | null;
+  canCancel: boolean;
+  canRetry: boolean;
+  recordedSpend: null | {
+    currency: string;
+    totalMinorUnits: number;
+  };
+};
+
+export type StudioRendererCapabilityActivityV3 = {
+  projectId: string;
+  preparedPhotoQuotes: StudioRendererPreparedPhotoQuoteV3[];
+  jobs: StudioRendererPieceActivityJobV3[];
+};
+
+export type StudioPieceExportGeneratedProvenanceV3 = {
+  origin: 'generated';
+  producerJobId: string;
+  provider: StudioProviderRef;
+  composition: StudioPieceGenerationCompositionV3;
+  requestPlan: StudioPieceGenerationRequestPlanV3;
+  authorizationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  receipt: StudioPieceSpendReceiptV3;
+};
+
+export type StudioPieceExportProvenanceV3 = { origin: 'imported' } | StudioPieceExportGeneratedProvenanceV3;
+
+export type StudioPieceExportManifestV3 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+  exportId: string;
+  projectId: string;
+  sourceRevision: number;
+  piece: {
+    id: string;
+    kind: StudioPieceKindV2;
+    handleAtExport: string;
+  };
+  asset: {
+    id: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+    width: number;
+    height: number;
+    createdAt: string;
+    relativePath: string;
+  };
+  provenance: StudioPieceExportProvenanceV3;
+  exportedAt: string;
+};
+
 /** Task 7 public project names now resolve exclusively to the Beat/Shot contract. */
 export type StudioProject = StudioProjectV2;
 export type StudioRendererProject = StudioRendererProjectV2;

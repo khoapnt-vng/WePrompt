@@ -15,16 +15,25 @@ import type {
 import {
   calculateStudioQuotedGenerationAmounts,
   composeStudioGenerationV2,
+  composeStudioPieceGenerationV3,
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
+  createStudioPieceGenerationRequestPlanV3,
+  deriveStudioPieceInstructionProfileV3,
   deriveStudioInstructionProfileV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   createStudioRateCardV2,
+  createStudioPieceSpendAuthorizationV3,
+  createStudioPieceSpendReceiptV3,
+  createStudioPieceSubmissionQuoteV3,
   createStudioSpendAuthorizationV2,
   createStudioSpendReceiptV2,
   createStudioSubmissionQuoteCoreV2,
   studioSpendReceiptMatchesJobV2,
+  studioPieceDuplicateChargeAcknowledgementIsValidV3,
+  studioPieceSpendReceiptMatchesJobV3,
+  validateStudioPieceSpendAuthorizationV3,
   type StudioSpendAuthorizationInputV2,
 } from '@/process/services/creative-studio/service/schema2/pricing';
 
@@ -616,5 +625,443 @@ describe('schema-2 Studio spend authorization', () => {
         jobId: 'job_video',
       })
     ).toEqual(before);
+  });
+});
+
+describe('inactive Piece spend authorization and receipt', () => {
+  const reservationId = 'reservation_piece_1';
+  const makePieceQuote = () => {
+    const composition = composeStudioPieceGenerationV3({
+      projectRevisionAtPreparation: 5,
+      authoringRevision: 2,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'a'.repeat(64),
+      brief: '',
+      rules: [],
+      source: {
+        kind: 'piece',
+        pieceId: 'piece_1',
+        words: 'A silver birch under rain.',
+        settings: { aspectRatio: '3:4', resolution: '1080p' },
+      },
+      purpose: 'piece_image',
+      conditioningInputs: [],
+      route: imageProvider,
+      instructionProfile: deriveStudioPieceInstructionProfileV3(imageProvider),
+    });
+    return createStudioPieceSubmissionQuoteV3({
+      reservationId,
+      quoteId: 'quote_piece_1',
+      quoteRevision: 1,
+      projectId: 'project_1',
+      projectRevisionAtPreparation: 5,
+      authoringRevision: 2,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'a'.repeat(64),
+      rateCardDigest: 'b'.repeat(64),
+      currency: 'USD',
+      target: { kind: 'piece', pieceId: 'piece_1' },
+      routeId: 'image_route',
+      requestPlan: createStudioPieceGenerationRequestPlanV3({ composition }),
+      rateUnit: 'generation',
+      rateMinorUnits: 20,
+      expiresAt: '2026-08-30T00:05:00.000Z',
+    });
+  };
+
+  const makePieceAuthorization = () =>
+    createStudioPieceSpendAuthorizationV3({
+      reservationId,
+      authorizationId: 'authorization_piece_1',
+      quote: makePieceQuote(),
+      confirmedAt: '2026-08-30T00:04:00.000Z',
+      projectRevisionAtAuthorization: 6,
+      provider: imageProvider,
+      cancellationPolicy: 'queued_and_running',
+      idempotencyKey: 'idempotency_piece_1',
+    });
+
+  it('keeps quote and authorization identities distinct and freezes provider and cancellation authority', () => {
+    const authorization = makePieceAuthorization();
+    expect(authorization.id).toBe('authorization_piece_1');
+    expect(authorization.quote.id).toBe('quote_piece_1');
+    expect(authorization.id).not.toBe(authorization.quote.id);
+    expect(authorization.providerBinding).toEqual({
+      itemId: authorization.quote.item.id,
+      provider: imageProvider,
+    });
+    expect(authorization.cancellationPolicy).toBe('queued_and_running');
+    expect(validateStudioPieceSpendAuthorizationV3(authorization, reservationId)).toBe(true);
+    expect(
+      validateStudioPieceSpendAuthorizationV3(
+        { ...authorization, cancellationPolicy: 'unsupported_policy' },
+        reservationId
+      )
+    ).toBe(false);
+    const crossed = structuredClone(authorization);
+    crossed.providerBinding.provider.model = 'other-model';
+    expect(validateStudioPieceSpendAuthorizationV3(crossed, reservationId)).toBe(false);
+
+    let proxyReads = 0;
+    const proxied = structuredClone(authorization);
+    proxied.providerBinding.provider = new Proxy(proxied.providerBinding.provider, {
+      get: (target, property, receiver) => {
+        proxyReads += 1;
+        return Reflect.get(target, property, receiver);
+      },
+    });
+    expect(validateStudioPieceSpendAuthorizationV3(proxied, reservationId)).toBe(false);
+    expect(proxyReads).toBe(0);
+
+    let getterReads = 0;
+    const accessorBacked = structuredClone(authorization);
+    const hostileProvider = {
+      providerId: imageProvider.providerId,
+      adapterId: imageProvider.adapterId,
+    } as Record<string, unknown>;
+    Object.defineProperty(hostileProvider, 'model', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        return imageProvider.model;
+      },
+    });
+    accessorBacked.providerBinding.provider = hostileProvider as never;
+    expect(validateStudioPieceSpendAuthorizationV3(accessorBacked, reservationId)).toBe(false);
+    expect(getterReads).toBe(0);
+  });
+
+  it('rejects expired, same-identity, stale-revision, and wrong-provider authorization', () => {
+    const quote = makePieceQuote();
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: quote.id,
+        quote,
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 6,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_authorization' }));
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: quote.item.id,
+        quote,
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 6,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_authorization' }));
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: 'authorization_piece_1',
+        quote,
+        confirmedAt: quote.expiresAt,
+        projectRevisionAtAuthorization: 6,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'expired_quote' }));
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: 'authorization_piece_1',
+        quote,
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 5,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_authorization' }));
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: 'authorization_piece_1',
+        quote,
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 4,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_authorization' }));
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: 'authorization_piece_1',
+        quote,
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 6,
+        provider: { ...imageProvider, model: 'other-model' },
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_provider_binding' }));
+  });
+
+  it('rejects accessor-backed authorization input without invoking it', () => {
+    let getterCalls = 0;
+    const input = {
+      reservationId,
+      authorizationId: 'authorization_piece_1',
+      quote: makePieceQuote(),
+      projectRevisionAtAuthorization: 6,
+      provider: imageProvider,
+      cancellationPolicy: 'queued_and_running',
+      idempotencyKey: 'idempotency_piece_1',
+    } as Record<string, unknown>;
+    Object.defineProperty(input, 'confirmedAt', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return '2026-08-30T00:04:00.000Z';
+      },
+    });
+
+    expect(() => createStudioPieceSpendAuthorizationV3(input as never)).toThrow(
+      expect.objectContaining({ code: 'invalid_authorization' })
+    );
+    expect(getterCalls).toBe(0);
+
+    expect(() =>
+      createStudioPieceSpendAuthorizationV3({
+        reservationId,
+        authorizationId: 'authorization_piece_1',
+        quote: makePieceQuote(),
+        confirmedAt: '2026-08-30T00:04:00.000Z',
+        projectRevisionAtAuthorization: 6,
+        provider: imageProvider,
+        cancellationPolicy: 'queued_and_running',
+        idempotencyKey: 'idempotency_piece_1',
+        extra: true,
+      } as never)
+    ).toThrow(expect.objectContaining({ code: 'invalid_authorization' }));
+  });
+
+  it('derives an exact fixed-image receipt and correlates its Job', () => {
+    const authorization = makePieceAuthorization();
+    const receipt = createStudioPieceSpendReceiptV3({
+      reservationId,
+      authorization,
+      jobId: 'job_piece_1',
+      recordedAt: '2026-08-30T00:04:30.000Z',
+    });
+    expect(receipt).toMatchObject({
+      authorizationId: authorization.id,
+      quoteId: authorization.quote.id,
+      quoteRevision: 1,
+      purpose: 'piece_image',
+      rateUnit: 'generation',
+      generationCount: 1,
+      totalMinorUnits: 20,
+    });
+    expect('durationSeconds' in receipt).toBe(false);
+    expect(
+      studioPieceSpendReceiptMatchesJobV3(
+        receipt,
+        authorization,
+        {
+          id: 'job_piece_1',
+          authorizationId: authorization.id,
+          authorizationItemId: authorization.quote.item.id,
+          idempotencyKey: authorization.idempotencyKey.key,
+        },
+        reservationId
+      )
+    ).toBe(true);
+
+    let receiptGetterReads = 0;
+    const accessorReceipt = { ...receipt } as Record<string, unknown>;
+    Object.defineProperty(accessorReceipt, 'recordedAt', {
+      enumerable: true,
+      get: () => {
+        receiptGetterReads += 1;
+        return receipt.recordedAt;
+      },
+    });
+    expect(
+      studioPieceSpendReceiptMatchesJobV3(
+        accessorReceipt as never,
+        authorization,
+        {
+          id: 'job_piece_1',
+          authorizationId: authorization.id,
+          authorizationItemId: authorization.quote.item.id,
+          idempotencyKey: authorization.idempotencyKey.key,
+        },
+        reservationId
+      )
+    ).toBe(false);
+    expect(receiptGetterReads).toBe(0);
+
+    let jobProxyReads = 0;
+    const proxiedJob = new Proxy(
+      {
+        id: 'job_piece_1',
+        authorizationId: authorization.id,
+        authorizationItemId: authorization.quote.item.id,
+        idempotencyKey: authorization.idempotencyKey.key,
+      },
+      {
+        get: (target, property, receiver) => {
+          jobProxyReads += 1;
+          return Reflect.get(target, property, receiver);
+        },
+      }
+    );
+    expect(studioPieceSpendReceiptMatchesJobV3(receipt, authorization, proxiedJob, reservationId)).toBe(false);
+    expect(jobProxyReads).toBe(0);
+    expect(
+      studioPieceSpendReceiptMatchesJobV3(
+        { ...receipt, extra: true } as never,
+        authorization,
+        proxiedJob,
+        reservationId
+      )
+    ).toBe(false);
+    expect(
+      studioPieceSpendReceiptMatchesJobV3(
+        receipt,
+        authorization,
+        {
+          id: 'job_piece_1',
+          authorizationId: authorization.id,
+          authorizationItemId: authorization.quote.item.id,
+          idempotencyKey: 'wrong_key',
+        },
+        reservationId
+      )
+    ).toBe(false);
+
+    const reordered = Object.fromEntries(Object.entries(receipt).toReversed()) as typeof receipt;
+    expect(
+      studioPieceSpendReceiptMatchesJobV3(
+        reordered,
+        authorization,
+        {
+          id: 'job_piece_1',
+          authorizationId: authorization.id,
+          authorizationItemId: authorization.quote.item.id,
+          idempotencyKey: authorization.idempotencyKey.key,
+        },
+        reservationId
+      )
+    ).toBe(true);
+
+    expect(() =>
+      createStudioPieceSpendReceiptV3({
+        reservationId,
+        authorization,
+        jobId: { toString: () => 'job_piece_1' } as never,
+        recordedAt: '2026-08-30T00:04:30.000Z',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_receipt' }));
+    expect(() =>
+      createStudioPieceSpendReceiptV3({
+        reservationId,
+        authorization,
+        jobId: 'job_piece_1',
+        recordedAt: '2026-08-30T00:03:59.999Z',
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_receipt' }));
+
+    let getterCalls = 0;
+    const hostileReceiptInput = {
+      reservationId,
+      authorization,
+      recordedAt: '2026-08-30T00:04:30.000Z',
+    } as Record<string, unknown>;
+    Object.defineProperty(hostileReceiptInput, 'jobId', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return 'job_piece_1';
+      },
+    });
+    expect(() => createStudioPieceSpendReceiptV3(hostileReceiptInput as never)).toThrow(
+      expect.objectContaining({ code: 'invalid_receipt' })
+    );
+    expect(getterCalls).toBe(0);
+    expect(() =>
+      createStudioPieceSpendReceiptV3({
+        reservationId,
+        authorization,
+        jobId: 'job_piece_1',
+        recordedAt: '2026-08-30T00:04:30.000Z',
+        extra: true,
+      } as never)
+    ).toThrow(expect.objectContaining({ code: 'invalid_receipt' }));
+  });
+
+  it('requires duplicate-charge acknowledgement only for submission-unknown retry', () => {
+    const timestamp = '2026-08-30T00:04:00.000Z';
+    expect(
+      studioPieceDuplicateChargeAcknowledgementIsValidV3({
+        retryReason: 'submission_unknown',
+        duplicateChargeAcknowledged: true,
+        duplicateChargeAcknowledgedAt: timestamp,
+      })
+    ).toBe(true);
+    expect(
+      studioPieceDuplicateChargeAcknowledgementIsValidV3({
+        retryReason: 'submission_unknown',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      })
+    ).toBe(false);
+    for (const retryReason of [null, 'provider_failure', 'variation_grid', 'cancelled'] as const) {
+      expect(
+        studioPieceDuplicateChargeAcknowledgementIsValidV3({
+          retryReason,
+          duplicateChargeAcknowledged: false,
+          duplicateChargeAcknowledgedAt: null,
+        })
+      ).toBe(true);
+      expect(
+        studioPieceDuplicateChargeAcknowledgementIsValidV3({
+          retryReason,
+          duplicateChargeAcknowledged: true,
+          duplicateChargeAcknowledgedAt: timestamp,
+        })
+      ).toBe(false);
+    }
+    expect(
+      studioPieceDuplicateChargeAcknowledgementIsValidV3({
+        retryReason: 'unknown_reason' as never,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+      })
+    ).toBe(false);
+
+    let getterReads = 0;
+    const hostileAcknowledgement = {
+      retryReason: 'provider_failure',
+      duplicateChargeAcknowledgedAt: null,
+    } as Record<string, unknown>;
+    Object.defineProperty(hostileAcknowledgement, 'duplicateChargeAcknowledged', {
+      enumerable: true,
+      get: () => {
+        getterReads += 1;
+        return false;
+      },
+    });
+    expect(studioPieceDuplicateChargeAcknowledgementIsValidV3(hostileAcknowledgement as never)).toBe(false);
+    expect(getterReads).toBe(0);
+    expect(
+      studioPieceDuplicateChargeAcknowledgementIsValidV3({
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        extra: true,
+      } as never)
+    ).toBe(false);
   });
 });

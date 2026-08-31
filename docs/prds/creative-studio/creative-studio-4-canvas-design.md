@@ -7,6 +7,11 @@
 > defaulting, completes the standalone-photo generation contract, separates quoted intent from a
 > durable Piece, and narrows Pilot 1 to what the product can actually finish.
 
+> **Schedule ruling:** the later block-grammar commission is accepted for its visual grammar, not for
+> its coexistence premise. Production stays on the schema-5 four-view workspace through Phase 4.
+> Phase 5 selects the schema-6 canvas and removes the four views in the same clean cutover; no
+> production reader serves both schemas.
+
 ---
 
 ## Product statement
@@ -45,6 +50,8 @@ Shooting-script and sound offers are not shown, disabled, or teased in Pilot 1.
 - **Generation composition** — immutable generation-request provenance. It is not an Assembly.
 
 The screen may call a Piece a card or block. Those are presentation terms, not persisted type names.
+Pilot 1 maps one Piece to one one-member stills block. A later stills block containing up to twelve
+members aggregates up to twelve distinct Pieces; it never turns one Piece into a multi-photo owner.
 
 ---
 

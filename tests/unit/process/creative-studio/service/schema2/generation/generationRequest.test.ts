@@ -14,14 +14,19 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   composeStudioGenerationV2,
+  composeStudioPieceGenerationV3,
+  deriveStudioPieceInstructionProfileV3,
   deriveStudioInstructionProfileV2,
 } from '@/process/services/creative-studio/service/schema2/generation/composition';
 import {
   createStudioDeferredGenerationRequestPlan,
   createStudioGenerationRequestTemplate,
   createStudioResolvedGenerationRequestPlan,
+  createStudioPieceGenerationRequestPlanV3,
   isStudioGenerationRequestCurrent,
   materializeStudioGenerationRequestPlan,
+  studioPieceGenerationRequestPlansEqualV3,
+  validateStudioPieceGenerationRequestPlanV3,
 } from '@/process/services/creative-studio/service/schema2/generation/generationRequest';
 
 const rule = {
@@ -249,5 +254,91 @@ describe('generation request plans', () => {
         }
       )
     ).toThrow(TypeError);
+  });
+});
+
+describe('inactive Piece image request plan', () => {
+  const makePieceComposition = () =>
+    composeStudioPieceGenerationV3({
+      projectRevisionAtPreparation: 3,
+      authoringRevision: 2,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'd'.repeat(64),
+      brief: '',
+      rules: [],
+      source: {
+        kind: 'piece',
+        pieceId: 'piece_1',
+        words: 'Một bức ảnh ở bờ biển.',
+        settings: { aspectRatio: '3:4', resolution: '720p' },
+      },
+      purpose: 'piece_image',
+      conditioningInputs: [],
+      route: imageRoute,
+      instructionProfile: deriveStudioPieceInstructionProfileV3(imageRoute),
+    });
+
+  it('builds one exact image-only resolved request with no Shot duration', () => {
+    const plan = createStudioPieceGenerationRequestPlanV3({ composition: makePieceComposition() });
+    expect(plan).toEqual({
+      kind: 'resolved',
+      snapshot: {
+        composition: expect.any(Object),
+        settings: { aspectRatio: '3:4', resolution: '720p' },
+        conditioningInputs: [],
+      },
+    });
+    expect('durationSeconds' in plan.snapshot).toBe(false);
+    expect('referenceInputs' in plan.snapshot).toBe(false);
+    expect('dependency' in plan).toBe(false);
+    expect(validateStudioPieceGenerationRequestPlanV3(plan)).toBe(true);
+    expect(studioPieceGenerationRequestPlansEqualV3(plan, structuredClone(plan))).toBe(true);
+  });
+
+  it('rejects accessor-backed constructor input without invoking it', () => {
+    let getterCalls = 0;
+    const hostile = {} as { composition: ReturnType<typeof makePieceComposition> };
+    Object.defineProperty(hostile, 'composition', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return makePieceComposition();
+      },
+    });
+
+    expect(() => createStudioPieceGenerationRequestPlanV3(hostile)).toThrow(TypeError);
+    expect(getterCalls).toBe(0);
+  });
+
+  it('rejects settings drift, conditioning, deferred shape, and film baggage', () => {
+    const plan = createStudioPieceGenerationRequestPlanV3({ composition: makePieceComposition() });
+    expect(
+      validateStudioPieceGenerationRequestPlanV3({
+        ...plan,
+        snapshot: { ...plan.snapshot, settings: { ...plan.snapshot.settings, resolution: '1080p' } },
+      })
+    ).toBe(false);
+    expect(
+      validateStudioPieceGenerationRequestPlanV3({
+        ...plan,
+        snapshot: { ...plan.snapshot, conditioningInputs: [{ kind: 'seed_still', assetId: 'asset_1' }] },
+      })
+    ).toBe(false);
+    expect(validateStudioPieceGenerationRequestPlanV3({ ...plan, kind: 'after_take_selection' })).toBe(false);
+    expect(
+      validateStudioPieceGenerationRequestPlanV3({
+        ...plan,
+        snapshot: { ...plan.snapshot, durationSeconds: 4 },
+      })
+    ).toBe(false);
+
+    const revoked = Proxy.revocable([], {});
+    revoked.revoke();
+    const hostile = {
+      ...plan,
+      snapshot: { ...plan.snapshot, conditioningInputs: revoked.proxy },
+    };
+    expect(() => validateStudioPieceGenerationRequestPlanV3(hostile)).not.toThrow();
+    expect(validateStudioPieceGenerationRequestPlanV3(hostile)).toBe(false);
   });
 });

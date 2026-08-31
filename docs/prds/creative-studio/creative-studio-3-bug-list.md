@@ -22,12 +22,12 @@ one. The point is to stop work on surfaces CS4 deletes, without closing defects 
 
 **Nothing here is closed by a disposition.** The status semantics are the whole mechanism:
 
-| Disposition               | What it means                                  | When the entry closes                                                   |
-| ------------------------- | ---------------------------------------------- | ----------------------------------------------------------------------- |
-| **fix before CS4**        | CS4 is built on top of something broken        | When it is fixed. It blocks the CS4 base.                               |
-| **absorb into CS4**       | CS4's own work subsumes it, at a named phase   | When that phase's acceptance evidence passes — not when the phase ships |
-| **superseded by cutover** | The defect lives only in a surface CS4 deletes | When that surface is actually removed. Not before.                      |
-| **defer**                 | Real, but explicitly outside the pilot         | Not in this programme                                                   |
+| Disposition               | What it means                                  | When the entry closes                                                                             |
+| ------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| **fix before CS4**        | A surviving dependency is broken               | When fixed; it blocks the named destination gate, and the base only when that destination says so |
+| **absorb into CS4**       | CS4's own work subsumes it, at a named phase   | When that phase's acceptance evidence passes — not when the phase ships                           |
+| **superseded by cutover** | The defect lives only in a surface CS4 deletes | When that surface is actually removed. Not before.                                                |
+| **defer**                 | Real, but explicitly outside the pilot         | Not in this programme                                                                             |
 
 **The distinction that matters is between a surface and a rule.** Pixels die with the four views;
 rules about spend, provenance, the chain, refusals and Director behaviour do not. An entry whose
@@ -45,9 +45,13 @@ the store, spend, chain or provenance is implicated.
 
 **Counts:** 3 fix-before-CS4 · 26 absorb · 1 superseded-by-cutover · 0 defer.
 
-The three base blockers are **BUG-190**, **BUG-162** and **BUG-163**. **BUG-173** is the sole
-cutover-superseded entry. Every absorbed entry below names the phase that owns its acceptance
-evidence; none is closed merely because CS4 work starts.
+The two shared-base Tranche 0 blockers are **BUG-162** and **BUG-163**. They must land independently
+on the current shared CS3 base, pass there, and reach CS4 only by merging that shared base afterward;
+the current branch layout, a local duplicate, or a claimant label does not prove that sequence has
+happened. **BUG-190** remains the third fix-before-CS4 entry, but it is a **Phase 5 Director-integration
+entry prerequisite**, not a Phase 0 or Phase 1 blocker. **BUG-173** is the sole cutover-superseded
+entry. Every absorbed entry below names the phase that owns its acceptance evidence; none is closed
+merely because CS4 work starts.
 
 Every triage block also carries a claimant field. `Unclaimed` is intentional at this planning
 checkpoint; the implementing agent replaces it before the first code edit. A phase destination is
@@ -1111,8 +1115,8 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Actual.** Asked to inspect a conditioning frame, the Director called `studio_get_conditioning_frame` and then sat at **`Thinking 3m 59s`**, blocked on _"I'd like to run a command … Choose an action: Yes, allow once / Yes, allow always / No"_. It resumed and completed the moment the prompt was answered.
   - **Why it matters more than an ordinary prompt.** The tool is read-only — it reads one frame out of the project's own directory — and `openingTurn.ts` now instructs the Director to call it **every time it revises a chained Shot after a failure**, which is the common case BUG-165 is about. A confirmation on every repair attempt trains people to click through MCP permission dialogs, which is exactly the habit the dialog exists to prevent.
   - **What is established.** The prompt fired for a **new** tool on a built-in server whose other tools (`read_storyboard`, `propose_storyboard`, `studio_apply_edits`) had been running all session without prompting. WePrompt never sets `AUTO_APPROVE_MCP_SERVERS`; the constant appears once in the tree, in a comment in `builtinCapabilities.ts:224`, describing AionCore behaviour.
-  - **What is not established.** Where the prior approvals are actually remembered — that state is AionCore's, not a file in the profile — so whether this is per-tool, first-use-per-server, or something else was not determined. The observation is solid; the mechanism needs one more look before a fix.
-  - **Phase 0 investigation 2026-08-30.** The Director uses Aionrs, not ACP. Aionrs presents every MCP
+  - **What was not established at filing.** Where the prior approvals were remembered — that state is AionCore's, not a file in the profile — and whether this was per-tool, first-use-per-server, or something else. The runtime-path investigation below resolves that mechanism; the original live observation remains solid.
+  - **Runtime-path investigation 2026-08-30.** The Director uses Aionrs, not ACP. Aionrs presents every MCP
     proxy call to approval as the single `mcp` category, so **Allow always** covers mutating Studio
     tools and external MCP tools too. ACP's name-based auto-approval path is not involved. WePrompt's
     session descriptor carries no backend-authenticated trust or read-only approval identity, and the
@@ -1129,16 +1133,18 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **Fix direction.** A built-in server's tools should not need per-tool consent, or adding a tool to a trusted built-in should not silently reintroduce a prompt. Whichever way it lands, a Director blocked on consent must not look like a Director that is thinking.
   - **CS4 triage**
     - **Disposition:** Fix before CS4.
-    - **Destination:** Prerequisite tranche before Phase 1.
-    - **Rationale:** Pilot 1 is capability-driven, so an unresolved consent prompt on routine reads
-      would block every new Director capability and encourage indiscriminate approval. The trust
-      boundary must be established before adding more built-in tools.
+    - **Destination:** Phase 5 entry prerequisite — Director command integration and canvas cutover.
+    - **Rationale:** Phases 1–4 register no production Director MCP tool and may proceed while the
+      external trust contract is developed; Phase 1's Director-facing surface remains provisional.
+      Phase 5 must not freeze the Director command surface, add a built-in tool, or cut the Director
+      over until routine trusted reads can bypass consent without granting external or mutating MCP
+      calls the same authority.
     - **Acceptance evidence:** An integration test must call an existing and then a newly registered
       read-only tool on the trusted built-in Studio server without a per-tool consent prompt, while an
       equivalent untrusted external tool still requires consent. A live Director run must execute the
       conditioning-frame read without pausing for approval.
-    - **Claimant:** `codex/creative-studio-4-pilot` — blocked on an identity-bound AionCore/Aionrs
-      permission contract before an in-repository fix can begin.
+    - **Claimant:** Unclaimed in WePrompt — the identity-bound AionCore/Aionrs contract and reviewed
+      release must exist first; claim the Phase 5 pin and integration separately when it does.
 
 - [ ] **[BUG-191][P2][Creative Studio] A Director turn can be blocked on a prompt for minutes with no sign of it anywhere in the workspace** — found 2026-08-30 in live testing
   - **Lane: Director.**

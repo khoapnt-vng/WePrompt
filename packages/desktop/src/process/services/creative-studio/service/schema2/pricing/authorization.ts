@@ -4,10 +4,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { types as nodeTypes } from 'node:util';
+
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   type StudioJobV2,
+  type StudioCancellationPolicy,
+  type StudioPieceJobRetryReasonV3,
+  type StudioPieceSpendAuthorizationV3,
+  type StudioPieceSpendReceiptV3,
   type StudioProviderRef,
   type StudioQuotedGeneration,
   type StudioSpendAuthorization,
@@ -18,7 +24,9 @@ import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
   createStudioQuotedGenerationId,
+  createStudioPieceQuotedGenerationIdV3,
   studioGenerationTargetKey,
+  validateStudioPieceGenerationRequestPlanV3,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from '../generation';
 
@@ -101,7 +109,9 @@ const validProvider = (value: StudioProviderRef): boolean =>
   value !== null &&
   typeof value === 'object' &&
   Reflect.ownKeys(value).length === 3 &&
+  typeof value.providerId === 'string' &&
   SAFE_ID.test(value.providerId) &&
+  typeof value.adapterId === 'string' &&
   ADAPTER_IDS.has(value.adapterId) &&
   safeModel(value.model);
 
@@ -348,4 +358,430 @@ export const studioSpendReceiptMatchesJobV2 = (
   } catch {
     return false;
   }
+};
+
+const PIECE_QUOTE_KEYS_V3 = new Set([
+  'id',
+  'reservationId',
+  'quoteRevision',
+  'projectId',
+  'projectRevisionAtPreparation',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'rateCardDigest',
+  'currency',
+  'item',
+  'lowerMinorUnits',
+  'upperMinorUnits',
+  'expiresAt',
+]);
+const PIECE_ITEM_KEYS_V3 = new Set([
+  'id',
+  'target',
+  'purpose',
+  'routeId',
+  'generationCount',
+  'requestPlan',
+  'rateUnit',
+  'rateMinorUnits',
+]);
+const PIECE_AUTHORIZATION_INPUT_KEYS_V3 = new Set([
+  'reservationId',
+  'authorizationId',
+  'quote',
+  'confirmedAt',
+  'projectRevisionAtAuthorization',
+  'provider',
+  'cancellationPolicy',
+  'idempotencyKey',
+]);
+const PIECE_AUTHORIZATION_KEYS_V3 = new Set([
+  'id',
+  'quote',
+  'confirmedAt',
+  'projectRevisionAtAuthorization',
+  'cancellationPolicy',
+  'providerBinding',
+  'idempotencyKey',
+]);
+const PIECE_PROVIDER_KEYS_V3 = new Set(['providerId', 'adapterId', 'model']);
+const PIECE_PROVIDER_BINDING_KEYS_V3 = new Set(['itemId', 'provider']);
+const PIECE_IDEMPOTENCY_KEYS_V3 = new Set(['itemId', 'key']);
+const PIECE_RECEIPT_INPUT_KEYS_V3 = new Set(['reservationId', 'authorization', 'jobId', 'recordedAt']);
+const PIECE_RECEIPT_KEYS_V3 = new Set([
+  'authorizationId',
+  'quoteId',
+  'quoteRevision',
+  'itemId',
+  'jobId',
+  'purpose',
+  'routeId',
+  'currency',
+  'rateUnit',
+  'rateMinorUnits',
+  'generationCount',
+  'totalMinorUnits',
+  'recordedAt',
+]);
+const PIECE_RECEIPT_JOB_KEYS_V3 = new Set(['id', 'authorizationId', 'authorizationItemId', 'idempotencyKey']);
+const PIECE_DUPLICATE_ACKNOWLEDGEMENT_KEYS_V3 = new Set([
+  'retryReason',
+  'duplicateChargeAcknowledged',
+  'duplicateChargeAcknowledgedAt',
+]);
+
+const exactRecordV3 = (value: unknown, keys: ReadonlySet<string>): value is Record<string, unknown> => {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value) || nodeTypes.isProxy(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const ownKeys = Reflect.ownKeys(value);
+    return (
+      ownKeys.length === keys.size &&
+      ownKeys.every((key) => typeof key === 'string' && keys.has(key)) &&
+      [...keys].every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor !== undefined && descriptor.enumerable && Object.hasOwn(descriptor, 'value');
+      })
+    );
+  } catch {
+    return false;
+  }
+};
+
+const hasOnlyOwnDataGraphV3 = (value: unknown, seen = new Set<object>()): boolean => {
+  if (typeof value === 'function' || typeof value === 'symbol') return false;
+  if (typeof value !== 'object' || value === null) return true;
+  if (nodeTypes.isProxy(value) || seen.has(value)) return false;
+  seen.add(value);
+  try {
+    const isArray = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    if (isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== 'string') return false;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !Object.hasOwn(descriptor, 'value') ||
+        (!descriptor.enumerable && !(isArray && key === 'length')) ||
+        !hasOnlyOwnDataGraphV3(descriptor.value, seen)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const validProviderV3 = (value: unknown): value is StudioProviderRef =>
+  exactRecordV3(value, PIECE_PROVIDER_KEYS_V3) &&
+  typeof value.providerId === 'string' &&
+  SAFE_ID.test(value.providerId) &&
+  typeof value.adapterId === 'string' &&
+  ADAPTER_IDS.has(value.adapterId as StudioProviderRef['adapterId']) &&
+  typeof value.model === 'string' &&
+  safeModel(value.model);
+
+const validCancellationPolicyV3 = (value: unknown): value is StudioCancellationPolicy =>
+  value === 'none' || value === 'queued_only' || value === 'queued_and_running';
+
+const canonicalJsonV3 = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonV3).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .toSorted()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJsonV3(record[key])}`)
+    .join(',')}}`;
+};
+
+const pieceQuoteIsValidV3 = (quote: StudioPieceSpendAuthorizationV3['quote'], reservationId: string): boolean => {
+  try {
+    if (
+      typeof reservationId !== 'string' ||
+      !SAFE_ID.test(reservationId) ||
+      !exactRecordV3(quote, PIECE_QUOTE_KEYS_V3) ||
+      typeof quote.id !== 'string' ||
+      !SAFE_ID.test(quote.id) ||
+      quote.reservationId !== reservationId ||
+      typeof quote.projectId !== 'string' ||
+      !SAFE_ID.test(quote.projectId) ||
+      !Number.isSafeInteger(quote.quoteRevision) ||
+      quote.quoteRevision < 1 ||
+      !Number.isSafeInteger(quote.projectRevisionAtPreparation) ||
+      quote.projectRevisionAtPreparation < 1 ||
+      !Number.isSafeInteger(quote.authoringRevision) ||
+      quote.authoringRevision < 1 ||
+      quote.authoringFingerprintVersion !== 1 ||
+      typeof quote.authoringFingerprint !== 'string' ||
+      !LOWERCASE_SHA256.test(quote.authoringFingerprint) ||
+      typeof quote.rateCardDigest !== 'string' ||
+      !LOWERCASE_SHA256.test(quote.rateCardDigest) ||
+      typeof quote.currency !== 'string' ||
+      !/^[A-Z]{3}$/.test(quote.currency) ||
+      !canonicalTimestamp(quote.expiresAt) ||
+      !Number.isSafeInteger(quote.lowerMinorUnits) ||
+      quote.lowerMinorUnits < 1 ||
+      quote.lowerMinorUnits !== quote.upperMinorUnits ||
+      !exactRecordV3(quote.item, PIECE_ITEM_KEYS_V3)
+    ) {
+      return false;
+    }
+    const item = quote.item;
+    if (
+      !exactRecordV3(item.target, new Set(['kind', 'pieceId'])) ||
+      item.target.kind !== 'piece' ||
+      typeof item.target.pieceId !== 'string' ||
+      !SAFE_ID.test(item.target.pieceId) ||
+      item.purpose !== 'piece_image' ||
+      typeof item.routeId !== 'string' ||
+      !SAFE_ID.test(item.routeId) ||
+      item.generationCount !== 1 ||
+      item.rateUnit !== 'generation' ||
+      item.rateMinorUnits !== quote.lowerMinorUnits ||
+      !validateStudioPieceGenerationRequestPlanV3(item.requestPlan)
+    ) {
+      return false;
+    }
+    const composition = item.requestPlan.snapshot.composition;
+    return (
+      item.id ===
+        createStudioPieceQuotedGenerationIdV3({
+          projectId: quote.projectId,
+          reservationId: quote.reservationId,
+          quoteId: quote.id,
+          quoteRevision: quote.quoteRevision,
+          target: item.target,
+          purpose: 'piece_image',
+        }) &&
+      composition.inputs.source.pieceId === item.target.pieceId &&
+      composition.inputs.projectRevisionAtPreparation === quote.projectRevisionAtPreparation &&
+      composition.inputs.authoringRevision === quote.authoringRevision &&
+      composition.inputs.authoringFingerprintVersion === quote.authoringFingerprintVersion &&
+      composition.inputs.authoringFingerprint === quote.authoringFingerprint
+    );
+  } catch {
+    return false;
+  }
+};
+
+export type StudioPieceSpendAuthorizationInputV3 = {
+  reservationId: string;
+  authorizationId: string;
+  quote: StudioPieceSpendAuthorizationV3['quote'];
+  confirmedAt: string;
+  projectRevisionAtAuthorization: number;
+  provider: StudioProviderRef;
+  cancellationPolicy: StudioCancellationPolicy;
+  idempotencyKey: string;
+};
+
+/** Freezes a separately identified Piece authorization after the reservation has been revalidated. */
+export const createStudioPieceSpendAuthorizationV3 = (
+  input: StudioPieceSpendAuthorizationInputV3
+): StudioPieceSpendAuthorizationV3 => {
+  let snapshot: StudioPieceSpendAuthorizationInputV3;
+  if (!exactRecordV3(input, PIECE_AUTHORIZATION_INPUT_KEYS_V3) || !hasOnlyOwnDataGraphV3(input)) {
+    return fail('invalid_authorization');
+  }
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    return fail('invalid_authorization');
+  }
+  if (!pieceQuoteIsValidV3(snapshot.quote, snapshot.reservationId)) fail('invalid_authorization');
+  if (
+    typeof snapshot.authorizationId !== 'string' ||
+    !SAFE_ID.test(snapshot.authorizationId) ||
+    snapshot.authorizationId === snapshot.quote.id ||
+    snapshot.authorizationId === snapshot.quote.item.id ||
+    !canonicalTimestamp(snapshot.confirmedAt) ||
+    Date.parse(snapshot.confirmedAt) >= Date.parse(snapshot.quote.expiresAt) ||
+    !Number.isSafeInteger(snapshot.projectRevisionAtAuthorization) ||
+    snapshot.projectRevisionAtAuthorization <= snapshot.quote.projectRevisionAtPreparation ||
+    !validCancellationPolicyV3(snapshot.cancellationPolicy)
+  ) {
+    fail(
+      Date.parse(snapshot.confirmedAt) >= Date.parse(snapshot.quote.expiresAt)
+        ? 'expired_quote'
+        : 'invalid_authorization'
+    );
+  }
+  if (!validProvider(snapshot.provider)) fail('invalid_provider_binding');
+  const compositionProvider = snapshot.quote.item.requestPlan.snapshot.composition.inputs.route;
+  if (
+    compositionProvider.providerId !== snapshot.provider.providerId ||
+    compositionProvider.adapterId !== snapshot.provider.adapterId ||
+    compositionProvider.model !== snapshot.provider.model
+  ) {
+    fail('invalid_provider_binding');
+  }
+  if (typeof snapshot.idempotencyKey !== 'string' || !SAFE_ID.test(snapshot.idempotencyKey)) {
+    fail('invalid_idempotency');
+  }
+  return {
+    id: snapshot.authorizationId,
+    quote: structuredClone(snapshot.quote),
+    confirmedAt: snapshot.confirmedAt,
+    projectRevisionAtAuthorization: snapshot.projectRevisionAtAuthorization,
+    cancellationPolicy: snapshot.cancellationPolicy,
+    providerBinding: { itemId: snapshot.quote.item.id, provider: cloneProvider(snapshot.provider) },
+    idempotencyKey: { itemId: snapshot.quote.item.id, key: snapshot.idempotencyKey },
+  };
+};
+
+export const validateStudioPieceSpendAuthorizationV3 = (
+  authorization: unknown,
+  reservationId: string
+): authorization is StudioPieceSpendAuthorizationV3 => {
+  try {
+    if (
+      !hasOnlyOwnDataGraphV3(authorization) ||
+      !exactRecordV3(authorization, PIECE_AUTHORIZATION_KEYS_V3) ||
+      typeof authorization.id !== 'string' ||
+      !SAFE_ID.test(authorization.id) ||
+      !pieceQuoteIsValidV3(authorization.quote as StudioPieceSpendAuthorizationV3['quote'], reservationId) ||
+      (authorization.quote as StudioPieceSpendAuthorizationV3['quote']).id === authorization.id ||
+      (authorization.quote as StudioPieceSpendAuthorizationV3['quote']).item.id === authorization.id ||
+      !canonicalTimestamp(authorization.confirmedAt as string) ||
+      Date.parse(authorization.confirmedAt as string) >=
+        Date.parse((authorization.quote as StudioPieceSpendAuthorizationV3['quote']).expiresAt) ||
+      !Number.isSafeInteger(authorization.projectRevisionAtAuthorization) ||
+      (authorization.projectRevisionAtAuthorization as number) <=
+        (authorization.quote as StudioPieceSpendAuthorizationV3['quote']).projectRevisionAtPreparation ||
+      !validCancellationPolicyV3(authorization.cancellationPolicy) ||
+      !exactRecordV3(authorization.providerBinding, PIECE_PROVIDER_BINDING_KEYS_V3) ||
+      !exactRecordV3(authorization.idempotencyKey, PIECE_IDEMPOTENCY_KEYS_V3)
+    ) {
+      return false;
+    }
+    const typed = authorization as unknown as StudioPieceSpendAuthorizationV3;
+    return (
+      typed.providerBinding.itemId === typed.quote.item.id &&
+      validProviderV3(typed.providerBinding.provider) &&
+      typed.providerBinding.provider.providerId ===
+        typed.quote.item.requestPlan.snapshot.composition.inputs.route.providerId &&
+      typed.providerBinding.provider.adapterId ===
+        typed.quote.item.requestPlan.snapshot.composition.inputs.route.adapterId &&
+      typed.providerBinding.provider.model === typed.quote.item.requestPlan.snapshot.composition.inputs.route.model &&
+      typed.idempotencyKey.itemId === typed.quote.item.id &&
+      typeof typed.idempotencyKey.key === 'string' &&
+      SAFE_ID.test(typed.idempotencyKey.key)
+    );
+  } catch {
+    return false;
+  }
+};
+
+export const createStudioPieceSpendReceiptV3 = (input: {
+  reservationId: string;
+  authorization: StudioPieceSpendAuthorizationV3;
+  jobId: string;
+  recordedAt: string;
+}): StudioPieceSpendReceiptV3 => {
+  let snapshot: typeof input;
+  if (!exactRecordV3(input, PIECE_RECEIPT_INPUT_KEYS_V3) || !hasOnlyOwnDataGraphV3(input)) {
+    return fail('invalid_receipt');
+  }
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    return fail('invalid_receipt');
+  }
+  if (!validateStudioPieceSpendAuthorizationV3(snapshot.authorization, snapshot.reservationId)) {
+    fail('invalid_receipt');
+  }
+  if (
+    typeof snapshot.jobId !== 'string' ||
+    !SAFE_ID.test(snapshot.jobId) ||
+    !canonicalTimestamp(snapshot.recordedAt) ||
+    snapshot.recordedAt < snapshot.authorization.confirmedAt
+  ) {
+    fail('invalid_receipt');
+  }
+  const { authorization } = snapshot;
+  const item = authorization.quote.item;
+  return {
+    authorizationId: authorization.id,
+    quoteId: authorization.quote.id,
+    quoteRevision: authorization.quote.quoteRevision,
+    itemId: item.id,
+    jobId: snapshot.jobId,
+    purpose: 'piece_image',
+    routeId: item.routeId,
+    currency: authorization.quote.currency,
+    rateUnit: 'generation',
+    rateMinorUnits: item.rateMinorUnits,
+    generationCount: 1,
+    totalMinorUnits: item.rateMinorUnits,
+    recordedAt: snapshot.recordedAt,
+  };
+};
+
+export const studioPieceSpendReceiptMatchesJobV3 = (
+  receipt: StudioPieceSpendReceiptV3,
+  authorization: StudioPieceSpendAuthorizationV3,
+  job: { id: string; authorizationId: string; authorizationItemId: string; idempotencyKey: string },
+  reservationId: string
+): boolean => {
+  try {
+    if (
+      !exactRecordV3(receipt, PIECE_RECEIPT_KEYS_V3) ||
+      !exactRecordV3(job, PIECE_RECEIPT_JOB_KEYS_V3) ||
+      !hasOnlyOwnDataGraphV3({ receipt, authorization, job, reservationId })
+    ) {
+      return false;
+    }
+    const snapshot = structuredClone({ receipt, authorization, job, reservationId });
+    if (!validateStudioPieceSpendAuthorizationV3(snapshot.authorization, snapshot.reservationId)) return false;
+    const expected = createStudioPieceSpendReceiptV3({
+      reservationId: snapshot.reservationId,
+      authorization: snapshot.authorization,
+      jobId: snapshot.job.id,
+      recordedAt: snapshot.receipt.recordedAt,
+    });
+    return (
+      snapshot.job.authorizationId === snapshot.authorization.id &&
+      snapshot.job.authorizationItemId === snapshot.authorization.quote.item.id &&
+      snapshot.job.idempotencyKey === snapshot.authorization.idempotencyKey.key &&
+      canonicalJsonV3(snapshot.receipt) === canonicalJsonV3(expected)
+    );
+  } catch {
+    return false;
+  }
+};
+
+/** Enforces the Pilot retry duplicate-charge acknowledgement matrix. */
+export const studioPieceDuplicateChargeAcknowledgementIsValidV3 = (input: {
+  retryReason: StudioPieceJobRetryReasonV3 | null;
+  duplicateChargeAcknowledged: boolean;
+  duplicateChargeAcknowledgedAt: string | null;
+}): boolean => {
+  if (!exactRecordV3(input, PIECE_DUPLICATE_ACKNOWLEDGEMENT_KEYS_V3) || !hasOnlyOwnDataGraphV3(input)) {
+    return false;
+  }
+  let snapshot: typeof input;
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    return false;
+  }
+  if (
+    snapshot.retryReason !== null &&
+    snapshot.retryReason !== 'provider_failure' &&
+    snapshot.retryReason !== 'submission_unknown' &&
+    snapshot.retryReason !== 'variation_grid' &&
+    snapshot.retryReason !== 'cancelled'
+  ) {
+    return false;
+  }
+  return snapshot.retryReason === 'submission_unknown'
+    ? snapshot.duplicateChargeAcknowledged &&
+        snapshot.duplicateChargeAcknowledgedAt !== null &&
+        canonicalTimestamp(snapshot.duplicateChargeAcknowledgedAt)
+    : !snapshot.duplicateChargeAcknowledged && snapshot.duplicateChargeAcknowledgedAt === null;
 };

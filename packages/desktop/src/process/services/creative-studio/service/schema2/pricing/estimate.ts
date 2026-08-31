@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { types as nodeTypes } from 'node:util';
+
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
@@ -16,6 +18,9 @@ import {
   type StudioGenerationRequestTemplate,
   type StudioGenerationTargetV2,
   type StudioMediaModelRef,
+  type StudioPieceGenerationRequestPlanV3,
+  type StudioPieceGenerationTargetV3,
+  type StudioPieceSubmissionQuoteV3,
   type StudioPrepareGenerationChoiceV2,
   type StudioPreparedSubmissionRequestV2,
   type StudioPricingRefusalDetailsV2,
@@ -48,11 +53,14 @@ import {
   createStudioFrameExtractionId,
   createStudioGenerationRequestTemplate,
   createStudioQuotedGenerationId,
+  createStudioPieceQuotedGenerationIdV3,
   createStudioReferenceGenerationRequestPlan,
   createStudioResolvedGenerationRequestPlan,
   deriveStudioInstructionProfileV2,
   resolveStudioReferenceBindingV2,
   studioGenerationTargetKey,
+  studioPieceGenerationTargetKeyV3,
+  validateStudioPieceGenerationRequestPlanV3,
 } from '../generation';
 import { studioBoardAuthorizationScopeIsValidV2 } from './authorization';
 import {
@@ -1642,3 +1650,401 @@ export const toStudioRendererSubmissionQuoteV2 = (
   upperMinorUnits: quote.upperMinorUnits,
   budget: evaluateStudioBudgetV2(quote, policy).verdict,
 });
+
+const PIECE_QUOTE_KEYS_V3 = new Set([
+  'id',
+  'reservationId',
+  'quoteRevision',
+  'projectId',
+  'projectRevisionAtPreparation',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'rateCardDigest',
+  'currency',
+  'item',
+  'lowerMinorUnits',
+  'upperMinorUnits',
+  'expiresAt',
+]);
+const PIECE_QUOTE_ITEM_KEYS_V3 = new Set([
+  'id',
+  'target',
+  'purpose',
+  'routeId',
+  'generationCount',
+  'requestPlan',
+  'rateUnit',
+  'rateMinorUnits',
+]);
+const PIECE_TARGET_KEYS_V3 = new Set(['kind', 'pieceId']);
+const PIECE_SPEND_QUOTE_KEYS_V3 = new Set(['currency', 'lowerMinorUnits', 'upperMinorUnits']);
+const PIECE_SPEND_POLICY_KEYS_V3 = new Set(['currency', 'maxPerBatchMinorUnits']);
+const PIECE_QUOTE_REVALIDATION_KEYS_V3 = new Set(['reservationId', 'recorded', 'rederived', 'policy']);
+const PIECE_QUOTE_INPUT_KEYS_V3 = new Set([
+  'reservationId',
+  'quoteId',
+  'quoteRevision',
+  'projectId',
+  'projectRevisionAtPreparation',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'rateCardDigest',
+  'currency',
+  'target',
+  'routeId',
+  'requestPlan',
+  'rateUnit',
+  'rateMinorUnits',
+  'expiresAt',
+]);
+const isSafeIdValueV3 = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
+
+const isExactOwnDataRecordV3 = (value: unknown, keys: ReadonlySet<string>): value is Record<string, unknown> => {
+  try {
+    return !nodeTypes.isProxy(value) && isExactOwnDataRecord(value, keys);
+  } catch {
+    return false;
+  }
+};
+
+const hasOnlyOwnDataGraphV3 = (value: unknown, seen = new Set<object>()): boolean => {
+  if (typeof value === 'function' || typeof value === 'symbol') return false;
+  if (typeof value !== 'object' || value === null) return true;
+  if (nodeTypes.isProxy(value) || seen.has(value)) return false;
+  seen.add(value);
+  try {
+    const isArray = Array.isArray(value);
+    const prototype = Object.getPrototypeOf(value);
+    if (isArray ? prototype !== Array.prototype : prototype !== Object.prototype && prototype !== null) return false;
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== 'string') return false;
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (
+        descriptor === undefined ||
+        !Object.hasOwn(descriptor, 'value') ||
+        (!descriptor.enumerable && !(isArray && key === 'length')) ||
+        !hasOnlyOwnDataGraphV3(descriptor.value, seen)
+      ) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const isCanonicalTimestampV3 = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length !== 24) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+};
+
+export type StudioPieceSubmissionQuoteInputV3 = {
+  reservationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  projectId: string;
+  projectRevisionAtPreparation: number;
+  authoringRevision: number;
+  authoringFingerprintVersion: 1;
+  authoringFingerprint: string;
+  rateCardDigest: string;
+  currency: string;
+  target: StudioPieceGenerationTargetV3;
+  routeId: string;
+  requestPlan: StudioPieceGenerationRequestPlanV3;
+  rateUnit: 'generation';
+  rateMinorUnits: number;
+  expiresAt: string;
+};
+
+/** Builds one fixed-price, single-image quote without admitting the film graph vocabulary. */
+export const createStudioPieceSubmissionQuoteV3 = (
+  input: StudioPieceSubmissionQuoteInputV3
+): StudioPieceSubmissionQuoteV3 => {
+  let snapshot: StudioPieceSubmissionQuoteInputV3;
+  if (!isExactOwnDataRecordV3(input, PIECE_QUOTE_INPUT_KEYS_V3) || !hasOnlyOwnDataGraphV3(input)) {
+    return fail('invalid_quote');
+  }
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    return fail('invalid_quote');
+  }
+  if (
+    !isSafeIdValueV3(snapshot.reservationId) ||
+    !isSafeIdValueV3(snapshot.quoteId) ||
+    !isSafeIdValueV3(snapshot.projectId) ||
+    !Number.isSafeInteger(snapshot.quoteRevision) ||
+    snapshot.quoteRevision < 1 ||
+    !Number.isSafeInteger(snapshot.projectRevisionAtPreparation) ||
+    snapshot.projectRevisionAtPreparation < 1 ||
+    !Number.isSafeInteger(snapshot.authoringRevision) ||
+    snapshot.authoringRevision < 1 ||
+    snapshot.authoringFingerprintVersion !== 1 ||
+    typeof snapshot.authoringFingerprint !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(snapshot.authoringFingerprint) ||
+    typeof snapshot.rateCardDigest !== 'string' ||
+    !/^[a-f0-9]{64}$/.test(snapshot.rateCardDigest) ||
+    typeof snapshot.currency !== 'string' ||
+    !CURRENCY.test(snapshot.currency) ||
+    !isExactOwnDataRecordV3(snapshot.target, PIECE_TARGET_KEYS_V3) ||
+    snapshot.target.kind !== 'piece' ||
+    !isSafeIdValueV3(snapshot.target.pieceId) ||
+    !isSafeIdValueV3(snapshot.routeId) ||
+    snapshot.rateUnit !== 'generation' ||
+    !Number.isSafeInteger(snapshot.rateMinorUnits) ||
+    snapshot.rateMinorUnits < 1 ||
+    !isCanonicalTimestampV3(snapshot.expiresAt) ||
+    !validateStudioPieceGenerationRequestPlanV3(snapshot.requestPlan)
+  ) {
+    return fail('invalid_quote');
+  }
+  const composition = snapshot.requestPlan.snapshot.composition;
+  if (
+    composition.inputs.source.pieceId !== snapshot.target.pieceId ||
+    composition.inputs.purpose !== 'piece_image' ||
+    composition.inputs.projectRevisionAtPreparation !== snapshot.projectRevisionAtPreparation ||
+    composition.inputs.authoringRevision !== snapshot.authoringRevision ||
+    composition.inputs.authoringFingerprintVersion !== snapshot.authoringFingerprintVersion ||
+    composition.inputs.authoringFingerprint !== snapshot.authoringFingerprint
+  ) {
+    return fail('invalid_quote');
+  }
+  const item = {
+    id: createStudioPieceQuotedGenerationIdV3({
+      projectId: snapshot.projectId,
+      reservationId: snapshot.reservationId,
+      quoteId: snapshot.quoteId,
+      quoteRevision: snapshot.quoteRevision,
+      target: snapshot.target,
+      purpose: 'piece_image',
+    }),
+    target: structuredClone(snapshot.target),
+    purpose: 'piece_image' as const,
+    routeId: snapshot.routeId,
+    generationCount: 1 as const,
+    requestPlan: structuredClone(snapshot.requestPlan),
+    rateUnit: 'generation' as const,
+    rateMinorUnits: snapshot.rateMinorUnits,
+  };
+  return {
+    id: snapshot.quoteId,
+    reservationId: snapshot.reservationId,
+    quoteRevision: snapshot.quoteRevision,
+    projectId: snapshot.projectId,
+    projectRevisionAtPreparation: snapshot.projectRevisionAtPreparation,
+    authoringRevision: snapshot.authoringRevision,
+    authoringFingerprintVersion: 1,
+    authoringFingerprint: snapshot.authoringFingerprint,
+    rateCardDigest: snapshot.rateCardDigest,
+    currency: snapshot.currency,
+    item,
+    lowerMinorUnits: snapshot.rateMinorUnits,
+    upperMinorUnits: snapshot.rateMinorUnits,
+    expiresAt: snapshot.expiresAt,
+  };
+};
+
+/** Validates quote shape and stored-to-stored consistency; reservation identity is external cache authority. */
+export const validateStudioPieceSubmissionQuoteV3 = (
+  quote: unknown,
+  reservationId: string
+): quote is StudioPieceSubmissionQuoteV3 => {
+  try {
+    if (!isSafeIdValueV3(reservationId) || !isExactOwnDataRecordV3(quote, PIECE_QUOTE_KEYS_V3)) return false;
+    if (
+      !isSafeIdValueV3(quote.id) ||
+      quote.reservationId !== reservationId ||
+      !Number.isSafeInteger(quote.quoteRevision) ||
+      (quote.quoteRevision as number) < 1 ||
+      !isSafeIdValueV3(quote.projectId) ||
+      !Number.isSafeInteger(quote.projectRevisionAtPreparation) ||
+      (quote.projectRevisionAtPreparation as number) < 1 ||
+      !Number.isSafeInteger(quote.authoringRevision) ||
+      (quote.authoringRevision as number) < 1 ||
+      quote.authoringFingerprintVersion !== 1 ||
+      typeof quote.authoringFingerprint !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(quote.authoringFingerprint) ||
+      typeof quote.rateCardDigest !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(quote.rateCardDigest) ||
+      typeof quote.currency !== 'string' ||
+      !CURRENCY.test(quote.currency) ||
+      !Number.isSafeInteger(quote.lowerMinorUnits) ||
+      !Number.isSafeInteger(quote.upperMinorUnits) ||
+      quote.lowerMinorUnits !== quote.upperMinorUnits ||
+      (quote.lowerMinorUnits as number) < 1 ||
+      !isCanonicalTimestampV3(quote.expiresAt) ||
+      !isExactOwnDataRecordV3(quote.item, PIECE_QUOTE_ITEM_KEYS_V3)
+    ) {
+      return false;
+    }
+    const item = quote.item;
+    if (
+      !isExactOwnDataRecordV3(item.target, PIECE_TARGET_KEYS_V3) ||
+      item.target.kind !== 'piece' ||
+      typeof item.target.pieceId !== 'string' ||
+      !isSafeIdValueV3(item.target.pieceId) ||
+      item.purpose !== 'piece_image' ||
+      typeof item.routeId !== 'string' ||
+      !isSafeIdValueV3(item.routeId) ||
+      item.generationCount !== 1 ||
+      item.rateUnit !== 'generation' ||
+      item.rateMinorUnits !== quote.lowerMinorUnits ||
+      !validateStudioPieceGenerationRequestPlanV3(item.requestPlan)
+    ) {
+      return false;
+    }
+    const plan = item.requestPlan;
+    const composition = plan.snapshot.composition;
+    return (
+      typeof item.id === 'string' &&
+      item.id ===
+        createStudioPieceQuotedGenerationIdV3({
+          projectId: quote.projectId as string,
+          reservationId: quote.reservationId as string,
+          quoteId: quote.id as string,
+          quoteRevision: quote.quoteRevision as number,
+          target: item.target as StudioPieceGenerationTargetV3,
+          purpose: 'piece_image',
+        }) &&
+      studioPieceGenerationTargetKeyV3(item.target as StudioPieceGenerationTargetV3) ===
+        `piece:${composition.inputs.source.pieceId}` &&
+      composition.inputs.projectRevisionAtPreparation === quote.projectRevisionAtPreparation &&
+      composition.inputs.authoringRevision === quote.authoringRevision &&
+      composition.inputs.authoringFingerprintVersion === quote.authoringFingerprintVersion &&
+      composition.inputs.authoringFingerprint === quote.authoringFingerprint
+    );
+  } catch {
+    return false;
+  }
+};
+
+export type StudioPieceSpendPolicyEvaluationV3 = {
+  classification: 'within_cap' | 'no_policy' | 'currency_mismatch' | 'over_cap';
+  requiresExplicitHumanAction: boolean;
+};
+
+export const evaluateStudioPieceSpendPolicyV3 = (
+  quote: Pick<StudioPieceSubmissionQuoteV3, 'currency' | 'lowerMinorUnits' | 'upperMinorUnits'>,
+  policy: StudioSpendPolicy | null
+): StudioPieceSpendPolicyEvaluationV3 => {
+  if (
+    !isExactOwnDataRecordV3(quote, PIECE_SPEND_QUOTE_KEYS_V3) ||
+    (policy !== null && !isExactOwnDataRecordV3(policy, PIECE_SPEND_POLICY_KEYS_V3)) ||
+    !hasOnlyOwnDataGraphV3({ quote, policy })
+  ) {
+    return fail('invalid_quote');
+  }
+  let snapshot: {
+    quote: Pick<StudioPieceSubmissionQuoteV3, 'currency' | 'lowerMinorUnits' | 'upperMinorUnits'>;
+    policy: StudioSpendPolicy | null;
+  };
+  try {
+    snapshot = structuredClone({ quote, policy });
+  } catch {
+    return fail('invalid_quote');
+  }
+  const currentQuote = snapshot.quote;
+  const currentPolicy = snapshot.policy;
+  if (
+    typeof currentQuote.currency !== 'string' ||
+    !CURRENCY.test(currentQuote.currency) ||
+    !Number.isSafeInteger(currentQuote.lowerMinorUnits) ||
+    !Number.isSafeInteger(currentQuote.upperMinorUnits) ||
+    currentQuote.lowerMinorUnits < 1 ||
+    currentQuote.lowerMinorUnits !== currentQuote.upperMinorUnits
+  ) {
+    return fail('invalid_quote');
+  }
+  if (currentPolicy === null) return { classification: 'no_policy', requiresExplicitHumanAction: true };
+  if (
+    typeof currentPolicy.currency !== 'string' ||
+    !CURRENCY.test(currentPolicy.currency) ||
+    !Number.isSafeInteger(currentPolicy.maxPerBatchMinorUnits) ||
+    currentPolicy.maxPerBatchMinorUnits < 0
+  ) {
+    return fail('invalid_quote');
+  }
+  if (currentPolicy.currency !== currentQuote.currency) {
+    return { classification: 'currency_mismatch', requiresExplicitHumanAction: true };
+  }
+  if (currentQuote.upperMinorUnits > currentPolicy.maxPerBatchMinorUnits) {
+    return { classification: 'over_cap', requiresExplicitHumanAction: true };
+  }
+  return { classification: 'within_cap', requiresExplicitHumanAction: false };
+};
+
+export const studioPieceSubmissionQuotesEqualV3 = (
+  left: StudioPieceSubmissionQuoteV3,
+  right: StudioPieceSubmissionQuoteV3
+): boolean => canonicalJson(left) === canonicalJson(right);
+
+export const studioPieceQuoteMatchesAuthoringAuthorityV3 = (
+  quote: StudioPieceSubmissionQuoteV3,
+  authority: {
+    authoringRevision: number;
+    authoringFingerprint: string;
+  }
+): boolean =>
+  quote.authoringRevision === authority.authoringRevision &&
+  quote.authoringFingerprint === authority.authoringFingerprint;
+
+export const studioPieceQuoteMatchesRouteAndRateV3 = (
+  quote: StudioPieceSubmissionQuoteV3,
+  authority: {
+    routeId: string;
+    rateCardDigest: string;
+    currency: string;
+    rateUnit: 'generation';
+    rateMinorUnits: number;
+  }
+): boolean =>
+  quote.item.routeId === authority.routeId &&
+  quote.rateCardDigest === authority.rateCardDigest &&
+  quote.currency === authority.currency &&
+  quote.item.rateUnit === authority.rateUnit &&
+  quote.item.rateMinorUnits === authority.rateMinorUnits &&
+  quote.lowerMinorUnits === authority.rateMinorUnits &&
+  quote.upperMinorUnits === authority.rateMinorUnits;
+
+/** Compares a freshly rederived quote and re-evaluates current policy immediately before commit. */
+export const revalidateStudioPieceSubmissionQuoteV3 = (input: {
+  reservationId: string;
+  recorded: StudioPieceSubmissionQuoteV3;
+  rederived: StudioPieceSubmissionQuoteV3;
+  policy: StudioSpendPolicy | null;
+}): ({ ok: true } & StudioPieceSpendPolicyEvaluationV3) | { ok: false; reason: 'invalid_quote' | 'stale_quote' } => {
+  if (!isExactOwnDataRecordV3(input, PIECE_QUOTE_REVALIDATION_KEYS_V3) || !hasOnlyOwnDataGraphV3(input)) {
+    return { ok: false, reason: 'invalid_quote' };
+  }
+  let snapshot: typeof input;
+  try {
+    snapshot = structuredClone(input);
+  } catch {
+    return { ok: false, reason: 'invalid_quote' };
+  }
+  if (
+    !validateStudioPieceSubmissionQuoteV3(snapshot.recorded, snapshot.reservationId) ||
+    !validateStudioPieceSubmissionQuoteV3(snapshot.rederived, snapshot.reservationId)
+  ) {
+    return { ok: false, reason: 'invalid_quote' };
+  }
+  if (!studioPieceSubmissionQuotesEqualV3(snapshot.recorded, snapshot.rederived)) {
+    return { ok: false, reason: 'stale_quote' };
+  }
+  return {
+    ok: true,
+    ...evaluateStudioPieceSpendPolicyV3(
+      {
+        currency: snapshot.recorded.currency,
+        lowerMinorUnits: snapshot.recorded.lowerMinorUnits,
+        upperMinorUnits: snapshot.recorded.upperMinorUnits,
+      },
+      snapshot.policy
+    ),
+  };
+};

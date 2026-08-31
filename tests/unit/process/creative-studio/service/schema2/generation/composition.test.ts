@@ -10,6 +10,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
+  STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_MAX_STORY_LENGTH,
   type StudioGenerationCompositionInputSnapshotV2,
@@ -18,11 +20,16 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   composeStudioGenerationV2,
+  composeStudioPieceGenerationV3,
+  deriveStudioPieceInstructionProfileV3,
   deriveStudioInstructionProfileV2,
   recomposeStudioGenerationV2,
   studioGenerationCompositionMatchesAuthorityV2,
   studioGenerationCompositionDigestV2,
   studioGenerationCompositionsEqualV2,
+  normalizeStudioPieceWordsV3,
+  studioPieceGenerationCompositionMatchesAuthorityV3,
+  validateStudioPieceGenerationCompositionV3,
 } from '@/process/services/creative-studio/service/schema2/generation/composition';
 
 const route: StudioMediaModelRef = {
@@ -408,5 +415,287 @@ describe('canonical schema-5 generation composition', () => {
         },
       })
     ).toThrow('composed prompt is empty or exceeds');
+  });
+});
+
+describe('inactive schema-2 Piece generation composition', () => {
+  const pieceRoute: StudioMediaModelRef = {
+    providerId: 'provider_image',
+    adapterId: 'weprompt-image-v1',
+    model: 'image-model-2',
+  };
+  const composePiece = () =>
+    composeStudioPieceGenerationV3({
+      projectRevisionAtPreparation: 11,
+      authoringRevision: 4,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'c'.repeat(64),
+      brief: 'A quiet, human-scale photographic study.',
+      rules: [],
+      source: {
+        kind: 'piece',
+        pieceId: 'piece_salt_flat',
+        words: '  Bình minh\ttrên   cánh đồng muối  ',
+        settings: { aspectRatio: '4:3', resolution: '1080p' },
+      },
+      purpose: 'piece_image',
+      conditioningInputs: [],
+      route: pieceRoute,
+      instructionProfile: deriveStudioPieceInstructionProfileV3(pieceRoute),
+    });
+
+  it('normalizes Unicode words and freezes exact schema-2 Piece authority', () => {
+    const composition = composePiece();
+    expect(normalizeStudioPieceWordsV3('  Bình minh\ttrên   cánh đồng muối  ')).toBe('Bình minh trên cánh đồng muối');
+    expect(composition.inputs).toEqual({
+      schemaVersion: STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
+      projectRevisionAtPreparation: 11,
+      authoringRevision: 4,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'c'.repeat(64),
+      brief: 'A quiet, human-scale photographic study.',
+      rules: [],
+      source: {
+        kind: 'piece',
+        pieceId: 'piece_salt_flat',
+        words: 'Bình minh trên cánh đồng muối',
+        settings: { aspectRatio: '4:3', resolution: '1080p' },
+      },
+      purpose: 'piece_image',
+      conditioningInputs: [],
+      route: pieceRoute,
+      instructionProfile: 'weprompt-image-v1.piece-image.v1',
+    });
+    expect(composition.prompt).toContain('PHOTO REQUEST\nBình minh trên cánh đồng muối');
+    expect(composition.prompt).toContain('Create exactly one standalone photograph.');
+    expect(validateStudioPieceGenerationCompositionV3(composition)).toBe(true);
+    expect(
+      studioPieceGenerationCompositionMatchesAuthorityV3(composition, {
+        projectRevisionAtPreparation: 11,
+        authoringRevision: 4,
+        authoringFingerprint: 'c'.repeat(64),
+        target: { kind: 'piece', pieceId: 'piece_salt_flat' },
+        provider: pieceRoute,
+      })
+    ).toBe(true);
+  });
+
+  it('validates historical prompt bytes without recomposition', () => {
+    const historical = composePiece();
+    historical.prompt = 'A historical provider prompt whose former template no longer exists.';
+    expect(validateStudioPieceGenerationCompositionV3(historical)).toBe(true);
+    expect(composePiece().prompt).not.toBe(historical.prompt);
+
+    historical.inputs.instructionProfile = 'weprompt-image-v1.piece-image.v2';
+    expect(validateStudioPieceGenerationCompositionV3(historical)).toBe(true);
+
+    const { schemaVersion: ignoredSchemaVersion, ...currentInput } = composePiece().inputs;
+    void ignoredSchemaVersion;
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...currentInput,
+        instructionProfile: 'weprompt-image-v1.piece-image.v2',
+      })
+    ).toThrow('instructionProfile is not canonical');
+
+    for (const instructionProfile of [
+      'weprompt-image-v1.piece-image.v0',
+      'weprompt-image-v1.piece-image.v01',
+      'openrouter-video-v1.piece-image.v2',
+      'weprompt-image-v1.piece-image.v2 ',
+    ]) {
+      expect(
+        validateStudioPieceGenerationCompositionV3({
+          ...historical,
+          inputs: { ...historical.inputs, instructionProfile },
+        })
+      ).toBe(false);
+    }
+  });
+
+  it('fails closed on source, purpose, conditioning, adapter, and normalization drift', () => {
+    const base = composePiece();
+    const { schemaVersion: ignoredSchemaVersion, ...input } = base.inputs;
+    void ignoredSchemaVersion;
+    expect(validateStudioPieceGenerationCompositionV3({ ...base, extra: true })).toBe(false);
+    expect(validateStudioPieceGenerationCompositionV3({ ...base, prompt: '   ' })).toBe(false);
+    expect(
+      validateStudioPieceGenerationCompositionV3({
+        ...base,
+        inputs: { ...base.inputs, conditioningInputs: [{ kind: 'seed_still' }] },
+      })
+    ).toBe(false);
+    expect(
+      validateStudioPieceGenerationCompositionV3({
+        ...base,
+        inputs: { ...base.inputs, source: { ...base.inputs.source, words: ` ${base.inputs.source.words}` } },
+      })
+    ).toBe(false);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        route: { ...pieceRoute, adapterId: 'openrouter-video-v1' },
+        instructionProfile: 'openrouter-video-v1.piece-image.v1',
+      })
+    ).toThrow('image adapter');
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        purpose: 'video_take' as never,
+      })
+    ).toThrow('Piece sources require piece_image');
+  });
+
+  it('rejects accessor and Proxy graphs without invoking hostile input', () => {
+    const base = composePiece();
+    const { schemaVersion: ignoredSchemaVersion, ...input } = base.inputs;
+    void ignoredSchemaVersion;
+    let getterCalls = 0;
+    const source = { ...input.source } as Record<string, unknown>;
+    Object.defineProperty(source, 'words', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return 'A different photograph.';
+      },
+    });
+
+    expect(() => composeStudioPieceGenerationV3({ ...input, source } as never)).toThrow(TypeError);
+    expect(getterCalls).toBe(0);
+    expect(
+      validateStudioPieceGenerationCompositionV3({
+        ...base,
+        inputs: { ...base.inputs, rules: new Proxy([], {}) },
+      })
+    ).toBe(false);
+    expect(
+      validateStudioPieceGenerationCompositionV3({
+        ...base,
+        inputs: { ...base.inputs, conditioningInputs: new Proxy([], {}) },
+      })
+    ).toBe(false);
+  });
+
+  it('rejects object-coerced Piece authority and unsafe provider model text', () => {
+    const { schemaVersion: ignoredSchemaVersion, ...input } = composePiece().inputs;
+    void ignoredSchemaVersion;
+    const stringLikeId = { toString: () => 'piece_salt_flat' };
+    const stringLikeFingerprint = { toString: () => 'c'.repeat(64) };
+
+    expect(() =>
+      composeStudioPieceGenerationV3({ ...input, authoringFingerprint: stringLikeFingerprint } as never)
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        source: { ...input.source, pieceId: stringLikeId },
+      } as never)
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        route: { ...pieceRoute, providerId: stringLikeId },
+      } as never)
+    ).toThrow(TypeError);
+    expect(() =>
+      composeStudioPieceGenerationV3({
+        ...input,
+        route: { ...pieceRoute, model: 'image-model\nOUTPUT' },
+      })
+    ).toThrow(TypeError);
+  });
+
+  it('covers the bounded Piece composer authority matrix', () => {
+    const { schemaVersion: ignoredSchemaVersion, ...input } = composePiece().inputs;
+    void ignoredSchemaVersion;
+    const rule = {
+      id: 'rule_1',
+      scope: 'project' as const,
+      text: 'Do not show a real logo.',
+      predicate: { kind: 'forbidden_terms' as const, terms: ['Acme'] },
+      createdAt: '2026-08-30T00:00:00.000Z',
+    };
+    const ruled = composeStudioPieceGenerationV3({ ...input, rules: [rule] });
+    expect(ruled.prompt).toContain('PROJECT RULES');
+    expect(validateStudioPieceGenerationCompositionV3(ruled)).toBe(true);
+    expect(
+      validateStudioPieceGenerationCompositionV3(
+        composeStudioPieceGenerationV3({ ...input, rules: [{ ...rule, predicate: null }] })
+      )
+    ).toBe(true);
+
+    const invalidInputs = [
+      { ...input, extra: true },
+      { ...input, projectRevisionAtPreparation: 0 },
+      { ...input, projectRevisionAtPreparation: 1.5 },
+      { ...input, authoringRevision: 0 },
+      { ...input, authoringRevision: 12 },
+      { ...input, authoringFingerprintVersion: 2 },
+      { ...input, authoringFingerprint: 'A'.repeat(64) },
+      { ...input, brief: 7 as never },
+      { ...input, brief: 'b'.repeat(16 * 1024 + 1) },
+      { ...input, rules: {} as never },
+      { ...input, source: { ...input.source, extra: true } as never },
+      { ...input, source: { ...input.source, kind: 'shot' } as never },
+      { ...input, source: { ...input.source, settings: { ...input.source.settings, aspectRatio: '2:1' } } as never },
+      { ...input, source: { ...input.source, settings: { ...input.source.settings, resolution: '4k' } } as never },
+      { ...input, source: { ...input.source, words: '' } },
+      { ...input, source: { ...input.source, words: 'x'.repeat(STUDIO_MAX_GENERATION_PROMPT_LENGTH + 1) } },
+      { ...input, conditioningInputs: [{}] as never },
+      { ...input, instructionProfile: 'wrong-profile' },
+      { ...input, route: { ...input.route, model: '' } },
+      { ...input, route: { ...input.route, model: 'x'.repeat(257) } },
+      { ...input, route: { ...input.route, model: 'model\u0080name' } },
+    ];
+    for (const invalid of invalidInputs) {
+      expect(() => composeStudioPieceGenerationV3(invalid as never)).toThrow();
+    }
+    expect(() => normalizeStudioPieceWordsV3(7 as never)).toThrow(TypeError);
+  });
+
+  it('covers exact persisted-composition refusal boundaries and authority mismatches', () => {
+    const base = composePiece();
+    const invalidRecords: unknown[] = [
+      null,
+      [],
+      { ...base, prompt: '' },
+      { ...base, prompt: 'x'.repeat(STUDIO_MAX_GENERATION_PROMPT_LENGTH + 1) },
+      { ...base, inputs: { ...base.inputs, schemaVersion: 1 } },
+      { ...base, inputs: { ...base.inputs, projectRevisionAtPreparation: 0 } },
+      { ...base, inputs: { ...base.inputs, authoringRevision: 0 } },
+      { ...base, inputs: { ...base.inputs, authoringRevision: 12 } },
+      { ...base, inputs: { ...base.inputs, authoringFingerprintVersion: 2 } },
+      { ...base, inputs: { ...base.inputs, authoringFingerprint: 'A'.repeat(64) } },
+      { ...base, inputs: { ...base.inputs, brief: 'b'.repeat(16 * 1024 + 1) } },
+      { ...base, inputs: { ...base.inputs, rules: [{ id: 'bad' }] } },
+      { ...base, inputs: { ...base.inputs, source: { ...base.inputs.source, pieceId: '../piece' } } },
+      { ...base, inputs: { ...base.inputs, source: { ...base.inputs.source, words: '' } } },
+      { ...base, inputs: { ...base.inputs, purpose: 'seed_still' } },
+      { ...base, inputs: { ...base.inputs, route: { ...base.inputs.route, providerId: '../provider' } } },
+      { ...base, inputs: { ...base.inputs, route: { ...base.inputs.route, model: '' } } },
+      { ...base, inputs: { ...base.inputs, instructionProfile: 'wrong-profile' } },
+      new Proxy(base, {}),
+    ];
+    for (const invalid of invalidRecords) expect(validateStudioPieceGenerationCompositionV3(invalid)).toBe(false);
+
+    const authority = {
+      projectRevisionAtPreparation: 11,
+      authoringRevision: 4,
+      authoringFingerprint: 'c'.repeat(64),
+      target: { kind: 'piece' as const, pieceId: 'piece_salt_flat' },
+      provider: pieceRoute,
+    };
+    expect(
+      studioPieceGenerationCompositionMatchesAuthorityV3(base, {
+        ...authority,
+        projectRevisionAtPreparation: 12,
+      })
+    ).toBe(false);
+    expect(
+      studioPieceGenerationCompositionMatchesAuthorityV3(base, {
+        ...authority,
+        provider: { ...pieceRoute, model: 'other-model' },
+      })
+    ).toBe(false);
   });
 });

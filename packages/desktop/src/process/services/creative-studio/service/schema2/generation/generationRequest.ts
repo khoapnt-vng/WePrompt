@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { types as nodeTypes } from 'node:util';
+
 import {
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOT_SECONDS,
@@ -16,8 +18,14 @@ import {
   type StudioGenerationRequestSnapshot,
   type StudioGenerationRequestTemplate,
   type StudioJobPurpose,
+  type StudioPieceGenerationCompositionV3,
+  type StudioPieceGenerationRequestPlanV3,
 } from '@/common/types/project/creativeStudioTypes';
-import { studioGenerationCompositionsEqualV2 } from './composition';
+import {
+  studioGenerationCompositionsEqualV2,
+  studioPieceGenerationCompositionsEqualV3,
+  validateStudioPieceGenerationCompositionV3,
+} from './composition';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
@@ -259,3 +267,89 @@ export const isStudioGenerationRequestCurrent = (
   normalizedCurrent.composition.inputs.projectRevision = recorded.composition.inputs.projectRevision;
   return studioGenerationRequestSnapshotsEqual(recorded, normalizedCurrent);
 };
+
+const hasExactOwnKeysV3 = (value: unknown, keys: readonly string[]): value is Record<string, unknown> => {
+  try {
+    if (typeof value !== 'object' || value === null || Array.isArray(value) || nodeTypes.isProxy(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) return false;
+    const ownKeys = Reflect.ownKeys(value);
+    return (
+      ownKeys.length === keys.length &&
+      ownKeys.every((key) => typeof key === 'string' && keys.includes(key)) &&
+      keys.every((key) => {
+        const descriptor = Object.getOwnPropertyDescriptor(value, key);
+        return descriptor !== undefined && descriptor.enumerable && Object.hasOwn(descriptor, 'value');
+      })
+    );
+  } catch {
+    return false;
+  }
+};
+
+const isExactlyEmptyDenseArrayV3 = (value: unknown): value is [] => {
+  try {
+    return (
+      !nodeTypes.isProxy(value) &&
+      Array.isArray(value) &&
+      value.length === 0 &&
+      Object.getPrototypeOf(value) === Array.prototype &&
+      Reflect.ownKeys(value).length === 1 &&
+      Reflect.ownKeys(value)[0] === 'length'
+    );
+  } catch {
+    return false;
+  }
+};
+
+/** Builds the only Pilot-1 request plan: one unconditioned, resolved Piece image. */
+export const createStudioPieceGenerationRequestPlanV3 = (input: {
+  composition: StudioPieceGenerationCompositionV3;
+}): StudioPieceGenerationRequestPlanV3 => {
+  if (!hasExactOwnKeysV3(input, ['composition'])) {
+    throw new TypeError('Piece request requires an exact composition input');
+  }
+  const candidate = input.composition;
+  if (!validateStudioPieceGenerationCompositionV3(candidate)) {
+    throw new TypeError('Piece request requires a valid composition schema 2');
+  }
+  const composition = structuredClone(candidate);
+  return {
+    kind: 'resolved',
+    snapshot: {
+      composition,
+      settings: {
+        aspectRatio: composition.inputs.source.settings.aspectRatio,
+        resolution: composition.inputs.source.settings.resolution,
+      },
+      conditioningInputs: [],
+    },
+  };
+};
+
+/** Validates exact stored-to-stored Piece request consistency without recomposing prompt history. */
+export const validateStudioPieceGenerationRequestPlanV3 = (
+  value: unknown
+): value is StudioPieceGenerationRequestPlanV3 => {
+  if (!hasExactOwnKeysV3(value, ['kind', 'snapshot']) || value.kind !== 'resolved') return false;
+  if (!hasExactOwnKeysV3(value.snapshot, ['composition', 'settings', 'conditioningInputs'])) return false;
+  if (!validateStudioPieceGenerationCompositionV3(value.snapshot.composition)) return false;
+  if (!hasExactOwnKeysV3(value.snapshot.settings, ['aspectRatio', 'resolution'])) return false;
+  const composition = value.snapshot.composition;
+  return (
+    value.snapshot.settings.aspectRatio === composition.inputs.source.settings.aspectRatio &&
+    value.snapshot.settings.resolution === composition.inputs.source.settings.resolution &&
+    isExactlyEmptyDenseArrayV3(value.snapshot.conditioningInputs)
+  );
+};
+
+export const studioPieceGenerationRequestPlansEqualV3 = (
+  left: StudioPieceGenerationRequestPlanV3,
+  right: StudioPieceGenerationRequestPlanV3
+): boolean =>
+  left.kind === right.kind &&
+  studioPieceGenerationCompositionsEqualV3(left.snapshot.composition, right.snapshot.composition) &&
+  left.snapshot.settings.aspectRatio === right.snapshot.settings.aspectRatio &&
+  left.snapshot.settings.resolution === right.snapshot.settings.resolution &&
+  left.snapshot.conditioningInputs.length === 0 &&
+  right.snapshot.conditioningInputs.length === 0;

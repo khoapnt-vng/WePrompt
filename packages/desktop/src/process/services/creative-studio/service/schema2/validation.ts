@@ -8,28 +8,43 @@ import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
+  STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
   STUDIO_BOARD_STYLES_V2,
   STUDIO_MAX_BEATS,
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
+  STUDIO_MAX_ASSETS_V3,
+  STUDIO_MAX_EXPORT_DIRECTORY_DEPTH,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V2,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_JOBS_PER_PIECE_V3,
+  STUDIO_MAX_JOBS_V3,
+  STUDIO_MAX_PIECES_V3,
+  STUDIO_MAX_PIECE_PRIOR_HANDLES_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SPEND_AUTHORIZATIONS_V3,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
   STUDIO_MAX_STORY_LENGTH,
   STUDIO_MAX_UNDO_ENTRIES,
+  STUDIO_MAX_UNDO_ENTRIES_V3,
   STUDIO_MAX_UNDO_LABEL_LENGTH,
   STUDIO_MAX_UNDO_PATCHES_PER_ENTRY,
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
+  STUDIO_PROJECT_SCHEMA_VERSION_V3,
+  STUDIO_EXPORT_SCHEMA_VERSION_V3,
   type StudioAssetV2,
+  type StudioAssetV3,
   type StudioBeat,
   type StudioBinItem,
   type StudioGenerationCompositionInputSnapshotV2,
@@ -37,8 +52,19 @@ import {
   type StudioGenerationRequestPlan,
   type StudioJobV2,
   type StudioJobPurpose,
+  type StudioPieceGenerationCompositionV3,
+  type StudioPieceGenerationRequestPlanV3,
+  type StudioPieceGenerationTargetV3,
+  type StudioPieceJobRetryReasonV3,
+  type StudioPieceJobV3,
+  type StudioPieceSpendReceiptV3,
+  type StudioPieceSpendAuthorizationV3,
+  type StudioPieceSubmissionQuoteV3,
+  type StudioPieceExportManifestV3,
+  type StudioPieceV2,
   type StudioProjectReferenceV2,
   type StudioProjectV2,
+  type StudioProjectV3,
   type StudioProviderAdapterId,
   type StudioProviderRef,
   type StudioQuotedGeneration,
@@ -55,11 +81,14 @@ import {
   calculateStudioQuoteTotals,
   calculateStudioQuotedGenerationAmounts,
   createStudioFrameExtractionId,
+  createStudioPieceQuotedGenerationIdV3,
   createStudioQuotedGenerationId,
+  isStudioPieceInstructionProfileV3,
   studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
 import { STUDIO_FIXED_SHOT_REASON_ORDER_V2 } from './fixedShots';
+import { isCanonicalStudioPieceHandleV3 } from './mutations/pieceHandles';
 import { studioBoardAuthorizationScopeIsValidV2 } from './pricing/authorization';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -2681,4 +2710,1028 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
   }
 
   return true;
+};
+
+const PROJECT_KEYS_V3 = new Set([
+  'schemaVersion',
+  'revision',
+  'authoringRevision',
+  'id',
+  'name',
+  'brief',
+  'rules',
+  'forgeProjectId',
+  'briefConversationId',
+  'pieceOrder',
+  'pieces',
+  'spendPolicy',
+  'spendAuthorizations',
+  'undoHistory',
+  'assets',
+  'jobs',
+  'createdAt',
+  'updatedAt',
+]);
+const PIECE_KEYS_V3 = new Set([
+  'id',
+  'kind',
+  'handle',
+  'priorHandles',
+  'currentAssetId',
+  'jobIds',
+  'createdAt',
+  'updatedAt',
+]);
+const ASSET_KEYS_V3 = new Set([
+  'id',
+  'projectId',
+  'pieceId',
+  'mediaKind',
+  'mimeType',
+  'managedAsset',
+  'byteSize',
+  'sha256',
+  'width',
+  'height',
+  'createdAt',
+  'origin',
+  'producerJobId',
+  'compositionDigest',
+]);
+const MANAGED_ASSET_KEYS_V3 = new Set(['collection', 'fileName']);
+const PHOTO_SETTINGS_KEYS_V3 = new Set(['aspectRatio', 'resolution']);
+const PIECE_TARGET_KEYS_V3 = new Set(['kind', 'pieceId']);
+const PIECE_SOURCE_KEYS_V3 = new Set(['kind', 'pieceId', 'words', 'settings']);
+const COMPOSITION_KEYS_V3 = new Set(['inputs', 'prompt']);
+const COMPOSITION_INPUT_KEYS_V3 = new Set([
+  'schemaVersion',
+  'projectRevisionAtPreparation',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'brief',
+  'rules',
+  'source',
+  'purpose',
+  'conditioningInputs',
+  'route',
+  'instructionProfile',
+]);
+const REQUEST_PLAN_KEYS_V3 = new Set(['kind', 'snapshot']);
+const REQUEST_SNAPSHOT_KEYS_V3 = new Set(['composition', 'settings', 'conditioningInputs']);
+const QUOTED_ITEM_KEYS_V3 = new Set([
+  'id',
+  'target',
+  'purpose',
+  'routeId',
+  'generationCount',
+  'requestPlan',
+  'rateUnit',
+  'rateMinorUnits',
+]);
+const QUOTE_KEYS_V3 = new Set([
+  'id',
+  'reservationId',
+  'quoteRevision',
+  'projectId',
+  'projectRevisionAtPreparation',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'rateCardDigest',
+  'currency',
+  'item',
+  'lowerMinorUnits',
+  'upperMinorUnits',
+  'expiresAt',
+]);
+const AUTHORIZATION_KEYS_V3 = new Set([
+  'id',
+  'quote',
+  'confirmedAt',
+  'projectRevisionAtAuthorization',
+  'cancellationPolicy',
+  'providerBinding',
+  'idempotencyKey',
+]);
+const SINGLE_PROVIDER_BINDING_KEYS_V3 = new Set(['itemId', 'provider']);
+const SINGLE_IDEMPOTENCY_KEY_KEYS_V3 = new Set(['itemId', 'key']);
+const RECEIPT_KEYS_V3 = new Set([
+  'authorizationId',
+  'quoteId',
+  'quoteRevision',
+  'itemId',
+  'jobId',
+  'purpose',
+  'routeId',
+  'currency',
+  'rateUnit',
+  'rateMinorUnits',
+  'generationCount',
+  'totalMinorUnits',
+  'recordedAt',
+]);
+const JOB_KEYS_V3 = new Set([
+  'id',
+  'projectId',
+  'target',
+  'purpose',
+  'status',
+  'provider',
+  'idempotencyKey',
+  'providerJobId',
+  'remoteStartedAt',
+  'cancellationPolicy',
+  'outputAssetId',
+  'error',
+  'progress',
+  'retryOfJobId',
+  'retryReason',
+  'duplicateChargeAcknowledged',
+  'duplicateChargeAcknowledgedAt',
+  'authorizationId',
+  'authorizationItemId',
+  'composition',
+  'requestPlan',
+  'spendReceipt',
+  'authoringRevision',
+  'authoringFingerprintVersion',
+  'authoringFingerprint',
+  'projectRevisionAtPreparation',
+  'projectRevisionAtAuthorization',
+  'createdAt',
+  'updatedAt',
+]);
+const UNDO_ENTRY_KEYS_V3 = new Set(['id', 'sourceRevision', 'sourceAuthoringRevision', 'label', 'patches']);
+const PIECE_CATALOG_PATCH_KEYS_V3 = new Set(['kind', 'pieceId', 'before', 'afterDigest']);
+const PIECE_CATALOG_PATCH_BEFORE_KEYS_V3 = new Set(['handle', 'priorHandles']);
+const PIECE_JOB_STATUSES_V3 = new Set<StudioPieceJobV3['status']>([
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+  'needs_attention',
+  'succeeded',
+  'failed',
+  'cancelled',
+]);
+const PIECE_JOB_ERROR_CODES_V3 = new Set([
+  'invalid_request',
+  'content_rejected',
+  'auth',
+  'quota',
+  'rate_limited',
+  'provider_unavailable',
+  'timeout',
+  'poll_deadline',
+  'no_output',
+  'variation_grid',
+  'submission_unknown',
+  'download_failed',
+  'unsupported',
+  'unknown',
+]);
+const ACTIVE_PIECE_JOB_STATUSES_V3 = new Set<StudioPieceJobV3['status']>([
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+]);
+
+const isCanonicalPieceWordsV3 = (value: unknown): value is string =>
+  isNonEmptyStringWithin(value, STUDIO_MAX_GENERATION_PROMPT_LENGTH) &&
+  value === value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+
+const canonicalJsonV3 = (value: unknown): string => {
+  if (value === null || typeof value !== 'object') return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(canonicalJsonV3).join(',')}]`;
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record)
+    .toSorted()
+    .map((key) => `${JSON.stringify(key)}:${canonicalJsonV3(record[key])}`)
+    .join(',')}}`;
+};
+
+const canonicalValuesEqualV3 = (left: unknown, right: unknown): boolean =>
+  canonicalJsonV3(left) === canonicalJsonV3(right);
+
+const pieceCompositionDigestV3 = (value: StudioPieceGenerationCompositionV3): string =>
+  createHash('sha256').update(canonicalJsonV3(value), 'utf8').digest('hex');
+
+const validatePiecePhotoSettingsV3 = (value: unknown): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, PHOTO_SETTINGS_KEYS_V3) &&
+  typeof value.aspectRatio === 'string' &&
+  ASPECT_RATIOS.has(value.aspectRatio) &&
+  typeof value.resolution === 'string' &&
+  RESOLUTIONS.has(value.resolution);
+
+const validatePieceTargetV3 = (value: unknown): boolean =>
+  isRecord(value) && hasExactKeys(value, PIECE_TARGET_KEYS_V3) && value.kind === 'piece' && isSafeId(value.pieceId);
+
+const validatePieceCompositionV3 = (value: unknown): value is StudioPieceGenerationCompositionV3 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, COMPOSITION_KEYS_V3) ||
+    !isRecord(value.inputs) ||
+    !hasExactKeys(value.inputs, COMPOSITION_INPUT_KEYS_V3)
+  ) {
+    return false;
+  }
+  const inputs = value.inputs;
+  if (
+    inputs.schemaVersion !== STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3 ||
+    !isIntegerInRange(inputs.projectRevisionAtPreparation, 1, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(inputs.authoringRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    (inputs.authoringRevision as number) > (inputs.projectRevisionAtPreparation as number) ||
+    inputs.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
+    !isLowercaseDigest(inputs.authoringFingerprint) ||
+    !isStringWithin(inputs.brief, 16 * 1024) ||
+    !validateRules(inputs.rules) ||
+    !isRecord(inputs.source) ||
+    !hasExactKeys(inputs.source, PIECE_SOURCE_KEYS_V3) ||
+    inputs.source.kind !== 'piece' ||
+    !isSafeId(inputs.source.pieceId) ||
+    !isCanonicalPieceWordsV3(inputs.source.words) ||
+    !validatePiecePhotoSettingsV3(inputs.source.settings) ||
+    inputs.purpose !== 'piece_image' ||
+    !isDenseArray(inputs.conditioningInputs, 0) ||
+    inputs.conditioningInputs.length !== 0 ||
+    !validateProvider(inputs.route) ||
+    (inputs.route as StudioProviderRef).adapterId !== 'weprompt-image-v1' ||
+    !isStudioPieceInstructionProfileV3(inputs.instructionProfile) ||
+    !isNonEmptyStringWithin(value.prompt, STUDIO_MAX_GENERATION_PROMPT_LENGTH)
+  ) {
+    return false;
+  }
+  return true;
+};
+
+const photoSettingsEqualV3 = (left: unknown, right: unknown): boolean =>
+  isRecord(left) && isRecord(right) && left.aspectRatio === right.aspectRatio && left.resolution === right.resolution;
+
+const validatePieceRequestPlanV3 = (value: unknown): value is StudioPieceGenerationRequestPlanV3 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, REQUEST_PLAN_KEYS_V3) ||
+    value.kind !== 'resolved' ||
+    !isRecord(value.snapshot) ||
+    !hasExactKeys(value.snapshot, REQUEST_SNAPSHOT_KEYS_V3) ||
+    !validatePieceCompositionV3(value.snapshot.composition) ||
+    !validatePiecePhotoSettingsV3(value.snapshot.settings) ||
+    !isDenseArray(value.snapshot.conditioningInputs, 0) ||
+    value.snapshot.conditioningInputs.length !== 0
+  ) {
+    return false;
+  }
+  return (
+    photoSettingsEqualV3(value.snapshot.settings, value.snapshot.composition.inputs.source.settings) &&
+    value.snapshot.composition.inputs.conditioningInputs.length === value.snapshot.conditioningInputs.length
+  );
+};
+
+const validatePieceQuotedGenerationV3 = (value: unknown): boolean => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, QUOTED_ITEM_KEYS_V3) ||
+    !isSafeId(value.id) ||
+    !validatePieceTargetV3(value.target) ||
+    value.purpose !== 'piece_image' ||
+    !isSafeId(value.routeId) ||
+    value.generationCount !== 1 ||
+    !validatePieceRequestPlanV3(value.requestPlan) ||
+    value.rateUnit !== 'generation' ||
+    !isIntegerInRange(value.rateMinorUnits, 1, Number.MAX_SAFE_INTEGER)
+  ) {
+    return false;
+  }
+  const target = value.target as Record<string, unknown>;
+  const composition = (value.requestPlan as StudioPieceGenerationRequestPlanV3).snapshot.composition;
+  return target.pieceId === composition.inputs.source.pieceId && value.purpose === composition.inputs.purpose;
+};
+
+const validatePieceQuoteV3 = (
+  value: unknown,
+  projectId: string,
+  currentRevision: number,
+  currentAuthoringRevision: number
+): value is StudioPieceSubmissionQuoteV3 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, QUOTE_KEYS_V3) ||
+    !isSafeId(value.id) ||
+    !isSafeId(value.reservationId) ||
+    !isIntegerInRange(value.quoteRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    value.projectId !== projectId ||
+    !isIntegerInRange(value.projectRevisionAtPreparation, 1, currentRevision) ||
+    !isIntegerInRange(value.authoringRevision, 1, currentAuthoringRevision) ||
+    (value.authoringRevision as number) > (value.projectRevisionAtPreparation as number) ||
+    value.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
+    !isLowercaseDigest(value.authoringFingerprint) ||
+    !isLowercaseDigest(value.rateCardDigest) ||
+    !isCurrency(value.currency) ||
+    !validatePieceQuotedGenerationV3(value.item) ||
+    !isIntegerInRange(value.lowerMinorUnits, 1, Number.MAX_SAFE_INTEGER) ||
+    value.upperMinorUnits !== value.lowerMinorUnits ||
+    !isCanonicalTimestamp(value.expiresAt)
+  ) {
+    return false;
+  }
+  const item = value.item as Record<string, unknown>;
+  const requestPlan = item.requestPlan as StudioPieceGenerationRequestPlanV3;
+  const inputs = requestPlan.snapshot.composition.inputs;
+  return (
+    item.id ===
+      createStudioPieceQuotedGenerationIdV3({
+        projectId: value.projectId,
+        reservationId: value.reservationId,
+        quoteId: value.id,
+        quoteRevision: value.quoteRevision,
+        target: item.target as StudioPieceGenerationTargetV3,
+        purpose: 'piece_image',
+      }) &&
+    item.rateMinorUnits === value.lowerMinorUnits &&
+    inputs.projectRevisionAtPreparation === value.projectRevisionAtPreparation &&
+    inputs.authoringRevision === value.authoringRevision &&
+    inputs.authoringFingerprintVersion === value.authoringFingerprintVersion &&
+    inputs.authoringFingerprint === value.authoringFingerprint
+  );
+};
+
+const validatePieceAuthorizationV3 = (
+  value: unknown,
+  project: StudioProjectV3
+): value is StudioPieceSpendAuthorizationV3 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, AUTHORIZATION_KEYS_V3) ||
+    !isSafeId(value.id) ||
+    !validatePieceQuoteV3(value.quote, project.id, project.revision, project.authoringRevision) ||
+    value.id === value.quote.id ||
+    value.id === value.quote.item.id ||
+    value.quote.id === value.quote.item.id ||
+    !isCanonicalTimestamp(value.confirmedAt) ||
+    !isIntegerInRange(value.projectRevisionAtAuthorization, 1, project.revision) ||
+    (value.projectRevisionAtAuthorization as number) <= value.quote.projectRevisionAtPreparation ||
+    value.confirmedAt >= value.quote.expiresAt ||
+    (value.cancellationPolicy !== 'none' &&
+      value.cancellationPolicy !== 'queued_only' &&
+      value.cancellationPolicy !== 'queued_and_running') ||
+    !isRecord(value.providerBinding) ||
+    !hasExactKeys(value.providerBinding, SINGLE_PROVIDER_BINDING_KEYS_V3) ||
+    value.providerBinding.itemId !== value.quote.item.id ||
+    !validateProvider(value.providerBinding.provider) ||
+    !isRecord(value.idempotencyKey) ||
+    !hasExactKeys(value.idempotencyKey, SINGLE_IDEMPOTENCY_KEY_KEYS_V3) ||
+    value.idempotencyKey.itemId !== value.quote.item.id ||
+    !isSafeId(value.idempotencyKey.key)
+  ) {
+    return false;
+  }
+  return providersEqual(value.providerBinding.provider, value.quote.item.requestPlan.snapshot.composition.inputs.route);
+};
+
+const validatePieceReceiptV3 = (value: unknown): value is StudioPieceSpendReceiptV3 =>
+  isRecord(value) &&
+  hasExactKeys(value, RECEIPT_KEYS_V3) &&
+  isSafeId(value.authorizationId) &&
+  isSafeId(value.quoteId) &&
+  isIntegerInRange(value.quoteRevision, 1, Number.MAX_SAFE_INTEGER) &&
+  isSafeId(value.itemId) &&
+  isSafeId(value.jobId) &&
+  value.purpose === 'piece_image' &&
+  isSafeId(value.routeId) &&
+  isCurrency(value.currency) &&
+  value.rateUnit === 'generation' &&
+  isIntegerInRange(value.rateMinorUnits, 1, Number.MAX_SAFE_INTEGER) &&
+  value.generationCount === 1 &&
+  value.totalMinorUnits === value.rateMinorUnits &&
+  isCanonicalTimestamp(value.recordedAt);
+
+const validatePieceJobV3 = (jobId: string, projectId: string, value: unknown): value is StudioPieceJobV3 => {
+  if (!isRecord(value) || !hasExactKeys(value, JOB_KEYS_V3)) return false;
+  const errorIsValid =
+    value.error === null ||
+    (isRecord(value.error) &&
+      hasExactKeys(value.error, JOB_ERROR_KEYS) &&
+      typeof value.error.code === 'string' &&
+      PIECE_JOB_ERROR_CODES_V3.has(value.error.code) &&
+      isNonEmptyStringWithin(value.error.messageKey, 256));
+  if (
+    value.id !== jobId ||
+    !isSafeId(jobId) ||
+    value.projectId !== projectId ||
+    !validatePieceTargetV3(value.target) ||
+    value.purpose !== 'piece_image' ||
+    typeof value.status !== 'string' ||
+    !PIECE_JOB_STATUSES_V3.has(value.status as StudioPieceJobV3['status']) ||
+    !validateProvider(value.provider) ||
+    !isSafeId(value.idempotencyKey) ||
+    (value.providerJobId !== null &&
+      (typeof value.providerJobId !== 'string' || !isValidProviderJobId(value.providerJobId))) ||
+    (value.remoteStartedAt !== null && !isCanonicalTimestamp(value.remoteStartedAt)) ||
+    (value.providerJobId === null) !== (value.remoteStartedAt === null) ||
+    (value.cancellationPolicy !== 'none' &&
+      value.cancellationPolicy !== 'queued_only' &&
+      value.cancellationPolicy !== 'queued_and_running') ||
+    !isNullableSafeId(value.outputAssetId) ||
+    !errorIsValid ||
+    (value.progress !== null && !isFiniteInRange(value.progress, 0, 100)) ||
+    !isNullableSafeId(value.retryOfJobId) ||
+    (value.retryReason !== null &&
+      value.retryReason !== 'provider_failure' &&
+      value.retryReason !== 'submission_unknown' &&
+      value.retryReason !== 'variation_grid' &&
+      value.retryReason !== 'cancelled') ||
+    (value.retryOfJobId === null) !== (value.retryReason === null) ||
+    typeof value.duplicateChargeAcknowledged !== 'boolean' ||
+    (value.duplicateChargeAcknowledgedAt !== null && !isCanonicalTimestamp(value.duplicateChargeAcknowledgedAt)) ||
+    (value.retryReason === 'submission_unknown'
+      ? !value.duplicateChargeAcknowledged || value.duplicateChargeAcknowledgedAt === null
+      : value.duplicateChargeAcknowledged || value.duplicateChargeAcknowledgedAt !== null) ||
+    !isSafeId(value.authorizationId) ||
+    !isSafeId(value.authorizationItemId) ||
+    !validatePieceCompositionV3(value.composition) ||
+    !validatePieceRequestPlanV3(value.requestPlan) ||
+    !canonicalValuesEqualV3(value.requestPlan.snapshot.composition, value.composition) ||
+    (value.spendReceipt !== null && !validatePieceReceiptV3(value.spendReceipt)) ||
+    !isIntegerInRange(value.authoringRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    value.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
+    !isLowercaseDigest(value.authoringFingerprint) ||
+    !isIntegerInRange(value.projectRevisionAtPreparation, 1, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(value.projectRevisionAtAuthorization, 1, Number.MAX_SAFE_INTEGER) ||
+    (value.projectRevisionAtAuthorization as number) <= (value.projectRevisionAtPreparation as number) ||
+    !isCanonicalTimestamp(value.createdAt) ||
+    !isCanonicalTimestamp(value.updatedAt) ||
+    value.createdAt > value.updatedAt
+  ) {
+    return false;
+  }
+  const target = value.target as Record<string, unknown>;
+  const composition = value.composition as StudioPieceGenerationCompositionV3;
+  if (
+    target.pieceId !== composition.inputs.source.pieceId ||
+    value.purpose !== composition.inputs.purpose ||
+    !providersEqual(value.provider, composition.inputs.route) ||
+    value.authoringRevision !== composition.inputs.authoringRevision ||
+    value.authoringFingerprintVersion !== composition.inputs.authoringFingerprintVersion ||
+    value.authoringFingerprint !== composition.inputs.authoringFingerprint ||
+    value.projectRevisionAtPreparation !== composition.inputs.projectRevisionAtPreparation
+  ) {
+    return false;
+  }
+  const status = value.status as StudioPieceJobV3['status'];
+  const errorCode = isRecord(value.error) && typeof value.error.code === 'string' ? value.error.code : null;
+  if (
+    status === 'queued_local' &&
+    (value.providerJobId !== null || value.remoteStartedAt !== null || value.progress !== null || value.error !== null)
+  ) {
+    return false;
+  }
+  if (
+    status === 'submitting' &&
+    (value.providerJobId !== null || value.remoteStartedAt !== null || value.progress !== null || value.error !== null)
+  ) {
+    return false;
+  }
+  if (
+    (status === 'queued_remote' || status === 'running' || status === 'succeeded') &&
+    (value.providerJobId === null || value.remoteStartedAt === null)
+  ) {
+    return false;
+  }
+  if (errorCode === 'variation_grid' && status !== 'failed') return false;
+  if (errorCode === 'submission_unknown' && status !== 'failed' && status !== 'needs_attention') {
+    return false;
+  }
+  const receiptRequired =
+    status === 'succeeded' ||
+    (status === 'failed' &&
+      (errorCode === 'no_output' || errorCode === 'variation_grid' || errorCode === 'download_failed'));
+  const receiptAllowed = receiptRequired || status === 'running';
+  if ((receiptRequired && value.spendReceipt === null) || (!receiptAllowed && value.spendReceipt !== null)) {
+    return false;
+  }
+  if (status === 'succeeded') {
+    return value.outputAssetId !== null && value.error === null;
+  }
+  if (value.outputAssetId !== null) return false;
+  if (status === 'failed' || status === 'needs_attention') return value.error !== null;
+  if (ACTIVE_PIECE_JOB_STATUSES_V3.has(status)) return value.error === null;
+  return status === 'cancelled' && value.error === null;
+};
+
+const PIECE_IMAGE_EXTENSION_BY_MIME_TYPE_V3: ReadonlyMap<string, string> = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+]);
+
+const isCanonicalPieceManagedAssetFileNameV3 = (assetId: string, mimeType: string, value: unknown): value is string => {
+  const extension = PIECE_IMAGE_EXTENSION_BY_MIME_TYPE_V3.get(mimeType);
+  return extension !== undefined && isSafeFileName(value) && value === `${assetId}.${extension}`;
+};
+
+const validatePieceAssetV3 = (assetId: string, projectId: string, value: unknown): value is StudioAssetV3 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ASSET_KEYS_V3) ||
+    value.id !== assetId ||
+    !isSafeId(assetId) ||
+    value.projectId !== projectId ||
+    !isSafeId(value.pieceId) ||
+    value.mediaKind !== 'image' ||
+    !isStudioReferenceImageMimeType(value.mimeType) ||
+    !isRecord(value.managedAsset) ||
+    !hasExactKeys(value.managedAsset, MANAGED_ASSET_KEYS_V3) ||
+    !isCanonicalPieceManagedAssetFileNameV3(assetId, value.mimeType, value.managedAsset.fileName) ||
+    !isIntegerInRange(value.byteSize, 1, STUDIO_MAX_IMAGE_ASSET_BYTES_V3) ||
+    !isLowercaseDigest(value.sha256) ||
+    !isIntegerInRange(value.width, 1, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(value.height, 1, Number.MAX_SAFE_INTEGER) ||
+    !isCanonicalTimestamp(value.createdAt)
+  ) {
+    return false;
+  }
+  if (value.origin === 'imported') {
+    return (
+      value.managedAsset.collection === 'imports' && value.producerJobId === null && value.compositionDigest === null
+    );
+  }
+  return (
+    value.origin === 'generated' &&
+    value.managedAsset.collection === 'assets' &&
+    isSafeId(value.producerJobId) &&
+    isLowercaseDigest(value.compositionDigest)
+  );
+};
+
+const validatePieceRecordV3 = (pieceId: string, value: unknown): value is StudioPieceV2 =>
+  isRecord(value) &&
+  hasExactKeys(value, PIECE_KEYS_V3) &&
+  value.id === pieceId &&
+  isSafeId(pieceId) &&
+  value.kind === 'photograph' &&
+  isCanonicalStudioPieceHandleV3(value.handle) &&
+  isDenseArray(value.priorHandles, STUDIO_MAX_PIECE_PRIOR_HANDLES_V3) &&
+  arrayEvery(value.priorHandles, isCanonicalStudioPieceHandleV3) &&
+  new Set(value.priorHandles).size === value.priorHandles.length &&
+  !value.priorHandles.includes(value.handle) &&
+  isNullableSafeId(value.currentAssetId) &&
+  isUniqueSafeIdArray(value.jobIds, STUDIO_MAX_JOBS_PER_PIECE_V3) &&
+  isCanonicalTimestamp(value.createdAt) &&
+  isCanonicalTimestamp(value.updatedAt) &&
+  value.createdAt <= value.updatedAt;
+
+const validateUndoHistoryV3 = (value: unknown, project: StudioProjectV3): boolean => {
+  if (!isDenseArray(value, STUDIO_MAX_UNDO_ENTRIES_V3)) return false;
+  const entryIds = new Set<string>();
+  for (let entryIndex = 0; entryIndex < value.length; entryIndex += 1) {
+    const entry = value[entryIndex];
+    if (
+      !isRecord(entry) ||
+      !hasExactKeys(entry, UNDO_ENTRY_KEYS_V3) ||
+      !isSafeId(entry.id) ||
+      entryIds.has(entry.id) ||
+      !isIntegerInRange(entry.sourceRevision, 1, project.revision) ||
+      !isIntegerInRange(entry.sourceAuthoringRevision, 1, project.authoringRevision) ||
+      (entry.sourceAuthoringRevision as number) > (entry.sourceRevision as number) ||
+      !isNonEmptyStringWithin(entry.label, STUDIO_MAX_UNDO_LABEL_LENGTH) ||
+      !isDenseArray(entry.patches, 1) ||
+      entry.patches.length !== 1
+    ) {
+      return false;
+    }
+    entryIds.add(entry.id as string);
+    const patch = entry.patches[0];
+    if (
+      !isRecord(patch) ||
+      !hasExactKeys(patch, PIECE_CATALOG_PATCH_KEYS_V3) ||
+      patch.kind !== 'piece_catalog' ||
+      !isSafeId(patch.pieceId) ||
+      !Object.hasOwn(project.pieces, patch.pieceId) ||
+      !isRecord(patch.before) ||
+      !hasExactKeys(patch.before, PIECE_CATALOG_PATCH_BEFORE_KEYS_V3) ||
+      !isCanonicalStudioPieceHandleV3(patch.before.handle) ||
+      !isDenseArray(patch.before.priorHandles, STUDIO_MAX_PIECE_PRIOR_HANDLES_V3) ||
+      !arrayEvery(patch.before.priorHandles, isCanonicalStudioPieceHandleV3) ||
+      new Set(patch.before.priorHandles).size !== patch.before.priorHandles.length ||
+      patch.before.priorHandles.includes(patch.before.handle) ||
+      !isLowercaseDigest(patch.afterDigest)
+    ) {
+      return false;
+    }
+  }
+  return true;
+};
+
+const pieceRetryGraphHasCycleV3 = (jobs: Record<string, StudioPieceJobV3>): boolean => {
+  const states = new Map<string, 'visiting' | 'visited'>();
+  for (const startJobId of Object.keys(jobs)) {
+    if (states.get(startJobId) === 'visited') continue;
+    const path: string[] = [];
+    let jobId: string | null = startJobId;
+    while (jobId !== null) {
+      const state = states.get(jobId);
+      if (state === 'visiting') return true;
+      if (state === 'visited') break;
+      const job = ownValue(jobs, jobId);
+      if (job === undefined) break;
+      states.set(jobId, 'visiting');
+      path.push(jobId);
+      jobId = job.retryOfJobId !== null && Object.hasOwn(jobs, job.retryOfJobId) ? job.retryOfJobId : null;
+    }
+    for (const visitedJobId of path) states.set(visitedJobId, 'visited');
+  }
+  return false;
+};
+
+/**
+ * Derives the only paid-retry reason admitted by Pilot 1. Download and poll recovery stay on their
+ * existing same-Job paths; minting a fresh paid Job for either would require a separate product
+ * ruling and duplicate-spend contract.
+ */
+export const studioPieceRetryReasonForPredecessorV3 = (
+  predecessor: Pick<StudioPieceJobV3, 'status' | 'error'>
+): StudioPieceJobRetryReasonV3 | null => {
+  if (predecessor.status === 'cancelled') return 'cancelled';
+  if (
+    (predecessor.status === 'failed' || predecessor.status === 'needs_attention') &&
+    predecessor.error?.code === 'submission_unknown'
+  ) {
+    return 'submission_unknown';
+  }
+  if (predecessor.status !== 'failed' || predecessor.error === null) return null;
+  if (predecessor.error.code === 'variation_grid') return 'variation_grid';
+  if (predecessor.error.code === 'download_failed' || predecessor.error.code === 'poll_deadline') return null;
+  return 'provider_failure';
+};
+
+const pieceRetryReasonMatchesPredecessorV3 = (
+  reason: StudioPieceJobRetryReasonV3,
+  predecessor: StudioPieceJobV3
+): boolean => studioPieceRetryReasonForPredecessorV3(predecessor) === reason;
+
+/**
+ * Validates the exact inactive schema-6 Pilot project contract without defaults or schema-5
+ * compatibility. Frozen composition prompts are checked only for shape and stored consistency.
+ */
+export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV3 => {
+  const dataSnapshot = snapshotOwnDataGraph(value);
+  if (dataSnapshot === INVALID_DATA_SNAPSHOT) return false;
+  value = dataSnapshot;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, PROJECT_KEYS_V3) ||
+    value.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V3 ||
+    !isIntegerInRange(value.revision, 1, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(value.authoringRevision, 1, value.revision as number) ||
+    !isSafeId(value.id) ||
+    !isNonEmptyStringWithin(value.name, 256) ||
+    value.name !== (value.name as string).trim() ||
+    !isStringWithin(value.brief, 16 * 1024) ||
+    !validateRules(value.rules) ||
+    !isNullableSafeId(value.forgeProjectId) ||
+    !isNullableSafeId(value.briefConversationId) ||
+    !isUniqueSafeIdArray(value.pieceOrder, STUDIO_MAX_PIECES_V3) ||
+    !isRecord(value.pieces) ||
+    !validateSpendPolicy(value.spendPolicy) ||
+    !isDenseArray(value.spendAuthorizations, STUDIO_MAX_SPEND_AUTHORIZATIONS_V3) ||
+    !isDenseArray(value.undoHistory, STUDIO_MAX_UNDO_ENTRIES_V3) ||
+    !isRecord(value.assets) ||
+    !isRecord(value.jobs) ||
+    !isCanonicalTimestamp(value.createdAt) ||
+    !isCanonicalTimestamp(value.updatedAt) ||
+    value.createdAt > value.updatedAt
+  ) {
+    return false;
+  }
+
+  const project = value as StudioProjectV3;
+  const pieceIds = Object.keys(project.pieces);
+  const assetIds = Object.keys(project.assets);
+  const jobIds = Object.keys(project.jobs);
+  if (
+    pieceIds.length > STUDIO_MAX_PIECES_V3 ||
+    assetIds.length > STUDIO_MAX_ASSETS_V3 ||
+    jobIds.length > STUDIO_MAX_JOBS_V3 ||
+    project.pieceOrder.length !== pieceIds.length ||
+    !arrayEvery(project.pieceOrder, (pieceId) => Object.hasOwn(project.pieces, pieceId)) ||
+    !pieceIds.every((pieceId) => validatePieceRecordV3(pieceId, project.pieces[pieceId])) ||
+    !jobIds.every((jobId) => validatePieceJobV3(jobId, project.id, project.jobs[jobId])) ||
+    !validateUndoHistoryV3(project.undoHistory, project)
+  ) {
+    return false;
+  }
+
+  const managedAssetPaths = new Set<string>();
+  for (const assetId of assetIds) {
+    const asset = ownValue(project.assets, assetId);
+    if (isRecord(asset) && isRecord(asset.managedAsset)) {
+      const { collection, fileName } = asset.managedAsset;
+      if (typeof collection === 'string' && typeof fileName === 'string') {
+        const managedAssetPath = `${collection}/${fileName}`;
+        if (managedAssetPaths.has(managedAssetPath)) return false;
+        managedAssetPaths.add(managedAssetPath);
+      }
+    }
+    if (!validatePieceAssetV3(assetId, project.id, asset)) return false;
+  }
+
+  const handleNamespace = new Set<string>();
+  const currentAssetOwners = new Map<string, string>();
+  const jobOwners = new Map<string, { pieceId: string; position: number }>();
+  for (const piece of Object.values(project.pieces)) {
+    for (const handle of [piece.handle, ...piece.priorHandles]) {
+      if (handleNamespace.has(handle)) return false;
+      handleNamespace.add(handle);
+    }
+    if (
+      piece.createdAt < project.createdAt ||
+      piece.updatedAt > project.updatedAt ||
+      (piece.currentAssetId === null && piece.jobIds.length === 0)
+    ) {
+      return false;
+    }
+    if (piece.currentAssetId !== null) {
+      if (currentAssetOwners.has(piece.currentAssetId)) return false;
+      currentAssetOwners.set(piece.currentAssetId, piece.id);
+    }
+    let previousCreatedAt = '';
+    for (let position = 0; position < piece.jobIds.length; position += 1) {
+      const jobId = piece.jobIds[position]!;
+      const job = ownValue(project.jobs, jobId);
+      if (
+        job === undefined ||
+        job.target.pieceId !== piece.id ||
+        job.createdAt < previousCreatedAt ||
+        jobOwners.has(jobId)
+      ) {
+        return false;
+      }
+      previousCreatedAt = job.createdAt;
+      jobOwners.set(jobId, { pieceId: piece.id, position });
+    }
+    if (piece.jobIds.filter((jobId) => ACTIVE_PIECE_JOB_STATUSES_V3.has(project.jobs[jobId]!.status)).length > 1) {
+      return false;
+    }
+  }
+  if (jobOwners.size !== jobIds.length || currentAssetOwners.size !== assetIds.length) return false;
+
+  for (const asset of Object.values(project.assets)) {
+    const piece = ownValue(project.pieces, asset.pieceId);
+    if (
+      piece === undefined ||
+      piece.currentAssetId !== asset.id ||
+      currentAssetOwners.get(asset.id) !== piece.id ||
+      asset.createdAt < piece.createdAt ||
+      asset.createdAt > project.updatedAt
+    ) {
+      return false;
+    }
+    if (asset.origin === 'imported') {
+      if (piece.jobIds.length !== 0) return false;
+      continue;
+    }
+    const producer = ownValue(project.jobs, asset.producerJobId);
+    if (
+      producer === undefined ||
+      producer.target.pieceId !== piece.id ||
+      producer.status !== 'succeeded' ||
+      producer.outputAssetId !== asset.id ||
+      asset.compositionDigest !== pieceCompositionDigestV3(producer.composition)
+    ) {
+      return false;
+    }
+  }
+
+  const authorizationsById = new Map<string, StudioPieceSpendAuthorizationV3>();
+  const quoteIds = new Set<string>();
+  const authorizationItemIds = new Set<string>();
+  const idempotencyKeys = new Set<string>();
+  for (let index = 0; index < project.spendAuthorizations.length; index += 1) {
+    const authorization = project.spendAuthorizations[index]!;
+    if (
+      !validatePieceAuthorizationV3(authorization, project) ||
+      authorization.confirmedAt < project.createdAt ||
+      authorization.confirmedAt > project.updatedAt ||
+      authorizationsById.has(authorization.id) ||
+      quoteIds.has(authorization.quote.id) ||
+      authorizationItemIds.has(authorization.quote.item.id) ||
+      idempotencyKeys.has(authorization.idempotencyKey.key)
+    ) {
+      return false;
+    }
+    authorizationsById.set(authorization.id, authorization);
+    quoteIds.add(authorization.quote.id);
+    authorizationItemIds.add(authorization.quote.item.id);
+    idempotencyKeys.add(authorization.idempotencyKey.key);
+  }
+  if (authorizationsById.size !== jobIds.length) return false;
+
+  const retryChildren = new Set<string>();
+  const usedAuthorizationIds = new Set<string>();
+  for (const job of Object.values(project.jobs)) {
+    const piece = ownValue(project.pieces, job.target.pieceId);
+    const owner = jobOwners.get(job.id);
+    const authorization = authorizationsById.get(job.authorizationId);
+    if (
+      piece === undefined ||
+      owner?.pieceId !== piece.id ||
+      authorization === undefined ||
+      usedAuthorizationIds.has(job.authorizationId) ||
+      authorization.quote.item.id !== job.authorizationItemId ||
+      authorization.quote.item.target.pieceId !== piece.id ||
+      !canonicalValuesEqualV3(authorization.quote.item.requestPlan, job.requestPlan) ||
+      !providersEqual(authorization.providerBinding.provider, job.provider) ||
+      authorization.cancellationPolicy !== job.cancellationPolicy ||
+      authorization.idempotencyKey.key !== job.idempotencyKey ||
+      authorization.projectRevisionAtAuthorization !== job.projectRevisionAtAuthorization ||
+      authorization.quote.projectRevisionAtPreparation !== job.projectRevisionAtPreparation ||
+      authorization.quote.authoringRevision !== job.authoringRevision ||
+      authorization.quote.authoringFingerprint !== job.authoringFingerprint ||
+      job.createdAt < authorization.confirmedAt ||
+      (job.remoteStartedAt !== null && (job.remoteStartedAt < job.createdAt || job.remoteStartedAt > job.updatedAt)) ||
+      (job.duplicateChargeAcknowledgedAt !== null &&
+        (job.duplicateChargeAcknowledgedAt < authorization.confirmedAt ||
+          job.duplicateChargeAcknowledgedAt > job.createdAt)) ||
+      (job.spendReceipt !== null &&
+        (job.spendReceipt.recordedAt < authorization.confirmedAt ||
+          job.spendReceipt.recordedAt < job.createdAt ||
+          job.spendReceipt.recordedAt > job.updatedAt ||
+          job.spendReceipt.authorizationId !== authorization.id ||
+          job.spendReceipt.quoteId !== authorization.quote.id ||
+          job.spendReceipt.quoteRevision !== authorization.quote.quoteRevision ||
+          job.spendReceipt.itemId !== authorization.quote.item.id ||
+          job.spendReceipt.jobId !== job.id ||
+          job.spendReceipt.routeId !== authorization.quote.item.routeId ||
+          job.spendReceipt.currency !== authorization.quote.currency ||
+          job.spendReceipt.rateMinorUnits !== authorization.quote.item.rateMinorUnits)) ||
+      job.updatedAt > project.updatedAt
+    ) {
+      return false;
+    }
+    usedAuthorizationIds.add(job.authorizationId);
+    if (job.status === 'succeeded') {
+      const asset = ownValue(project.assets, job.outputAssetId!);
+      if (
+        asset?.origin !== 'generated' ||
+        asset.pieceId !== piece.id ||
+        piece.currentAssetId !== asset.id ||
+        job.spendReceipt === null
+      ) {
+        return false;
+      }
+    }
+    if (job.retryOfJobId === null) {
+      if (owner.position !== 0) return false;
+      continue;
+    }
+    if (retryChildren.has(job.retryOfJobId)) return false;
+    retryChildren.add(job.retryOfJobId);
+    const predecessor = ownValue(project.jobs, job.retryOfJobId);
+    const predecessorOwner = predecessor === undefined ? undefined : jobOwners.get(predecessor.id);
+    if (
+      predecessor === undefined ||
+      predecessorOwner?.pieceId !== piece.id ||
+      predecessorOwner.position >= owner.position ||
+      predecessor.purpose !== job.purpose ||
+      predecessor.composition.inputs.source.words !== job.composition.inputs.source.words ||
+      !photoSettingsEqualV3(predecessor.composition.inputs.source.settings, job.composition.inputs.source.settings) ||
+      job.retryReason === null ||
+      !pieceRetryReasonMatchesPredecessorV3(job.retryReason, predecessor)
+    ) {
+      return false;
+    }
+  }
+  if (usedAuthorizationIds.size !== authorizationsById.size || pieceRetryGraphHasCycleV3(project.jobs)) return false;
+
+  return true;
+};
+
+const EXPORT_MANIFEST_KEYS_V3 = new Set([
+  'schemaVersion',
+  'exportId',
+  'projectId',
+  'sourceRevision',
+  'piece',
+  'asset',
+  'provenance',
+  'exportedAt',
+]);
+const EXPORT_PIECE_KEYS_V3 = new Set(['id', 'kind', 'handleAtExport']);
+const EXPORT_ASSET_KEYS_V3 = new Set([
+  'id',
+  'sha256',
+  'mimeType',
+  'byteSize',
+  'width',
+  'height',
+  'createdAt',
+  'relativePath',
+]);
+const EXPORT_IMPORTED_PROVENANCE_KEYS_V3 = new Set(['origin']);
+const EXPORT_GENERATED_PROVENANCE_KEYS_V3 = new Set([
+  'origin',
+  'producerJobId',
+  'provider',
+  'composition',
+  'requestPlan',
+  'authorizationId',
+  'quoteId',
+  'quoteRevision',
+  'receipt',
+]);
+
+const WINDOWS_RESERVED_EXPORT_NAME_V3 = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/iu;
+const UNSAFE_EXPORT_PATH_CHARACTER_V3 = /[\p{C}<>:"|?*]/u;
+const MAX_EXPORT_RELATIVE_PATH_BYTES_V3 = 1024;
+const MAX_EXPORT_PATH_SEGMENT_SCALARS_V3 = 256;
+const MAX_EXPORT_PATH_SEGMENT_BYTES_V3 = 512;
+
+const isSafeRelativeExportPathV3 = (value: unknown): value is string => {
+  if (
+    typeof value !== 'string' ||
+    value.length === 0 ||
+    Buffer.byteLength(value, 'utf8') > MAX_EXPORT_RELATIVE_PATH_BYTES_V3 ||
+    value.startsWith('/') ||
+    value.includes('\\') ||
+    /^[A-Za-z]:/u.test(value) ||
+    value !== value.normalize('NFKC')
+  ) {
+    return false;
+  }
+  const segments = value.split('/');
+  return (
+    segments.length <= STUDIO_MAX_EXPORT_DIRECTORY_DEPTH &&
+    segments.every(
+      (segment) =>
+        segment.length > 0 &&
+        segment !== '.' &&
+        segment !== '..' &&
+        !segment.endsWith('.') &&
+        !segment.endsWith(' ') &&
+        [...segment].length <= MAX_EXPORT_PATH_SEGMENT_SCALARS_V3 &&
+        Buffer.byteLength(segment, 'utf8') <= MAX_EXPORT_PATH_SEGMENT_BYTES_V3 &&
+        !UNSAFE_EXPORT_PATH_CHARACTER_V3.test(segment) &&
+        !WINDOWS_RESERVED_EXPORT_NAME_V3.test(segment)
+    )
+  );
+};
+
+/** Validates the inactive exact schema-3 standalone-Piece export sidecar. */
+export const validateStudioPieceExportManifestV3 = (value: unknown): value is StudioPieceExportManifestV3 => {
+  const dataSnapshot = snapshotOwnDataGraph(value);
+  if (dataSnapshot === INVALID_DATA_SNAPSHOT) return false;
+  value = dataSnapshot;
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, EXPORT_MANIFEST_KEYS_V3) ||
+    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    !isSafeId(value.exportId) ||
+    !isSafeId(value.projectId) ||
+    !isIntegerInRange(value.sourceRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    !isRecord(value.piece) ||
+    !hasExactKeys(value.piece, EXPORT_PIECE_KEYS_V3) ||
+    !isSafeId(value.piece.id) ||
+    value.piece.kind !== 'photograph' ||
+    !isCanonicalStudioPieceHandleV3(value.piece.handleAtExport) ||
+    !isRecord(value.asset) ||
+    !hasExactKeys(value.asset, EXPORT_ASSET_KEYS_V3) ||
+    !isSafeId(value.asset.id) ||
+    !isLowercaseDigest(value.asset.sha256) ||
+    !isStudioReferenceImageMimeType(value.asset.mimeType) ||
+    !isIntegerInRange(value.asset.byteSize, 1, STUDIO_MAX_IMAGE_ASSET_BYTES_V2) ||
+    !isIntegerInRange(value.asset.width, 1, Number.MAX_SAFE_INTEGER) ||
+    !isIntegerInRange(value.asset.height, 1, Number.MAX_SAFE_INTEGER) ||
+    !isCanonicalTimestamp(value.asset.createdAt) ||
+    !isSafeRelativeExportPathV3(value.asset.relativePath) ||
+    !isCanonicalTimestamp(value.exportedAt) ||
+    value.asset.createdAt > value.exportedAt ||
+    !isRecord(value.provenance)
+  ) {
+    return false;
+  }
+  if (value.provenance.origin === 'imported') {
+    return hasExactKeys(value.provenance, EXPORT_IMPORTED_PROVENANCE_KEYS_V3);
+  }
+  return (
+    value.provenance.origin === 'generated' &&
+    hasExactKeys(value.provenance, EXPORT_GENERATED_PROVENANCE_KEYS_V3) &&
+    isSafeId(value.provenance.producerJobId) &&
+    validateProvider(value.provenance.provider) &&
+    validatePieceCompositionV3(value.provenance.composition) &&
+    value.piece.id === value.provenance.composition.inputs.source.pieceId &&
+    providersEqual(value.provenance.provider, value.provenance.composition.inputs.route) &&
+    validatePieceRequestPlanV3(value.provenance.requestPlan) &&
+    canonicalValuesEqualV3(value.provenance.requestPlan.snapshot.composition, value.provenance.composition) &&
+    isSafeId(value.provenance.authorizationId) &&
+    isSafeId(value.provenance.quoteId) &&
+    isIntegerInRange(value.provenance.quoteRevision, 1, Number.MAX_SAFE_INTEGER) &&
+    validatePieceReceiptV3(value.provenance.receipt) &&
+    value.provenance.receipt.authorizationId === value.provenance.authorizationId &&
+    value.provenance.receipt.quoteId === value.provenance.quoteId &&
+    value.provenance.receipt.quoteRevision === value.provenance.quoteRevision &&
+    value.provenance.receipt.jobId === value.provenance.producerJobId
+  );
 };

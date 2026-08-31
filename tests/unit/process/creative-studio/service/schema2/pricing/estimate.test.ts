@@ -22,23 +22,32 @@ import {
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
 import {
   composeStudioGenerationV2,
+  composeStudioPieceGenerationV3,
   createStudioDeferredGenerationRequestPlan,
   createStudioBoardGenerationRequestPlanForShot,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
   createStudioResolvedGenerationRequestPlan,
+  createStudioPieceGenerationRequestPlanV3,
+  deriveStudioPieceInstructionProfileV3,
   deriveStudioInstructionProfileV2,
   studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
   createStudioRateCardV2,
+  createStudioPieceSubmissionQuoteV3,
   createStudioSubmissionQuoteCoreV2,
   deriveStudioProjectReferenceSubmissionQuoteGraphV2 as deriveStudioProjectReferenceSubmissionQuoteGraphV2Impl,
   deriveStudioSubmissionQuoteCoresV2 as deriveStudioSubmissionQuoteCoresV2Impl,
   deriveStudioSubmissionQuoteGraphV2 as deriveStudioSubmissionQuoteGraphV2Impl,
   evaluateStudioBudgetV2,
+  evaluateStudioPieceSpendPolicyV3,
   priceStudioSubmissionQuoteGraphV2,
   studioSubmissionQuoteCoresEqual,
+  revalidateStudioPieceSubmissionQuoteV3,
+  studioPieceQuoteMatchesAuthoringAuthorityV3,
+  studioPieceQuoteMatchesRouteAndRateV3,
+  validateStudioPieceSubmissionQuoteV3,
   toStudioRendererSubmissionQuoteV2,
   type StudioSubmissionQuoteEstimateInputV2,
   type StudioUnpricedQuotedGenerationV2,
@@ -2144,5 +2153,268 @@ describe('schema-2 Studio estimates', () => {
       durationSeconds: 8,
       conditioningAssetId: 'take_seed',
     });
+  });
+});
+
+describe('inactive fixed-price Piece quote', () => {
+  const reservationId = 'reservation_1';
+  const makePieceQuote = (overrides: Record<string, unknown> = {}) => {
+    const composition = composeStudioPieceGenerationV3({
+      projectRevisionAtPreparation: 8,
+      authoringRevision: 3,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'e'.repeat(64),
+      brief: 'One standalone photograph.',
+      rules: [],
+      source: {
+        kind: 'piece',
+        pieceId: 'piece_1',
+        words: 'A lone boat in morning fog.',
+        settings: { aspectRatio: '16:9', resolution: '1080p' },
+      },
+      purpose: 'piece_image',
+      conditioningInputs: [],
+      route: imageProvider,
+      instructionProfile: deriveStudioPieceInstructionProfileV3(imageProvider),
+    });
+    return createStudioPieceSubmissionQuoteV3({
+      reservationId,
+      quoteId: 'quote_piece_1',
+      quoteRevision: 1,
+      projectId: 'project_1',
+      projectRevisionAtPreparation: 8,
+      authoringRevision: 3,
+      authoringFingerprintVersion: 1,
+      authoringFingerprint: 'e'.repeat(64),
+      rateCardDigest: 'f'.repeat(64),
+      currency: 'USD',
+      target: { kind: 'piece', pieceId: 'piece_1' },
+      routeId: 'image_route',
+      requestPlan: createStudioPieceGenerationRequestPlanV3({ composition }),
+      rateUnit: 'generation',
+      rateMinorUnits: 20,
+      expiresAt: '2026-08-30T00:05:00.000Z',
+      ...overrides,
+    } as never);
+  };
+
+  it('prices exactly one fixed image and validates all Piece authority links', () => {
+    const quote = makePieceQuote();
+    expect(quote).toMatchObject({
+      id: 'quote_piece_1',
+      reservationId,
+      quoteRevision: 1,
+      lowerMinorUnits: 20,
+      upperMinorUnits: 20,
+      item: {
+        target: { kind: 'piece', pieceId: 'piece_1' },
+        purpose: 'piece_image',
+        generationCount: 1,
+        rateUnit: 'generation',
+        rateMinorUnits: 20,
+      },
+    });
+    expect(validateStudioPieceSubmissionQuoteV3(quote, reservationId)).toBe(true);
+    expect(
+      studioPieceQuoteMatchesAuthoringAuthorityV3(quote, {
+        authoringRevision: 3,
+        authoringFingerprint: 'e'.repeat(64),
+      })
+    ).toBe(true);
+    expect(
+      studioPieceQuoteMatchesRouteAndRateV3(quote, {
+        routeId: 'image_route',
+        rateCardDigest: 'f'.repeat(64),
+        currency: 'USD',
+        rateUnit: 'generation',
+        rateMinorUnits: 20,
+      })
+    ).toBe(true);
+  });
+
+  it('fails closed on variable pricing, cross-Piece composition, and reservation identity drift', () => {
+    expect(() => makePieceQuote({ rateUnit: 'second' })).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+    expect(() => makePieceQuote({ rateMinorUnits: 0 })).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+    const quote = makePieceQuote();
+    expect(validateStudioPieceSubmissionQuoteV3(quote, 'reservation_other')).toBe(false);
+    const crossed = structuredClone(quote);
+    crossed.item.target.pieceId = 'piece_other';
+    expect(validateStudioPieceSubmissionQuoteV3(crossed, reservationId)).toBe(false);
+    const ranged = structuredClone(quote);
+    ranged.upperMinorUnits = 40;
+    expect(validateStudioPieceSubmissionQuoteV3(ranged, reservationId)).toBe(false);
+  });
+
+  it('rejects object-coerced quote authority, proxies, and accessor-backed targets', () => {
+    const stringLikeId = { toString: () => 'quote_piece_1' };
+    const stringLikeDigest = { toString: () => 'f'.repeat(64) };
+    for (const overrides of [
+      { quoteId: stringLikeId },
+      { projectId: stringLikeId },
+      { routeId: stringLikeId },
+      { authoringFingerprint: stringLikeDigest },
+      { rateCardDigest: stringLikeDigest },
+      { target: { kind: 'piece', pieceId: stringLikeId } },
+    ]) {
+      expect(() => makePieceQuote(overrides)).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+    }
+
+    const proxyTarget = new Proxy({ kind: 'piece' as const, pieceId: 'piece_1' }, {});
+    expect(() => makePieceQuote({ target: proxyTarget })).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+
+    let getterRead = false;
+    const accessorTarget = { kind: 'piece' } as Record<string, unknown>;
+    Object.defineProperty(accessorTarget, 'pieceId', {
+      enumerable: true,
+      get: () => {
+        getterRead = true;
+        return 'piece_1';
+      },
+    });
+    expect(() => makePieceQuote({ target: accessorTarget })).toThrow(
+      expect.objectContaining({ code: 'invalid_quote' })
+    );
+    expect(getterRead).toBe(false);
+    expect(() => makePieceQuote({ extra: true })).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+  });
+
+  it('evaluates every spend-policy branch and ignores storage revision as authoring authority', () => {
+    const quote = makePieceQuote();
+    const spendQuote = {
+      currency: quote.currency,
+      lowerMinorUnits: quote.lowerMinorUnits,
+      upperMinorUnits: quote.upperMinorUnits,
+    };
+    expect(evaluateStudioPieceSpendPolicyV3(spendQuote, null)).toEqual({
+      classification: 'no_policy',
+      requiresExplicitHumanAction: true,
+    });
+    expect(evaluateStudioPieceSpendPolicyV3(spendQuote, { currency: 'USD', maxPerBatchMinorUnits: 20 })).toEqual({
+      classification: 'within_cap',
+      requiresExplicitHumanAction: false,
+    });
+    expect(
+      evaluateStudioPieceSpendPolicyV3(spendQuote, { currency: 'USD', maxPerBatchMinorUnits: 19 }).classification
+    ).toBe('over_cap');
+    expect(
+      evaluateStudioPieceSpendPolicyV3(spendQuote, { currency: 'EUR', maxPerBatchMinorUnits: 20 }).classification
+    ).toBe('currency_mismatch');
+    expect(
+      studioPieceQuoteMatchesAuthoringAuthorityV3(quote, {
+        authoringRevision: 3,
+        authoringFingerprint: 'e'.repeat(64),
+      })
+    ).toBe(true);
+  });
+
+  it('snapshots exact spend inputs and rejects accessors without invoking them', () => {
+    let quoteGetterReads = 0;
+    const hostileQuote = { lowerMinorUnits: 20, upperMinorUnits: 20 } as Record<string, unknown>;
+    Object.defineProperty(hostileQuote, 'currency', {
+      enumerable: true,
+      get: () => {
+        quoteGetterReads += 1;
+        return 'USD';
+      },
+    });
+    expect(() => evaluateStudioPieceSpendPolicyV3(hostileQuote as never, null)).toThrow(
+      expect.objectContaining({ code: 'invalid_quote' })
+    );
+    expect(quoteGetterReads).toBe(0);
+
+    let policyGetterReads = 0;
+    const hostilePolicy = { currency: 'USD' } as Record<string, unknown>;
+    Object.defineProperty(hostilePolicy, 'maxPerBatchMinorUnits', {
+      enumerable: true,
+      get: () => {
+        policyGetterReads += 1;
+        return 20;
+      },
+    });
+    expect(() =>
+      evaluateStudioPieceSpendPolicyV3(
+        { currency: 'USD', lowerMinorUnits: 20, upperMinorUnits: 20 },
+        hostilePolicy as never
+      )
+    ).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+    expect(policyGetterReads).toBe(0);
+  });
+
+  it('rejects any rederived authoring, route, rate, or quote change before spend', () => {
+    const quote = makePieceQuote();
+    expect(
+      revalidateStudioPieceSubmissionQuoteV3({
+        reservationId,
+        recorded: quote,
+        rederived: structuredClone(quote),
+        policy: { currency: 'USD', maxPerBatchMinorUnits: 20 },
+      })
+    ).toEqual({ ok: true, classification: 'within_cap', requiresExplicitHumanAction: false });
+    const stale = structuredClone(quote);
+    stale.authoringRevision = 4;
+    stale.item.requestPlan.snapshot.composition.inputs.authoringRevision = 4;
+    expect(
+      revalidateStudioPieceSubmissionQuoteV3({ reservationId, recorded: quote, rederived: stale, policy: null })
+    ).toEqual({ ok: false, reason: 'stale_quote' });
+    const routeChanged = structuredClone(quote);
+    routeChanged.item.routeId = 'image_route_new';
+    expect(
+      revalidateStudioPieceSubmissionQuoteV3({
+        reservationId,
+        recorded: quote,
+        rederived: routeChanged,
+        policy: null,
+      })
+    ).toEqual({ ok: false, reason: 'stale_quote' });
+    expect(() =>
+      revalidateStudioPieceSubmissionQuoteV3({
+        reservationId,
+        recorded: quote,
+        rederived: structuredClone(quote),
+        policy: { currency: 'USD', maxPerBatchMinorUnits: -1 },
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_quote' }));
+  });
+
+  it('rejects accessor-backed revalidation state without reading or recombining it', () => {
+    const quote = makePieceQuote();
+    let recordedReads = 0;
+    const hostileInput = {
+      reservationId,
+      rederived: structuredClone(quote),
+      policy: null,
+    } as Record<string, unknown>;
+    Object.defineProperty(hostileInput, 'recorded', {
+      enumerable: true,
+      get: () => {
+        recordedReads += 1;
+        return quote;
+      },
+    });
+    expect(revalidateStudioPieceSubmissionQuoteV3(hostileInput as never)).toEqual({
+      ok: false,
+      reason: 'invalid_quote',
+    });
+    expect(recordedReads).toBe(0);
+
+    let routeReads = 0;
+    const nestedHostile = {
+      reservationId,
+      recorded: structuredClone(quote),
+      rederived: structuredClone(quote),
+      policy: null,
+    };
+    Object.defineProperty(nestedHostile.recorded.item, 'routeId', {
+      enumerable: true,
+      get: () => {
+        routeReads += 1;
+        return 'image_route';
+      },
+    });
+    expect(revalidateStudioPieceSubmissionQuoteV3(nestedHostile)).toEqual({
+      ok: false,
+      reason: 'invalid_quote',
+    });
+    expect(routeReads).toBe(0);
   });
 });
