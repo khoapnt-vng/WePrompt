@@ -3,7 +3,7 @@
  *
  * Build and run with:
  * AIONUI_ENABLE_CREATIVE_STUDIO=1 bun run package
- * AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 \
+ * AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 E2E_DEV=1 AIONUI_ENABLE_CREATIVE_STUDIO=1 \
  *   bunx playwright test --config playwright.config.ts \
  *   tests/e2e/features/workspaces/creative-studio.e2e.ts
  */

@@ -87,6 +87,9 @@ jobs:
           CI: true
           E2E_DEV: '1'
           E2E_SCREENSHOTS: '1'
+          # electron.vite.config.ts resolves this at build time. Without it,
+          # Studio tests silently redirect to /guid and fail as missing UI.
+          AIONUI_ENABLE_CREATIVE_STUDIO: '1'
           AIONUI_BACKEND_BINARY: ${{ github.workspace }}/.e2e-aioncore/target/release/aioncore
           AIONUI_EXTENSIONS_PATH: ${{ github.workspace }}/examples
 

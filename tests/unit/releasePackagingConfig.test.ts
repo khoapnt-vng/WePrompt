@@ -653,6 +653,7 @@ describe('release packaging configuration', () => {
     expect(workflow).toContain("toolchain: '1.95.0'");
     expect(workflow).toContain('cargo build --locked --release -p aionui-app');
     expect(workflow).toContain('test -x target/release/aioncore');
+    expect(workflow).toContain("AIONUI_ENABLE_CREATIVE_STUDIO: '1'");
     expect(workflow).toContain('AIONUI_BACKEND_BINARY: ${{ github.workspace }}/.e2e-aioncore/target/release/aioncore');
   });
 
