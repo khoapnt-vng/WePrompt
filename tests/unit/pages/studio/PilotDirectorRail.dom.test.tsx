@@ -46,8 +46,6 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
   default: ({ conversation_id }: { conversation_id: string }) => <div>chat:{conversation_id}</div>,
 }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: mocks.translate }) }));
-vi.mock('@/common/utils', () => ({ uuid: () => 'conversation_new' }));
-
 import { PilotDirectorRail } from '@/renderer/pages/studio/components/Pilot/PilotDirectorRail';
 
 const supported = (
@@ -133,7 +131,7 @@ describe('Pilot Director rail', () => {
       },
     });
     mocks.bind.mockResolvedValue({ ok: true, data: { status: 'bound' } });
-    mocks.create.mockResolvedValue(conversation('conversation_new'));
+    mocks.create.mockResolvedValue(conversation('conversation_backend'));
   });
 
   it('reattaches the exact persisted Director conversation', async () => {
@@ -143,16 +141,17 @@ describe('Pilot Director rail', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it('creates, attests, binds, and seeds a fresh Director', async () => {
+  it('accepts the backend-owned id when it creates, attests, binds, and seeds a fresh Director', async () => {
     render(<PilotDirectorRail projectId='project_1' client={client(supported(null)) as never} />);
-    expect(await screen.findByText('chat:conversation_new')).toBeVisible();
+    expect(await screen.findByText('chat:conversation_backend')).toBeVisible();
     expect(mocks.getServer).toHaveBeenCalledWith({ projectId: 'project_1' });
+    expect(mocks.create).toHaveBeenCalledWith(expect.not.objectContaining({ id: expect.anything() }));
     expect(mocks.bind).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedAuthoringRevision: 1,
-      conversationId: 'conversation_new',
+      conversationId: 'conversation_backend',
     });
-    expect(window.sessionStorage.getItem('aionrs_initial_message_conversation_new')).toContain('Make a lantern.');
+    expect(window.sessionStorage.getItem('aionrs_initial_message_conversation_backend')).toContain('Make a lantern.');
   });
 
   it('rejoins one unbound claimant without creating another conversation', async () => {

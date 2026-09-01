@@ -22,7 +22,6 @@ import {
   type StudioPilotDirectorSessionAuthorityV3,
 } from '@/common/types/project/creativeStudioPilotMcpEnv';
 import type { StudioProjectLoadResultV3 } from '@/common/types/project/creativeStudioTypes';
-import { uuid } from '@/common/utils';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
 import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsChat';
@@ -259,7 +258,6 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
     }
     if (current_model === undefined || modelList.length === 0 || providers === undefined || starting.current) return;
     starting.current = true;
-    const conversationId = uuid();
     void ipcBridge.creativeStudioPilot.getDirectorSessionServer
       .invoke({ projectId })
       .then(async (descriptorResult) => {
@@ -272,9 +270,10 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
         ) {
           throw new Error('director_authority_failed');
         }
+        // AionCore owns conversation identity. The create endpoint ignores a
+        // client-supplied id, so every subsequent write must use its response.
         const created = await ipcBridge.conversation.create.invoke({
           type: 'aionrs',
-          id: conversationId,
           name: project.summary.name,
           model: current_model,
           extra: {
@@ -289,7 +288,7 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
           },
         });
         if (
-          !isDirectorConversation(created, projectId, conversationId) ||
+          !isDirectorConversation(created, projectId) ||
           !hasExactConversationAuthority(
             created,
             projectId,
@@ -303,10 +302,10 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
         const binding = await ipcBridge.creativeStudioPilot.bindDirectorConversation.invoke({
           projectId,
           expectedAuthoringRevision: project.canvas.authoringRevision,
-          conversationId,
+          conversationId: created.id,
         });
         if (!binding.ok) throw new Error('director_binding_failed');
-        seedOpeningTurn(conversationId, project.director.brief);
+        seedOpeningTurn(created.id, project.director.brief);
         setConversation(created);
       })
       .catch(() => setError(true))
