@@ -230,6 +230,30 @@ describe('verifyBundledAioncoreResources', () => {
     expect(result.failures).toEqual([]);
   });
 
+  it('uses the caller-provided migration lineage instead of the module singleton', () => {
+    const expectedMigrationLineage = { ...acceptedMigrationLineage, fingerprint: '0'.repeat(64) };
+    writeJson(join(resourcesDir, 'bundled-aioncore', 'win32-x64', 'migration-lineage.json'), expectedMigrationLineage);
+    writeJson(join(resourcesDir, 'bundled-aioncore', 'win32-x64', 'manifest.json'), {
+      platform: 'win32',
+      arch: 'x64',
+      migrationLineage: {
+        ...expectedMigrationLineage,
+        entries: expectedMigrationLineage.entries.map((entry: Record<string, unknown>) => ({ ...entry })),
+        file: 'migration-lineage.json',
+      },
+    });
+
+    const result = verifyBundledAioncoreResources({
+      resourcesDir,
+      electronPlatformName: 'win32',
+      targetArch: 'x64',
+      expectedMigrationLineage,
+    });
+
+    expect(result.missing).toEqual([]);
+    expect(result.failures).toEqual([]);
+  });
+
   it('fails closed when the bundled runtime has no migration lineage contract', () => {
     rmSync(join(resourcesDir, 'bundled-aioncore', 'win32-x64', 'migration-lineage.json'));
     const result = verifyBundledAioncoreResources({

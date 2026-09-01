@@ -168,6 +168,65 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
     });
   });
 
+  it('admits an Actions run against the contract-provided source commit instead of the legacy singleton', () => {
+    const expectedSourceCommit = '2222222222222222222222222222222222222222';
+    const resolveContractRefs = () => `${expectedSourceCommit}\trefs/heads/release-contract\n`;
+
+    expect(
+      assertAcceptedActionsRun(
+        {
+          conclusion: 'success',
+          head_sha: expectedSourceCommit,
+          status: 'completed',
+        },
+        'strict-run',
+        resolveContractRefs,
+        expectedSourceCommit
+      )
+    ).toEqual({
+      conclusion: 'success',
+      headSha: expectedSourceCommit,
+      status: 'completed',
+    });
+  });
+
+  posixFakeToolchainIt(
+    'passes the strict contract source commit through the Actions preparation path',
+    () => {
+      const tmp = mkdtempSync(join(tmpdir(), 'aionui-actions-contract-sha-'));
+      const fakeBin = createFakeToolchain(tmp);
+      const previousPath = process.env.PATH;
+      process.env.PATH = `${fakeBin}${delimiter}${previousPath || ''}`;
+      process.env.AIONUI_BACKEND_RUN_ID = '123';
+      const restoreTmpdir = useIsolatedTmpdir(tmp);
+
+      try {
+        expect(() =>
+          prepareAioncore({
+            projectRoot: join(tmp, 'project'),
+            platform: 'darwin',
+            arch: 'arm64',
+            version: '0.1.55',
+            releaseBundleContract: {
+              repository: 'khoapnt-vng/aioncore',
+              exactVersion: '0.1.55',
+              expectedSourceCommit: '2222222222222222222222222222222222222222',
+              expectedLineage: acceptedMigrationLineage,
+              allowedRuntimeKeys: ['darwin-arm64', 'win32-x64'],
+              requireCompleteBundle: true,
+            },
+          })
+        ).toThrow(/does not match accepted source commit 2222222222222222222222222222222222222222/);
+      } finally {
+        if (previousPath === undefined) delete process.env.PATH;
+        else process.env.PATH = previousPath;
+        restoreTmpdir();
+        rmSync(tmp, { recursive: true, force: true });
+      }
+    },
+    FAKE_TOOLCHAIN_TIMEOUT_MS
+  );
+
   it('rejects an echoed accepted commit when the publishing host does not advertise it', () => {
     const unrelatedPublishedRefs = '7061136ee8159d6e2768cabfa40b22d49351e74b\trefs/heads/main\n';
 

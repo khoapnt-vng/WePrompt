@@ -10,6 +10,9 @@
  * Output: {projectRoot}/resources/bundled-aioncore/{platform}-{arch}/
  *   - aioncore[.exe]
  *   - manifest.json
+ *   - bundle-manifest.json (when supplied by a complete release bundle)
+ *   - SHA256SUMS (when supplied by a complete release bundle)
+ *   - migration-lineage.json
  *   - managed-resources/...
  *
  * @module prepare-aioncore
@@ -21,13 +24,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { isDeepStrictEqual } = require('util');
-const {
-  acceptedMigrationLineage,
-  getAcceptedMigrationLineageManifest,
-  verifyBundledAioncoreResources,
-} = require('./verify-bundled-aioncore-resources');
+const { acceptedMigrationLineage, verifyBundledAioncoreResources } = require('./verify-bundled-aioncore-resources');
 
 const aioncoreChecksums = require('./aioncore-checksums');
+const {
+  AIONCORE_RELEASE_REPOSITORY,
+  releaseBundleMetadataState,
+  validateAioncoreReleaseBundleContract,
+  verifyAioncoreReleaseBundle,
+} = require('./aioncoreReleaseBundle');
 const aioncoreTrust = require('./aioncore-trust');
 const { assertGitShaResolvesOnRemote, listRemoteRefs } = require('./verify-git-source-commit');
 
@@ -96,6 +101,16 @@ const ACTIONS_ARTIFACT_TARGETS = {
   },
 };
 
+function getDefaultReleaseBundleContract() {
+  return {
+    repository: AIONCORE_RELEASE_REPOSITORY,
+    expectedLineage: acceptedMigrationLineage,
+    expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+    allowedRuntimeKeys: Object.keys(ACTIONS_ARTIFACT_TARGETS),
+    requireCompleteBundle: false,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -147,23 +162,31 @@ function getBinaryName(platform) {
   return platform === 'win32' ? 'aioncore.exe' : 'aioncore';
 }
 
-function assertAcceptedMigrationLineageFile(lineagePath, sourceLabel) {
+function assertAcceptedMigrationLineageFile(lineagePath, sourceLabel, expectedLineage = acceptedMigrationLineage) {
   let document;
   try {
     document = JSON.parse(fs.readFileSync(lineagePath, 'utf8'));
   } catch {
     throw makeIntegrityError(`AionCore ${sourceLabel} is missing a valid migration-lineage.json document.`);
   }
-  if (!isDeepStrictEqual(document, acceptedMigrationLineage)) {
+  if (!isDeepStrictEqual(document, expectedLineage)) {
     throw makeIntegrityError(
       `AionCore ${sourceLabel} migration lineage does not match the accepted WePrompt lineage ` +
-        `${acceptedMigrationLineage.fingerprint}. Refusing to package an incompatible runtime.`
+        `${expectedLineage.fingerprint}. Refusing to package an incompatible runtime.`
     );
   }
   return lineagePath;
 }
 
-function buildBundleManifest({ platform, arch, version, sourceType, source, generatedAt = new Date().toISOString() }) {
+function buildBundleManifest({
+  platform,
+  arch,
+  version,
+  sourceType,
+  source,
+  expectedLineage = acceptedMigrationLineage,
+  generatedAt = new Date().toISOString(),
+}) {
   return {
     platform,
     arch,
@@ -171,7 +194,11 @@ function buildBundleManifest({ platform, arch, version, sourceType, source, gene
     generatedAt,
     sourceType,
     source,
-    migrationLineage: getAcceptedMigrationLineageManifest(),
+    migrationLineage: {
+      ...expectedLineage,
+      entries: expectedLineage.entries.map((entry) => ({ ...entry })),
+      file: 'migration-lineage.json',
+    },
     files: [getBinaryName(platform), 'migration-lineage.json', 'managed-resources/'],
   };
 }
@@ -218,6 +245,39 @@ function makeIntegrityError(message) {
  */
 function isIntegrityError(error) {
   return Boolean(error && error.isAioncoreIntegrityError === true);
+}
+
+function verifyCompleteBundleIfPresent({ bundleDir, platform, arch, version, bundleContract, allowDesktopManifest }) {
+  const metadataState = releaseBundleMetadataState(bundleDir);
+  if (metadataState === 'absent') {
+    if (bundleContract.requireCompleteBundle) {
+      throw makeIntegrityError(
+        'AionCore strict release bundle is missing bundle-manifest.json and SHA256SUMS. Refusing legacy fallback.'
+      );
+    }
+    return null;
+  }
+  if (metadataState === 'partial') {
+    throw makeIntegrityError(
+      'AionCore bundle has incomplete release metadata; bundle-manifest.json and SHA256SUMS must be supplied together.'
+    );
+  }
+
+  try {
+    return verifyAioncoreReleaseBundle({
+      bundleDir,
+      platform,
+      arch,
+      version: bundleContract.exactVersion ?? version,
+      sourceCommit: bundleContract.expectedSourceCommit,
+      repository: bundleContract.repository,
+      expectedLineage: bundleContract.expectedLineage,
+      allowedRuntimeKeys: bundleContract.allowedRuntimeKeys,
+      allowDesktopManifest,
+    });
+  } catch (error) {
+    throw makeIntegrityError(`AionCore complete bundle verification failed: ${error?.message ?? error}`);
+  }
 }
 
 /**
@@ -410,11 +470,17 @@ function prepareManagedResources(binaryPath, targetDir) {
   return bundleOut;
 }
 
-function verifyPreparedAioncoreBundle(projectRoot, platform, arch) {
+function verifyPreparedAioncoreBundle(
+  projectRoot,
+  platform,
+  arch,
+  expectedMigrationLineage = acceptedMigrationLineage
+) {
   const result = verifyBundledAioncoreResources({
     resourcesDir: path.join(projectRoot, 'resources'),
     electronPlatformName: platform,
     targetArch: arch,
+    expectedMigrationLineage,
   });
   if (result.missing.length > 0 || result.failures.length > 0) {
     const summary = result.missing.length > 0 ? result.missing.join(', ') : JSON.stringify(result.failures);
@@ -674,7 +740,12 @@ function listActionsArtifacts(runId) {
   return Array.isArray(response?.artifacts) ? response.artifacts : [];
 }
 
-function assertAcceptedActionsRun(run, runId = 'unknown', resolveRefs = listRemoteRefs) {
+function assertAcceptedActionsRun(
+  run,
+  runId = 'unknown',
+  resolveRefs = listRemoteRefs,
+  expectedSourceCommit = ACCEPTED_AIONCORE_SOURCE_COMMIT
+) {
   const status = typeof run?.status === 'string' ? run.status : 'unknown';
   const conclusion = typeof run?.conclusion === 'string' ? run.conclusion : 'unknown';
   const headSha = typeof run?.head_sha === 'string' ? run.head_sha : 'unknown';
@@ -684,10 +755,9 @@ function assertAcceptedActionsRun(run, runId = 'unknown', resolveRefs = listRemo
       `AionCore run ${runId} is not completed successfully (status=${status}, conclusion=${conclusion}).`
     );
   }
-  if (headSha !== ACCEPTED_AIONCORE_SOURCE_COMMIT) {
+  if (headSha !== expectedSourceCommit) {
     throw makeIntegrityError(
-      `AionCore run ${runId} head ${headSha} does not match accepted source commit ` +
-        `${ACCEPTED_AIONCORE_SOURCE_COMMIT}.`
+      `AionCore run ${runId} head ${headSha} does not match accepted source commit ${expectedSourceCommit}.`
     );
   }
   assertGitShaResolvesOnRemote({
@@ -699,18 +769,18 @@ function assertAcceptedActionsRun(run, runId = 'unknown', resolveRefs = listRemo
   return { conclusion, headSha, status };
 }
 
-function getAcceptedActionsRun(runId, resolveRefs) {
+function getAcceptedActionsRun(runId, resolveRefs, expectedSourceCommit) {
   const run = githubApiGetJson(`repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${runId}`);
-  return assertAcceptedActionsRun(run, runId, resolveRefs);
+  return assertAcceptedActionsRun(run, runId, resolveRefs, expectedSourceCommit);
 }
 
-function downloadAndExtractActionsArtifact(platform, arch, runId, resolveRefs) {
+function downloadAndExtractActionsArtifact(platform, arch, runId, version, bundleContract, resolveRefs) {
   const expectedArtifactName = getActionsArtifactName(platform, arch);
   if (!expectedArtifactName) {
     throw new Error(`Unsupported AionCore Actions artifact target: ${platform}-${arch}`);
   }
 
-  const acceptedRun = getAcceptedActionsRun(runId, resolveRefs);
+  const acceptedRun = getAcceptedActionsRun(runId, resolveRefs, bundleContract.expectedSourceCommit);
   const artifacts = listActionsArtifacts(runId);
   const availableArtifactNames = artifacts
     .map((artifact) => artifact.name)
@@ -752,16 +822,45 @@ function downloadAndExtractActionsArtifact(platform, arch, runId, resolveRefs) {
   extractArchive(archivePath, binaryExtractDir, platform);
 
   const binaryName = getBinaryName(platform);
-  const binaryPath = findBinaryInDir(binaryExtractDir, binaryName);
+  const rootReleaseBundle = verifyCompleteBundleIfPresent({
+    bundleDir: binaryExtractDir,
+    platform,
+    arch,
+    version,
+    bundleContract,
+    allowDesktopManifest: false,
+  });
+  const binaryPath = rootReleaseBundle
+    ? path.join(binaryExtractDir, binaryName)
+    : findBinaryInDir(binaryExtractDir, binaryName);
   if (!binaryPath) {
     throw new Error(`Binary ${binaryName} not found in AionCore artifact ${expectedArtifactName} from run ${runId}`);
   }
-  const lineagePath = findFileInDir(binaryExtractDir, 'migration-lineage.json');
-  assertAcceptedMigrationLineageFile(lineagePath, `Actions artifact ${expectedArtifactName}`);
+  const lineagePath = rootReleaseBundle
+    ? path.join(binaryExtractDir, 'migration-lineage.json')
+    : findFileInDir(binaryExtractDir, 'migration-lineage.json');
+  assertAcceptedMigrationLineageFile(
+    lineagePath,
+    `Actions artifact ${expectedArtifactName}`,
+    bundleContract.expectedLineage
+  );
+  const bundleDir = path.dirname(binaryPath);
+  const releaseBundle =
+    rootReleaseBundle ??
+    verifyCompleteBundleIfPresent({
+      bundleDir,
+      platform,
+      arch,
+      version,
+      bundleContract,
+      allowDesktopManifest: false,
+    });
 
   return {
     binaryPath,
     lineagePath,
+    bundleDir: releaseBundle ? bundleDir : null,
+    releaseManifest: releaseBundle?.manifest ?? null,
     tempDir,
     artifactName: expectedArtifactName,
     archivePath,
@@ -770,7 +869,7 @@ function downloadAndExtractActionsArtifact(platform, arch, runId, resolveRefs) {
   };
 }
 
-function downloadAndExtract(platform, arch, tag) {
+function downloadAndExtract(platform, arch, tag, bundleContract) {
   const assetName = getAssetName(platform, arch, tag);
   if (!assetName) {
     throw new Error(`Unsupported aioncore target: ${platform}-${arch}`);
@@ -792,14 +891,42 @@ function downloadAndExtract(platform, arch, tag) {
   extractArchive(archivePath, extractDir, platform);
 
   const binaryName = getBinaryName(platform);
-  const binaryPath = findBinaryInDir(extractDir, binaryName);
+  const rootReleaseBundle = verifyCompleteBundleIfPresent({
+    bundleDir: extractDir,
+    platform,
+    arch,
+    version: tag,
+    bundleContract,
+    allowDesktopManifest: false,
+  });
+  const binaryPath = rootReleaseBundle ? path.join(extractDir, binaryName) : findBinaryInDir(extractDir, binaryName);
   if (!binaryPath) {
     throw new Error(`Binary ${binaryName} not found in downloaded archive`);
   }
-  const lineagePath = findFileInDir(extractDir, 'migration-lineage.json');
-  assertAcceptedMigrationLineageFile(lineagePath, `release asset ${assetName}`);
+  const lineagePath = rootReleaseBundle
+    ? path.join(extractDir, 'migration-lineage.json')
+    : findFileInDir(extractDir, 'migration-lineage.json');
+  assertAcceptedMigrationLineageFile(lineagePath, `release asset ${assetName}`, bundleContract.expectedLineage);
+  const bundleDir = path.dirname(binaryPath);
+  const releaseBundle =
+    rootReleaseBundle ??
+    verifyCompleteBundleIfPresent({
+      bundleDir,
+      platform,
+      arch,
+      version: tag,
+      bundleContract,
+      allowDesktopManifest: false,
+    });
 
-  return { binaryPath, lineagePath, tempDir, url };
+  return {
+    binaryPath,
+    lineagePath,
+    bundleDir: releaseBundle ? bundleDir : null,
+    releaseManifest: releaseBundle?.manifest ?? null,
+    tempDir,
+    url,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -836,7 +963,7 @@ function getForgeDownloadUrl(ownerRepo, forgeTag, fileName) {
  * @param {string} tag - Upstream AionCore release tag (drives asset naming + pin).
  * @returns {{ binaryPath: string; tempDir: string; url: string; forgeTag: string; ownerRepo: string }}
  */
-function downloadAndExtractForge(platform, arch, tag) {
+function downloadAndExtractForge(platform, arch, tag, bundleContract) {
   const assetName = getAssetName(platform, arch, tag);
   if (!assetName) {
     throw new Error(`Unsupported aioncore target: ${platform}-${arch}`);
@@ -873,14 +1000,44 @@ function downloadAndExtractForge(platform, arch, tag) {
   extractArchive(archivePath, extractDir, platform);
 
   const binaryName = getBinaryName(platform);
-  const binaryPath = findBinaryInDir(extractDir, binaryName);
+  const rootReleaseBundle = verifyCompleteBundleIfPresent({
+    bundleDir: extractDir,
+    platform,
+    arch,
+    version: tag,
+    bundleContract,
+    allowDesktopManifest: false,
+  });
+  const binaryPath = rootReleaseBundle ? path.join(extractDir, binaryName) : findBinaryInDir(extractDir, binaryName);
   if (!binaryPath) {
     throw new Error(`Binary ${binaryName} not found in downloaded Forge archive`);
   }
-  const lineagePath = findFileInDir(extractDir, 'migration-lineage.json');
-  assertAcceptedMigrationLineageFile(lineagePath, `Forge asset ${assetName}`);
+  const lineagePath = rootReleaseBundle
+    ? path.join(extractDir, 'migration-lineage.json')
+    : findFileInDir(extractDir, 'migration-lineage.json');
+  assertAcceptedMigrationLineageFile(lineagePath, `Forge asset ${assetName}`, bundleContract.expectedLineage);
+  const bundleDir = path.dirname(binaryPath);
+  const releaseBundle =
+    rootReleaseBundle ??
+    verifyCompleteBundleIfPresent({
+      bundleDir,
+      platform,
+      arch,
+      version: tag,
+      bundleContract,
+      allowDesktopManifest: false,
+    });
 
-  return { binaryPath, lineagePath, tempDir, url, forgeTag, ownerRepo };
+  return {
+    binaryPath,
+    lineagePath,
+    bundleDir: releaseBundle ? bundleDir : null,
+    releaseManifest: releaseBundle?.manifest ?? null,
+    tempDir,
+    url,
+    forgeTag,
+    ownerRepo,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -896,12 +1053,27 @@ function downloadAndExtractForge(platform, arch, tag) {
  * @param {string} options.arch - Target architecture (process.arch)
  * @param {string} options.version - Backend version (default: 'latest')
  * @param {(remoteUrl: string) => string} [options.resolveAioncoreRefs] - Git ref resolver
+ * @param {{repository: string, exactVersion?: string, expectedSourceCommit: string, expectedLineage: object, allowedRuntimeKeys: string[], requireCompleteBundle: boolean}} [options.releaseBundleContract]
  * @returns {{ prepared: true; dir: string; sourceType: string }}
  */
 function prepareAioncore(options) {
-  const { projectRoot, platform, arch, version = 'latest', resolveAioncoreRefs = listRemoteRefs } = options;
+  const {
+    projectRoot,
+    platform,
+    arch,
+    version = 'latest',
+    resolveAioncoreRefs = listRemoteRefs,
+    releaseBundleContract = getDefaultReleaseBundleContract(),
+  } = options;
   const runtimeKey = `${platform}-${arch}`;
   const actionsRunId = (process.env.AIONUI_BACKEND_RUN_ID || '').trim();
+
+  validateAioncoreReleaseBundleContract({
+    contract: releaseBundleContract,
+    platform,
+    arch,
+    requestedVersion: version,
+  });
 
   let tag = null;
   if (!actionsRunId) {
@@ -935,13 +1107,28 @@ function prepareAioncore(options) {
     const localBinaryPath = path.join(resolvedLocalBundleDir, binaryName);
     const localLineagePath = path.join(resolvedLocalBundleDir, 'migration-lineage.json');
     const localManagedResourcesDir = path.join(resolvedLocalBundleDir, 'managed-resources');
-    if (
-      fs.existsSync(resolvedLocalBundleDir) &&
-      fs.statSync(resolvedLocalBundleDir).isDirectory() &&
-      fs.existsSync(localBinaryPath) &&
-      fs.existsSync(localManagedResourcesDir)
-    ) {
-      assertAcceptedMigrationLineageFile(localLineagePath, `local bundle ${resolvedLocalBundleDir}`);
+    const localBundleExists =
+      fs.existsSync(resolvedLocalBundleDir) && fs.statSync(resolvedLocalBundleDir).isDirectory();
+    const releaseBundle = localBundleExists
+      ? verifyCompleteBundleIfPresent({
+          bundleDir: resolvedLocalBundleDir,
+          platform,
+          arch,
+          version: tag || version,
+          bundleContract: releaseBundleContract,
+          allowDesktopManifest: false,
+        })
+      : null;
+    const legacyBundleIsComplete =
+      localBundleExists && fs.existsSync(localBinaryPath) && fs.existsSync(localManagedResourcesDir);
+    if (releaseBundle || legacyBundleIsComplete) {
+      if (!releaseBundle) {
+        assertAcceptedMigrationLineageFile(
+          localLineagePath,
+          `local bundle ${resolvedLocalBundleDir}`,
+          releaseBundleContract.expectedLineage
+        );
+      }
       copyDirectorySafe(resolvedLocalBundleDir, targetDir);
       ensureExecutableMode(targetBinaryPath);
       const manifest = buildBundleManifest({
@@ -950,9 +1137,20 @@ function prepareAioncore(options) {
         version: tag || (actionsRunId ? `actions-run-${actionsRunId}` : 'local-bundle'),
         sourceType: 'local-bundle',
         source: { path: resolvedLocalBundleDir },
+        expectedLineage: releaseBundleContract.expectedLineage,
       });
       writeJson(path.join(targetDir, 'manifest.json'), manifest);
-      verifyPreparedAioncoreBundle(projectRoot, platform, arch);
+      if (releaseBundle) {
+        verifyCompleteBundleIfPresent({
+          bundleDir: targetDir,
+          platform,
+          arch,
+          version: releaseBundle.manifest.version,
+          bundleContract: releaseBundleContract,
+          allowDesktopManifest: true,
+        });
+      }
+      verifyPreparedAioncoreBundle(projectRoot, platform, arch, releaseBundleContract.expectedLineage);
       console.log(`  Using local aioncore bundle: ${resolvedLocalBundleDir}`);
       return { prepared: true, dir: targetDir, sourceType: 'local-bundle' };
     }
@@ -961,15 +1159,26 @@ function prepareAioncore(options) {
 
   let sourcePath = null;
   let sourceLineagePath = null;
+  let sourceBundleDir = null;
+  let sourceReleaseManifest = null;
   let sourceType = 'none';
   let sourceDetail = {};
   let tempDir = null;
 
   // 1. Download from GitHub Actions artifacts when manual build run id is provided.
   if (actionsRunId) {
-    const result = downloadAndExtractActionsArtifact(platform, arch, actionsRunId, resolveAioncoreRefs);
+    const result = downloadAndExtractActionsArtifact(
+      platform,
+      arch,
+      actionsRunId,
+      version,
+      releaseBundleContract,
+      resolveAioncoreRefs
+    );
     sourcePath = result.binaryPath;
     sourceLineagePath = result.lineagePath;
+    sourceBundleDir = result.bundleDir;
+    sourceReleaseManifest = result.releaseManifest;
     tempDir = result.tempDir;
     sourceType = 'actions-artifact';
     sourceDetail = {
@@ -986,17 +1195,21 @@ function prepareAioncore(options) {
   if (!sourcePath && tag) {
     try {
       if (aioncoreSource === 'forge') {
-        const result = downloadAndExtractForge(platform, arch, tag);
+        const result = downloadAndExtractForge(platform, arch, tag, releaseBundleContract);
         sourcePath = result.binaryPath;
         sourceLineagePath = result.lineagePath;
+        sourceBundleDir = result.bundleDir;
+        sourceReleaseManifest = result.releaseManifest;
         tempDir = result.tempDir;
         sourceType = 'forge-signed';
         sourceDetail = { url: result.url, ownerRepo: result.ownerRepo, forgeTag: result.forgeTag };
         console.log(`  Downloaded and cosign-verified from Forge mirror`);
       } else {
-        const result = downloadAndExtract(platform, arch, tag);
+        const result = downloadAndExtract(platform, arch, tag, releaseBundleContract);
         sourcePath = result.binaryPath;
         sourceLineagePath = result.lineagePath;
+        sourceBundleDir = result.bundleDir;
+        sourceReleaseManifest = result.releaseManifest;
         tempDir = result.tempDir;
         sourceType = 'download';
         sourceDetail = { url: result.url };
@@ -1014,6 +1227,11 @@ function prepareAioncore(options) {
   }
 
   // 3. Use an explicitly supplied local cache when network download is unavailable.
+  if (!sourcePath && releaseBundleContract.requireCompleteBundle) {
+    throw makeIntegrityError(
+      'AionCore strict release bundle could not be verified. Refusing local-binary fallback and managed-resource regeneration.'
+    );
+  }
   if (!sourcePath) {
     const localBinary = (process.env.AIONUI_BACKEND_LOCAL_BINARY || '').trim();
     if (localBinary) {
@@ -1028,7 +1246,8 @@ function prepareAioncore(options) {
         const resolvedLocalLineage = path.resolve(localLineage);
         sourceLineagePath = assertAcceptedMigrationLineageFile(
           resolvedLocalLineage,
-          `local binary ${resolvedLocalBinary}`
+          `local binary ${resolvedLocalBinary}`,
+          releaseBundleContract.expectedLineage
         );
         sourcePath = resolvedLocalBinary;
         sourceType = 'local-binary';
@@ -1045,10 +1264,16 @@ function prepareAioncore(options) {
     if (!sourceLineagePath) {
       throw makeIntegrityError(`AionCore source ${sourceType} did not provide migration-lineage.json.`);
     }
-    copyFileSafe(sourcePath, targetBinaryPath);
-    copyFileSafe(sourceLineagePath, path.join(targetDir, 'migration-lineage.json'));
+    let bundledManagedResourcesDir;
+    if (sourceBundleDir) {
+      copyDirectorySafe(sourceBundleDir, targetDir);
+      bundledManagedResourcesDir = path.join(targetDir, 'managed-resources');
+    } else {
+      copyFileSafe(sourcePath, targetBinaryPath);
+      copyFileSafe(sourceLineagePath, path.join(targetDir, 'migration-lineage.json'));
+      bundledManagedResourcesDir = prepareManagedResources(targetBinaryPath, targetDir);
+    }
     ensureExecutableMode(targetBinaryPath);
-    const bundledManagedResourcesDir = prepareManagedResources(targetBinaryPath, targetDir);
 
     // The release tag is the authoritative version — the aioncore
     // binary does not expose a --version flag (it has --app-version which
@@ -1059,10 +1284,21 @@ function prepareAioncore(options) {
       version: tag || `actions-run-${actionsRunId}`,
       sourceType,
       source: sourceDetail,
+      expectedLineage: releaseBundleContract.expectedLineage,
     });
 
     writeJson(path.join(targetDir, 'manifest.json'), manifest);
-    verifyPreparedAioncoreBundle(projectRoot, platform, arch);
+    if (sourceReleaseManifest) {
+      verifyCompleteBundleIfPresent({
+        bundleDir: targetDir,
+        platform,
+        arch,
+        version: sourceReleaseManifest.version,
+        bundleContract: releaseBundleContract,
+        allowDesktopManifest: true,
+      });
+    }
+    verifyPreparedAioncoreBundle(projectRoot, platform, arch, releaseBundleContract.expectedLineage);
     console.log(
       `  Bundled aioncore prepared: resources/bundled-aioncore/${runtimeKey}/${binaryName} [source=${sourceType}]`
     );
@@ -1081,6 +1317,7 @@ module.exports = {
   assertHttpsUrl,
   computeSha256,
   cosign,
+  getDefaultReleaseBundleContract,
   getActionsArtifactMissingMessage,
   getActionsArtifactName,
   getAioncoreSource,

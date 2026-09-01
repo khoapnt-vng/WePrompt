@@ -107,7 +107,16 @@ function readManifest(manifestPath) {
   }
 }
 
-function verifyBundleManifest(baseDir, runtimeKey, electronPlatformName, targetArch, checked, missing, failures) {
+function verifyBundleManifest(
+  baseDir,
+  runtimeKey,
+  electronPlatformName,
+  targetArch,
+  expectedMigrationLineage,
+  checked,
+  missing,
+  failures
+) {
   const relativePath = bundledPath(runtimeKey, 'manifest.json');
   const manifestPath = path.join(baseDir, 'manifest.json');
   checked.push(relativePath);
@@ -146,7 +155,7 @@ function verifyBundleManifest(baseDir, runtimeKey, electronPlatformName, targetA
     );
   }
 
-  const expectedLineage = getAcceptedMigrationLineageManifest();
+  const expectedLineage = getMigrationLineageManifest(expectedMigrationLineage);
   if (!isDeepStrictEqual(manifest.migrationLineage, expectedLineage)) {
     addFailure(failures, missing, {
       component: 'migration-lineage',
@@ -157,14 +166,18 @@ function verifyBundleManifest(baseDir, runtimeKey, electronPlatformName, targetA
 }
 
 function getAcceptedMigrationLineageManifest() {
+  return getMigrationLineageManifest(acceptedMigrationLineage);
+}
+
+function getMigrationLineageManifest(migrationLineage) {
   return {
-    ...acceptedMigrationLineage,
-    entries: acceptedMigrationLineage.entries.map((entry) => ({ ...entry })),
+    ...migrationLineage,
+    entries: migrationLineage.entries.map((entry) => ({ ...entry })),
     file: 'migration-lineage.json',
   };
 }
 
-function verifyMigrationLineage(baseDir, runtimeKey, checked, missing, failures) {
+function verifyMigrationLineage(baseDir, runtimeKey, expectedMigrationLineage, checked, missing, failures) {
   const relativePath = bundledPath(runtimeKey, 'migration-lineage.json');
   const lineagePath = path.join(baseDir, 'migration-lineage.json');
   checked.push(relativePath);
@@ -185,7 +198,7 @@ function verifyMigrationLineage(baseDir, runtimeKey, checked, missing, failures)
     return;
   }
 
-  if (!isDeepStrictEqual(document, acceptedMigrationLineage)) {
+  if (!isDeepStrictEqual(document, expectedMigrationLineage)) {
     addFailure(failures, missing, {
       component: 'migration-lineage',
       reason: 'lineage_mismatch',
@@ -851,7 +864,12 @@ function verifyManagedResourcesContract(managedRootInfo, runtimeKey, checked, mi
   addSchemaFailure(failures, missing, runtimeKey, 'managed-resources', 'unsupported_schema_version');
 }
 
-function verifyBundledAioncoreResources({ resourcesDir, electronPlatformName, targetArch }) {
+function verifyBundledAioncoreResources({
+  resourcesDir,
+  electronPlatformName,
+  targetArch,
+  expectedMigrationLineage = acceptedMigrationLineage,
+}) {
   const runtimeKey = `${electronPlatformName}-${targetArch}`;
   const baseDir = path.join(resourcesDir, 'bundled-aioncore', runtimeKey);
   const checked = [];
@@ -859,8 +877,17 @@ function verifyBundledAioncoreResources({ resourcesDir, electronPlatformName, ta
   const failures = [];
 
   requireRelativePath(baseDir, runtimeKey, [backendBinaryName(electronPlatformName)], checked, missing, failures);
-  verifyBundleManifest(baseDir, runtimeKey, electronPlatformName, targetArch, checked, missing, failures);
-  verifyMigrationLineage(baseDir, runtimeKey, checked, missing, failures);
+  verifyBundleManifest(
+    baseDir,
+    runtimeKey,
+    electronPlatformName,
+    targetArch,
+    expectedMigrationLineage,
+    checked,
+    missing,
+    failures
+  );
+  verifyMigrationLineage(baseDir, runtimeKey, expectedMigrationLineage, checked, missing, failures);
   requireRelativeDirectory(baseDir, runtimeKey, ['managed-resources'], checked, missing, failures);
   const managedRootInfo = inspectManagedResourcesRoot(baseDir, runtimeKey, missing, failures);
   if (managedRootInfo) verifyManagedResourcesContract(managedRootInfo, runtimeKey, checked, missing, failures);
