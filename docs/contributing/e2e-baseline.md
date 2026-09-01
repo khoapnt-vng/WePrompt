@@ -215,6 +215,61 @@ stable.
 
 ---
 
+## Per-file isolation works, and batch curation does not
+
+Contamination cannot be worked around by picking a green subset. Twenty-nine files were clean in both
+full runs; run as one batch they produced a failure, and removing the offending file produced a
+_different_ failure. The composition of a batch determines its own results, so any hand-picked list
+goes red the moment a spec is added or removed.
+
+Running each file in its own process fixes it by construction — a fresh Electron instance per file,
+nothing to leak:
+
+| Approach                            | Result                          | Wall clock |
+| ----------------------------------- | ------------------------------- | ---------- |
+| 29 files as one batch               | 1 failed                        | 2 min      |
+| 28 files as one batch (one removed) | 1 failed — **a different test** | 2 min      |
+| **29 files, one process each**      | **29 green, 0 red**             | **5 min**  |
+
+`just e2e-isolated [DIR]` does this and reports per-file green/red. Three extra minutes buys a result
+that is stable under edits and names the file that is actually broken instead of the one that happened
+to run after it.
+
+Note also that contamination runs **both** directions. `features/settings/skills/edge-cases.e2e.ts`
+passed in both full runs and failed in the batch — it _depends_ on state an earlier spec creates. Its
+assertion is a negative one ("should not show custom external source tab"), so in the full suite it
+passed because the thing was absent rather than because absence was verified.
+
+## Blocker: e2e cannot run in CI until the backend is provisioned
+
+**The one e2e workflow that exists cannot pass as written.** `pr-e2e-artifacts.yml` runs on
+`ubuntu-latest` with `E2E_DEV: '1'` and provisions no backend. `resolveDevBackendBinary()`
+(`tests/e2e/fixtures.ts:208-225`) **throws** unless it finds a binary at one of five locations:
+`AIONUI_BACKEND_BINARY`, `AIONUI_BACKEND_BIN`, `../aionCore/target/debug`, `../aionCore/target/release`,
+or `~/.cargo/bin`. A fresh CI checkout has none of them, so every test dies at launch.
+
+`postinstall.js` does not help — it explicitly skips its work under CI, and it concerns electron
+rebuilds rather than the backend. The binary `prepare-aioncore.js` produces lands in
+`resources/bundled-aioncore/<runtimeKey>/`, which is **not** among the five candidates.
+
+That workflow is `workflow_dispatch`-only and has evidently never been dispatched, which is why nobody
+has hit this.
+
+**Adding a `pull_request:` trigger is therefore not the fix, and adding one now would make every PR
+red.** Three options, in the order I would try them:
+
+1. **Point `AIONUI_BACKEND_BINARY` at a prepared bundle.** `prepare-aioncore.js` already produces one;
+   this may be a prepare step plus one env var. It also tests against the _pinned_ backend rather than
+   whatever is on a developer's machine, which removes the reproducibility caveat recorded above.
+2. **Add the bundled path as a fifth candidate** in `resolveDevBackendBinary()` so local and CI resolve
+   identically.
+3. Build aioncore from source in CI — slow, and it puts a Rust toolchain on a JS repo's PR path.
+
+This is artifact/release territory and needs an owner decision, so it is recorded here rather than
+acted on.
+
+---
+
 ## Reproducing this
 
 ```bash

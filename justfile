@@ -429,6 +429,26 @@ e2e-studio:
 e2e-smoke:
     bunx playwright test --config playwright.config.ts tests/e2e/specs/window-controls.e2e.ts
 
+# Each spec gets a fresh Electron instance, so no spec can contaminate another. This
+# matters: the suite shares one app instance, and the same file can pass alone and fail
+# in a batch -- and changing the batch changes which one fails. Measured 29/29 green in
+# 5 minutes this way versus 1 failure batched. See docs/contributing/e2e-baseline.md.
+# Run each E2E spec in its own process and report per-file green/red
+e2e-isolated DIR="tests/e2e":
+    #!/usr/bin/env bash
+    set -uo pipefail
+    pass=0; fail=0; red=()
+    while IFS= read -r spec; do
+      if bunx playwright test --config playwright.config.ts "$spec" --reporter=dot >/dev/null 2>&1; then
+        pass=$((pass+1)); printf '.'
+      else
+        fail=$((fail+1)); red+=("$spec"); printf 'F'
+      fi
+    done < <(find {{DIR}} -name '*.e2e.ts' | sort)
+    printf '\n%s green, %s red\n' "$pass" "$fail"
+    for spec in "${red[@]:-}"; do [ -n "$spec" ] && echo "  red: $spec"; done
+    [ "$fail" -eq 0 ]
+
 # Open Playwright HTML report after test run
 e2e-report:
     bunx playwright show-report tests/e2e/report
