@@ -120,6 +120,7 @@ const command = async <T>(
   try {
     return { ok: true, data: await operation() };
   } catch (error) {
+    console.error('[CreativeStudioPilotBridge] command failed:', error);
     return {
       ok: false,
       error: {

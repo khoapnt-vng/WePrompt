@@ -201,4 +201,33 @@ describe('Pilot Director rail', () => {
     render(<PilotDirectorRail projectId='project_1' client={client(supported(null)) as never} />);
     await waitFor(() => expect(screen.getByText('failed')).toBeVisible());
   });
+
+  it('logs the bounded Main error code when Director attachment fails', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    mocks.getServer.mockResolvedValueOnce({ ok: false, error: { code: 'storage_error' } });
+
+    render(<PilotDirectorRail projectId='project_1' client={client(supported(null)) as never} />);
+
+    await waitFor(() =>
+      expect(errorLog).toHaveBeenCalledWith(
+        '[PilotDirectorRail] Director attachment failed:',
+        expect.objectContaining({ message: 'director_descriptor_failed:storage_error' })
+      )
+    );
+    errorLog.mockRestore();
+  });
+
+  it('names a missing persisted Director instead of silently collapsing it', async () => {
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(<PilotDirectorRail projectId='project_1' client={client(supported('conversation_missing')) as never} />);
+
+    await waitFor(() =>
+      expect(errorLog).toHaveBeenCalledWith(
+        '[PilotDirectorRail] Director attachment failed:',
+        expect.objectContaining({ message: 'director_bound_conversation_missing' })
+      )
+    );
+    errorLog.mockRestore();
+  });
 });

@@ -135,5 +135,7 @@ export const installSessionMcpTrustKeyProvider = (provider: () => string): (() =
 /** Mint a claim with the currently running backend's Main-only key. */
 export const createSessionMcpTrustClaim = (server: ISessionMcpServer): ISessionMcpTrustClaim => {
   if (trustKeyProvider === null) throw new Error('session_mcp_trust_key_unavailable');
-  return mintSessionMcpTrustClaim(server, trustKeyProvider());
+  const encodedKey = trustKeyProvider();
+  if (typeof encodedKey !== 'string') throw new Error('session_mcp_trust_key_unavailable');
+  return mintSessionMcpTrustClaim(server, encodedKey);
 };

@@ -116,4 +116,13 @@ describe('session MCP trust claims', () => {
     }
     expect(() => createSessionMcpTrustClaim(goldenServer())).toThrow('session_mcp_trust_key_unavailable');
   });
+
+  it('fails closed with the named error when the installed provider has no key', () => {
+    const uninstall = installSessionMcpTrustKeyProvider(() => undefined as never);
+    try {
+      expect(() => createSessionMcpTrustClaim(goldenServer())).toThrow('session_mcp_trust_key_unavailable');
+    } finally {
+      uninstall();
+    }
+  });
 });

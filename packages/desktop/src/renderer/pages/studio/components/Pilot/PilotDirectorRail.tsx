@@ -21,7 +21,7 @@ import {
   STUDIO_PILOT_ENV,
   type StudioPilotDirectorSessionAuthorityV3,
 } from '@/common/types/project/creativeStudioPilotMcpEnv';
-import type { StudioProjectLoadResultV3 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioPilotCommandResultV3, StudioProjectLoadResultV3 } from '@/common/types/project/creativeStudioTypes';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
 import AionrsChat from '@/renderer/pages/conversation/platforms/aionrs/AionrsChat';
@@ -126,6 +126,13 @@ const isDirectorConversation = (
   value.type === 'aionrs' &&
   value.extra.studio_project_id === projectId &&
   (conversationId === undefined || conversationId === null || value.id === conversationId);
+const commandFailureCode = <T,>(result: StudioPilotCommandResultV3<T>): string =>
+  (result as Extract<StudioPilotCommandResultV3<T>, { ok: false }>).error.code;
+const commandFailure = <T,>(stage: string, result: StudioPilotCommandResultV3<T>): Error =>
+  new Error(`${stage}:${commandFailureCode(result)}`);
+const reportDirectorFailure = (error: unknown): void => {
+  console.error('[PilotDirectorRail] Director attachment failed:', error);
+};
 
 const ConversationSurface: React.FC<{ conversation: DirectorConversation }> = ({ conversation }) => {
   const onSelectModel = useCallback(
@@ -174,7 +181,8 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
       try {
         const next = await client.loadProjectV3(projectId);
         if (active && next.status === 'supported') setProject(next);
-      } catch {
+      } catch (error) {
+        reportDirectorFailure(error);
         if (active) setError(true);
       }
     };
@@ -195,6 +203,7 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
     if (bound !== null) {
       const existing = allConversations.find((candidate) => isDirectorConversation(candidate, projectId, bound));
       if (existing === undefined) {
+        reportDirectorFailure(new Error('director_bound_conversation_missing'));
         setConversation(null);
         setError(true);
         return;
@@ -202,23 +211,27 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
       void Promise.all([
         ipcBridge.creativeStudioPilot.getDirectorSessionServer.invoke({ projectId }),
         ipcBridge.creativeStudioPilot.getDirectorSessionAuthority.invoke({ projectId }),
-      ]).then(([descriptorResult, authorityResult]) => {
-        if (
-          descriptorResult.ok &&
-          authorityResult.ok &&
-          hasExactConversationAuthority(
-            existing,
-            projectId,
-            authorityResult.data,
-            descriptorResult.data.server,
-            descriptorResult.data.serverFingerprint
-          )
-        ) {
+      ])
+        .then(([descriptorResult, authorityResult]) => {
+          if (!descriptorResult.ok) throw commandFailure('director_descriptor_failed', descriptorResult);
+          if (!authorityResult.ok) throw commandFailure('director_authority_failed', authorityResult);
+          if (
+            !hasExactConversationAuthority(
+              existing,
+              projectId,
+              authorityResult.data,
+              descriptorResult.data.server,
+              descriptorResult.data.serverFingerprint
+            )
+          ) {
+            throw new Error('director_existing_authority_failed');
+          }
           setConversation(existing);
-        } else {
+        })
+        .catch((error) => {
+          reportDirectorFailure(error);
           setError(true);
-        }
-      });
+        });
       return;
     }
     const createAndBind = async (
@@ -262,7 +275,7 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
         expectedAuthoringRevision: project.canvas.authoringRevision,
         conversationId: created.id,
       });
-      if (!binding.ok) throw new Error('director_binding_failed');
+      if (!binding.ok) throw commandFailure('director_binding_failed', binding);
       seedOpeningTurn(created.id, project.director.brief);
       setConversation(created);
     };
@@ -275,7 +288,8 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
         ipcBridge.creativeStudioPilot.getDirectorSessionAuthority.invoke({ projectId }),
       ])
         .then(async ([descriptorResult, authorityResult]) => {
-          if (!descriptorResult.ok || !authorityResult.ok) throw new Error('director_claimant_authority_failed');
+          if (!descriptorResult.ok) throw commandFailure('director_claimant_descriptor_failed', descriptorResult);
+          if (!authorityResult.ok) throw commandFailure('director_claimant_authority_failed', authorityResult);
           const trustedClaimants = claimants.filter((claimant) =>
             hasExactConversationAuthority(
               claimant,
@@ -306,10 +320,13 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
             expectedAuthoringRevision: project.canvas.authoringRevision,
             conversationId: claimant.id,
           });
-          if (!binding.ok) throw new Error('director_binding_failed');
+          if (!binding.ok) throw commandFailure('director_binding_failed', binding);
           setConversation(claimant);
         })
-        .catch(() => setError(true))
+        .catch((error) => {
+          reportDirectorFailure(error);
+          setError(true);
+        })
         .finally(() => {
           starting.current = false;
         });
@@ -320,9 +337,9 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
     void ipcBridge.creativeStudioPilot.getDirectorSessionServer
       .invoke({ projectId })
       .then(async (descriptorResult) => {
-        if (!descriptorResult.ok) throw new Error('director_descriptor_failed');
+        if (!descriptorResult.ok) throw commandFailure('director_descriptor_failed', descriptorResult);
         const authorityResult = await ipcBridge.creativeStudioPilot.getDirectorSessionAuthority.invoke({ projectId });
-        if (!authorityResult.ok) throw new Error('director_authority_failed');
+        if (!authorityResult.ok) throw commandFailure('director_authority_failed', authorityResult);
         await createAndBind(
           descriptorResult.data.server,
           descriptorResult.data.serverFingerprint,
@@ -330,7 +347,10 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
           authorityResult.data
         );
       })
-      .catch(() => setError(true))
+      .catch((error) => {
+        reportDirectorFailure(error);
+        setError(true);
+      })
       .finally(() => {
         starting.current = false;
       });

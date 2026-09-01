@@ -375,4 +375,17 @@ describe('Creative Studio Pilot bridge', () => {
     });
     expect(getRuntime).not.toHaveBeenCalled();
   });
+
+  it('logs an unexpected Main failure before returning its sanitized envelope', async () => {
+    const failure = new Error('provider body and local path');
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const entryPoint = makeEntryPoint();
+    entryPoint.loadProjectV3.mockRejectedValue(failure);
+    initCreativeStudioPilotBridgeV3({ isFeatureEnabled: () => true, getRuntime: () => ({ entryPoint }) as never });
+
+    await mocks.handlers.get('loadProject')?.({ projectId: 'project_1' });
+
+    expect(errorLog).toHaveBeenCalledWith('[CreativeStudioPilotBridge] command failed:', failure);
+    errorLog.mockRestore();
+  });
 });
