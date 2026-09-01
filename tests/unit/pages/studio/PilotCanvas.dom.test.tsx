@@ -622,6 +622,42 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
     expect(board.children[2]).toHaveTextContent('#second');
   });
 
+  it.each([1, 2, 3])('selects the generous density band for %s visible blocks', async (blockCount) => {
+    const pieces = Array.from({ length: blockCount }, (_, index) => pendingPiece(`piece_${index}`, `piece_${index}`));
+    const client = makeClient(supportedProject({ pieces }));
+    renderEnglish(<PilotCanvas projectId='project_1' client={client} />);
+
+    const board = await screen.findByRole('region', { name: 'Photo Pieces' });
+    expect(board).toHaveAttribute('data-pilot-density', '1-3');
+    expect(board.children).toHaveLength(blockCount);
+  });
+
+  it('keeps the status chip and footer action visible in the generous band', async () => {
+    const client = makeClient(supportedProject({ pieces: [pendingPiece('piece_1', 'one_photo')] }));
+    renderEnglish(<PilotCanvas projectId='project_1' client={client} />);
+
+    const board = await screen.findByRole('region', { name: 'Photo Pieces' });
+    expect(within(board).getByText('Failed')).toBeVisible();
+    expect(within(board).getByRole('button', { name: 'Rename Piece' })).toBeVisible();
+  });
+
+  it('ends the generous band at four blocks without quietening a spend decision', async () => {
+    const quote = preparedQuote({
+      targetPieceId: 'piece_future',
+      orderIndex: 3,
+      spendPolicyClassification: 'over_cap',
+      requiresExplicitHumanAction: true,
+    });
+    const pieces = Array.from({ length: 3 }, (_, index) => pendingPiece(`piece_${index}`, `piece_${index}`));
+    const client = makeClient(supportedProject({ pieces, quotes: [quote] }));
+    renderEnglish(<PilotCanvas projectId='project_1' client={client} />);
+
+    const board = await screen.findByRole('region', { name: 'Photo Pieces' });
+    expect(board).not.toHaveAttribute('data-pilot-density');
+    expect(board.children).toHaveLength(4);
+    expect(screen.getByRole('button', { name: 'Confirm and create photo' })).toBeVisible();
+  });
+
   it.each([
     {
       code: 'route_catalog_unavailable',

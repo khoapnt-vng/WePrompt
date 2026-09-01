@@ -157,6 +157,33 @@ test.describe.serial('Creative Studio schema-6 Pilot', () => {
     const piece = page.getByRole('article').filter({ has: current });
     await expect(piece.getByRole('region', { name: /Provenance for/ })).toContainText('Generated');
 
+    const board = page.getByRole('region', { name: 'Photo Pieces' });
+    await expect(board).toHaveAttribute('data-pilot-density', '1-3');
+    const geometry = await board.evaluate((element) => {
+      const boardStyle = getComputedStyle(element);
+      const boardRect = element.getBoundingClientRect();
+      const canvas = element.parentElement;
+      if (canvas === null) throw new Error('Pilot board has no canvas parent');
+      const canvasStyle = getComputedStyle(canvas);
+      const canvasRect = canvas.getBoundingClientRect();
+      const canvasInlineStart = canvasRect.left + Number.parseFloat(canvasStyle.paddingLeft);
+      const canvasInlineEnd = canvasRect.right - Number.parseFloat(canvasStyle.paddingRight);
+      const canvasContentWidth = canvasInlineEnd - canvasInlineStart;
+      return {
+        maxInlineSize: boardStyle.maxInlineSize,
+        width: boardRect.width,
+        inlineCenterDelta: Math.abs((boardRect.left + boardRect.right) / 2 - (canvasInlineStart + canvasInlineEnd) / 2),
+        paddingBlockStart: Number.parseFloat(boardStyle.paddingBlockStart),
+        paddingBlockEnd: Number.parseFloat(boardStyle.paddingBlockEnd),
+        expectedPadding: canvasContentWidth * 0.15,
+      };
+    });
+    expect(geometry.maxInlineSize).toBe('900px');
+    expect(geometry.width).toBeLessThanOrEqual(900.5);
+    expect(geometry.inlineCenterDelta).toBeLessThan(1);
+    expect(Math.abs(geometry.paddingBlockStart - geometry.expectedPadding)).toBeLessThan(1);
+    expect(Math.abs(geometry.paddingBlockEnd - geometry.expectedPadding)).toBeLessThan(1);
+
     const rename = piece.getByRole('button', { name: 'Rename Piece' });
     await rename.click();
     const renameInput = piece.getByRole('textbox', { name: /Rename #/ });

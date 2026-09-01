@@ -1339,7 +1339,11 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
       )}
 
       {project !== null && (quotes.length > 0 || project.canvas.pieces.length > 0) && (
-        <section className={styles.board} aria-label={t(`${PILOT_I18N_ROOT}.canvas.boardAccessible`)}>
+        <section
+          className={styles.board}
+          aria-label={t(`${PILOT_I18N_ROOT}.canvas.boardAccessible`)}
+          data-pilot-density={boardItems.length <= 3 ? '1-3' : undefined}
+        >
           {boardItems.map((item) =>
             item.kind === 'quote' ? (
               <QuoteCard key={item.key} quote={item.quote} busy={busy} onConfirm={confirm} onDiscard={discard} />

@@ -64,6 +64,13 @@
   gap: 20px;
 }
 
+.board[data-pilot-density='1-3'] {
+  inline-size: 100%;
+  max-inline-size: 900px;
+  margin-inline: auto;
+  padding-block: 15%;
+}
+
 .composer,
 .quote,
 .piece {
