@@ -27,6 +27,24 @@ function mapPreviewHistoryTarget(target: Record<string, unknown> | undefined): R
  * to the legacy IPC bridge.
  */
 export const HTTP_ROUTES: Record<string, HttpRoute> = {
+  // Extensions moved to AionCore HTTP with the production renderer. Keep the
+  // E2E helper on that same boundary instead of falling through to Electron's
+  // native-provider allowlist, where these intentionally non-native keys are
+  // refused.
+  'extensions.get-loaded-extensions': { method: 'GET', path: '/api/extensions' },
+  'extensions.get-themes': { method: 'GET', path: '/api/extensions/themes' },
+  'extensions.get-assistants': { method: 'GET', path: '/api/extensions/assistants' },
+  'extensions.get-agents': { method: 'GET', path: '/api/extensions/agents' },
+  'extensions.get-acp-adapters': { method: 'GET', path: '/api/extensions/acp-adapters' },
+  'extensions.get-mcp-servers': { method: 'GET', path: '/api/extensions/mcp-servers' },
+  'extensions.get-skills': { method: 'GET', path: '/api/extensions/skills' },
+  'extensions.get-settings-tabs': { method: 'GET', path: '/api/extensions/settings-tabs' },
+  'extensions.get-webui-contributions': { method: 'GET', path: '/api/extensions/webui' },
+  'extensions.get-agent-activity-snapshot': { method: 'GET', path: '/api/extensions/agent-activity' },
+  'extensions.get-permissions': { method: 'POST', path: '/api/extensions/permissions' },
+  'extensions.get-risk-level': { method: 'POST', path: '/api/extensions/risk-level' },
+  'extensions.enable': { method: 'POST', path: '/api/extensions/enable' },
+  'extensions.disable': { method: 'POST', path: '/api/extensions/disable' },
   'cron.list-jobs': {
     method: 'GET',
     path: '/api/cron/jobs',
