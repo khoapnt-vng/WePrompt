@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const harness = vi.hoisted(() => ({
   activeId: 'conversation-1' as string | undefined,
+  pathname: undefined as string | undefined,
   activeCompletion: undefined as { completedAt: number; seenAt?: number } | undefined,
   markCompletionSeen: vi.fn(),
   refreshConversationRuntime: vi.fn(),
@@ -19,7 +20,7 @@ const harness = vi.hoisted(() => ({
 }));
 
 vi.mock('react-router-dom', () => ({
-  useParams: () => ({ id: harness.activeId }),
+  useLocation: () => ({ pathname: harness.pathname ?? (harness.activeId ? `/conversation/${harness.activeId}` : '/') }),
 }));
 
 vi.mock('@/renderer/hooks/context/ConversationHistoryContext', () => ({
@@ -72,6 +73,7 @@ const projectTimeline = (): TimelineSection[] => [
 describe('useConversations completion state', () => {
   beforeEach(() => {
     harness.activeId = 'conversation-1';
+    harness.pathname = undefined;
     harness.activeCompletion = undefined;
     harness.markCompletionSeen.mockReset();
     harness.refreshConversationRuntime.mockReset();
@@ -101,6 +103,15 @@ describe('useConversations completion state', () => {
     harness.activeCompletion = { completedAt: 1_000, seenAt: 1_500 };
     renderHook(() => useConversations());
 
+    expect(harness.markCompletionSeen).not.toHaveBeenCalled();
+  });
+
+  it('does not query a Studio project id as a conversation id', () => {
+    harness.pathname = '/studio/project_1';
+
+    renderHook(() => useConversations());
+
+    expect(harness.refreshConversationRuntime).not.toHaveBeenCalled();
     expect(harness.markCompletionSeen).not.toHaveBeenCalled();
   });
 

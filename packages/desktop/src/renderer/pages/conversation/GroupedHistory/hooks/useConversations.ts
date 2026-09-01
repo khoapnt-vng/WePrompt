@@ -6,7 +6,7 @@
 
 import type { TChatConversation } from '@/common/config/storage';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useParams } from 'react-router-dom';
+import { useLocation } from 'react-router-dom';
 import { useConversationHistoryContext } from '@/renderer/hooks/context/ConversationHistoryContext';
 import type { TimelineSection } from '../types';
 import {
@@ -57,7 +57,8 @@ const locateConversation = (
 export const useConversations = () => {
   const [expandedWorkspaces, setExpandedWorkspaces] = useState<string[]>(() => readExpandedWorkspaces());
   const [collapsedSections, setCollapsedSections] = useState<Set<string>>(() => readCollapsedSections());
-  const { id } = useParams();
+  const { pathname } = useLocation();
+  const id = pathname.match(/^\/conversation\/([^/]+)/u)?.[1];
   const {
     conversations,
     hasLoadedConversations,
