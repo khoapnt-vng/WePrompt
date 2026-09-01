@@ -179,6 +179,16 @@ function strictFixtureContract() {
   };
 }
 
+function legacyFixtureContract(allowedRuntimeKeys: string[]) {
+  return {
+    repository: AIONCORE_RELEASE_REPOSITORY,
+    expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+    expectedLineage: acceptedMigrationLineage,
+    allowedRuntimeKeys,
+    requireCompleteBundle: false,
+  };
+}
+
 function verifyReleaseFixture(
   root: string,
   overrides: Partial<{
@@ -417,15 +427,16 @@ describe('prepare-aioncore local bundle input', () => {
     }
   );
 
-  it('keeps the default legacy contract on all six existing targets without an exact-version cutover', () => {
+  it('requires the exact complete v0.1.55 bundle on the two approved release targets', () => {
     const contract = getDefaultReleaseBundleContract();
 
     expect(contract).toEqual({
       repository: 'khoapnt-vng/aioncore',
+      exactVersion: '0.1.55',
       expectedLineage: acceptedMigrationLineage,
       expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
-      allowedRuntimeKeys: ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64', 'win32-arm64', 'win32-x64'],
-      requireCompleteBundle: false,
+      allowedRuntimeKeys: ['darwin-arm64', 'win32-x64'],
+      requireCompleteBundle: true,
     });
   });
 
@@ -472,7 +483,7 @@ describe('prepare-aioncore local bundle input', () => {
           version: 'latest',
           releaseBundleContract: {
             repository: AIONCORE_RELEASE_REPOSITORY,
-            exactVersion: '0.1.51',
+            exactVersion: '0.1.55',
             expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
             expectedLineage: acceptedMigrationLineage,
             allowedRuntimeKeys: ['win32-x64'],
@@ -512,6 +523,25 @@ describe('prepare-aioncore local bundle input', () => {
     );
     try {
       expect(() => verifyReleaseFixture(tmp)).toThrow(/SHA256SUMS mismatch: bundle-manifest\.json/);
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
+  it('accepts the Windows release checksum document with CRLF line endings', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'aionui-release-windows-checksums-'));
+    createCompleteLocalBundle(tmp, 'win32', 'x64');
+    sealReleaseBundle(tmp, 'win32', 'x64', { target: 'x86_64-pc-windows-msvc' });
+    const checksumPath = join(tmp, 'SHA256SUMS');
+    writeFileSync(checksumPath, readFileSync(checksumPath, 'utf8').replaceAll('\n', '\r\n'));
+    try {
+      expect(() =>
+        verifyReleaseFixture(tmp, {
+          platform: 'win32',
+          arch: 'x64',
+          allowedRuntimeKeys: ['win32-x64'],
+        })
+      ).not.toThrow();
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
@@ -590,6 +620,7 @@ describe('prepare-aioncore local bundle input', () => {
           platform: 'darwin',
           arch: 'arm64',
           version: 'v0.1.50',
+          releaseBundleContract: legacyFixtureContract(['darwin-arm64']),
         })
       ).toThrow(/missing a valid migration-lineage\.json/);
     } finally {
@@ -670,6 +701,7 @@ describe('prepare-aioncore local bundle input', () => {
         platform: 'darwin',
         arch: 'arm64',
         version: 'v0.1.55-appops-e582874c',
+        releaseBundleContract: legacyFixtureContract(['darwin-arm64']),
       });
 
       expect(
@@ -714,6 +746,7 @@ describe('prepare-aioncore local bundle input', () => {
           platform: 'win32',
           arch: 'x64',
           version: 'v0.1.46',
+          releaseBundleContract: legacyFixtureContract(['win32-x64']),
         })
       ).toThrow(/managed-resources\/manifest\.json/);
     } finally {
@@ -723,7 +756,7 @@ describe('prepare-aioncore local bundle input', () => {
     }
   });
 
-  it('prepares macOS ARM, macOS Intel, Windows Intel, and Windows ARM with the exact accepted lineage', () => {
+  it('preserves the exact accepted lineage across legacy local-bundle target fixtures', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aionui-lineage-targets-'));
     const targets = [
       ['darwin', 'arm64'],
@@ -745,6 +778,9 @@ describe('prepare-aioncore local bundle input', () => {
           platform,
           arch,
           version: 'v0.1.50',
+          releaseBundleContract: legacyFixtureContract(
+            targets.map(([targetPlatform, targetArch]) => `${targetPlatform}-${targetArch}`)
+          ),
         });
         const preparedRoot = join(projectRoot, 'resources', 'bundled-aioncore', runtimeKey);
         const manifest = JSON.parse(readFileSync(join(preparedRoot, 'manifest.json'), 'utf8'));

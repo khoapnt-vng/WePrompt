@@ -42,11 +42,9 @@ const GITHUB_OWNER = 'khoapnt-vng';
 const GITHUB_REPO = 'aioncore';
 const AIONCORE_PUBLISHING_REMOTE = 'https://github.com/khoapnt-vng/aioncore.git';
 
-// Target of the `v0.1.51` tag, which is the release this file's checksums pin.
-// Verified out-of-band on both hosts before use: code.vng.vn/dto/aioncore and
-// github.com/khoapnt-vng/aioncore resolve `v0.1.51^{}` to this same commit.
-// Replaces the fabricated `260dbbc05…` value (BUG-040), which existed on neither.
-const ACCEPTED_AIONCORE_SOURCE_COMMIT = 'd4d8e87714690cdb230ab7a6987de3ceacbea275';
+// Target of the annotated `v0.1.55` tag. The release workflow binds this exact
+// merged commit into every complete bundle before WePrompt verifies it again.
+const ACCEPTED_AIONCORE_SOURCE_COMMIT = 'ef6e1dd199e884fdf2df95d494b2c51b97006656';
 
 // Default Forge mirror that publishes cosign-signed, self-built AionCore
 // artifacts (see aioncore-trust.js). Overridable via env for other mirrors.
@@ -104,10 +102,11 @@ const ACTIONS_ARTIFACT_TARGETS = {
 function getDefaultReleaseBundleContract() {
   return {
     repository: AIONCORE_RELEASE_REPOSITORY,
+    exactVersion: '0.1.55',
     expectedLineage: acceptedMigrationLineage,
     expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
-    allowedRuntimeKeys: Object.keys(ACTIONS_ARTIFACT_TARGETS),
-    requireCompleteBundle: false,
+    allowedRuntimeKeys: ['darwin-arm64', 'win32-x64'],
+    requireCompleteBundle: true,
   };
 }
 

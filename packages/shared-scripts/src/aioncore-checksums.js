@@ -55,9 +55,20 @@
  * Source: https://github.com/khoapnt-vng/aioncore/releases/download/v0.1.51/aioncore-checksums.txt
  * Cross-verified: aioncore-v0.1.51-aarch64-apple-darwin.tar.gz downloaded and
  * hashed with shasum -a 256 — matched the checksums file (31387543 bytes).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * v0.1.55 (internal two-target release: khoapnt-vng/aioncore)
+ * ─────────────────────────────────────────────────────────────────────────────
+ * Source: https://github.com/khoapnt-vng/aioncore/releases/download/v0.1.55/aioncore-checksums.txt
+ * Cross-verified: both published archives were downloaded and independently
+ * hashed with shasum -a 256 — both matched the release sidecar.
  */
 
 const CHECKSUMS = {
+  'v0.1.55': {
+    'aioncore-v0.1.55-aarch64-apple-darwin.tar.gz': 'cde7f6dc21d7f3a6c6a5ee1ef16ffc401976d2b0724f3e07358cdb2f22cead5d',
+    'aioncore-v0.1.55-x86_64-pc-windows-msvc.zip': 'bca6cc3988f9f0cdef2a9f1c74c2a5f9b3091fb9920bae0b299f2a20126ee6ef',
+  },
   'v0.1.51': {
     'aioncore-v0.1.51-aarch64-apple-darwin.tar.gz': '116069dd12116c77533457b6c913d1509552f672da42e9812a711b4e013194f4',
     'aioncore-v0.1.51-aarch64-pc-windows-msvc.zip': '9b64955ff0e8601e013cc679b02102efae43f59f6ca626a6bf42bf0d3253cfa1',

@@ -9,6 +9,43 @@ pin changes, and the independent checks that connect AionCore source to packaged
 
 ---
 
+## Pilot internal-release amendment — `v0.1.55`
+
+**Date:** 2026-09-02 · **Status:** accepted for the initial Creative Studio 4 pilot only
+
+The initial pilot ships AionCore `v0.1.55` from immutable commit
+`ef6e1dd199e884fdf2df95d494b2c51b97006656` for exactly two runtimes:
+`darwin-arm64` and `win32-x64`. This amendment supersedes the older `v0.1.51` current-state
+statements below for that pilot pin; the remainder of this document is retained as the historical
+public-release contract and audit.
+
+The accepted pilot release is deliberately narrower than that public contract:
+
+- each archive is a complete bundle containing the native binary, `migration-lineage.json`,
+  `managed-resources/`, `bundle-manifest.json`, and its internal `SHA256SUMS`;
+- the manifest must name version `0.1.55`, the exact source commit above, and the matching runtime;
+- the lineage must deep-equal WePrompt's independently pinned 29-entry lineage, including migration
+  filenames;
+- both archives must be downloaded and SHA-256 hashed independently before their digests are added
+  to `aioncore-checksums.js`;
+- WePrompt accepts only the two named runtime keys and fails closed on incomplete, differently
+  versioned, differently sourced, or differently lined bundles.
+
+This is an **unsigned internal release**. It does not satisfy or waive this document's signing and
+public-distribution requirements, and it must not be represented as public macOS notarization or
+Windows signing acceptance. A later public release still requires signer provenance and packaged
+platform acceptance.
+
+Release evidence: AionCore Actions run
+[`33570043845`](https://github.com/khoapnt-vng/aioncore/actions/runs/33570043845) bound the annotated
+tag, built both targets, extracted and reverified both archives, and created the immutable release.
+An independent post-release download on 2026-09-02 calculated
+`cde7f6dc21d7f3a6c6a5ee1ef16ffc401976d2b0724f3e07358cdb2f22cead5d` for macOS ARM64 and
+`bca6cc3988f9f0cdef2a9f1c74c2a5f9b3091fb9920bae0b299f2a20126ee6ef` for Windows x64; both
+matched the release sidecar. WePrompt's release-bundle verifier then accepted both extracted
+archives against the exact source, target, 29-entry lineage, internal payload checksums, and
+managed-resource contract.
+
 ## Reading rule
 
 - **Verified current state** means the cited repository file says or enforces the claim at the

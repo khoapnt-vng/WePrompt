@@ -26,8 +26,18 @@ const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
  * the global default without re-measuring under full-suite load.
  */
 const FAKE_TOOLCHAIN_TIMEOUT_MS = 120_000;
-const publishedAioncoreRefs = 'd4d8e87714690cdb230ab7a6987de3ceacbea275\trefs/tags/v0.1.51\n';
+const publishedAioncoreRefs = 'ef6e1dd199e884fdf2df95d494b2c51b97006656\trefs/tags/v0.1.55\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
+
+function legacyFixtureContract(allowedRuntimeKeys = ['linux-x64']) {
+  return {
+    repository: 'khoapnt-vng/aioncore',
+    expectedSourceCommit: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+    expectedLineage: acceptedMigrationLineage,
+    allowedRuntimeKeys,
+    requireCompleteBundle: false,
+  };
+}
 
 function writeFile(filePath: string, contents = 'x') {
   mkdirSync(dirname(filePath), { recursive: true });
@@ -312,6 +322,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
             arch: 'x64',
             version: 'v0.1.46',
             resolveAioncoreRefs: resolvePublishedAioncoreRefs,
+            releaseBundleContract: legacyFixtureContract(),
           })
         ).toThrow(/managed-resources\/manifest\.json/);
       } finally {
@@ -344,6 +355,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
             platform: 'linux',
             arch: 'x64',
             version: 'v0.1.46',
+            releaseBundleContract: legacyFixtureContract(),
           })
         ).toThrow(/managed-resources\/manifest\.json/);
       } finally {
@@ -380,6 +392,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
             platform: 'linux',
             arch: 'x64',
             version: 'v0.1.46',
+            releaseBundleContract: legacyFixtureContract(),
           })
         ).toThrow(/managed-resources\/manifest\.json/);
       } finally {
@@ -411,6 +424,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
             platform: 'linux',
             arch: 'x64',
             version: 'v0.1.46',
+            releaseBundleContract: legacyFixtureContract(),
           })
         ).toThrow(/AIONUI_BACKEND_LOCAL_LINEAGE/);
       } finally {

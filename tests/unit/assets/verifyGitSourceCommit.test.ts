@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 const { assertGitShaResolvesOnRemote } = require('../../../packages/shared-scripts/src/verify-git-source-commit');
 
 const publishingRemote = 'https://github.com/khoapnt-vng/aioncore.git';
-const verifiedCommit = 'd4d8e87714690cdb230ab7a6987de3ceacbea275';
+const verifiedCommit = 'ef6e1dd199e884fdf2df95d494b2c51b97006656';
 const fabricatedCommit = '260dbbc05d5c8d079fb60e0e9578d4250b6e4338';
 
 describe('publishing-host Git commit verification', () => {

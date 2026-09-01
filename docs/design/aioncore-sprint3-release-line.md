@@ -9,6 +9,21 @@ BUG-040 in `TASKS.md`, and T0.2 in [sprint3-plan.md](../readme/sprint3-plan.md).
 
 ---
 
+## Creative Studio 4 pilot amendment — `v0.1.55`
+
+**Date:** 2026-09-02 · **Status:** accepted for the internal macOS ARM64 and Windows x64 pilot
+
+The current pilot source pin is immutable tag `v0.1.55` at
+`ef6e1dd199e884fdf2df95d494b2c51b97006656` on
+`github.com/khoapnt-vng/aioncore`. It supersedes the Sprint 3 `v0.1.51` pin for pilot builds without
+rewriting the historical Sprint 3 decision below. The release workflow accepts that exact tag and
+commit only and publishes exactly `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` complete
+bundles. WePrompt separately pins the tag, full source commit, migration lineage, allowed runtime
+keys, and independently calculated archive digests.
+
+This is an unsigned internal release. Public distribution remains subject to the signing and
+packaged acceptance requirements in [aioncore-artifact-contract.md](aioncore-artifact-contract.md).
+
 ## Decision — Sprint 3 ships the `v0.1.51` tag
 
 The Sprint 3 AionCore release line is tag `v0.1.51`, whose target is
