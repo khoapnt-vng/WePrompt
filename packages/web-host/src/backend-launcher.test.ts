@@ -36,6 +36,7 @@ import {
   buildSpawnEnv,
   createLocalToken,
   findAvailablePort,
+  serializeBackendBootstrapSecrets,
   BackendLifecycleManager,
   BackendStartupError,
 } from './backend-launcher.js';
@@ -81,7 +82,9 @@ function makeFakeChild(): ChildProcess {
   const child = new EventEmitter() as EventEmitter & Partial<ChildProcess>;
   child.stdout = new EventEmitter() as ChildProcess['stdout'];
   child.stderr = new EventEmitter() as ChildProcess['stderr'];
-  (child.stdin as unknown) = { end: vi.fn() };
+  const stdin = new EventEmitter() as EventEmitter & { end: ReturnType<typeof vi.fn> };
+  stdin.end = vi.fn(() => queueMicrotask(() => stdin.emit('finish')));
+  (child.stdin as unknown) = stdin;
   child.kill = vi.fn() as unknown as ChildProcess['kill'];
   child.pid = 99999;
   return child as ChildProcess;
@@ -241,17 +244,38 @@ describe('buildSpawnEnv', () => {
     expect(env.PATH).toBe(process.env.PATH); // inherits
   });
 
-  it('passes the independent local and session-MCP secrets plus origin allow-list through the environment', () => {
-    // Never through argv: `ps` is world-readable, so a flag would publish the
-    // secret to every local process.
+  it('marks the private stdin channel without exposing secrets in the environment', () => {
     const env = buildSpawnEnv(undefined, {
-      localToken: 'deadbeef',
-      sessionMcpTrustKey: 'main-only-key',
+      localToken: 'd'.repeat(64),
+      sessionMcpTrustKey: 'A'.repeat(43),
       allowedOrigins: ['null', 'http://localhost:5173'],
     });
-    expect(env.AIONUI_LOCAL_TOKEN).toBe('deadbeef');
-    expect(env.AIONUI_SESSION_MCP_TRUST_KEY).toBe('main-only-key');
+    expect(env.AIONUI_LOCAL_TOKEN).toBeUndefined();
+    expect(env.AIONUI_SESSION_MCP_TRUST_KEY).toBeUndefined();
+    expect(env.AIONUI_BOOTSTRAP_SECRETS_STDIN).toBe('1');
     expect(env.AIONUI_LOCAL_ALLOWED_ORIGINS).toBe('null,http://localhost:5173');
+  });
+
+  it('scrubs inherited server authorities when no private channel is configured', () => {
+    const previousToken = process.env.AIONUI_LOCAL_TOKEN;
+    const previousKey = process.env.AIONUI_SESSION_MCP_TRUST_KEY;
+    const previousMarker = process.env.AIONUI_BOOTSTRAP_SECRETS_STDIN;
+    process.env.AIONUI_LOCAL_TOKEN = 'inherited-token';
+    process.env.AIONUI_SESSION_MCP_TRUST_KEY = 'inherited-key';
+    process.env.AIONUI_BOOTSTRAP_SECRETS_STDIN = '1';
+    try {
+      const env = buildSpawnEnv();
+      expect(env.AIONUI_LOCAL_TOKEN).toBeUndefined();
+      expect(env.AIONUI_SESSION_MCP_TRUST_KEY).toBeUndefined();
+      expect(env.AIONUI_BOOTSTRAP_SECRETS_STDIN).toBeUndefined();
+    } finally {
+      if (previousToken === undefined) delete process.env.AIONUI_LOCAL_TOKEN;
+      else process.env.AIONUI_LOCAL_TOKEN = previousToken;
+      if (previousKey === undefined) delete process.env.AIONUI_SESSION_MCP_TRUST_KEY;
+      else process.env.AIONUI_SESSION_MCP_TRUST_KEY = previousKey;
+      if (previousMarker === undefined) delete process.env.AIONUI_BOOTSTRAP_SECRETS_STDIN;
+      else process.env.AIONUI_BOOTSTRAP_SECRETS_STDIN = previousMarker;
+    }
   });
 
   it('omits the security vars when no secret or origin is supplied', () => {
@@ -263,8 +287,29 @@ describe('buildSpawnEnv', () => {
 
   it('omits the origin allow-list when it is empty', () => {
     const env = buildSpawnEnv(undefined, { localToken: 'abc', allowedOrigins: [] });
-    expect(env.AIONUI_LOCAL_TOKEN).toBe('abc');
+    expect(env.AIONUI_LOCAL_TOKEN).toBeUndefined();
+    expect(env.AIONUI_BOOTSTRAP_SECRETS_STDIN).toBeUndefined();
     expect(env.AIONUI_LOCAL_ALLOWED_ORIGINS).toBeUndefined();
+  });
+});
+
+describe('serializeBackendBootstrapSecrets', () => {
+  it('writes one versioned, newline-terminated JSON envelope', () => {
+    expect(
+      serializeBackendBootstrapSecrets({
+        localToken: 'd'.repeat(64),
+        sessionMcpTrustKey: 'A'.repeat(43),
+      })
+    ).toBe(`${JSON.stringify({ version: 1, localToken: 'd'.repeat(64), sessionMcpTrustKey: 'A'.repeat(43) })}\n`);
+  });
+
+  it('refuses malformed authority values before spawn', () => {
+    expect(() => serializeBackendBootstrapSecrets({ localToken: 'short', sessionMcpTrustKey: 'A'.repeat(43) })).toThrow(
+      'local token'
+    );
+    expect(() =>
+      serializeBackendBootstrapSecrets({ localToken: 'd'.repeat(64), sessionMcpTrustKey: 'not+base64url' })
+    ).toThrow('trust key');
   });
 });
 
@@ -450,10 +495,20 @@ describe('BackendLifecycleManager.start (success path)', () => {
       expect(opts.env.AIONUI_CACHE_DIR).toBe('/c');
       expect(opts.env.AIONUI_WORK_DIR).toBe('/w');
       expect(opts.env.AIONUI_LOG_DIR).toBe('/l');
-      expect(opts.env.AIONUI_SESSION_MCP_TRUST_KEY).toBe(mgr.sessionMcpTrustKey);
+      expect(opts.env.AIONUI_LOCAL_TOKEN).toBeUndefined();
+      expect(opts.env.AIONUI_SESSION_MCP_TRUST_KEY).toBeUndefined();
+      expect(opts.env.AIONUI_BOOTSTRAP_SECRETS_STDIN).toBe('1');
       expect(mgr.sessionMcpTrustKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
       expect(mgr.sessionMcpTrustKey).not.toBe(mgr.localToken);
       expect(spawnCall[1]).not.toContain(mgr.sessionMcpTrustKey);
+      expect(child.stdin?.end).toHaveBeenCalledWith(
+        `${JSON.stringify({
+          version: 1,
+          localToken: mgr.localToken,
+          sessionMcpTrustKey: mgr.sessionMcpTrustKey,
+        })}\n`,
+        'utf8'
+      );
       expect((spawnCall[2] as { detached?: boolean }).detached).toBe(process.platform !== 'win32');
       expect(mkdirSync).toHaveBeenCalledWith('/db/path', { recursive: true });
       expect(mkdirSync).toHaveBeenCalledWith('/log/dir', { recursive: true });
@@ -468,6 +523,27 @@ describe('BackendLifecycleManager.start (success path)', () => {
       fetchSpy.mockRestore();
       infoSpy.mockRestore();
     }
+  });
+
+  it('reports an asynchronous bootstrap pipe failure without leaking an unhandled error', async () => {
+    const child = makeFakeChild();
+    const stdin = child.stdin as unknown as EventEmitter & { end: ReturnType<typeof vi.fn> };
+    stdin.end.mockImplementationOnce(() => queueMicrotask(() => stdin.emit('error', new Error('EPIPE'))));
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    const killSpy = vi.spyOn(process, 'kill').mockImplementation(() => true);
+
+    const mgr = new BackendLifecycleManager(APP_META_PACKAGED, () => '/abs/path/aioncore');
+    await expect(mgr.start('/db/path', '/log/dir')).rejects.toMatchObject({
+      name: 'BackendStartupError',
+      details: expect.objectContaining({
+        stage: 'spawn',
+        causeMessage: 'EPIPE',
+      }),
+    });
+
+    expect(mgr.status).toBe('error');
+    expect(killSpy).toHaveBeenCalledWith(-99999, 'SIGKILL');
+    killSpy.mockRestore();
   });
 });
 

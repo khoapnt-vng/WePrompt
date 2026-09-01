@@ -229,7 +229,7 @@ export function buildSpawnArgs(config: SpawnConfig): string[] {
  * ProcessEnv('aionui.dir').
  */
 export function buildSpawnEnv(dirs?: BackendDirConfig, security?: BackendSecurityConfig): NodeJS.ProcessEnv {
-  return {
+  const env: NodeJS.ProcessEnv = {
     ...process.env,
     ...(dirs
       ? {
@@ -238,10 +238,54 @@ export function buildSpawnEnv(dirs?: BackendDirConfig, security?: BackendSecurit
           AIONUI_LOG_DIR: dirs.logDir,
         }
       : {}),
-    ...(security?.localToken ? { AIONUI_LOCAL_TOKEN: security.localToken } : {}),
-    ...(security?.sessionMcpTrustKey ? { AIONUI_SESSION_MCP_TRUST_KEY: security.sessionMcpTrustKey } : {}),
+    ...(security?.localToken && security.sessionMcpTrustKey ? { AIONUI_BOOTSTRAP_SECRETS_STDIN: '1' } : {}),
     ...(security?.allowedOrigins?.length ? { AIONUI_LOCAL_ALLOWED_ORIGINS: security.allowedOrigins.join(',') } : {}),
   };
+  // Never inherit either server authority from Main's ambient environment. The
+  // packaged launcher transfers both through the child's private stdin pipe.
+  delete env.AIONUI_LOCAL_TOKEN;
+  delete env.AIONUI_SESSION_MCP_TRUST_KEY;
+  if (!security?.localToken || !security.sessionMcpTrustKey) delete env.AIONUI_BOOTSTRAP_SECRETS_STDIN;
+  return env;
+}
+
+export function serializeBackendBootstrapSecrets(
+  security: Required<Pick<BackendSecurityConfig, 'localToken' | 'sessionMcpTrustKey'>>
+): string {
+  if (!/^[0-9a-f]{64}$/.test(security.localToken)) {
+    throw new Error('AionCore bootstrap local token must be 32 bytes of lowercase hexadecimal.');
+  }
+  if (!/^[A-Za-z0-9_-]{43}$/.test(security.sessionMcpTrustKey)) {
+    throw new Error('AionCore bootstrap session MCP trust key must be canonical base64url.');
+  }
+  return `${JSON.stringify({
+    version: 1,
+    localToken: security.localToken,
+    sessionMcpTrustKey: security.sessionMcpTrustKey,
+  })}\n`;
+}
+
+function writeBackendBootstrapSecrets(
+  stdin: NonNullable<ChildProcess['stdin']>,
+  payload: string,
+  onError: (error: Error) => void
+): void {
+  const cleanup = () => {
+    stdin.removeListener('error', handleError);
+    stdin.removeListener('finish', cleanup);
+  };
+  const handleError = (error: Error) => {
+    cleanup();
+    onError(error);
+  };
+  stdin.once('error', handleError);
+  stdin.once('finish', cleanup);
+  try {
+    stdin.end(payload, 'utf8');
+  } catch (error) {
+    cleanup();
+    throw error;
+  }
 }
 
 /**
@@ -249,8 +293,8 @@ export function buildSpawnEnv(dirs?: BackendDirConfig, security?: BackendSecurit
  *
  * In local mode the backend skips JWT verification, so without these it answers
  * any process — or any page a browser renders — that reaches its loopback port.
- * Passed through the environment rather than argv: process arguments are
- * world-readable via `ps`.
+ * Secrets cross the process boundary through the child's private stdin pipe;
+ * argv and the exec-time environment remain non-secret and inspectable.
  */
 export type BackendSecurityConfig = {
   localToken?: string;
@@ -712,6 +756,10 @@ export class BackendLifecycleManager {
     // the previous renderer held.
     this._localToken = createLocalToken();
     this._sessionMcpTrustKey = randomBytes(32).toString('base64url');
+    const bootstrapSecrets = serializeBackendBootstrapSecrets({
+      localToken: this._localToken,
+      sessionMcpTrustKey: this._sessionMcpTrustKey,
+    });
 
     const args = buildSpawnArgs({
       port: this._port,
@@ -753,8 +801,6 @@ export class BackendLifecycleManager {
       throw makeStartupError('spawn', 'aioncore process spawn threw before startup', error);
     }
 
-    this.childProcess.stdin?.end();
-
     backendPid = this.childProcess.pid;
     const pid = backendPid;
     const killOnExit = () => {
@@ -762,6 +808,7 @@ export class BackendLifecycleManager {
     };
     process.on('exit', killOnExit);
 
+    let rejectStartupFailure: (error: unknown) => void = () => {};
     const startupFailure = new Promise<never>((_resolve, reject) => {
       let failureSettled = false;
       let pendingStartupExit:
@@ -777,6 +824,7 @@ export class BackendLifecycleManager {
         failureSettled = true;
         reject(error);
       };
+      rejectStartupFailure = rejectOnce;
 
       this.childProcess?.once('error', (error) => {
         if (startupSettled) return;
@@ -830,6 +878,27 @@ export class BackendLifecycleManager {
         }
       });
     });
+
+    const childStdin = this.childProcess.stdin;
+    if (!childStdin) {
+      this._status = 'error';
+      await killBackendProcessTree(this.childProcess, 'SIGKILL');
+      this.childProcess = null;
+      throw makeStartupError('spawn', 'aioncore bootstrap secret pipe was not available');
+    }
+    try {
+      writeBackendBootstrapSecrets(childStdin, bootstrapSecrets, (error) => {
+        if (startupSettled) return;
+        this._status = 'error';
+        void killBackendProcessTree(this.childProcess, 'SIGKILL');
+        rejectStartupFailure(makeStartupError('spawn', 'aioncore bootstrap secret pipe write failed', error));
+      });
+    } catch (error) {
+      this._status = 'error';
+      await killBackendProcessTree(this.childProcess, 'SIGKILL');
+      this.childProcess = null;
+      throw makeStartupError('spawn', 'aioncore bootstrap secret pipe write failed', error);
+    }
 
     let reportedPortSettled = false;
     let reportedPortTimer: ReturnType<typeof setTimeout> | undefined;
