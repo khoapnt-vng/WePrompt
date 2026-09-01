@@ -407,6 +407,28 @@ e2e-test-headed:
     bun run package
     bunx playwright test --config playwright.config.ts --headed
 
+# Serial by design -- playwright.config.ts pins workers:1 because Electron tests share
+# one app instance -- so budget roughly 80 minutes.
+# How to read the result: docs/contributing/e2e-baseline.md
+# Measure the whole e2e suite and write a machine-readable baseline
+e2e-baseline OUT="/tmp/e2e-baseline.json":
+    bun run package
+    PLAYWRIGHT_JSON_OUTPUT_NAME={{OUT}} bunx playwright test --config playwright.config.ts --reporter=json
+
+# Gated on three variables no other recipe sets; without them all twelve tests skip
+# and the run still reports success.
+# Run the Creative Studio E2E spec with its required environment gates
+e2e-studio:
+    bun run package
+    AIONUI_E2E_TEST=1 AIONUI_E2E_STUDIO_FAKE=1 AIONUI_ENABLE_CREATIVE_STUDIO=1 \
+        bunx playwright test --config playwright.config.ts \
+        tests/e2e/features/workspaces/creative-studio.e2e.ts
+
+# Two bridge-driven tests, no UI, ~18s.
+# Prove the E2E harness launches before committing to a long run
+e2e-smoke:
+    bunx playwright test --config playwright.config.ts tests/e2e/specs/window-controls.e2e.ts
+
 # Open Playwright HTML report after test run
 e2e-report:
     bunx playwright show-report tests/e2e/report
