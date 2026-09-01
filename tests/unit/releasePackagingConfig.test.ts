@@ -642,6 +642,20 @@ describe('release packaging configuration', () => {
     expect(workflow).not.toContain('Contents/MacOS/Forge');
   });
 
+  it('provisions the exact reviewed AionCore source for dev-mode E2E artifacts', () => {
+    const workflow = readProjectFile('.github/workflows/pr-e2e-artifacts.yml');
+    const sourceCommit = 'ef6e1dd199e884fdf2df95d494b2c51b97006656';
+
+    expect(workflow).toContain(`AIONCORE_E2E_SOURCE_COMMIT: ${sourceCommit}`);
+    expect(workflow).toMatch(
+      /repository: khoapnt-vng\/aioncore\s+ref: \$\{\{ env\.AIONCORE_E2E_SOURCE_COMMIT \}\}\s+path: \.e2e-aioncore/
+    );
+    expect(workflow).toContain("toolchain: '1.95.0'");
+    expect(workflow).toContain('cargo build --locked --release -p aionui-app');
+    expect(workflow).toContain('test -x target/release/aioncore');
+    expect(workflow).toContain('AIONUI_BACKEND_BINARY: ${{ github.workspace }}/.e2e-aioncore/target/release/aioncore');
+  });
+
   it('blocks local pushes and sprint3 pull requests on reviewed Creative Studio coverage', () => {
     const justfile = readProjectFile('justfile');
     const workflow = readProjectFile('.github/workflows/sprint3-pr-gate.yml');
