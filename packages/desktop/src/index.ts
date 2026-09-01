@@ -249,7 +249,7 @@ const backendManager = new BackendLifecycleManager(
     resourcesPath: process.resourcesPath,
     userDataPath: app.getPath('userData'),
   },
-  resolveBinaryPath
+  () => resolveBinaryPath({ allowEnvironmentOverride: !app.isPackaged })
 );
 installSessionMcpTrustKeyProvider(() => backendManager.sessionMcpTrustKey);
 

@@ -220,8 +220,53 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
       });
       return;
     }
-    const claimant = allConversations.find((candidate) => isDirectorConversation(candidate, projectId));
-    if (claimant !== undefined) {
+    const createAndBind = async (
+      descriptor: ISessionMcpServer,
+      serverFingerprint: string,
+      trustClaim: { payload: string; signature: string },
+      authority: StudioPilotDirectorSessionAuthorityV3
+    ): Promise<void> => {
+      if (
+        current_model === undefined ||
+        !hasSafeServer(descriptor, projectId, authority) ||
+        !FINGERPRINT.test(serverFingerprint)
+      ) {
+        throw new Error('director_authority_failed');
+      }
+      // AionCore owns conversation identity. The create endpoint ignores a
+      // client-supplied id, so every subsequent write must use its response.
+      const created = await ipcBridge.conversation.create.invoke({
+        type: 'aionrs',
+        name: project.summary.name,
+        model: current_model,
+        extra: {
+          studio_project_id: projectId,
+          preset_rules: PILOT_DIRECTOR_RULES,
+          studio_director_rules_profile: RULES_PROFILE,
+          workspace: '',
+          custom_workspace: false,
+          selected_mcp_server_ids: [],
+          selected_session_mcp_servers: [descriptor],
+          selected_session_mcp_trust_claims: [trustClaim],
+        },
+      });
+      if (
+        !isDirectorConversation(created, projectId) ||
+        !hasExactConversationAuthority(created, projectId, authority, descriptor, serverFingerprint)
+      ) {
+        throw new Error('director_create_failed');
+      }
+      const binding = await ipcBridge.creativeStudioPilot.bindDirectorConversation.invoke({
+        projectId,
+        expectedAuthoringRevision: project.canvas.authoringRevision,
+        conversationId: created.id,
+      });
+      if (!binding.ok) throw new Error('director_binding_failed');
+      seedOpeningTurn(created.id, project.director.brief);
+      setConversation(created);
+    };
+    const claimants = allConversations.filter((candidate) => isDirectorConversation(candidate, projectId));
+    if (claimants.length > 0) {
       if (starting.current) return;
       starting.current = true;
       void Promise.all([
@@ -229,18 +274,31 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
         ipcBridge.creativeStudioPilot.getDirectorSessionAuthority.invoke({ projectId }),
       ])
         .then(async ([descriptorResult, authorityResult]) => {
-          if (
-            !descriptorResult.ok ||
-            !authorityResult.ok ||
-            !hasExactConversationAuthority(
+          if (!descriptorResult.ok || !authorityResult.ok) throw new Error('director_claimant_authority_failed');
+          const trustedClaimants = claimants.filter((claimant) =>
+            hasExactConversationAuthority(
               claimant,
               projectId,
               authorityResult.data,
               descriptorResult.data.server,
               descriptorResult.data.serverFingerprint
             )
-          ) {
-            throw new Error('director_claimant_authority_failed');
+          );
+          if (trustedClaimants.length > 1) throw new Error('director_claimant_ambiguous');
+          const claimant = trustedClaimants[0];
+          if (claimant === undefined) {
+            // A failed attach against an older backend may have left an
+            // unbound, unattested conversation. It is never trusted or
+            // deleted; a newly attested backend-owned conversation may safely
+            // supersede it as the sole project binding.
+            if (current_model === undefined || modelList.length === 0 || providers === undefined) return;
+            await createAndBind(
+              descriptorResult.data.server,
+              descriptorResult.data.serverFingerprint,
+              descriptorResult.data.trustClaim,
+              authorityResult.data
+            );
+            return;
           }
           const binding = await ipcBridge.creativeStudioPilot.bindDirectorConversation.invoke({
             projectId,
@@ -263,50 +321,13 @@ export const PilotDirectorRail: React.FC<{ projectId: string; client: StudioPilo
       .then(async (descriptorResult) => {
         if (!descriptorResult.ok) throw new Error('director_descriptor_failed');
         const authorityResult = await ipcBridge.creativeStudioPilot.getDirectorSessionAuthority.invoke({ projectId });
-        if (
-          !authorityResult.ok ||
-          !hasSafeServer(descriptorResult.data.server, projectId, authorityResult.data) ||
-          !FINGERPRINT.test(descriptorResult.data.serverFingerprint)
-        ) {
-          throw new Error('director_authority_failed');
-        }
-        // AionCore owns conversation identity. The create endpoint ignores a
-        // client-supplied id, so every subsequent write must use its response.
-        const created = await ipcBridge.conversation.create.invoke({
-          type: 'aionrs',
-          name: project.summary.name,
-          model: current_model,
-          extra: {
-            studio_project_id: projectId,
-            preset_rules: PILOT_DIRECTOR_RULES,
-            studio_director_rules_profile: RULES_PROFILE,
-            workspace: '',
-            custom_workspace: false,
-            selected_mcp_server_ids: [],
-            selected_session_mcp_servers: [descriptorResult.data.server],
-            selected_session_mcp_trust_claims: [descriptorResult.data.trustClaim],
-          },
-        });
-        if (
-          !isDirectorConversation(created, projectId) ||
-          !hasExactConversationAuthority(
-            created,
-            projectId,
-            authorityResult.data,
-            descriptorResult.data.server,
-            descriptorResult.data.serverFingerprint
-          )
-        ) {
-          throw new Error('director_create_failed');
-        }
-        const binding = await ipcBridge.creativeStudioPilot.bindDirectorConversation.invoke({
-          projectId,
-          expectedAuthoringRevision: project.canvas.authoringRevision,
-          conversationId: created.id,
-        });
-        if (!binding.ok) throw new Error('director_binding_failed');
-        seedOpeningTurn(created.id, project.director.brief);
-        setConversation(created);
+        if (!authorityResult.ok) throw new Error('director_authority_failed');
+        await createAndBind(
+          descriptorResult.data.server,
+          descriptorResult.data.serverFingerprint,
+          descriptorResult.data.trustClaim,
+          authorityResult.data
+        );
       })
       .catch(() => setError(true))
       .finally(() => {

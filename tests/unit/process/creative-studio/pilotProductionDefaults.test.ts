@@ -154,8 +154,10 @@ describe('Creative Studio Pilot production defaults', () => {
     const production = module.getCreativeStudioPilotProductionRuntimeV3();
     expect(module.getCreativeStudioPilotProductionRuntimeV3()).toBe(production);
 
-    expect(await mocks.resolverDeps?.listProviders()).toEqual([{ id: 'real_provider' }, mocks.fake.provider]);
-    expect(await mocks.resolverDeps?.listConnections()).toEqual([mocks.connection, mocks.fake.connections[0]]);
+    expect(await mocks.resolverDeps?.listProviders()).toEqual([mocks.fake.provider]);
+    expect(await mocks.resolverDeps?.listConnections()).toEqual([mocks.fake.connections[0]]);
+    expect(mocks.httpRequest).not.toHaveBeenCalled();
+    expect(mocks.store.listConnections).not.toHaveBeenCalled();
     expect(mocks.controllerDeps).toMatchObject({
       manifest: mocks.store,
       injectedBindings: [mocks.fake.connections[0]],

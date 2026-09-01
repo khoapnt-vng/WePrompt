@@ -211,12 +211,15 @@ export const createCreativeStudioPilotProductionRuntimeV3 = (
 const shouldEnableFakeAdapter = (environment: RuntimeEnvironmentV3, isPackaged: boolean): boolean =>
   !isPackaged && environment.AIONUI_E2E_TEST === '1' && environment.AIONUI_E2E_STUDIO_FAKE === '1';
 
-const mergeProviders = (
+const selectProviders = (
   listProviders: () => Promise<IProvider[]>,
   fake: StudioE2EFakeBundle | null
 ): (() => Promise<IProvider[]>) => {
   if (fake === null) return listProviders;
-  return async () => [...(await listProviders()).filter((provider) => provider.id !== fake.provider.id), fake.provider];
+  // Fake mode is an explicit no-spend environment, not an extra catalog row.
+  // Keeping real providers in this list lets deterministic route ordering pick
+  // a paid persisted connection before the fake route.
+  return async () => [fake.provider];
 };
 
 let productionRuntime: CreativeStudioPilotProductionRuntimeV3 | null = null;
@@ -232,15 +235,15 @@ export const getCreativeStudioPilotProductionRuntimeV3 = (): CreativeStudioPilot
     : null;
   const baseAdapters = createGenerationProviderAdapterRegistry({ image: { workspaceDir: rootDir } });
   const adapters = fake === null ? baseAdapters : new Map([...baseAdapters, ...fake.adapters]);
-  const listProviders = mergeProviders(() => httpRequest<IProvider[]>('GET', '/api/providers'), fake);
+  const listProviders = selectProviders(() => httpRequest<IProvider[]>('GET', '/api/providers'), fake);
   const injectedBindings = fake?.connections.filter((connection) => connection.adapterId === 'weprompt-image-v1') ?? [];
   const injectedBindingIds = new Set(injectedBindings.map((connection) => connection.id));
-  const listConnections = async () => [
-    ...(await connectionManifest.listConnections())
-      .filter((connection) => fake === null || !fake.connections.some((candidate) => candidate.id === connection.id))
-      .filter((connection) => connection.adapterId === 'weprompt-image-v1' && !injectedBindingIds.has(connection.id)),
-    ...injectedBindings,
-  ];
+  const listConnections = async () =>
+    fake === null
+      ? (await connectionManifest.listConnections()).filter(
+          (connection) => connection.adapterId === 'weprompt-image-v1' && !injectedBindingIds.has(connection.id)
+        )
+      : injectedBindings;
   const providerResolver = createStudioProviderResolver({ listProviders, listConnections });
   const connections = createStudioConnectionControllerV1({
     manifest: connectionManifest,

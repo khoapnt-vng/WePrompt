@@ -162,16 +162,28 @@ describe('Pilot Director rail', () => {
     expect(mocks.create).not.toHaveBeenCalled();
   });
 
-  it('refuses an unbound claimant whose persisted session authority does not attest', async () => {
+  it('leaves an unattested claimant untouched and creates one newly attested Director', async () => {
     const claimant = conversation('conversation_untrusted');
     claimant.extra.session_mcp_trust[0]!.server_fingerprint = 'b'.repeat(64);
     mocks.conversations = [claimant];
 
     render(<PilotDirectorRail projectId='project_1' client={client(supported(null)) as never} />);
 
+    expect(await screen.findByText('chat:conversation_backend')).toBeVisible();
+    expect(mocks.create).toHaveBeenCalledOnce();
+    expect(mocks.bind).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'conversation_backend' }));
+  });
+
+  it('fails closed when the replacement for an unattested claimant is also unattested', async () => {
+    const claimant = conversation('conversation_untrusted');
+    claimant.extra.session_mcp_trust[0]!.server_fingerprint = 'b'.repeat(64);
+    mocks.conversations = [claimant];
+    mocks.create.mockResolvedValueOnce(claimant);
+
+    render(<PilotDirectorRail projectId='project_1' client={client(supported(null)) as never} />);
+
     expect(await screen.findByText('failed')).toBeVisible();
     expect(mocks.bind).not.toHaveBeenCalled();
-    expect(mocks.create).not.toHaveBeenCalled();
   });
 
   it('shows bounded recovery copy when no model exists or attachment fails', async () => {

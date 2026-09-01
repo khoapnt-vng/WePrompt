@@ -7,7 +7,7 @@
  */
 
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { execSync } from 'node:child_process';
 
 const BINARY_NAME = 'aioncore';
@@ -26,6 +26,12 @@ type BackendBinaryResolveDiagnostics = {
   pathLookupCommand: string;
   pathLookupResult?: string;
   pathLookupError?: string;
+  explicitBinaryPath?: string;
+};
+
+type BackendBinaryResolveOptions = {
+  /** Development/test escape hatch. Packaged callers must leave this false. */
+  allowEnvironmentOverride?: boolean;
 };
 
 class BackendBinaryResolveError extends Error {
@@ -64,7 +70,7 @@ function trimLookupText(text: string): string {
  * Resolve the aioncore binary path.
  * Returns the absolute path to the binary, or throws if not found.
  */
-export function resolveBinaryPath(): string {
+export function resolveBinaryPath(options: BackendBinaryResolveOptions = {}): string {
   const runtimeKey = getRuntimeKey();
   const binaryName = getBinaryName();
   const diagnostics: BackendBinaryResolveDiagnostics = {
@@ -72,6 +78,16 @@ export function resolveBinaryPath(): string {
     binaryName,
     pathLookupCommand: process.platform === 'win32' ? `where ${BINARY_NAME}` : `which ${BINARY_NAME}`,
   };
+
+  if (options.allowEnvironmentOverride) {
+    const configured = process.env.AIONUI_BACKEND_BINARY?.trim() || process.env.AIONUI_BACKEND_BIN?.trim();
+    if (configured) {
+      const explicit = isAbsolute(configured) ? configured : resolve(configured);
+      diagnostics.explicitBinaryPath = explicit;
+      if (existsSync(explicit)) return explicit;
+      throw new BackendBinaryResolveError(`Configured AionCore binary does not exist: ${explicit}`, diagnostics);
+    }
+  }
 
   const bundled = bundledPath(runtimeKey, binaryName, diagnostics);
   if (bundled) return bundled;

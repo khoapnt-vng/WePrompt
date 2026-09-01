@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resolveBinaryPath } from './binaryResolver';
 
@@ -14,6 +14,8 @@ vi.mock('node:fs', () => ({
 }));
 
 const originalResourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+const originalBackendBinary = process.env.AIONUI_BACKEND_BINARY;
+const originalBackendBin = process.env.AIONUI_BACKEND_BIN;
 
 function setResourcesPath(resourcesPath: string | undefined): void {
   Object.defineProperty(process, 'resourcesPath', {
@@ -32,10 +34,33 @@ function dirEntry(name: string, isDirectory = false): ReturnType<typeof readdirS
 describe('resolveBinaryPath', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    delete process.env.AIONUI_BACKEND_BINARY;
+    delete process.env.AIONUI_BACKEND_BIN;
   });
 
   afterEach(() => {
     setResourcesPath(originalResourcesPath);
+    if (originalBackendBinary === undefined) delete process.env.AIONUI_BACKEND_BINARY;
+    else process.env.AIONUI_BACKEND_BINARY = originalBackendBinary;
+    if (originalBackendBin === undefined) delete process.env.AIONUI_BACKEND_BIN;
+    else process.env.AIONUI_BACKEND_BIN = originalBackendBin;
+  });
+
+  it('uses an explicit existing binary only when the caller permits development overrides', () => {
+    process.env.AIONUI_BACKEND_BINARY = './tmp/aioncore-under-test';
+    vi.mocked(existsSync).mockImplementation((candidate) => candidate === resolve('./tmp/aioncore-under-test'));
+
+    expect(resolveBinaryPath({ allowEnvironmentOverride: true })).toBe(resolve('./tmp/aioncore-under-test'));
+    expect(() => resolveBinaryPath()).toThrow('Cannot find "aioncore" binary');
+  });
+
+  it('fails closed when an explicitly configured development binary is missing', () => {
+    process.env.AIONUI_BACKEND_BINARY = '/missing/aioncore';
+    vi.mocked(existsSync).mockReturnValue(false);
+
+    expect(() => resolveBinaryPath({ allowEnvironmentOverride: true })).toThrow(
+      'Configured AionCore binary does not exist: /missing/aioncore'
+    );
   });
 
   it('attaches bundled path diagnostics when aioncore cannot be resolved', () => {
