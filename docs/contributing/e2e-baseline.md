@@ -6,7 +6,8 @@
 Before this, every statement about the e2e suite was static analysis, including mine. The suite runs in
 no automatically-triggered job, so no baseline existed anywhere. This is the first one.
 
-**Headline: 135 pass, 171 fail, 112 skip of 418.** A 32% pass rate. The prevailing description of this
+**Headline: 135 pass, 171 fail, 112 skip of 418** on the first run; 142/158/117 on an identical second
+run, with 96.7% of tests returning the same status. Roughly **157 failures are deterministic**. The prevailing description of this
 suite ("stale selectors that need updating") describes a real problem that is a small minority of what
 is actually wrong.
 
@@ -166,6 +167,51 @@ that are fine. Reproduce any failure in isolation before believing its error mes
 one-third figure is from those four and should not be extrapolated to the whole suite. Two earlier
 generalisations in this document were each drawn from a single file and were each wrong; the honest
 position is that the split varies per file and has to be measured per file.
+
+---
+
+## The repeat run: what is deterministic
+
+The suite was run a second time under identical conditions — same worktree, same unpinned backend
+binary (sha256 `4a584bf58da5…`), no environment gates, dev mode. Only the run differs.
+
+|           | Run A | Run C |
+| --------- | ----: | ----: |
+| passed    |   135 |   142 |
+| failed    |   170 |   158 |
+| timed out |     1 |     1 |
+| skipped   |   112 |   117 |
+
+**404 of 418 tests — 96.7% — returned the same status.** Fourteen moved: eight failed→passed, five
+failed→skipped, one passed→failed. So the headline is stable and roughly **157 failures are
+deterministic**, with about a dozen tests that are state- or timing-dependent.
+
+### The repeat validated the isolation method
+
+The four files measured in isolation predicted their own behaviour across the two runs, which is the
+most useful result here:
+
+| File                                   | Isolated  | Run A              | Run C         |
+| -------------------------------------- | --------- | ------------------ | ------------- |
+| `specs/dropdown-search.e2e.ts`         | 3 passed  | 3 failed           | **3 passed**  |
+| `specs/ext-channels.e2e.ts`            | 6 passed  | 2 failed, 4 passed | **6 passed**  |
+| `specs/assistant-settings-crud.e2e.ts` | 15 failed | 15 failed          | **15 failed** |
+| `specs/ext-ipc-queries.e2e.ts`         | 22 failed | 22 failed          | **22 failed** |
+
+Every file that recovers in isolation also **moved between runs**. Every file that fails in isolation
+is **bit-stable across both**. That gives a classifier for the whole suite that costs two runs instead
+of 418 isolated ones:
+
+> **Run the suite twice. What moves is contamination. What holds is a real defect.**
+
+It also means the contamination is _deterministic enough to trace_ — the same tests recover, rather
+than a different random set each time — so it is a findable leak between specific specs, not
+irreducible timing noise. That is the cheaper of the two possible worlds.
+
+**One test regressed:** `specs/window-controls.e2e.ts` "maximize and unmaximize round-trip through the
+bridge" passed in A and failed in C. Worth knowing, because that file is recommended above as the
+smoke check — it is a good smoke because it is fast and needs no UI, not because it is perfectly
+stable.
 
 ---
 
