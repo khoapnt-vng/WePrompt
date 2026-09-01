@@ -81,6 +81,7 @@ type HarnessOptions = {
   durableOutputClaimInspections?: readonly ('clear' | 'claimed' | 'error')[];
   outputClaimInspectionGate?: Promise<void>;
   onProjectUpdated?: (projectId: string) => void;
+  providerModels?: string[];
 };
 
 const never = <T>(): Promise<T> => new Promise<T>(() => undefined);
@@ -111,7 +112,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
     name: 'Image provider',
     base_url: 'https://provider.invalid/v1',
     api_key: 'secret',
-    models: ['image-model'],
+    models: options.providerModels ?? ['image-model'],
     enabled: true,
     model_enabled: { 'image-model': true },
     model_health: { 'image-model': { status: 'healthy' } },
@@ -1008,6 +1009,16 @@ describe('schema-6 Piece job manager', () => {
     expect(project.spendAuthorizations).toHaveLength(1);
     expect(Object.keys(project.jobs)).toEqual([harness.confirmed.jobId]);
     expect(harness.calls.submit).toBe(1);
+  });
+
+  it('submits through a validated route when the provider discovery list omits its exact model', async () => {
+    const harness = await createHarness({ adapterMode: 'local_success', providerModels: [] });
+
+    await harness.manager.waitForIdleV3();
+
+    const project = await harness.store.loadProjectV3(harness.projectId);
+    expect(project.jobs[harness.confirmed.jobId]?.status).toBe('succeeded');
+    expect(harness.calls).toMatchObject({ submit: 1, publish: 1 });
   });
 
   it.each(['queued_remote', 'running', 'needs_attention'] as const)(

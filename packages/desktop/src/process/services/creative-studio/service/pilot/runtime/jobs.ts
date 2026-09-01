@@ -190,8 +190,10 @@ const providerWithModel = (provider: IProvider, model: string): TProviderWithMod
   return { ...withoutModels, use_model: model };
 };
 
+// The validated route catalog owns model admission. Provider discovery may omit
+// a configured image model after restart, so its transient models[] list is not
+// a second source of route authority.
 const providerAvailable = (provider: IProvider, model: string): boolean =>
-  provider.models.includes(model) &&
   provider.enabled !== false &&
   provider.model_enabled?.[model] !== false &&
   provider.model_health?.[model]?.status !== 'unhealthy' &&
