@@ -6,10 +6,17 @@
 Before this, every statement about the e2e suite was static analysis, including mine. The suite runs in
 no automatically-triggered job, so no baseline existed anywhere. This is the first one.
 
-**Headline: 135 pass, 171 fail, 112 skip of 418.** A 32% pass rate, and **79% of the failures never
-reach their own assertions** — they fail in the harness, in app startup, or at the IPC gate. The
-prevailing description of this suite ("stale selectors that need updating") describes a real problem
-that is a small minority of what is actually wrong.
+**Headline: 135 pass, 171 fail, 112 skip of 418.** A 32% pass rate. The prevailing description of this
+suite ("stale selectors that need updating") describes a real problem that is a small minority of what
+is actually wrong.
+
+**Two distinct problems are tangled together**, and separating them took a second measurement pass
+after the first draft of this document got it wrong. There are roughly 170 genuine failures, _and_
+there is cross-test contamination that both manufactures additional failures and disguises the cause of
+real ones. In a sample of four files, **31 in-suite failures fell to 21 when the files were run alone**
+— so about a third of failures in that sample are induced by the suite itself. See
+[Isolated versus in-suite](#isolated-versus-in-suite), which is the section to read before triaging
+anything from full-suite output.
 
 ---
 
@@ -40,7 +47,12 @@ timeout is 60s, `expect` timeout 10s, and retries are 0 locally (`process.env.CI
 |     9 | assertion failures                                                          | genuinely wrong expectations                                                                    |
 |     8 | other (ENOENT, dynamic import, missing cron fixture, …)                     | assorted                                                                                        |
 
-**Only 28 of 171 failures — 16% — are the "stale test" category.** The other 143 are infrastructure.
+**Only 28 of 171 failures — 16% — are the "stale test" category.**
+
+Do **not** read the remaining 143 as "tests that would pass if the harness were fixed". That was this
+document's first conclusion and it is wrong. The window-resolution and timeout buckets are a mixture of
+genuinely broken tests whose cause is misreported and tests that are fine and fail only because of what
+ran before them. The next section measures the split.
 
 ### Files with the most failures
 
@@ -117,6 +129,43 @@ not. Failures are `expect(locator).toBeVisible()` and repeated
 set, on a second guard inside the file.
 
 This is the file a Phase 5 renderer E2E would most naturally extend.
+
+---
+
+## Isolated versus in-suite
+
+The suite is serial and shares one Electron instance, so tests contaminate each other. Four files were
+re-run alone and compared against their results in the full run.
+
+| File                                   | Alone                | In the full suite                        | Reading                                                              |
+| -------------------------------------- | -------------------- | ---------------------------------------- | -------------------------------------------------------------------- |
+| `specs/assistant-settings-crud.e2e.ts` | 15 failed            | 15 failed (13 of them window-resolution) | **No recovery.** Genuinely broken; in-suite the cause is misreported |
+| `specs/conversation-full-cycle.e2e.ts` | 6 failed, 15 skipped | 11 failed, 10 skipped                    | Partial — 5 recovered                                                |
+| `specs/ext-channels.e2e.ts`            | 6 passed, 1 skipped  | 4 passed, 2 failed, 1 skipped            | Partial — 2 recovered                                                |
+| `specs/dropdown-search.e2e.ts`         | **3 passed**         | **3 failed**                             | **Full recovery.** Nothing wrong with these tests at all             |
+| **total**                              | **21 failed**        | **31 failed**                            | ~⅓ of failures in this sample are induced by the suite               |
+
+Two things follow, and they pull in opposite directions.
+
+**Cross-test contamination is real and it manufactures failures.** `dropdown-search` passes 3 of 3
+alone and fails 3 of 3 in the suite. Anyone "fixing" those tests would be repairing something that was
+never broken.
+
+**But most failures are genuine, and the suite misreports their cause.**
+`assistant-settings-crud` fails 15 either way. In the suite, 13 of those surface as
+`Failed to resolve main renderer window`; alone, none do. The window-resolution message is therefore a
+**masking symptom** on that file, not the defect. The same pattern holds for
+`specs/ext-ipc-queries.e2e.ts`: 11 window failures in the suite, but run alone it fails 22 of 22 at the
+IPC gate instead — same brokenness, different story depending on what preceded it.
+
+**The practical consequence:** triaging from full-suite output will send you after phantom
+window-resolution problems on tests whose real defect is elsewhere, and will also have you repair tests
+that are fine. Reproduce any failure in isolation before believing its error message.
+
+**Sample size, stated plainly:** four of the fourteen files that showed window-resolution failures. The
+one-third figure is from those four and should not be extrapolated to the whole suite. Two earlier
+generalisations in this document were each drawn from a single file and were each wrong; the honest
+position is that the split varies per file and has to be measured per file.
 
 ---
 
