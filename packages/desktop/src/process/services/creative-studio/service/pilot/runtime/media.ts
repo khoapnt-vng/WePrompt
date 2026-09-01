@@ -8,6 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { constants as fsConstants, promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
+import { syncDurableDirectory } from '../../durableDirectory';
 import {
   STUDIO_MAX_ASSETS_V3,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
@@ -475,12 +476,7 @@ const parseIntent = (bytes: string): StudioPilotMediaIntentV3 | null => {
 };
 
 const syncDirectory = async (fs: StudioPilotMediaFileSystemV3, directory: string): Promise<void> => {
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+  await syncDurableDirectory(fs, directory);
 };
 
 const ensureDirectory = async (fs: StudioPilotMediaFileSystemV3, parent: string, name: string): Promise<string> => {

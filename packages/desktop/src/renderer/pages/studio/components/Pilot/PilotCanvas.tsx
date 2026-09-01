@@ -15,13 +15,14 @@ import {
   type StudioConfirmPreparedPhotoResultV3,
   type StudioDiscardPreparedPhotoRequestV3,
   type StudioDiscardPreparedPhotoResultV3,
-  type StudioExportPieceRequestV3,
-  type StudioExportPieceResultV3,
+  type StudioDeliverPieceExportRequestV3,
+  type StudioExportPieceDeliveryResultV3,
   type StudioImportPhotoRequestV3,
   type StudioImportPhotoResultV3,
   type StudioPiecePhotoSettingsV3,
   type StudioPieceJobErrorCodeV3,
   type StudioPieceJobRetryReasonV3,
+  type StudioPieceExportArtifactRequestV3,
   type StudioPreparePhotoIntentV3,
   type StudioPreparePhotoResultV3,
   type StudioProjectLoadResultV3,
@@ -32,6 +33,7 @@ import {
   type StudioRendererPreparedPhotoQuoteV3,
   type StudioResumePieceJobRequestV3,
   type StudioResumePieceJobResultV3,
+  type StudioRevealPieceExportResultV3,
   type StudioRetryPieceDownloadRequestV3,
   type StudioRetryPieceDownloadResultV3,
 } from '@/common/types/project/creativeStudioTypes';
@@ -57,7 +59,8 @@ export type StudioPilotClientV3 = {
   resumeJobV3(input: StudioResumePieceJobRequestV3): Promise<StudioResumePieceJobResultV3>;
   retryDownloadV3(input: StudioRetryPieceDownloadRequestV3): Promise<StudioRetryPieceDownloadResultV3>;
   listPieceExportsV3(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
-  exportPieceV3(input: StudioExportPieceRequestV3): Promise<StudioExportPieceResultV3>;
+  exportPieceV3(input: StudioDeliverPieceExportRequestV3): Promise<StudioExportPieceDeliveryResultV3>;
+  revealPieceExportV3(input: StudioPieceExportArtifactRequestV3): Promise<StudioRevealPieceExportResultV3>;
   watchProjectUpdatesV3(listener: (update: StudioPilotRendererUpdateV3) => void): () => void;
 };
 
@@ -70,7 +73,13 @@ export type PilotCanvasProps = {
   client: StudioPilotClientV3;
   assetUrlFor?: (projectId: string, asset: StudioRendererPieceAssetV3) => string | null;
   onEditSpendPolicy?: () => void;
-  onExported?: (pieceId: string, result: StudioExportPieceResultV3) => void;
+  onExported?: (pieceId: string, result: Extract<StudioExportPieceDeliveryResultV3, { status: 'copied' }>) => void;
+};
+
+type DeliveredExportV3 = {
+  handle: string;
+  artifactId: string;
+  catalogRevision: number;
 };
 
 type SupportedProject = Extract<StudioProjectLoadResultV3, { status: 'supported' }>;
@@ -732,6 +741,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
   const [activeErrorCode, setActiveErrorCode] = useState<string | null>(null);
   const [errorRole, setErrorRole] = useState<'alert' | 'status'>('alert');
   const [announcement, setAnnouncement] = useState('');
+  const [deliveredExport, setDeliveredExport] = useState<DeliveredExportV3 | null>(null);
   const [spendingLimitOpen, setSpendingLimitOpen] = useState(false);
   const [focusTarget, setFocusTarget] = useState<{ kind: 'quote' | 'piece'; id: string } | null>(null);
   const lastSupportedProject = useRef<SupportedProject | null>(null);
@@ -796,6 +806,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
     setError(null);
     setActiveErrorCode(null);
     setErrorRole('alert');
+    setDeliveredExport(null);
     previousJobStatuses.current = new Map();
 
     const synchronize = async (): Promise<void> => {
@@ -1106,6 +1117,54 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
     }
   };
 
+  const exportPiece = async (piece: StudioRendererPieceV3): Promise<void> => {
+    if (project === null || piece.currentAsset === null) return;
+    setBusy(true);
+    setError(null);
+    setActiveErrorCode(null);
+    try {
+      const result = await client.exportPieceV3({
+        projectId,
+        pieceId: piece.id,
+        expectedRevision: project.canvas.revision,
+      });
+      if (result.status === 'cancelled') {
+        setAnnouncement(t(`${PILOT_I18N_ROOT}.canvas.announcements.exportCancelled`));
+        return;
+      }
+      setDeliveredExport({
+        handle: piece.handle,
+        artifactId: result.artifact.id,
+        catalogRevision: result.catalog.revision,
+      });
+      setAnnouncement(t(`${PILOT_I18N_ROOT}.canvas.announcements.exported`, { handle: `#${piece.handle}` }));
+      onExported?.(piece.id, result);
+    } catch (caught) {
+      handleError(caught);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revealDeliveredExport = async (): Promise<void> => {
+    if (deliveredExport === null) return;
+    setBusy(true);
+    setError(null);
+    setActiveErrorCode(null);
+    try {
+      await client.revealPieceExportV3({
+        projectId,
+        expectedCatalogRevision: deliveredExport.catalogRevision,
+        artifactId: deliveredExport.artifactId,
+      });
+      setAnnouncement(t(`${PILOT_I18N_ROOT}.canvas.announcements.exportRevealed`));
+    } catch (caught) {
+      handleError(caught);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const currentPieces = project?.canvas.pieces.filter((piece) => piece.currentAsset !== null) ?? [];
   const projectMenu = (
     <Menu>
@@ -1113,29 +1172,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
         {t(`${PILOT_I18N_ROOT}.canvas.projectMenu.spendingLimit`)}
       </Menu.Item>
       {currentPieces.map((piece) => (
-        <Menu.Item
-          key={piece.id}
-          onClick={() => {
-            if (project === null) return;
-            setBusy(true);
-            void client
-              .listPieceExportsV3(projectId)
-              .then((catalog) =>
-                client.exportPieceV3({
-                  projectId,
-                  pieceId: piece.id,
-                  expectedRevision: project.canvas.revision,
-                  expectedCatalogRevision: catalog.revision,
-                })
-              )
-              .then((result) => {
-                setAnnouncement(t(`${PILOT_I18N_ROOT}.canvas.announcements.exported`, { handle: `#${piece.handle}` }));
-                onExported?.(piece.id, result);
-              })
-              .catch(handleError)
-              .finally(() => setBusy(false));
-          }}
-        >
+        <Menu.Item key={piece.id} onClick={() => void exportPiece(piece)}>
           {t(`${PILOT_I18N_ROOT}.canvas.projectMenu.export`)} <bdi dir='auto'>#{piece.handle}</bdi>
         </Menu.Item>
       ))}
@@ -1169,6 +1206,26 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
       <div className={styles.announcement} role='status' aria-live='polite' aria-atomic='true'>
         {announcement}
       </div>
+      {deliveredExport !== null && (
+        <section
+          className={styles.exportStatus}
+          aria-label={t(`${PILOT_I18N_ROOT}.canvas.projectMenu.exportStatus`, {
+            handle: `#${deliveredExport.handle}`,
+          })}
+        >
+          <p dir='auto'>
+            {t(`${PILOT_I18N_ROOT}.canvas.announcements.exported`, { handle: `#${deliveredExport.handle}` })}
+          </p>
+          <div className={styles.exportStatusActions}>
+            <Button disabled={busy} onClick={() => void revealDeliveredExport()}>
+              {t(`${PILOT_I18N_ROOT}.canvas.projectMenu.revealExport`)}
+            </Button>
+            <Button disabled={busy} onClick={() => setDeliveredExport(null)}>
+              {t(`${PILOT_I18N_ROOT}.canvas.projectMenu.dismissExport`)}
+            </Button>
+          </div>
+        </section>
+      )}
       {error !== null && (
         <div className={styles.alert} role={errorRole}>
           <p>{error}</p>

@@ -4,14 +4,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
 import type { StudioConnectionBinding, StudioConnectionCapabilities } from '@/common/types/project/creativeStudioTypes';
 import type {
   OpenRouterVideoCatalog,
   OpenRouterVideoModelSpec,
 } from '@process/services/creative-studio/adapters/openRouterVideoAdapter';
-import { createStudioProviderResolver } from '@process/services/creative-studio/providerResolver';
+import {
+  createStudioProviderResolver,
+  projectStudioImageConnectionCandidates,
+} from '@process/services/creative-studio/providerResolver';
 
 const provider = (overrides: Partial<IProvider> = {}): IProvider => ({
   id: 'provider_1',
@@ -106,6 +109,21 @@ const resolver = (
   });
 
 describe('createStudioProviderResolver', () => {
+  it('projects only image-capable models into the image-only connection surface', () => {
+    const candidates = projectStudioImageConnectionCandidates([
+      provider({ models: ['chat-model', 'gemini-2.5-flash-image'] }),
+    ]);
+
+    expect(candidates).toEqual([
+      {
+        providerId: 'provider_1',
+        providerName: 'Provider One',
+        models: [{ model: 'gemini-2.5-flash-image', health: 'unknown' }],
+        integrationModels: [],
+      },
+    ]);
+  });
+
   it('returns only sanitized image and video routes backed by validated bindings', async () => {
     const catalog = await resolver([
       provider({ models: ['gemini-2.5-flash-image', 'video-model'] }),
@@ -133,6 +151,33 @@ describe('createStudioProviderResolver', () => {
     const catalog = await resolver([provider({ models: ['gemini-2.5-flash-image'] })], []).listGenerationRoutes();
 
     expect(catalog.routes).toEqual([]);
+  });
+
+  it('does not refresh the OpenRouter video catalog for an image-only binding set', async () => {
+    const refresh = vi.fn(async () => []);
+    const imageBinding = binding({
+      adapterId: 'weprompt-image-v1',
+      model: 'gemini-2.5-flash-image',
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: true },
+    });
+    const catalog = await resolver(
+      [
+        provider({ models: ['gemini-2.5-flash-image'] }),
+        provider({
+          id: 'openrouter_configured',
+          platform: 'openai',
+          base_url: 'https://openrouter.ai/api/v1',
+          api_key: 'configured-but-unused',
+          models: [],
+        }),
+      ],
+      [imageBinding],
+      { refresh, listModels: () => [], getModelSpec: () => null }
+    ).listGenerationRoutes();
+
+    expect(refresh).not.toHaveBeenCalled();
+    expect(catalog.routes).toHaveLength(1);
+    expect(catalog.routes[0]?.kind).toBe('image');
   });
 
   it('sanitizes provider names and filters unsafe provider and model identities', async () => {

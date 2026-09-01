@@ -10,13 +10,16 @@ import { createHash, randomUUID } from 'node:crypto';
 import { constants as fsConstants, promises as fs } from 'node:fs';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { syncDurableDirectory } from '../../durableDirectory';
 import {
   STUDIO_EXPORT_SCHEMA_VERSION_V3,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
   STUDIO_MAX_PIECE_EXPORTS_PER_PIECE_V3,
   STUDIO_MAX_PIECE_EXPORTS_PER_PROJECT_V3,
   type StudioAssetV3,
+  type StudioDeliverPieceExportRequestV3,
   type StudioExportPieceResultV3,
+  type StudioPieceExportArtifactRequestV3,
   type StudioPieceExportArtifactV3,
   type StudioPieceExportCatalogV3,
   type StudioProjectV3,
@@ -32,7 +35,11 @@ import {
   serializeStudioPieceExportManifestV3,
 } from '../../schema2/exports/pieceManifestV3';
 import { isCanonicalStudioPieceHandleV3 } from '../../schema2/mutations/pieceHandles';
-import { parseStudioExportPieceRequestV3 } from '../contracts';
+import {
+  parseStudioDeliverPieceExportRequestV3,
+  parseStudioExportPieceRequestV3,
+  parseStudioPieceExportArtifactRequestV3,
+} from '../contracts';
 import { CreativeStudioPilotServiceErrorV3, normalizeCreativeStudioPilotErrorV3 } from '../errors';
 
 const SAFE_PERSISTED_ID = /^[A-Za-z0-9_-]{1,256}$/;
@@ -64,6 +71,15 @@ const ARTIFACT_KEYS = new Set([
 ]);
 const MANAGED_EXPORT_KEYS = new Set(['collection', 'fileName']);
 const PENDING_MARKER_KEYS = new Set(['schemaVersion', 'projectId', 'exportId', 'stageName', 'finalName']);
+const COPY_INTENT_KEYS = new Set([
+  'schemaVersion',
+  'projectId',
+  'artifactId',
+  'catalogRevision',
+  'artifactSha256',
+  'destinationName',
+  'stageName',
+]);
 
 export type StudioPilotManagedAssetVerifierV3 = {
   verifyManagedAssetV3(input: {
@@ -80,7 +96,12 @@ export type StudioPieceExportRuntimeStepV3 =
   | 'catalog_committed'
   | 'intent_removed'
   | 'eviction_complete'
-  | 'recovery_complete';
+  | 'recovery_complete'
+  | 'copy_stage_closed'
+  | 'copy_intent_committed'
+  | 'copy_publish_ready'
+  | 'copy_artifact_published'
+  | 'copy_intent_removed';
 
 export type StudioPieceExportRuntimeDepsV3 = {
   store: Pick<CreativeStudioPilotStoreV3, 'loadProjectV3' | 'withProjectAuthorityV3'>;
@@ -92,7 +113,10 @@ export type StudioPieceExportRuntimeDepsV3 = {
 };
 
 export type StudioPieceExportRuntimeV3 = {
+  describe(input: unknown): Promise<{ suggestedName: string }>;
   create(input: unknown): Promise<StudioExportPieceResultV3>;
+  copy(request: unknown, destinationPath: string): Promise<{ status: 'copied' }>;
+  resolveRevealPath(request: unknown): Promise<string>;
   list(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
   recover(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
 };
@@ -105,6 +129,16 @@ type PendingMarkerV3 = {
   finalName: string;
 };
 
+type CopyIntentV3 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+  projectId: string;
+  artifactId: string;
+  catalogRevision: number;
+  artifactSha256: string;
+  destinationName: string;
+  stageName: string;
+};
+
 type VerifiedArtifactV3 = {
   artifact: StudioPieceExportArtifactV3;
   directoryPath: string;
@@ -114,6 +148,22 @@ type OpenedSourceV3 = {
   bytes: Buffer;
   assertUnchanged(): Promise<void>;
   close(): Promise<void>;
+};
+
+type ExportPayloadSnapshotV3 = {
+  artifact: StudioPieceExportArtifactV3;
+  directoryPath: string;
+  files: ReadonlyArray<{ name: string; bytes: Buffer }>;
+};
+
+type DirectoryIdentityV3 = {
+  dev: number | bigint;
+  ino: number | bigint;
+};
+
+type OwnedCopyProofV3 = {
+  directory: DirectoryIdentityV3;
+  files: Map<string, DirectoryIdentityV3>;
 };
 
 const sha256 = (value: Uint8Array): string => createHash('sha256').update(value).digest('hex');
@@ -166,14 +216,7 @@ const normalizeExportError = (error: unknown): never => {
 };
 
 const syncDirectory = async (directoryPath: string): Promise<void> => {
-  const handle = await fs.open(directoryPath, fsConstants.O_RDONLY | NO_FOLLOW);
-  try {
-    const stats = await handle.stat();
-    if (!stats.isDirectory()) return serviceFailure('storage_error');
-    await handle.sync();
-  } finally {
-    await handle.close().catch((): undefined => undefined);
-  }
+  await syncDurableDirectory(fs, directoryPath, { additionalFlags: NO_FOLLOW });
 };
 
 const ensureDirectory = async (parent: string, name: string): Promise<string> => {
@@ -188,13 +231,22 @@ const ensureDirectory = async (parent: string, name: string): Promise<string> =>
   return directory;
 };
 
-const writeExclusiveDurable = async (filePath: string, bytes: Uint8Array): Promise<void> => {
+const writeExclusiveDurable = async (
+  filePath: string,
+  bytes: Uint8Array,
+  onCreated?: (identity: DirectoryIdentityV3) => void
+): Promise<void> => {
   const handle = await fs.open(
     filePath,
     fsConstants.O_WRONLY | fsConstants.O_CREAT | fsConstants.O_EXCL | NO_FOLLOW,
     0o600
   );
   try {
+    const created = await handle.stat();
+    if (!created.isFile() || created.isSymbolicLink() || created.nlink !== 1 || created.size !== 0) {
+      return serviceFailure('storage_error');
+    }
+    onCreated?.(directoryIdentity(created));
     await handle.writeFile(bytes);
     await handle.sync();
   } finally {
@@ -215,6 +267,45 @@ const writeCatalogDurable = async (
 };
 
 const identity = (stats: Awaited<ReturnType<FileHandle['stat']>>): string => `${stats.dev}:${stats.ino}`;
+
+const directoryIdentity = (
+  stats: Awaited<ReturnType<FileHandle['stat']>> | Awaited<ReturnType<typeof fs.lstat>>
+): DirectoryIdentityV3 => ({ dev: stats.dev, ino: stats.ino });
+
+const sameDirectoryIdentity = (left: DirectoryIdentityV3, right: DirectoryIdentityV3): boolean =>
+  left.dev === right.dev && left.ino === right.ino;
+
+const readVerifiedDirectoryIdentity = async (directoryPath: string): Promise<DirectoryIdentityV3> => {
+  let handle: FileHandle | null = null;
+  try {
+    handle = await fs.open(directoryPath, fsConstants.O_RDONLY | NO_FOLLOW);
+    const opened = await handle.stat();
+    const pathStats = await fs.lstat(directoryPath);
+    if (
+      !opened.isDirectory() ||
+      !pathStats.isDirectory() ||
+      pathStats.isSymbolicLink() ||
+      !sameDirectoryIdentity(directoryIdentity(opened), directoryIdentity(pathStats)) ||
+      (await fs.realpath(directoryPath)) !== directoryPath
+    ) {
+      return serviceFailure('storage_error');
+    }
+    const finalOpened = await handle.stat();
+    const finalPath = await fs.lstat(directoryPath);
+    if (
+      !sameDirectoryIdentity(directoryIdentity(opened), directoryIdentity(finalOpened)) ||
+      !sameDirectoryIdentity(directoryIdentity(opened), directoryIdentity(finalPath))
+    ) {
+      return serviceFailure('storage_error');
+    }
+    return directoryIdentity(opened);
+  } catch (error) {
+    if (error instanceof CreativeStudioPilotServiceErrorV3) throw error;
+    return serviceFailure('storage_error');
+  } finally {
+    await handle?.close().catch((): undefined => undefined);
+  }
+};
 
 const readHandleBytes = async (handle: FileHandle, byteSize: number): Promise<Buffer> => {
   if (!Number.isSafeInteger(byteSize) || byteSize < 1 || byteSize > STUDIO_MAX_IMAGE_ASSET_BYTES_V3) {
@@ -564,6 +655,311 @@ const artifactFromDirectory = async (
   }
 };
 
+const exactCatalogArtifact = (
+  request: StudioPieceExportArtifactRequestV3,
+  catalog: StudioPieceExportCatalogV3
+): StudioPieceExportArtifactV3 => {
+  if (request.projectId !== catalog.projectId || request.expectedCatalogRevision !== catalog.revision) {
+    return serviceFailure('stale_export_catalog');
+  }
+  const artifact = catalog.artifacts.find((candidate) => candidate.id === request.artifactId);
+  if (artifact === undefined) return serviceFailure('export_unavailable');
+  return artifact;
+};
+
+const readExportPayloadSnapshot = async (
+  projectId: string,
+  artifact: StudioPieceExportArtifactV3,
+  directoryPath: string
+): Promise<ExportPayloadSnapshotV3> => {
+  const firstProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName);
+  if (firstProof === null || canonicalJson(firstProof.artifact) !== canonicalJson(artifact)) {
+    return serviceFailure('storage_error');
+  }
+  const manifestBytes = await readBoundedRegularFile(path.join(directoryPath, MANIFEST_FILE_NAME), MANIFEST_MAX_BYTES);
+  const manifest = parseStudioPieceExportManifestV3(manifestBytes);
+  const photoName = manifest.asset.relativePath;
+  if (
+    !SAFE_FOLDER_NAME.test(photoName) ||
+    path.basename(photoName) !== photoName ||
+    photoName !== `photo.${imageExtension(manifest.asset.mimeType)}`
+  ) {
+    return serviceFailure('storage_error');
+  }
+  const photoBytes = await readBoundedRegularFile(path.join(directoryPath, photoName), STUDIO_MAX_IMAGE_ASSET_BYTES_V3);
+  await verifyImageBytes(photoBytes, manifest.asset);
+  if (
+    sha256(manifestBytes) !== artifact.manifestSha256 ||
+    manifestBytes.byteLength + photoBytes.byteLength !== artifact.byteSize
+  ) {
+    return serviceFailure('storage_error');
+  }
+  const finalProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName);
+  if (finalProof === null || canonicalJson(finalProof.artifact) !== canonicalJson(artifact)) {
+    return serviceFailure('storage_error');
+  }
+  return {
+    artifact,
+    directoryPath,
+    files: [
+      { name: photoName, bytes: photoBytes },
+      { name: MANIFEST_FILE_NAME, bytes: manifestBytes },
+    ],
+  };
+};
+
+const assertDestinationAbsent = async (destinationPath: string): Promise<void> => {
+  try {
+    await fs.lstat(destinationPath);
+    return serviceFailure('storage_error');
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return;
+    if (error instanceof CreativeStudioPilotServiceErrorV3) throw error;
+    return serviceFailure('storage_error');
+  }
+};
+
+const validateCopyDestination = async (
+  projectDir: string,
+  destinationPath: string
+): Promise<{ parentPath: string; parentIdentity: DirectoryIdentityV3 }> => {
+  if (
+    typeof destinationPath !== 'string' ||
+    !path.isAbsolute(destinationPath) ||
+    path.resolve(destinationPath) !== destinationPath ||
+    path.basename(destinationPath).length === 0
+  ) {
+    return serviceFailure('storage_error');
+  }
+  const relativeToProject = path.relative(projectDir, destinationPath);
+  const outsideProject =
+    relativeToProject === '..' || relativeToProject.startsWith(`..${path.sep}`) || path.isAbsolute(relativeToProject);
+  if (relativeToProject === '' || !outsideProject) return serviceFailure('storage_error');
+  const parentPath = path.dirname(destinationPath);
+  const parentIdentity = await readVerifiedDirectoryIdentity(parentPath);
+  return { parentPath, parentIdentity };
+};
+
+const pathExists = async (entryPath: string): Promise<boolean> => {
+  try {
+    await fs.lstat(entryPath);
+    return true;
+  } catch (error) {
+    if (hasErrorCode(error, 'ENOENT')) return false;
+    return serviceFailure('storage_error');
+  }
+};
+
+const copyPublicationNames = (
+  request: StudioPieceExportArtifactRequestV3,
+  artifact: StudioPieceExportArtifactV3,
+  destinationName: string
+): { stageName: string; intentName: string; intent: CopyIntentV3; intentBytes: Buffer } => {
+  const artifactSha256 = sha256(Buffer.from(canonicalJson(artifact), 'utf8'));
+  const digest = sha256(
+    Buffer.from(
+      canonicalJson({
+        projectId: request.projectId,
+        artifactId: request.artifactId,
+        catalogRevision: request.expectedCatalogRevision,
+        artifactSha256,
+        destinationName,
+      }),
+      'utf8'
+    )
+  ).slice(0, 48);
+  const stageName = `.copy-${digest}.part`;
+  const intentName = `.copy-${digest}.intent.json`;
+  const intent: CopyIntentV3 = {
+    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+    projectId: request.projectId,
+    artifactId: request.artifactId,
+    catalogRevision: request.expectedCatalogRevision,
+    artifactSha256,
+    destinationName,
+    stageName,
+  };
+  return { stageName, intentName, intent, intentBytes: Buffer.from(canonicalJson(intent), 'utf8') };
+};
+
+const parseCopyIntent = (bytes: Uint8Array, expected: CopyIntentV3): CopyIntentV3 | null => {
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch {
+    return null;
+  }
+  let value: unknown;
+  try {
+    value = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (
+    !isPlainRecord(value) ||
+    !hasExactKeys(value, COPY_INTENT_KEYS) ||
+    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    typeof value.projectId !== 'string' ||
+    !SAFE_PERSISTED_ID.test(value.projectId) ||
+    typeof value.artifactId !== 'string' ||
+    !SAFE_EXPORT_ID.test(value.artifactId) ||
+    !isPositiveInteger(value.catalogRevision) ||
+    typeof value.artifactSha256 !== 'string' ||
+    !LOWERCASE_SHA256.test(value.artifactSha256) ||
+    typeof value.destinationName !== 'string' ||
+    path.basename(value.destinationName) !== value.destinationName ||
+    typeof value.stageName !== 'string' ||
+    !SAFE_FOLDER_NAME.test(value.stageName) ||
+    canonicalJson(value) !== text ||
+    canonicalJson(value) !== canonicalJson(expected)
+  ) {
+    return null;
+  }
+  return value as CopyIntentV3;
+};
+
+const readCopyIntent = async (intentPath: string, expected: CopyIntentV3): Promise<Buffer | null> => {
+  if (!(await pathExists(intentPath))) return null;
+  const bytes = await readBoundedRegularFile(intentPath, MARKER_MAX_BYTES);
+  return parseCopyIntent(bytes, expected) === null ? serviceFailure('storage_error') : bytes;
+};
+
+const removeExactCopyIntent = async (intentPath: string, expectedBytes: Buffer): Promise<void> => {
+  const bytes = await readBoundedRegularFile(intentPath, MARKER_MAX_BYTES);
+  if (!bytes.equals(expectedBytes)) return serviceFailure('storage_error');
+  const stats = await fs.lstat(intentPath);
+  if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) return serviceFailure('storage_error');
+  await fs.unlink(intentPath);
+  await syncDirectory(path.dirname(intentPath));
+};
+
+const verifyCopyDirectory = async (
+  directoryPath: string,
+  snapshot: ExportPayloadSnapshotV3,
+  expected?: OwnedCopyProofV3
+): Promise<OwnedCopyProofV3> => {
+  const openedDirectory = await readVerifiedDirectoryIdentity(directoryPath);
+  if (expected !== undefined && !sameDirectoryIdentity(openedDirectory, expected.directory)) {
+    return serviceFailure('storage_error');
+  }
+  const expectedNames = snapshot.files.map(({ name }) => name).toSorted();
+  const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+  if (
+    entries.length !== expectedNames.length ||
+    entries.some((entry) => !entry.isFile() || entry.isSymbolicLink()) ||
+    canonicalJson(entries.map(({ name }) => name).toSorted()) !== canonicalJson(expectedNames)
+  ) {
+    return serviceFailure('storage_error');
+  }
+  const files = new Map<string, DirectoryIdentityV3>();
+  for (const source of snapshot.files) {
+    const filePath = path.join(directoryPath, source.name);
+    const maximumBytes = source.name === MANIFEST_FILE_NAME ? MANIFEST_MAX_BYTES : STUDIO_MAX_IMAGE_ASSET_BYTES_V3;
+    const bytes = await readBoundedRegularFile(filePath, maximumBytes);
+    if (!bytes.equals(source.bytes)) return serviceFailure('storage_error');
+    const stats = await fs.lstat(filePath);
+    if (!stats.isFile() || stats.isSymbolicLink() || stats.nlink !== 1) return serviceFailure('storage_error');
+    const currentIdentity = directoryIdentity(stats);
+    const expectedIdentity = expected?.files.get(source.name);
+    if (expectedIdentity !== undefined && !sameDirectoryIdentity(currentIdentity, expectedIdentity)) {
+      return serviceFailure('storage_error');
+    }
+    files.set(source.name, currentIdentity);
+  }
+  return { directory: openedDirectory, files };
+};
+
+const writeCopyDirectory = async (
+  directoryPath: string,
+  snapshot: ExportPayloadSnapshotV3
+): Promise<OwnedCopyProofV3> => {
+  let proof: OwnedCopyProofV3 | null = null;
+  try {
+    await fs.mkdir(directoryPath, { recursive: false, mode: 0o700 });
+    proof = { directory: await readVerifiedDirectoryIdentity(directoryPath), files: new Map() };
+    for (const source of snapshot.files) {
+      const currentDirectory = await readVerifiedDirectoryIdentity(directoryPath);
+      if (!sameDirectoryIdentity(currentDirectory, proof.directory)) return serviceFailure('storage_error');
+      await writeExclusiveDurable(path.join(directoryPath, source.name), source.bytes, (created) => {
+        proof?.files.set(source.name, created);
+      });
+    }
+    await syncDirectory(directoryPath);
+    return verifyCopyDirectory(directoryPath, snapshot, proof);
+  } catch (error) {
+    if (proof !== null) await removeOwnedCopyDirectory(directoryPath, proof);
+    throw error;
+  }
+};
+
+const removeOwnedCopyDirectory = async (directoryPath: string, proof: OwnedCopyProofV3): Promise<void> => {
+  try {
+    const currentDirectory = await readVerifiedDirectoryIdentity(directoryPath);
+    if (!sameDirectoryIdentity(currentDirectory, proof.directory)) return;
+    const entries = await fs.readdir(directoryPath, { withFileTypes: true });
+    const expectedNames = [...proof.files.keys()].toSorted();
+    if (
+      entries.some((entry) => !entry.isFile() || entry.isSymbolicLink()) ||
+      canonicalJson(entries.map(({ name }) => name).toSorted()) !== canonicalJson(expectedNames)
+    ) {
+      return;
+    }
+    for (const [name, expectedIdentity] of proof.files) {
+      const filePath = path.join(directoryPath, name);
+      let handle: FileHandle | null = null;
+      try {
+        handle = await fs.open(filePath, fsConstants.O_RDONLY | NO_FOLLOW);
+        const [opened, pathStats] = await Promise.all([handle.stat(), fs.lstat(filePath)]);
+        if (
+          !opened.isFile() ||
+          opened.nlink !== 1 ||
+          pathStats.isSymbolicLink() ||
+          !sameDirectoryIdentity(directoryIdentity(opened), expectedIdentity) ||
+          !sameDirectoryIdentity(directoryIdentity(pathStats), expectedIdentity)
+        ) {
+          return;
+        }
+      } finally {
+        await handle?.close().catch((): undefined => undefined);
+      }
+      const finalStats = await fs.lstat(filePath);
+      if (
+        !finalStats.isFile() ||
+        finalStats.isSymbolicLink() ||
+        !sameDirectoryIdentity(directoryIdentity(finalStats), expectedIdentity)
+      ) {
+        return;
+      }
+      await fs.unlink(filePath);
+    }
+    const finalDirectory = await readVerifiedDirectoryIdentity(directoryPath);
+    if (!sameDirectoryIdentity(finalDirectory, proof.directory) || (await fs.readdir(directoryPath)).length !== 0) {
+      return;
+    }
+    await fs.rmdir(directoryPath);
+    await syncDirectory(path.dirname(directoryPath));
+  } catch {
+    // Never delete a destination whose exact ownership can no longer be proved.
+  }
+};
+
+const sameExportPayloadSnapshot = (left: ExportPayloadSnapshotV3, right: ExportPayloadSnapshotV3): boolean =>
+  canonicalJson(left.artifact) === canonicalJson(right.artifact) &&
+  left.directoryPath === right.directoryPath &&
+  left.files.length === right.files.length &&
+  left.files.every((file, index) => {
+    const candidate = right.files[index];
+    return candidate !== undefined && file.name === candidate.name && file.bytes.equals(candidate.bytes);
+  });
+
+const reproveDestinationParent = async (authority: {
+  parentPath: string;
+  parentIdentity: DirectoryIdentityV3;
+}): Promise<void> => {
+  const current = await readVerifiedDirectoryIdentity(authority.parentPath);
+  if (!sameDirectoryIdentity(current, authority.parentIdentity)) return serviceFailure('storage_error');
+};
+
 const quarantineEntry = async (
   exportsRoot: string,
   quarantineRoot: string,
@@ -838,7 +1234,22 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
     }
   };
 
+  const describe = async (input: unknown): Promise<{ suggestedName: string }> => {
+    try {
+      const request: StudioDeliverPieceExportRequestV3 = parseStudioDeliverPieceExportRequestV3(input);
+      const project = await deps.store.loadProjectV3(request.projectId);
+      if (project.revision !== request.expectedRevision) return serviceFailure('stale_project');
+      findCurrentAsset(project, request.pieceId);
+      // The exact schema-6 decoder guarantees a canonical handle; findCurrentAsset proved ownership.
+      const piece = project.pieces[request.pieceId]!;
+      return { suggestedName: `piece-${piece.handle}-export` };
+    } catch (error) {
+      return normalizeExportError(error);
+    }
+  };
+
   return {
+    describe,
     async create(input) {
       try {
         const request = parseStudioExportPieceRequestV3(input);
@@ -947,6 +1358,109 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
           } finally {
             await source.close().catch((): undefined => undefined);
           }
+        });
+      } catch (error) {
+        return normalizeExportError(error);
+      }
+    },
+    async copy(rawRequest, destinationPath) {
+      try {
+        const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
+        return await deps.store.withProjectAuthorityV3(request.projectId, async (authority) => {
+          const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
+          const artifact = exactCatalogArtifact(request, catalog);
+          const projectDir = await fs.realpath(authority.projectDir);
+          if (projectDir !== authority.projectDir) return serviceFailure('storage_error');
+          const exportsRoot = await ensureDirectory(projectDir, EXPORTS_DIRECTORY_NAME);
+          const sourcePath = path.join(exportsRoot, artifact.managedExport.fileName);
+          const snapshot = await readExportPayloadSnapshot(request.projectId, artifact, sourcePath);
+          const destination = await validateCopyDestination(projectDir, destinationPath);
+          const publication = copyPublicationNames(request, artifact, path.basename(destinationPath));
+          const stagePath = path.join(destination.parentPath, publication.stageName);
+          const intentPath = path.join(destination.parentPath, publication.intentName);
+
+          const assertCopyAuthority = async (): Promise<void> => {
+            await reproveDestinationParent(destination);
+            const currentSource = await readExportPayloadSnapshot(request.projectId, artifact, sourcePath);
+            if (!sameExportPayloadSnapshot(snapshot, currentSource)) return serviceFailure('storage_error');
+            const currentCatalog = await recoverInsideAuthority(authority, createNonce, onStep);
+            if (currentCatalog.revision !== request.expectedCatalogRevision) {
+              return serviceFailure('stale_export_catalog');
+            }
+            const currentArtifact = exactCatalogArtifact(request, currentCatalog);
+            if (canonicalJson(currentArtifact) !== canonicalJson(artifact)) {
+              return serviceFailure('stale_export_catalog');
+            }
+            await authority.assertCurrent();
+          };
+
+          let intentBytes = await readCopyIntent(intentPath, publication.intent);
+          const stageExists = await pathExists(stagePath);
+          const destinationExists = await pathExists(destinationPath);
+          if (intentBytes === null && destinationExists) return serviceFailure('storage_error');
+          if (intentBytes !== null && stageExists && destinationExists) return serviceFailure('storage_error');
+          if (intentBytes !== null && !stageExists && !destinationExists) return serviceFailure('storage_error');
+
+          if (intentBytes !== null && destinationExists) {
+            await verifyCopyDirectory(destinationPath, snapshot);
+            await assertCopyAuthority();
+            await onStep('copy_intent_removed', request.projectId);
+            await removeExactCopyIntent(intentPath, intentBytes);
+            return { status: 'copied' };
+          }
+
+          let stageProof: OwnedCopyProofV3;
+          if (stageExists) {
+            stageProof = await verifyCopyDirectory(stagePath, snapshot);
+          } else {
+            await assertDestinationAbsent(destinationPath);
+            stageProof = await writeCopyDirectory(stagePath, snapshot);
+            await syncDirectory(destination.parentPath);
+            await onStep('copy_stage_closed', request.projectId);
+          }
+
+          if (intentBytes === null) {
+            await reproveDestinationParent(destination);
+            await assertDestinationAbsent(destinationPath);
+            await writeExclusiveDurable(intentPath, publication.intentBytes);
+            await syncDirectory(destination.parentPath);
+            intentBytes = publication.intentBytes;
+            await onStep('copy_intent_committed', request.projectId);
+          }
+
+          await assertCopyAuthority();
+          await verifyCopyDirectory(stagePath, snapshot, stageProof);
+          await assertDestinationAbsent(destinationPath);
+          await onStep('copy_publish_ready', request.projectId);
+          await reproveDestinationParent(destination);
+          await assertDestinationAbsent(destinationPath);
+          await fs.rename(stagePath, destinationPath);
+          await syncDirectory(destination.parentPath);
+          await verifyCopyDirectory(destinationPath, snapshot, stageProof);
+          await onStep('copy_artifact_published', request.projectId);
+          await assertCopyAuthority();
+          await onStep('copy_intent_removed', request.projectId);
+          await removeExactCopyIntent(intentPath, intentBytes);
+          return { status: 'copied' };
+        });
+      } catch (error) {
+        return normalizeExportError(error);
+      }
+    },
+    async resolveRevealPath(rawRequest) {
+      try {
+        const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
+        return await deps.store.withProjectAuthorityV3(request.projectId, async (authority) => {
+          const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
+          const artifact = exactCatalogArtifact(request, catalog);
+          const projectDir = await fs.realpath(authority.projectDir);
+          if (projectDir !== authority.projectDir) return serviceFailure('storage_error');
+          const exportsRoot = await ensureDirectory(projectDir, EXPORTS_DIRECTORY_NAME);
+          const directoryPath = path.join(exportsRoot, artifact.managedExport.fileName);
+          if (path.dirname(directoryPath) !== exportsRoot) return serviceFailure('storage_error');
+          await readExportPayloadSnapshot(request.projectId, artifact, directoryPath);
+          await authority.assertCurrent();
+          return directoryPath;
         });
       } catch (error) {
         return normalizeExportError(error);

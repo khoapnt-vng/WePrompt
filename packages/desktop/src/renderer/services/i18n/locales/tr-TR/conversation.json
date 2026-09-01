@@ -935,6 +935,12 @@
           "unreadableBody": "{{name}} silinsin mi? Bu proje güvenle açılamadığından, silme işlemi korumalı tek kullanımlık talebi kullanır."
         }
       },
+      "director": {
+        "title": "Yönetmen",
+        "loading": "Yönetmen başlatılıyor…",
+        "noModel": "Yönetmeni başlatmadan önce bir Aionrs modeli seçin.",
+        "failed": "Yönetmen güvenli şekilde bağlanamadı. Projeyi yeniden yükleyin."
+      },
       "canvas": {
         "projectActions": "Proje işlemleri",
         "loading": "Proje yükleniyor…",
@@ -1069,6 +1075,8 @@
           "photoImported": "Fotoğraf içe aktarıldı.",
           "renameUndone": "Son Parça yeniden adlandırması geri alındı.",
           "exported": "{{handle}} dışa aktarıldı.",
+          "exportCancelled": "Dışa aktarma iptal edildi. Hiçbir dışa aktarma oluşturulmadı.",
+          "exportRevealed": "Dışa aktarma klasöründe gösterildi.",
           "spendingLimitSaved": "Harcama sınırı kaydedildi.",
           "jobTransition": "{{handle}} artık {{status}} durumunda.",
           "freshQuoteRequired": "Önceki fiyat teklifi artık güncel değil. Ücretli işi başlatmadan önce yeni bir maliyeti inceleyin.",
@@ -1077,7 +1085,10 @@
         "projectMenu": {
           "label": "Proje menüsü",
           "spendingLimit": "Harcama sınırı",
-          "export": "Dışa aktar"
+          "export": "Dışa aktar",
+          "exportStatus": "{{handle}} dışa aktarımı",
+          "revealExport": "Klasörde göster",
+          "dismissExport": "Kapat"
         },
         "composer": {
           "description": "Fotoğraf açıklaması",

@@ -933,6 +933,12 @@
           "unreadableBody": "刪除 {{name}}？此專案無法安全開啟，因此刪除作業會使用受保護的一次性憑證。"
         }
       },
+      "director": {
+        "title": "導演",
+        "loading": "正在啟動導演…",
+        "noModel": "請先選擇 Aionrs 模型，再啟動導演。",
+        "failed": "無法安全連接導演。請重新載入專案。"
+      },
       "canvas": {
         "projectActions": "專案操作",
         "loading": "正在載入專案…",
@@ -1067,6 +1073,8 @@
           "photoImported": "照片已匯入。",
           "renameUndone": "已復原上次作品重新命名。",
           "exported": "已匯出 {{handle}}。",
+          "exportCancelled": "已取消匯出。未建立任何匯出內容。",
+          "exportRevealed": "已在資料夾中顯示匯出內容。",
           "spendingLimitSaved": "支出上限已儲存。",
           "jobTransition": "{{handle}} 現在處於「{{status}}」狀態。",
           "freshQuoteRequired": "先前的報價已不是最新版本。開始付費工作前，請檢查新的費用。",
@@ -1075,7 +1083,10 @@
         "projectMenu": {
           "label": "專案選單",
           "spendingLimit": "支出上限",
-          "export": "匯出"
+          "export": "匯出",
+          "exportStatus": "{{handle}} 的匯出",
+          "revealExport": "在資料夾中顯示",
+          "dismissExport": "關閉"
         },
         "composer": {
           "description": "照片描述",

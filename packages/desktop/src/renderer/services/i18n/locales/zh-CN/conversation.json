@@ -933,6 +933,12 @@
           "unreadableBody": "删除 {{name}}？此项目无法安全打开，因此删除操作会使用受保护的一次性凭据。"
         }
       },
+      "director": {
+        "title": "导演",
+        "loading": "正在启动导演…",
+        "noModel": "请先选择 Aionrs 模型，再启动导演。",
+        "failed": "无法安全连接导演。请重新加载项目。"
+      },
       "canvas": {
         "projectActions": "项目操作",
         "loading": "正在加载项目…",
@@ -1067,6 +1073,8 @@
           "photoImported": "照片已导入。",
           "renameUndone": "已撤销上次作品重命名。",
           "exported": "已导出 {{handle}}。",
+          "exportCancelled": "已取消导出。未创建任何导出内容。",
+          "exportRevealed": "已在文件夹中显示导出内容。",
           "spendingLimitSaved": "支出限额已保存。",
           "jobTransition": "{{handle}} 现在处于“{{status}}”状态。",
           "freshQuoteRequired": "先前的报价已不是最新版本。开始付费工作前，请查看新的费用。",
@@ -1075,7 +1083,10 @@
         "projectMenu": {
           "label": "项目菜单",
           "spendingLimit": "支出限额",
-          "export": "导出"
+          "export": "导出",
+          "exportStatus": "{{handle}} 的导出",
+          "revealExport": "在文件夹中显示",
+          "dismissExport": "关闭"
         },
         "composer": {
           "description": "照片描述",

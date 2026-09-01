@@ -168,11 +168,21 @@ const makeClient = (load: StudioProjectLoadResultV3 = supportedProject()) =>
       jobId: 'job_1',
       revision: 5,
     })),
-    listPieceExportsV3: vi.fn(async () => ({ revision: 0, artifacts: [] })),
-    exportPieceV3: vi.fn(async () => ({
-      status: 'exported' as const,
-      catalog: { revision: 1, artifacts: [] },
-    })),
+    listPieceExportsV3: vi.fn(async () => ({ revision: 1, artifacts: [] })),
+    exportPieceV3: vi.fn(async () => {
+      const artifact = {
+        id: 'export_1',
+        pieceId: 'piece_1',
+        sourceRevision: 4,
+        handleAtExport: 'morning_light',
+        byteSize: 123,
+        payloadFileCount: 2 as const,
+        createdAt: '2026-09-01T00:12:00.000Z',
+        folderName: 'piece-export_1',
+      };
+      return { status: 'copied' as const, artifact, catalog: { revision: 2, artifacts: [artifact] } };
+    }),
+    revealPieceExportV3: vi.fn(async () => ({ status: 'revealed' as const })),
     watchProjectUpdatesV3: vi.fn(() => vi.fn()),
   }) satisfies StudioPilotClientV3;
 
@@ -885,8 +895,21 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
       state: 'current',
     };
     const client = makeClient(supportedProject({ pieces: [currentPiece] }));
-    client.listPieceExportsV3.mockResolvedValue({ revision: 7, artifacts: [] });
-    const exportResult = { status: 'exported' as const, catalog: { revision: 8, artifacts: [] } };
+    const artifact = {
+      id: 'export_8',
+      pieceId: 'piece_1',
+      sourceRevision: 4,
+      handleAtExport: 'نور_صبح',
+      byteSize: 321,
+      payloadFileCount: 2 as const,
+      createdAt: '2026-09-01T00:12:00.000Z',
+      folderName: 'piece-export_8',
+    };
+    const exportResult = {
+      status: 'copied' as const,
+      artifact,
+      catalog: { revision: 8, artifacts: [artifact] },
+    };
     client.exportPieceV3.mockResolvedValue(exportResult);
     const onExported = vi.fn();
     const { container } = renderEnglish(
@@ -915,14 +938,22 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
         projectId: 'project_1',
         pieceId: 'piece_1',
         expectedRevision: 4,
-        expectedCatalogRevision: 7,
       })
-    );
-    expect(client.listPieceExportsV3.mock.invocationCallOrder[0]).toBeLessThan(
-      client.exportPieceV3.mock.invocationCallOrder[0]!
     );
     expect(onExported).toHaveBeenCalledWith('piece_1', exportResult);
     expect(screen.getByRole('status', { name: '' })).toHaveTextContent('Exported #نور_صبح.');
+    expect(screen.getByRole('region', { name: 'Export for #نور_صبح' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Reveal in folder' }));
+    await waitFor(() =>
+      expect(client.revealPieceExportV3).toHaveBeenCalledWith({
+        projectId: 'project_1',
+        expectedCatalogRevision: 8,
+        artifactId: 'export_8',
+      })
+    );
+    expect(screen.getByRole('status', { name: '' })).toHaveTextContent('Export revealed in its folder.');
+    fireEvent.click(screen.getByRole('button', { name: 'Dismiss' }));
+    expect(screen.queryByRole('region', { name: 'Export for #نور_صبح' })).not.toBeInTheDocument();
     expect(client.preparePhotoV3).not.toHaveBeenCalled();
     expect(client.confirmPreparedPhotoV3).not.toHaveBeenCalled();
     expect(client.applyMutationBatchV3).not.toHaveBeenCalled();
@@ -989,7 +1020,6 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
   it('keeps a failed export non-generative and does not report it as exported', async () => {
     const piece = importedPiece('piece_export', 'rain_window');
     const client = makeClient(supportedProject({ pieces: [piece] }));
-    client.listPieceExportsV3.mockResolvedValue({ revision: 7, artifacts: [] });
     client.exportPieceV3.mockRejectedValueOnce({ code: 'stale_revision', messageKey: 'internal.stale.export' });
     const onExported = vi.fn();
     renderEnglish(<PilotCanvas projectId='project_1' client={client} onExported={onExported} />);
@@ -998,18 +1028,34 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
     fireEvent.click(await screen.findByRole('menuitem', { name: 'Export #rain_window' }));
 
     expect(await screen.findByText('Creative Studio could not complete that action.')).toBeInTheDocument();
-    expect(client.listPieceExportsV3).toHaveBeenCalledWith('project_1');
     expect(client.exportPieceV3).toHaveBeenCalledWith({
       projectId: 'project_1',
       pieceId: 'piece_export',
       expectedRevision: 4,
-      expectedCatalogRevision: 7,
     });
     expect(onExported).not.toHaveBeenCalled();
     expect(screen.queryByText('Exported #rain_window.')).not.toBeInTheDocument();
     expect(client.preparePhotoV3).not.toHaveBeenCalled();
     expect(client.confirmPreparedPhotoV3).not.toHaveBeenCalled();
     expect(client.applyMutationBatchV3).not.toHaveBeenCalled();
+  });
+
+  it('announces native export cancellation without creating a success or reveal surface', async () => {
+    const piece = importedPiece('piece_export', 'rain_window');
+    const client = makeClient(supportedProject({ pieces: [piece] }));
+    client.exportPieceV3.mockResolvedValueOnce({ status: 'cancelled' });
+    const onExported = vi.fn();
+    renderEnglish(<PilotCanvas projectId='project_1' client={client} onExported={onExported} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Project menu' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Export #rain_window' }));
+
+    expect(await screen.findByText('Export cancelled. No export was created.')).toBeInTheDocument();
+    expect(onExported).not.toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Reveal in folder' })).not.toBeInTheDocument();
+    expect(client.listPieceExportsV3).not.toHaveBeenCalled();
+    expect(client.preparePhotoV3).not.toHaveBeenCalled();
+    expect(client.confirmPreparedPhotoV3).not.toHaveBeenCalled();
   });
 
   it('opens the typed spending-limit editor from every project menu and refreshes after saving', async () => {

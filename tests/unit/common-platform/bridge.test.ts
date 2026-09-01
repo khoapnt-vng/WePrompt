@@ -184,124 +184,80 @@ describe('local bridge', () => {
     );
   });
 
-  it('preserves a Studio store rejection as invalid_payload across the V2 bridge', async () => {
+  it('carries the bounded schema-6 Pilot result across the real IPC transport', async () => {
     await loadLoopbackBridge();
-    vi.doMock('@process/services/creative-studio/runtime', () => ({
-      getCreativeStudioRuntime: vi.fn(),
-      getCreativeStudioService: vi.fn(),
+    vi.doMock('@process/services/creative-studio/pilotProductionRuntime', () => ({
+      getCreativeStudioPilotProductionRuntimeV3: vi.fn(),
     }));
-    const [{ creativeStudio }, { initCreativeStudioBridge }, { CreativeStudioStoreError }] = await Promise.all([
-      import('@/common/adapter/ipcBridge'),
-      import('@process/bridge/creativeStudioBridge'),
-      import('@process/services/creative-studio/store'),
-    ]);
-    initCreativeStudioBridge({
+    const [{ creativeStudioPilot }, { initCreativeStudioPilotBridgeV3 }, { CreativeStudioPilotServiceErrorV3 }] =
+      await Promise.all([
+        import('@/common/adapter/ipcBridge'),
+        import('@process/bridge/creativeStudioPilotBridge'),
+        import('@process/services/creative-studio/service/pilot/errors'),
+      ]);
+    const entryPoint = {
+      listProjectsV3: async () => {
+        throw Object.assign(new CreativeStudioPilotServiceErrorV3('project_quarantined'), {
+          filePath: '/private/project.json',
+        });
+      },
+    };
+    initCreativeStudioPilotBridgeV3({
       isFeatureEnabled: () => true,
-      getService: () =>
-        ({
-          getProject: async () => {
-            throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio project id');
-          },
-        }) as never,
+      getRuntime: () => ({ entryPoint }) as never,
     });
 
-    await expect(creativeStudio.getProject.invoke({ projectId: 'project_1' })).resolves.toEqual({
+    const result = await creativeStudioPilot.listProjects.invoke();
+    expect(result).toEqual({
       ok: false,
       error: {
-        code: 'invalid_payload',
-        messageKey: 'conversation.creativeStudio.errors.invalidPayload',
+        code: 'project_quarantined',
+        messageKey: 'conversation.creativeStudio.pilot.common.actionFailed',
       },
     });
-    vi.doUnmock('@process/services/creative-studio/runtime');
+    expect(JSON.stringify(result)).not.toContain('/private/project.json');
+    vi.doUnmock('@process/services/creative-studio/pilotProductionRuntime');
   });
 
-  it('preserves only an allowlisted Studio pricing reason across the V2 IPC transport', async () => {
+  it('carries only bounded image-connection failures across the real IPC transport', async () => {
     await loadLoopbackBridge();
-    vi.doMock('@process/services/creative-studio/runtime', () => ({
-      getCreativeStudioRuntime: vi.fn(),
-      getCreativeStudioService: vi.fn(),
+    vi.doMock('@process/services/creative-studio/pilotProductionRuntime', () => ({
+      getCreativeStudioPilotProductionRuntimeV3: vi.fn(),
     }));
-    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioPricingErrorV2 }] = await Promise.all([
-      import('@/common/adapter/ipcBridge'),
-      import('@process/bridge/creativeStudioBridge'),
-      import('@process/services/creative-studio/service/schema2/pricing/estimate'),
-    ]);
-    initCreativeStudioBridge({
+    const [{ creativeStudio }, { initCreativeStudioConnectionBridgeV1 }, { StudioConnectionValidationError }] =
+      await Promise.all([
+        import('@/common/adapter/ipcBridge'),
+        import('@process/bridge/creativeStudioConnectionBridge'),
+        import('@process/services/creative-studio/service/projectMutations'),
+      ]);
+    initCreativeStudioConnectionBridgeV1({
       isFeatureEnabled: () => true,
-      getService: () =>
+      getController: () =>
         ({
-          prepareSubmission: async () => {
-            throw Object.assign(new StudioPricingErrorV2('missing_conditioning'), {
-              body: 'private provider body',
-              routeId: 'private_route_123',
-              stack: 'private stack',
+          saveConnection: async () => {
+            throw Object.assign(new StudioConnectionValidationError('auth'), {
+              apiKey: 'private-key',
+              providerBody: 'private body',
             });
           },
         }) as never,
     });
 
-    const result = await creativeStudio.prepareSubmission.invoke({
-      projectId: 'project_1',
-      expectedRevision: 1,
-      originReferenceHandoffId: null,
-      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
-      cascadeChoices: [],
+    const result = await creativeStudio.saveConnection.invoke({
+      providerId: 'provider_1',
+      integrationId: 'integration_g7Q2mB4p',
+      model: 'image-model',
     });
-
     expect(result).toEqual({
       ok: false,
       error: {
-        code: 'pricing_refused',
-        reason: 'missing_conditioning',
-        details: null,
-        messageKey: 'conversation.creativeStudio.errors.pricingRefused',
+        code: 'connection_validation_failed',
+        reason: 'auth',
+        messageKey: 'settings.mediaModels.validationFailure.auth',
       },
     });
-    expect(JSON.stringify(result)).not.toContain('private provider body');
-    expect(JSON.stringify(result)).not.toContain('private_route_123');
-    expect(JSON.stringify(result)).not.toContain('private stack');
-    vi.doUnmock('@process/services/creative-studio/runtime');
-  });
-
-  it('preserves only a bounded Studio mutation reason across the V2 IPC transport', async () => {
-    await loadLoopbackBridge();
-    vi.doMock('@process/services/creative-studio/runtime', () => ({
-      getCreativeStudioRuntime: vi.fn(),
-      getCreativeStudioService: vi.fn(),
-    }));
-    const [{ creativeStudio }, { initCreativeStudioBridge }, { StudioMutationErrorV2 }] = await Promise.all([
-      import('@/common/adapter/ipcBridge'),
-      import('@process/bridge/creativeStudioBridge'),
-      import('@process/services/creative-studio/service/schema2/mutations'),
-    ]);
-    initCreativeStudioBridge({
-      isFeatureEnabled: () => true,
-      getService: () =>
-        ({
-          applyMutations: async () => {
-            throw Object.assign(new StudioMutationErrorV2('dependency_blocked'), {
-              internalState: 'private mutation details',
-            });
-          },
-        }) as never,
-    });
-
-    const result = await creativeStudio.applyAuthoringBatch.invoke({
-      projectId: 'project_1',
-      expectedRevision: 1,
-      operations: [{ kind: 'set_brief', brief: 'Revised' }],
-    });
-
-    expect(result).toEqual({
-      ok: false,
-      error: {
-        code: 'mutation_refused',
-        reason: 'dependency_blocked',
-        messageKey: 'conversation.creativeStudio.errors.mutationRefused',
-      },
-    });
-    expect(JSON.stringify(result)).not.toContain('private mutation details');
-    vi.doUnmock('@process/services/creative-studio/runtime');
+    expect(JSON.stringify(result)).not.toContain('private');
+    vi.doUnmock('@process/services/creative-studio/pilotProductionRuntime');
   });
 
   it('disposes a renderer query callback listener when the invoke times out', async () => {

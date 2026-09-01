@@ -293,6 +293,10 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
     () => integrations.filter((integration) => integration.kind === editor.kind),
     [editor.kind, integrations]
   );
+  const supportedKinds = useMemo(
+    () => [...new Set(integrations.map((integration) => integration.kind))],
+    [integrations]
+  );
   const selectedCandidate = candidates.find((candidate) => candidate.providerId === editor.providerId) ?? null;
   const selectedIntegration = integrations.find((integration) => integration.integrationId === editor.integrationId);
   const integrationModels = selectedCandidate?.integrationModels.find(
@@ -665,18 +669,23 @@ export const StudioMediaModelsSection: React.FC<StudioMediaModelsSectionProps> =
         onCancel={closeEditor}
       >
         <div className='flex flex-col gap-12px'>
-          <div className='flex flex-col gap-6px text-12px text-t-secondary'>
-            {t('settings.mediaModels.outputType')}
-            <Select
-              aria-label={t('settings.mediaModels.outputType')}
-              value={editor.kind}
-              disabled={busy}
-              onChange={(value) => updateKind(value as StudioMediaKind)}
-            >
-              <Select.Option value='image'>{t('settings.mediaModels.image')}</Select.Option>
-              <Select.Option value='video'>{t('settings.mediaModels.video')}</Select.Option>
-            </Select>
-          </div>
+          {supportedKinds.length > 1 && (
+            <div className='flex flex-col gap-6px text-12px text-t-secondary'>
+              {t('settings.mediaModels.outputType')}
+              <Select
+                aria-label={t('settings.mediaModels.outputType')}
+                value={editor.kind}
+                disabled={busy}
+                onChange={(value) => updateKind(value as StudioMediaKind)}
+              >
+                {supportedKinds.map((kind) => (
+                  <Select.Option key={kind} value={kind}>
+                    {t(`settings.mediaModels.${kind}`)}
+                  </Select.Option>
+                ))}
+              </Select>
+            </div>
+          )}
           <div className='flex flex-col gap-6px text-12px text-t-secondary'>
             {t('settings.mediaModels.provider')}
             <Select

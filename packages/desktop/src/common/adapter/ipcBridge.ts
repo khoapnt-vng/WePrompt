@@ -177,7 +177,37 @@ import type {
   StudioRemoveConnectionRequest,
   StudioSaveConnectionRequest,
   StudioValidateConnectionRequest,
+  StudioApplyMutationBatchRequestV3,
+  StudioApplyMutationBatchResultV3,
+  StudioBindDirectorConversationResultV3,
+  StudioCancelPieceJobRequestV3,
+  StudioCancelPieceJobResultV3,
+  StudioConfirmPreparedPhotoRequestV3,
+  StudioConfirmPreparedPhotoResultV3,
+  StudioCreateProjectRequestV3,
+  StudioCreateProjectResultV3,
+  StudioDeleteProjectRequestV3,
+  StudioDeleteProjectResultV3,
+  StudioDiscardPreparedPhotoRequestV3,
+  StudioDiscardPreparedPhotoResultV3,
+  StudioDeliverPieceExportRequestV3,
+  StudioExportPieceDeliveryResultV3,
+  StudioImportPhotoRequestV3,
+  StudioImportPhotoResultV3,
+  StudioPieceExportArtifactRequestV3,
+  StudioPilotCommandResultV3,
+  StudioPreparePhotoIntentV3,
+  StudioPreparePhotoResultV3,
+  StudioProjectListResultV3,
+  StudioProjectLoadResultV3,
+  StudioRendererPieceExportCatalogV3,
+  StudioRevealPieceExportResultV3,
+  StudioResumePieceJobRequestV3,
+  StudioResumePieceJobResultV3,
+  StudioRetryPieceDownloadRequestV3,
+  StudioRetryPieceDownloadResultV3,
 } from '../types/project/creativeStudioTypes';
+import type { StudioPilotDirectorSessionAuthorityV3 } from '../types/project/creativeStudioPilotMcpEnv';
 import { STUDIO_MAX_DIRTY_DRAFTS_REPORTED } from '../types/project/creativeStudioTypes';
 import type {
   CreateProviderRequest,
@@ -1455,6 +1485,90 @@ export const creativeStudio = {
   projectUpdated: bridge.buildEmitter<{ projectId: string }>('studio.project-updated'),
   proposalUpdated: bridge.buildEmitter<{ projectId: string; proposalId: string }>('studio.proposal-updated'),
   referenceUpdated: bridge.buildEmitter<{ projectId: string; requestId: string }>('studio.reference-updated'),
+};
+
+export type StudioPilotProjectRequestV3 = { projectId: string };
+export type StudioPilotBindDirectorConversationRequestV3 = {
+  projectId: string;
+  expectedAuthoringRevision: number;
+  conversationId: string;
+};
+export type StudioPilotProjectUpdatedEventV3 =
+  | { source: 'prepared'; projectId: string }
+  | { source: 'durable'; facts: { projectId: string } };
+
+/** Exact schema-6 Pilot bridge. It is intentionally separate from the retired film contract. */
+export const creativeStudioPilot = {
+  listProjects: bridge.buildProvider<StudioPilotCommandResultV3<StudioProjectListResultV3>, void>(
+    'creative-studio-pilot.list-projects'
+  ),
+  createProject: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioCreateProjectResultV3>,
+    StudioCreateProjectRequestV3
+  >('creative-studio-pilot.create-project'),
+  loadProject: bridge.buildProvider<StudioPilotCommandResultV3<StudioProjectLoadResultV3>, StudioPilotProjectRequestV3>(
+    'creative-studio-pilot.load-project'
+  ),
+  getDirectorSessionServer: bridge.buildProvider<
+    StudioPilotCommandResultV3<IAttestedSessionMcpServer>,
+    StudioPilotProjectRequestV3
+  >('creative-studio-pilot.get-director-session-server'),
+  getDirectorSessionAuthority: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioPilotDirectorSessionAuthorityV3>,
+    StudioPilotProjectRequestV3
+  >('creative-studio-pilot.get-director-session-authority'),
+  bindDirectorConversation: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioBindDirectorConversationResultV3>,
+    StudioPilotBindDirectorConversationRequestV3
+  >('creative-studio-pilot.bind-director-conversation'),
+  preparePhoto: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioPreparePhotoResultV3>,
+    StudioPreparePhotoIntentV3
+  >('creative-studio-pilot.prepare-photo'),
+  confirmPreparedPhoto: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioConfirmPreparedPhotoResultV3>,
+    StudioConfirmPreparedPhotoRequestV3
+  >('creative-studio-pilot.confirm-prepared-photo'),
+  discardPreparedPhoto: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioDiscardPreparedPhotoResultV3>,
+    StudioDiscardPreparedPhotoRequestV3
+  >('creative-studio-pilot.discard-prepared-photo'),
+  importPhoto: bridge.buildProvider<StudioPilotCommandResultV3<StudioImportPhotoResultV3>, StudioImportPhotoRequestV3>(
+    'creative-studio-pilot.import-photo'
+  ),
+  applyMutationBatch: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioApplyMutationBatchResultV3>,
+    StudioApplyMutationBatchRequestV3
+  >('creative-studio-pilot.apply-mutation-batch'),
+  cancelJob: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioCancelPieceJobResultV3>,
+    StudioCancelPieceJobRequestV3
+  >('creative-studio-pilot.cancel-job'),
+  resumeJob: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioResumePieceJobResultV3>,
+    StudioResumePieceJobRequestV3
+  >('creative-studio-pilot.resume-job'),
+  retryDownload: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioRetryPieceDownloadResultV3>,
+    StudioRetryPieceDownloadRequestV3
+  >('creative-studio-pilot.retry-download'),
+  listPieceExports: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioRendererPieceExportCatalogV3>,
+    StudioPilotProjectRequestV3
+  >('creative-studio-pilot.list-piece-exports'),
+  exportPiece: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioExportPieceDeliveryResultV3>,
+    StudioDeliverPieceExportRequestV3
+  >('creative-studio-pilot.export-piece'),
+  revealPieceExport: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioRevealPieceExportResultV3>,
+    StudioPieceExportArtifactRequestV3
+  >('creative-studio-pilot.reveal-piece-export'),
+  deleteProject: bridge.buildProvider<
+    StudioPilotCommandResultV3<StudioDeleteProjectResultV3>,
+    StudioDeleteProjectRequestV3
+  >('creative-studio-pilot.delete-project'),
+  projectUpdated: bridge.buildEmitter<StudioPilotProjectUpdatedEventV3>('creative-studio-pilot.project-updated'),
 };
 
 // ---------------------------------------------------------------------------

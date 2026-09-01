@@ -19,11 +19,13 @@ import {
   parseStudioConfirmPreparedPhotoRequestV3,
   parseStudioCreateProjectRequestV3,
   parseStudioDeleteProjectRequestV3,
+  parseStudioDeliverPieceExportRequestV3,
   parseStudioDiscardPreparedPhotoRequestV3,
   parseStudioExportPieceRequestV3,
   parseStudioImportPhotoRequestV3,
   parseStudioPreparePhotoIntentV3,
   parseStudioPreparePhotoRequestV3,
+  parseStudioPieceExportArtifactRequestV3,
   parseStudioResumePieceJobRequestV3,
   parseStudioRetryPieceDownloadRequestV3,
   parseStudioRetryPieceJobRequestV3,
@@ -123,6 +125,20 @@ describe('CS4 Pilot public wire contracts', () => {
       expectedRevision: 7,
       expectedCatalogRevision: 3,
     });
+    expect(
+      parseStudioDeliverPieceExportRequestV3({
+        projectId: 'project_1',
+        pieceId: 'piece_1',
+        expectedRevision: 7,
+      })
+    ).toEqual({ projectId: 'project_1', pieceId: 'piece_1', expectedRevision: 7 });
+    expect(
+      parseStudioPieceExportArtifactRequestV3({
+        projectId: 'project_1',
+        expectedCatalogRevision: 4,
+        artifactId: 'export_1',
+      })
+    ).toEqual({ projectId: 'project_1', expectedCatalogRevision: 4, artifactId: 'export_1' });
     expect(parseStudioDeleteProjectRequestV3({ mode: 'healthy', projectId: 'project_1', expectedRevision: 7 })).toEqual(
       { mode: 'healthy', projectId: 'project_1', expectedRevision: 7 }
     );
@@ -200,6 +216,30 @@ describe('CS4 Pilot public wire contracts', () => {
         expectedRevision: 1,
         expectedCatalogRevision: 1,
         outputPath: '/private/export',
+      })
+    );
+    expectInvalid(() =>
+      parseStudioDeliverPieceExportRequestV3({
+        projectId: 'project_1',
+        pieceId: 'piece_1',
+        expectedRevision: 1,
+        outputPath: '/private/export',
+      })
+    );
+    expectInvalid(() =>
+      parseStudioPieceExportArtifactRequestV3({
+        projectId: 'project_1',
+        expectedCatalogRevision: 1,
+        artifactId: 'export_1',
+        folderName: 'piece-export_1',
+      })
+    );
+    expectInvalid(() =>
+      parseStudioDeliverPieceExportRequestV3({
+        projectId: 'project_1',
+        pieceId: 'piece_1',
+        expectedRevision: 1,
+        expectedCatalogRevision: 1,
       })
     );
     expectInvalid(() =>

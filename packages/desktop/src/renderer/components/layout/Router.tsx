@@ -94,7 +94,7 @@ const PanelRoute: React.FC<{ layout: React.ReactElement }> = ({ layout }) => {
           <Route path='/conversation/:id' element={withRouteFallback(Conversation)} />
           <Route path='/project/:id' element={withRouteFallback(ProjectHome)} />
           <Route path='/studio' element={<DesktopStudioRoute />} />
-          <Route path='/studio/:id/:view?' element={<DesktopStudioRoute />} />
+          <Route path='/studio/:id' element={<DesktopStudioRoute />} />
           <Route
             path='/team/:id'
             element={TEAM_MODE_ENABLED ? withRouteFallback(TeamIndex) : <Navigate to='/guid' replace />}

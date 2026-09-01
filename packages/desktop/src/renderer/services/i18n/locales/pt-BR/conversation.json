@@ -939,6 +939,12 @@
           "unreadableBody": "Excluir {{name}}? Este projeto não pode ser aberto com segurança; por isso, a exclusão usa sua credencial protegida de uso único."
         }
       },
+      "director": {
+        "title": "Diretor",
+        "loading": "Iniciando Diretor…",
+        "noModel": "Escolha um modelo Aionrs antes de iniciar o Diretor.",
+        "failed": "Não foi possível conectar o Diretor com segurança. Recarregue o projeto."
+      },
       "canvas": {
         "projectActions": "Ações do projeto",
         "loading": "Carregando projeto…",
@@ -1073,6 +1079,8 @@
           "photoImported": "Foto importada.",
           "renameUndone": "A última renomeação da Peça foi desfeita.",
           "exported": "{{handle}} exportada.",
+          "exportCancelled": "A exportação foi cancelada. Nenhuma exportação foi criada.",
+          "exportRevealed": "A exportação foi exibida na pasta.",
           "spendingLimitSaved": "Limite de gastos salvo.",
           "jobTransition": "{{handle}} agora está com o status {{status}}.",
           "freshQuoteRequired": "O orçamento anterior não está mais atualizado. Analise um novo custo antes de iniciar o trabalho pago.",
@@ -1081,7 +1089,10 @@
         "projectMenu": {
           "label": "Menu do projeto",
           "spendingLimit": "Limite de gastos",
-          "export": "Exportar"
+          "export": "Exportar",
+          "exportStatus": "Exportação de {{handle}}",
+          "revealExport": "Mostrar na pasta",
+          "dismissExport": "Fechar"
         },
         "composer": {
           "description": "Descrição da foto",

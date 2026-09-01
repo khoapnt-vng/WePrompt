@@ -267,6 +267,31 @@
   overflow-wrap: anywhere;
 }
 
+.exportStatus {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  padding-block: 12px;
+  padding-inline: 16px;
+  border: 1px solid rgb(var(--success-6));
+  border-radius: 8px;
+  background: var(--color-success-light-1);
+  gap: 12px;
+}
+
+.exportStatus p {
+  min-inline-size: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.exportStatusActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .announcement {
   position: absolute;
   inline-size: 1px;

@@ -7,6 +7,7 @@
 import { constants as fsConstants } from 'node:fs';
 import type { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
+import { syncDurableDirectory } from './durableDirectory';
 
 export type RecordIoErrorCode =
   | 'unsafe_path'
@@ -218,21 +219,9 @@ export async function resolveCompleteDirectorySet<const ChildName extends string
         // eslint-disable-next-line no-await-in-loop
         if ((await input.fs.readdir(child)).length !== 0) throw new RecordIoError('partial_directory_set');
         // eslint-disable-next-line no-await-in-loop
-        const childHandle = await input.fs.open(child, 'r');
-        try {
-          // eslint-disable-next-line no-await-in-loop
-          await childHandle.sync();
-        } finally {
-          // eslint-disable-next-line no-await-in-loop
-          await childHandle.close();
-        }
+        await syncDurableDirectory(input.fs, child);
       }
-      const stageHandle = await input.fs.open(stage, 'r');
-      try {
-        await stageHandle.sync();
-      } finally {
-        await stageHandle.close();
-      }
+      await syncDurableDirectory(input.fs, stage);
       await authorize();
       const currentParentStats = await input.fs.lstat(input.parent);
       if (
@@ -333,12 +322,7 @@ export async function resolveCompleteDirectorySet<const ChildName extends string
       ) {
         throw new RecordIoError('unsafe_path');
       }
-      const parentHandle = await input.fs.open(input.parent, 'r');
-      try {
-        await parentHandle.sync();
-      } finally {
-        await parentHandle.close();
-      }
+      await syncDurableDirectory(input.fs, input.parent);
     } catch (error) {
       if (authorizationFailed && stage !== undefined && ownedStageIdentity !== undefined) {
         try {
@@ -584,12 +568,7 @@ const assertSafeParent = async (input: {
 };
 
 const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<void> => {
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+  await syncDurableDirectory(fs, directory);
 };
 
 const removeIfPresent = async (fs: RecordIoFileSystem, file: string): Promise<boolean> => {

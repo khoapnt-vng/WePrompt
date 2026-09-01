@@ -7,6 +7,7 @@
 import { randomBytes } from 'node:crypto';
 import {
   type StudioApplyMutationBatchResultV3,
+  type StudioBindDirectorConversationResultV3,
   type StudioCancelPieceJobResultV3,
   type StudioConfirmPreparedPhotoResultV3,
   type StudioCreateProjectResultV3,
@@ -77,6 +78,11 @@ export type CreativeStudioPilotEntryPointV3 = {
   createProjectV3(input: unknown): Promise<StudioCreateProjectResultV3>;
   listProjectsV3(): Promise<StudioProjectListResultV3>;
   loadProjectV3(projectId: string): Promise<StudioProjectLoadResultV3>;
+  bindDirectorConversationV3(input: {
+    projectId: string;
+    expectedAuthoringRevision: number;
+    conversationId: string;
+  }): Promise<StudioBindDirectorConversationResultV3>;
   preparePhotoV3(input: unknown): Promise<StudioPreparePhotoResultV3>;
   confirmPreparedPhotoV3(input: unknown): Promise<StudioConfirmPreparedPhotoResultV3>;
   discardPreparedPhotoV3(input: unknown): Promise<StudioDiscardPreparedPhotoResultV3>;
@@ -118,7 +124,7 @@ const mutationFailure = (error: StudioMutationErrorV3): never => {
   throw new CreativeStudioPilotServiceErrorV3('invalid_payload');
 };
 
-/** Builds the inactive, typed schema-6 Main facade without registering a production IPC route. */
+/** Builds the typed schema-6 Main facade consumed by production IPC and headless verification. */
 export const createCreativeStudioPilotEntryPointV3 = (
   deps: CreativeStudioPilotEntryPointDepsV3
 ): CreativeStudioPilotEntryPointV3 => {
@@ -246,6 +252,11 @@ export const createCreativeStudioPilotEntryPointV3 = (
           status: 'supported',
           summary: toStudioProjectSummaryV3(loaded.project),
           canvas: toStudioRendererCanvasInventoryV3(loaded.project),
+          director: {
+            brief: loaded.project.brief,
+            rules: structuredClone(loaded.project.rules),
+            briefConversationId: loaded.project.briefConversationId,
+          },
           activity: toStudioRendererCapabilityActivityV3(
             loaded.project,
             quotes,
@@ -260,6 +271,57 @@ export const createCreativeStudioPilotEntryPointV3 = (
                   label: loaded.project.undoHistory.at(-1)!.label,
                 },
         };
+      } catch (error) {
+        return normalizeCreativeStudioPilotErrorV3(error);
+      }
+    },
+
+    async bindDirectorConversationV3(input) {
+      assertActive();
+      try {
+        if (
+          typeof input !== 'object' ||
+          input === null ||
+          Array.isArray(input) ||
+          Reflect.ownKeys(input).length !== 3 ||
+          !SAFE_ID.test(input.projectId) ||
+          !Number.isSafeInteger(input.expectedAuthoringRevision) ||
+          input.expectedAuthoringRevision < 1 ||
+          !SAFE_ID.test(input.conversationId)
+        ) {
+          throw new CreativeStudioPilotServiceErrorV3('invalid_payload');
+        }
+        return await deps.store.withProjectAuthorityV3(input.projectId, async (authority) => {
+          if (authority.project.authoringRevision !== input.expectedAuthoringRevision) {
+            throw new CreativeStudioPilotServiceErrorV3('stale_authoring');
+          }
+          if (authority.project.briefConversationId === input.conversationId) {
+            return {
+              status: 'bound',
+              projectId: authority.project.id,
+              conversationId: input.conversationId,
+              revision: authority.project.revision,
+              authoringRevision: authority.project.authoringRevision,
+              changed: false,
+            };
+          }
+          if (authority.project.briefConversationId !== null) {
+            throw new CreativeStudioPilotServiceErrorV3('busy');
+          }
+          const committed = await authority.commit(
+            (project) => ({ ...project, briefConversationId: input.conversationId }),
+            { kind: 'authoring', expectedRevision: authority.project.revision }
+          );
+          preparedPhotos.invalidateProject(committed.id, committed.authoringRevision);
+          return {
+            status: 'bound',
+            projectId: committed.id,
+            conversationId: input.conversationId,
+            revision: committed.revision,
+            authoringRevision: committed.authoringRevision,
+            changed: true,
+          };
+        });
       } catch (error) {
         return normalizeCreativeStudioPilotErrorV3(error);
       }

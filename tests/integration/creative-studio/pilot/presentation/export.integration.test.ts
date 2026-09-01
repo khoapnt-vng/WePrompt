@@ -7,7 +7,7 @@
  * @vitest-environment node
  */
 
-import { readFile, readdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -125,6 +125,55 @@ const exportedManifest = async (harness: Harness, folderName: string) => {
 };
 
 describe('schema-6 standalone Piece export runtime', () => {
+  it('describes native delivery without creating managed export storage', async () => {
+    const harness = await importedHarness({ fileName: 'night_lake.png' });
+    const runtime = harness.createRuntime();
+    const handle = harness.project.pieces[harness.pieceId]!.handle;
+
+    await expect(
+      runtime.describe({
+        projectId: harness.project.id,
+        pieceId: harness.pieceId,
+        expectedRevision: harness.project.revision,
+      })
+    ).resolves.toEqual({ suggestedName: `piece-${handle}-export` });
+    await expect(readdir(exportsDirectory(harness.root, harness.project.id))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+    expect(harness.media.verifyManagedAssetV3).not.toHaveBeenCalled();
+    await expect(
+      runtime.describe({
+        projectId: harness.project.id,
+        pieceId: harness.pieceId,
+        expectedRevision: harness.project.revision - 1,
+      })
+    ).rejects.toMatchObject({ code: 'stale_project' });
+    await expect(
+      runtime.describe({
+        projectId: harness.project.id,
+        pieceId: 'piece_missing',
+        expectedRevision: harness.project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'export_unavailable' });
+    await expect(
+      runtime.describe({
+        projectId: harness.project.id,
+        pieceId: harness.pieceId,
+        expectedRevision: harness.project.revision,
+        outputPath: '/private/export',
+      })
+    ).rejects.toMatchObject({ code: 'invalid_payload' });
+  });
+
+  it('uses production clock and identity defaults without weakening the export contract', async () => {
+    const harness = await importedHarness();
+    const runtime = createStudioPieceExportRuntimeV3({ store: harness.store, media: harness.media });
+
+    const result = await runtime.create(exportRequest(harness));
+    expect(result).toMatchObject({ status: 'exported', catalog: { revision: 2 } });
+    expect(result.catalog.artifacts).toHaveLength(1);
+  });
+
   it('exports the exact imported current image and deterministic sidecar without an internal path', async () => {
     const harness = await importedHarness();
     const runtime = harness.createRuntime();
@@ -148,6 +197,288 @@ describe('schema-6 standalone Piece export runtime', () => {
     expect(sidecarText).not.toContain(harness.root);
     expect(result.catalog.artifacts[0]).not.toHaveProperty('managedExport');
     expect(result.catalog.artifacts[0]).not.toHaveProperty('manifestSha256');
+  });
+
+  it('copies one exact catalog artifact to a new native destination and resolves reveal inside managed storage', async () => {
+    const harness = await importedHarness();
+    const runtime = harness.createRuntime();
+    const exported = await runtime.create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const destination = path.join(destinationParent, 'delivered-piece');
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: exported.catalog.revision,
+      artifactId: artifact.id,
+    };
+
+    await expect(runtime.copy(selection, destination)).resolves.toEqual({ status: 'copied' });
+    expect(await readFile(path.join(destination, 'photo.png'))).toEqual(harness.sourceBytes);
+    expect(parseStudioPieceExportManifestV3(await readFile(path.join(destination, 'manifest.json')))).toEqual(
+      await exportedManifest(harness, artifact.folderName)
+    );
+    await expect(runtime.resolveRevealPath(selection)).resolves.toBe(
+      path.join(await realpath(exportsDirectory(harness.root, harness.project.id)), artifact.folderName)
+    );
+  });
+
+  it.each([
+    ['copy_stage_closed', false],
+    ['copy_intent_committed', false],
+    ['copy_publish_ready', false],
+    ['copy_artifact_published', true],
+    ['copy_intent_removed', true],
+  ] as const)(
+    'recovers the %s native publication boundary without exposing a partial folder',
+    async (crashStep, visible) => {
+      const harness = await importedHarness();
+      const exported = await harness.createRuntime().create(exportRequest(harness));
+      const artifact = exported.catalog.artifacts[0]!;
+      const destinationParent = await realpath(path.dirname(harness.root));
+      const destination = path.join(destinationParent, `delivered-${crashStep}`);
+      const selection = {
+        projectId: harness.project.id,
+        expectedCatalogRevision: exported.catalog.revision,
+        artifactId: artifact.id,
+      };
+      const crashing = harness.createRuntime({
+        onStep: async (step) => {
+          if (step !== crashStep) return;
+          if (visible) {
+            expect((await readdir(destination)).toSorted()).toEqual(['manifest.json', 'photo.png']);
+          } else {
+            await expect(readdir(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+          }
+          throw new Error(`crash:${step}`);
+        },
+      });
+
+      await expect(crashing.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+      await expect(harness.createRuntime().copy(selection, destination)).resolves.toEqual({ status: 'copied' });
+      expect((await readdir(destination)).toSorted()).toEqual(['manifest.json', 'photo.png']);
+      expect(await readFile(path.join(destination, 'photo.png'))).toEqual(harness.sourceBytes);
+      expect((await readdir(destinationParent)).filter((name) => name.startsWith('.copy-'))).toEqual([]);
+    }
+  );
+
+  it('does not replace a destination claimed at the final publication boundary', async () => {
+    const harness = await importedHarness();
+    const exported = await harness.createRuntime().create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const destination = path.join(destinationParent, 'concurrently-claimed-export');
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: exported.catalog.revision,
+      artifactId: artifact.id,
+    };
+    const racing = harness.createRuntime({
+      onStep: async (step) => {
+        if (step !== 'copy_publish_ready') return;
+        await mkdir(destination);
+        await writeFile(path.join(destination, 'person-owned.txt'), 'keep me', 'utf8');
+      },
+    });
+
+    await expect(racing.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(await readFile(path.join(destination, 'person-owned.txt'), 'utf8')).toBe('keep me');
+    expect(await readdir(destination)).toEqual(['person-owned.txt']);
+    await expect(harness.createRuntime().copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
+  it('rejects a copy when its durable export catalog changes during staging', async () => {
+    const harness = await importedHarness();
+    const exported = await harness.createRuntime().create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const destination = path.join(destinationParent, 'stale-catalog-copy');
+    const catalogPath = path.join(exportsDirectory(harness.root, harness.project.id), 'catalog-v3.json');
+    const racing = harness.createRuntime({
+      onStep: async (step) => {
+        if (step !== 'copy_stage_closed') return;
+        const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as { revision: number };
+        catalog.revision += 1;
+        await writeFile(catalogPath, JSON.stringify(catalog), 'utf8');
+      },
+    });
+
+    await expect(
+      racing.copy(
+        {
+          projectId: harness.project.id,
+          expectedCatalogRevision: exported.catalog.revision,
+          artifactId: artifact.id,
+        },
+        destination
+      )
+    ).rejects.toMatchObject({ code: 'stale_export_catalog' });
+    await expect(readdir(destination)).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('fails closed on an invalid copy intent or an intent whose hidden stage disappeared', async () => {
+    const harness = await importedHarness();
+    const exported = await harness.createRuntime().create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: exported.catalog.revision,
+      artifactId: artifact.id,
+    };
+
+    for (const failure of [
+      'invalid-utf8',
+      'invalid-json',
+      'invalid-shape',
+      'noncanonical-intent',
+      'wrong-intent',
+      'missing-stage',
+    ] as const) {
+      const destination = path.join(destinationParent, failure);
+      const crashing = harness.createRuntime({
+        onStep: (step) => {
+          if (step === 'copy_intent_committed') throw new Error(`crash:${step}`);
+        },
+      });
+      await expect(crashing.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+      const residues = await readdir(destinationParent);
+      const intent = residues.find((name) => name.endsWith('.intent.json'))!;
+      const stage = residues.find((name) => name.endsWith('.part'))!;
+      if (failure === 'invalid-utf8') {
+        await writeFile(path.join(destinationParent, intent), Buffer.from([0xff]));
+      } else if (failure === 'invalid-json') {
+        await writeFile(path.join(destinationParent, intent), '{', 'utf8');
+      } else if (failure === 'invalid-shape') {
+        await writeFile(path.join(destinationParent, intent), '{}', 'utf8');
+      } else if (failure === 'noncanonical-intent') {
+        const original = await readFile(path.join(destinationParent, intent));
+        await writeFile(path.join(destinationParent, intent), Buffer.concat([original, Buffer.from(' ')]));
+      } else if (failure === 'wrong-intent') {
+        const original = JSON.parse(await readFile(path.join(destinationParent, intent), 'utf8')) as Record<
+          string,
+          unknown
+        >;
+        original.destinationName = 'different-destination';
+        await writeFile(path.join(destinationParent, intent), JSON.stringify(original), 'utf8');
+      } else {
+        await rm(path.join(destinationParent, stage), { recursive: true });
+      }
+      await expect(harness.createRuntime().copy(selection, destination)).rejects.toMatchObject({
+        code: 'storage_error',
+      });
+      await rm(path.join(destinationParent, intent), { force: true });
+      await rm(path.join(destinationParent, stage), { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a complete atomic publication when its exact intent is replaced before cleanup', async () => {
+    const harness = await importedHarness();
+    const exported = await harness.createRuntime().create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const destination = path.join(destinationParent, 'intent-replaced-after-publication');
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: exported.catalog.revision,
+      artifactId: artifact.id,
+    };
+    const tampering = harness.createRuntime({
+      onStep: async (step) => {
+        if (step !== 'copy_intent_removed') return;
+        const intent = (await readdir(destinationParent)).find((name) => name.endsWith('.intent.json'))!;
+        await writeFile(path.join(destinationParent, intent), '{}', 'utf8');
+      },
+    });
+
+    await expect(tampering.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+    expect((await readdir(destination)).toSorted()).toEqual(['manifest.json', 'photo.png']);
+  });
+
+  it.each(['unexpected-entry', 'changed-photo'] as const)(
+    'fails closed when a recovered hidden stage has an %s',
+    async (failure) => {
+      const harness = await importedHarness();
+      const exported = await harness.createRuntime().create(exportRequest(harness));
+      const artifact = exported.catalog.artifacts[0]!;
+      const destinationParent = await realpath(path.dirname(harness.root));
+      const destination = path.join(destinationParent, `invalid-stage-${failure}`);
+      const selection = {
+        projectId: harness.project.id,
+        expectedCatalogRevision: exported.catalog.revision,
+        artifactId: artifact.id,
+      };
+      const crashing = harness.createRuntime({
+        onStep: (step) => {
+          if (step === 'copy_stage_closed') throw new Error(`crash:${step}`);
+        },
+      });
+      await expect(crashing.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+      const stage = (await readdir(destinationParent)).find((name) => name.endsWith('.part'))!;
+      if (failure === 'unexpected-entry') {
+        await writeFile(path.join(destinationParent, stage, 'unexpected.txt'), 'not part of the export', 'utf8');
+      } else {
+        await writeFile(path.join(destinationParent, stage, 'photo.png'), 'not the frozen photo', 'utf8');
+      }
+
+      await expect(harness.createRuntime().copy(selection, destination)).rejects.toMatchObject({
+        code: 'storage_error',
+      });
+    }
+  );
+
+  it('fails closed on existing, in-project, stale-catalog, and missing-artifact copy destinations', async () => {
+    const harness = await importedHarness();
+    const runtime = harness.createRuntime();
+    const exported = await runtime.create(exportRequest(harness));
+    const artifact = exported.catalog.artifacts[0]!;
+    const destinationParent = await realpath(path.dirname(harness.root));
+    const existing = path.join(destinationParent, 'existing-export');
+    await writeFile(existing, 'owned by the person', 'utf8');
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: exported.catalog.revision,
+      artifactId: artifact.id,
+    };
+
+    await expect(runtime.copy(selection, existing)).rejects.toMatchObject({ code: 'storage_error' });
+    expect(await readFile(existing, 'utf8')).toBe('owned by the person');
+    await expect(runtime.copy(selection, 'relative/export')).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(runtime.copy(selection, null as never)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(runtime.copy(selection, path.parse(destinationParent).root)).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(runtime.copy(selection, path.join(destinationParent, 'x'.repeat(300)))).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(
+      runtime.copy(selection, `${destinationParent}${path.sep}nested${path.sep}..${path.sep}not-normalized`)
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(runtime.copy({ ...selection, outputPath: '/private/export' }, existing)).rejects.toMatchObject({
+      code: 'invalid_payload',
+    });
+    const managedProject = await realpath(projectDirectory(harness.root, harness.project.id));
+    await expect(runtime.copy(selection, managedProject)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(runtime.copy(selection, path.dirname(managedProject))).rejects.toMatchObject({
+      code: 'storage_error',
+    });
+    await expect(
+      runtime.copy(selection, path.join(projectDirectory(harness.root, harness.project.id), 'not-allowed'))
+    ).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(
+      runtime.copy(
+        { ...selection, expectedCatalogRevision: exported.catalog.revision + 1 },
+        path.join(destinationParent, 'stale-export')
+      )
+    ).rejects.toMatchObject({ code: 'stale_export_catalog' });
+    await expect(
+      runtime.copy({ ...selection, artifactId: 'export_missing' }, path.join(destinationParent, 'missing-export'))
+    ).rejects.toMatchObject({ code: 'export_unavailable' });
+    await expect(runtime.resolveRevealPath({ ...selection, artifactId: 'export_missing' })).rejects.toMatchObject({
+      code: 'export_unavailable',
+    });
+    await expect(
+      runtime.resolveRevealPath({ ...selection, expectedCatalogRevision: exported.catalog.revision + 1 })
+    ).rejects.toMatchObject({ code: 'stale_export_catalog' });
   });
 
   it('exports exact frozen generated provenance and never invokes generation, quote, or spend hooks', async () => {
@@ -221,9 +552,11 @@ describe('schema-6 standalone Piece export runtime', () => {
 
   it('fails closed when the requested Piece does not exist', async () => {
     const harness = await importedHarness();
-    await expect(
-      harness.createRuntime().create({ ...exportRequest(harness), pieceId: 'missing_piece' })
-    ).rejects.toMatchObject({ code: 'export_unavailable' });
+    const runtime = harness.createRuntime();
+    await expect(runtime.create({ ...exportRequest(harness), pieceId: 'missing_piece' })).rejects.toMatchObject({
+      code: 'export_unavailable',
+    });
+    await expect(runtime.recover('../unsafe-project')).rejects.toMatchObject({ code: 'invalid_payload' });
     expect(harness.media.verifyManagedAssetV3).not.toHaveBeenCalled();
   });
 
@@ -270,6 +603,11 @@ describe('schema-6 standalone Piece export runtime', () => {
     const invalidNonce = await importedHarness();
     await expect(
       invalidNonce.createRuntime({ createNonce: () => '../unsafe' }).create(exportRequest(invalidNonce))
+    ).rejects.toMatchObject({ code: 'storage_error' });
+
+    const nonStringNonce = await importedHarness();
+    await expect(
+      nonStringNonce.createRuntime({ createNonce: () => 7 as never }).create(exportRequest(nonStringNonce))
     ).rejects.toMatchObject({ code: 'storage_error' });
 
     const invalidTime = await importedHarness();
@@ -346,6 +684,27 @@ describe('schema-6 standalone Piece export runtime', () => {
     expect(quarantined.some((entry) => entry.startsWith('quarantine-'))).toBe(true);
     const next = await runtime.create(exportRequest(harness, recovered.revision));
     expect(next.catalog.artifacts).toHaveLength(2);
+  });
+
+  it('quarantines a corrupted managed artifact before reveal or native copy', async () => {
+    const harness = await importedHarness();
+    const runtime = harness.createRuntime();
+    const created = await runtime.create(exportRequest(harness));
+    const artifact = created.catalog.artifacts[0]!;
+    const managedFolder = path.join(exportsDirectory(harness.root, harness.project.id), artifact.folderName);
+    await writeFile(path.join(managedFolder, 'manifest.json'), '{"corrupt":true}', 'utf8');
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: created.catalog.revision,
+      artifactId: artifact.id,
+    };
+
+    await expect(runtime.resolveRevealPath(selection)).rejects.toMatchObject({ code: 'stale_export_catalog' });
+    const recovered = await runtime.list(harness.project.id);
+    expect(recovered.artifacts).toEqual([]);
+    expect((await harness.store.loadProjectV3(harness.project.id)).revision).toBe(harness.project.revision);
+    const quarantined = await readdir(path.join(exportsDirectory(harness.root, harness.project.id), 'quarantine'));
+    expect(quarantined.some((entry) => entry.startsWith('quarantine-'))).toBe(true);
   });
 
   it.each([

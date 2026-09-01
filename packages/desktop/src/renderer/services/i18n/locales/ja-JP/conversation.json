@@ -933,6 +933,12 @@
           "unreadableBody": "{{name}} を削除しますか？このプロジェクトは安全に開けないため、保護された一回限りのクレームを使って削除します。"
         }
       },
+      "director": {
+        "title": "ディレクター",
+        "loading": "ディレクターを起動中…",
+        "noModel": "ディレクターを起動する前に Aionrs モデルを選択してください。",
+        "failed": "ディレクターを安全に接続できませんでした。プロジェクトを再読み込みしてください。"
+      },
       "canvas": {
         "projectActions": "プロジェクト操作",
         "loading": "プロジェクトを読み込み中…",
@@ -1067,6 +1073,8 @@
           "photoImported": "写真を読み込みました。",
           "renameUndone": "直前のピース名変更を元に戻しました。",
           "exported": "{{handle}} を書き出しました。",
+          "exportCancelled": "書き出しをキャンセルしました。書き出しは作成されませんでした。",
+          "exportRevealed": "書き出しをフォルダに表示しました。",
           "spendingLimitSaved": "支出上限を保存しました。",
           "jobTransition": "{{handle}} は現在「{{status}}」です。",
           "freshQuoteRequired": "以前の見積もりは最新ではありません。有料処理を開始する前に、新しい費用を確認してください。",
@@ -1075,7 +1083,10 @@
         "projectMenu": {
           "label": "プロジェクトメニュー",
           "spendingLimit": "支出上限",
-          "export": "書き出す"
+          "export": "書き出す",
+          "exportStatus": "{{handle}} の書き出し",
+          "revealExport": "フォルダに表示",
+          "dismissExport": "閉じる"
         },
         "composer": {
           "description": "写真の説明",

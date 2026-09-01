@@ -42,7 +42,7 @@ const parseMinorUnits = (value: string): number | null => {
   return Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : null;
 };
 
-/** Inactive schema-6 seam for the human-owned per-batch spending policy. */
+/** Human-owned schema-6 per-batch spending policy editor. */
 export const PilotSpendingLimitDialog: React.FC<PilotSpendingLimitDialogProps> = ({
   open,
   currentPolicy,

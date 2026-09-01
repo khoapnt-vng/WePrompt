@@ -12,4 +12,4 @@ export * from './pricing';
 export * from './projections';
 export * from './confirmation';
 export * from './runtime';
-export * from './runtimeFactory';
+export * from './runtime/factory';

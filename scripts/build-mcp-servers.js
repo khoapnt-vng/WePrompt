@@ -49,7 +49,7 @@ async function main() {
     }),
     esbuild.build({
       ...SHARED_OPTIONS,
-      entryPoints: [path.join(ROOT, 'packages/desktop/src/process/resources/builtinMcp/studioServer.ts')],
+      entryPoints: [path.join(ROOT, 'packages/desktop/src/process/resources/builtinMcp/pilotStudioServer.ts')],
       outfile: path.join(ROOT, 'out/main/builtin-mcp-studio.js'),
     }),
   ]);

@@ -224,6 +224,22 @@ function resolveDevBackendBinary(): string {
   );
 }
 
+/**
+ * The desktop normalises PATH with `fix-path` before resolving aioncore, so a
+ * directory prepended only in Electron's launch environment is intentionally
+ * replaced on macOS/Linux. Put the selected test binary behind the app's
+ * existing NVM-path supplement instead; this keeps the E2E backend explicit
+ * without mutating the developer's shell or relying on an unpinned global.
+ */
+function installDevBackendPathShim(backendBinary: string): string {
+  const nvmRoot = path.join(e2eStateSandboxDir, 'backend-nvm');
+  const binaryDir = path.join(nvmRoot, 'versions', 'node', 'e2e', 'bin');
+  const shim = path.join(binaryDir, backendBinaryName());
+  fs.mkdirSync(binaryDir, { recursive: true });
+  if (!fs.existsSync(shim)) fs.symlinkSync(backendBinary, shim, process.platform === 'win32' ? 'file' : undefined);
+  return nvmRoot;
+}
+
 async function launchApp(): Promise<ElectronApplication> {
   const usePackaged = shouldUsePackagedMode();
 
@@ -276,6 +292,7 @@ async function launchApp(): Promise<ElectronApplication> {
   // Dev mode: launch via electron .
   console.log(`[E2E] Launching DEV app from: ${projectRoot}`);
   const backendBinary = resolveDevBackendBinary();
+  const backendNvmDir = installDevBackendPathShim(backendBinary);
   const inheritedPath = process.env.PATH ?? process.env.Path ?? '';
   const backendPath = path.dirname(backendBinary);
   console.log(`[E2E] Using DEV backend: ${backendBinary}`);
@@ -290,6 +307,7 @@ async function launchApp(): Promise<ElectronApplication> {
     cwd: projectRoot,
     env: {
       ...commonEnv,
+      NVM_DIR: backendNvmDir,
       PATH: [backendPath, inheritedPath].filter(Boolean).join(path.delimiter),
       NODE_ENV: 'development',
     },

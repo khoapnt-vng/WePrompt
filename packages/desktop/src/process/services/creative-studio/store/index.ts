@@ -12,7 +12,6 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
   type CreateStudioProjectInputV2,
-  type StudioCancellationPolicy,
   type StudioConnectionBinding,
   type StudioMutationBatchV2,
   type StudioMutationReducerContextV2,
@@ -71,6 +70,7 @@ import {
   createStudioProjectTransactionsV2,
   type StudioProjectFileInspectionV2 as ProjectFileInspectionV2,
 } from './projectTransactions';
+import { createStudioConnectionManifestV1 } from './connectionManifest';
 
 export * from './contracts';
 export {
@@ -81,52 +81,6 @@ export {
 
 const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 const STUDIO_PROJECT_V2_MAX_ID_LENGTH = 256;
-const ASPECT_RATIOS = new Set(['16:9', '9:16', '1:1', '4:3', '3:4']);
-const RESOLUTIONS = new Set(['720p', '1080p']);
-const MEDIA_KINDS = new Set(['image', 'video']);
-const CANCELLATION_POLICIES = new Set<StudioCancellationPolicy>(['none', 'queued_only', 'queued_and_running']);
-const ADAPTER_IDS = new Set([
-  'weprompt-image-v1',
-  'byteplus-seedance-v1',
-  'weprompt-media-gateway-v1',
-  'openrouter-video-v1',
-]);
-const CONNECTION_BINDING_KEYS = new Set([
-  'schemaVersion',
-  'id',
-  'providerId',
-  'adapterId',
-  'model',
-  'capabilities',
-  'validatedAt',
-]);
-const CONNECTION_MANIFEST_KEYS = new Set(['schemaVersion', 'connections']);
-const CONNECTION_CAPABILITY_KEYS = new Set([
-  'mediaKinds',
-  'audioModes',
-  'aspectRatios',
-  'resolutions',
-  'minDurationSeconds',
-  'maxDurationSeconds',
-  'supportedDurationSeconds',
-  'supportsFirstFrame',
-  'maxConditioningImages',
-  'cancellationPolicy',
-]);
-const FORBIDDEN_CONNECTION_KEY_FRAGMENTS = [
-  'authorization',
-  'credential',
-  'token',
-  'secret',
-  'key',
-  'url',
-  'uri',
-  'path',
-  'base64',
-  'bytes',
-  'raw',
-  'metadata',
-] as const;
 export const STUDIO_PROJECT_V2_MAX_RECORD_BYTES = 64 * 1024 * 1024;
 
 type ProjectListingSweepV2 = {
@@ -142,47 +96,17 @@ type JsonRecord = Record<string, unknown>;
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const normalizeConnectionFieldKey = (key: string): string =>
-  key
-    .normalize('NFKC')
-    .replaceAll(/[^A-Za-z0-9]/g, '')
-    .toLowerCase();
-
-const containsForbiddenConnectionField = (value: unknown): boolean => {
-  if (Array.isArray(value)) return value.some(containsForbiddenConnectionField);
-  if (!isRecord(value)) return false;
-  return Object.entries(value).some(([key, nestedValue]) => {
-    const normalized = normalizeConnectionFieldKey(key);
-    return (
-      FORBIDDEN_CONNECTION_KEY_FRAGMENTS.some((fragment) => normalized.includes(fragment)) ||
-      containsForbiddenConnectionField(nestedValue)
-    );
-  });
-};
-
 const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
 const isSafeIdV2 = (value: unknown): value is string =>
   isSafeId(value) && value.length <= STUDIO_PROJECT_V2_MAX_ID_LENGTH;
 const isSafeProposalId = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 256 && SAFE_ID.test(value);
-const isSafeConnectionId = (value: unknown): value is string =>
-  typeof value === 'string' && value.length <= 256 && SAFE_ID.test(value);
 
 const isIntegerInRange = (value: unknown, minimum: number, maximum: number): value is number =>
   typeof value === 'number' && Number.isInteger(value) && value >= minimum && value <= maximum;
 
-const isString = (value: unknown): value is string => typeof value === 'string';
-
-const isSafeConnectionModel = (value: unknown): value is string => {
-  if (!isString(value) || value.length === 0 || value.length > 256 || value !== value.trim()) return false;
-  return !value.split('').some((character) => {
-    const code = character.charCodeAt(0);
-    return code <= 0x1f || (code >= 0x7f && code <= 0x9f);
-  });
-};
-
 const isCanonicalIsoTimestamp = (value: unknown): value is string => {
-  if (!isString(value) || value.length !== 24) return false;
+  if (typeof value !== 'string' || value.length !== 24) return false;
   const timestamp = Date.parse(value);
   return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
 };
@@ -256,140 +180,6 @@ const assertSynchronousConfirmationResult = (value: unknown, label: string): voi
 
 const sha256Utf8 = (bytes: string): string => createHash('sha256').update(bytes, 'utf8').digest('hex');
 
-const validateConnectionBinding = (value: unknown, allowLegacyOpenRouter = false): value is StudioConnectionBinding => {
-  if (!isRecord(value) || !isRecord(value.capabilities)) return false;
-  const capabilities = value.capabilities;
-  const mediaKinds = capabilities.mediaKinds;
-  const validKinds =
-    Array.isArray(mediaKinds) &&
-    mediaKinds.length > 0 &&
-    mediaKinds.length <= 2 &&
-    mediaKinds.every((kind) => isString(kind) && MEDIA_KINDS.has(kind)) &&
-    new Set(mediaKinds).size === mediaKinds.length;
-  const optionalAudioModes =
-    capabilities.audioModes === undefined ||
-    (Array.isArray(capabilities.audioModes) &&
-      capabilities.audioModes.length === 1 &&
-      (capabilities.audioModes[0] === 'none' ||
-        (value.adapterId === 'openrouter-video-v1' && capabilities.audioModes[0] === 'audio')));
-  const optionalAspectRatios =
-    capabilities.aspectRatios === undefined ||
-    (Array.isArray(capabilities.aspectRatios) &&
-      capabilities.aspectRatios.length <= 5 &&
-      capabilities.aspectRatios.every((ratio) => isString(ratio) && ASPECT_RATIOS.has(ratio)) &&
-      new Set(capabilities.aspectRatios).size === capabilities.aspectRatios.length);
-  const optionalResolutions =
-    capabilities.resolutions === undefined ||
-    (Array.isArray(capabilities.resolutions) &&
-      capabilities.resolutions.length <= 2 &&
-      capabilities.resolutions.every((resolution) => isString(resolution) && RESOLUTIONS.has(resolution)) &&
-      new Set(capabilities.resolutions).size === capabilities.resolutions.length);
-  const supportedDurationSeconds = capabilities.supportedDurationSeconds;
-  const optionalSupportedDurations =
-    supportedDurationSeconds === undefined ||
-    (Array.isArray(supportedDurationSeconds) &&
-      supportedDurationSeconds.length > 0 &&
-      supportedDurationSeconds.length <= 12 &&
-      supportedDurationSeconds.every(
-        (duration, index) =>
-          isIntegerInRange(duration, 4, 15) &&
-          (index === 0 || (supportedDurationSeconds[index - 1] as number) < duration)
-      ));
-  const supportedDurationEndpointsMatch =
-    supportedDurationSeconds === undefined ||
-    (Array.isArray(supportedDurationSeconds) &&
-      capabilities.minDurationSeconds === supportedDurationSeconds[0] &&
-      capabilities.maxDurationSeconds === supportedDurationSeconds.at(-1));
-  const validAdapterCapabilities =
-    value.adapterId === 'weprompt-image-v1'
-      ? Array.isArray(mediaKinds) &&
-        mediaKinds.length === 1 &&
-        mediaKinds[0] === 'image' &&
-        capabilities.audioModes === undefined
-      : value.adapterId === 'openrouter-video-v1'
-        ? Array.isArray(mediaKinds) &&
-          mediaKinds.length === 1 &&
-          mediaKinds[0] === 'video' &&
-          Array.isArray(capabilities.audioModes) &&
-          capabilities.audioModes.length === 1 &&
-          (capabilities.audioModes[0] === 'none' || capabilities.audioModes[0] === 'audio') &&
-          Array.isArray(capabilities.aspectRatios) &&
-          capabilities.aspectRatios.length > 0 &&
-          Array.isArray(capabilities.resolutions) &&
-          capabilities.resolutions.length > 0 &&
-          (allowLegacyOpenRouter ||
-            (Array.isArray(capabilities.supportedDurationSeconds) &&
-              capabilities.supportedDurationSeconds.length > 0)) &&
-          capabilities.maxConditioningImages === 0 &&
-          capabilities.cancellationPolicy === 'none'
-        : (value.adapterId === 'byteplus-seedance-v1' || value.adapterId === 'weprompt-media-gateway-v1') &&
-          Array.isArray(mediaKinds) &&
-          mediaKinds.length === 1 &&
-          mediaKinds[0] === 'video' &&
-          Array.isArray(capabilities.audioModes) &&
-          capabilities.audioModes.length === 1 &&
-          capabilities.audioModes[0] === 'none';
-  return (
-    Object.keys(value).length === CONNECTION_BINDING_KEYS.size &&
-    Object.keys(value).every((key) => CONNECTION_BINDING_KEYS.has(key)) &&
-    value.schemaVersion === 1 &&
-    isSafeConnectionId(value.id) &&
-    isSafeConnectionId(value.providerId) &&
-    isString(value.adapterId) &&
-    ADAPTER_IDS.has(value.adapterId) &&
-    isSafeConnectionModel(value.model) &&
-    Object.keys(capabilities).every((key) => CONNECTION_CAPABILITY_KEYS.has(key)) &&
-    validKinds &&
-    validAdapterCapabilities &&
-    optionalAudioModes &&
-    optionalAspectRatios &&
-    optionalResolutions &&
-    (capabilities.supportsFirstFrame === undefined || typeof capabilities.supportsFirstFrame === 'boolean') &&
-    (capabilities.maxConditioningImages === undefined || isIntegerInRange(capabilities.maxConditioningImages, 0, 6)) &&
-    isString(capabilities.cancellationPolicy) &&
-    CANCELLATION_POLICIES.has(capabilities.cancellationPolicy as StudioCancellationPolicy) &&
-    (capabilities.minDurationSeconds === undefined || isIntegerInRange(capabilities.minDurationSeconds, 1, 60)) &&
-    (capabilities.maxDurationSeconds === undefined || isIntegerInRange(capabilities.maxDurationSeconds, 1, 60)) &&
-    optionalSupportedDurations &&
-    (capabilities.minDurationSeconds === undefined ||
-      capabilities.maxDurationSeconds === undefined ||
-      (capabilities.minDurationSeconds as number) <= (capabilities.maxDurationSeconds as number)) &&
-    supportedDurationEndpointsMatch &&
-    isCanonicalIsoTimestamp(value.validatedAt) &&
-    !containsForbiddenConnectionField(value)
-  );
-};
-
-const canonicalizeConnectionBinding = (
-  value: unknown,
-  allowLegacyOpenRouter = false
-): StudioConnectionBinding | null => {
-  if (!isRecord(value) || !isRecord(value.capabilities)) return null;
-  const capabilities = value.capabilities;
-  const hasPolicy = Object.hasOwn(capabilities, 'cancellationPolicy');
-  const hasLegacy = Object.hasOwn(capabilities, 'cancellation');
-  if (hasPolicy && hasLegacy) return null;
-
-  let cancellationPolicy: StudioCancellationPolicy;
-  if (hasPolicy) {
-    if (!isString(capabilities.cancellationPolicy)) return null;
-    cancellationPolicy = capabilities.cancellationPolicy as StudioCancellationPolicy;
-    if (!CANCELLATION_POLICIES.has(cancellationPolicy)) return null;
-  } else if (hasLegacy) {
-    if (typeof capabilities.cancellation !== 'boolean') return null;
-    cancellationPolicy = capabilities.cancellation ? 'queued_only' : 'none';
-  } else {
-    cancellationPolicy = 'none';
-  }
-
-  const { cancellation: _legacyCancellation, ...canonicalCapabilities } = capabilities;
-  const candidate = {
-    ...value,
-    capabilities: { ...canonicalCapabilities, cancellationPolicy },
-  };
-  return validateConnectionBinding(candidate, allowLegacyOpenRouter) ? candidate : null;
-};
-
 const compareSummariesV2 = (left: StudioProjectSummaryV2, right: StudioProjectSummaryV2): number => {
   const byUpdatedAt = right.updatedAt.localeCompare(left.updatedAt);
   return byUpdatedAt !== 0 ? byUpdatedAt : left.id.localeCompare(right.id);
@@ -403,6 +193,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.createId ?? (() => crypto.randomUUID().replaceAll('-', '_'));
   const fs = deps.fs ?? nodeFs;
+  const connectionManifest = createStudioConnectionManifestV1({ rootDir, fs });
   const onProjectCommitted = deps.onProjectCommitted;
   const logError = deps.logError ?? ((message: string, error: unknown): void => console.error(message, error));
   const watchProposalTree =
@@ -420,7 +211,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     });
   const queues = new Map<string, Promise<unknown>>();
   let summaryV2Queue: Promise<unknown> = Promise.resolve();
-  let connectionsQueue: Promise<unknown> = Promise.resolve();
 
   const safeLogError = (message: string, error: unknown): void => {
     try {
@@ -584,12 +374,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     return file;
   };
 
-  const connectionsFile = async (root: string): Promise<string> => {
-    const file = resolveRootChild(root, 'connections.json');
-    await assertRegularFileOrMissing(file);
-    return file;
-  };
-
   const sidecarJournal = createStudioSidecarJournalV2({
     fs,
     defaultMaxRecordBytes: STUDIO_PROPOSAL_MAX_RECORD_BYTES,
@@ -641,40 +425,6 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       recoverBriefTransaction: recoverBriefTransactionV2,
       storageError,
     });
-
-  const readConnections = async (root: string): Promise<StudioConnectionBinding[]> => {
-    const file = await connectionsFile(root);
-    try {
-      const parsed = JSON.parse(await fs.readFile(file, 'utf8')) as unknown;
-      if (
-        !isRecord(parsed) ||
-        Object.keys(parsed).length !== CONNECTION_MANIFEST_KEYS.size ||
-        !Object.keys(parsed).every((key) => CONNECTION_MANIFEST_KEYS.has(key)) ||
-        parsed.schemaVersion !== 1 ||
-        !Array.isArray(parsed.connections)
-      ) {
-        throw new CreativeStudioStoreError('storage_error', 'Malformed Studio connection manifest');
-      }
-      const connections = parsed.connections.map((connection) => canonicalizeConnectionBinding(connection, true));
-      if (connections.some((connection) => connection === null)) {
-        throw new CreativeStudioStoreError('storage_error', 'Malformed Studio connection manifest');
-      }
-      return (connections as StudioConnectionBinding[]).toSorted((left, right) => left.id.localeCompare(right.id));
-    } catch (error) {
-      if (error instanceof CreativeStudioStoreError) throw error;
-      if (isRecord(error) && error.code === 'ENOENT') return [];
-      throw new CreativeStudioStoreError(
-        'storage_error',
-        error instanceof Error ? error.message : 'Studio connection storage read failed'
-      );
-    }
-  };
-
-  const enqueueConnections = <T>(work: () => Promise<T>): Promise<T> => {
-    const next = connectionsQueue.catch((): undefined => undefined).then(work);
-    connectionsQueue = next.catch((): undefined => undefined);
-    return next;
-  };
 
   const enqueue = <T>(projectId: string, work: () => Promise<T>): Promise<T> => {
     const previous = queues.get(projectId) ?? Promise.resolve();
@@ -1930,44 +1680,15 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
     },
 
     async listConnections(): Promise<StudioConnectionBinding[]> {
-      return readConnections(await canonicalRoot());
+      return connectionManifest.listConnections();
     },
 
     async saveConnection(binding: StudioConnectionBinding): Promise<StudioConnectionBinding> {
-      const canonicalBinding = canonicalizeConnectionBinding(binding);
-      if (canonicalBinding === null) {
-        throw new CreativeStudioStoreError('invalid_payload', 'Invalid Studio connection binding');
-      }
-      return enqueueConnections(async () => {
-        const root = await canonicalRoot();
-        const current = await readConnections(root);
-        const next = [
-          ...current.filter(
-            (connection) =>
-              connection.id !== canonicalBinding.id &&
-              !(
-                connection.providerId === canonicalBinding.providerId &&
-                connection.adapterId === canonicalBinding.adapterId &&
-                connection.model === canonicalBinding.model
-              )
-          ),
-          structuredClone(canonicalBinding),
-        ].toSorted((left, right) => left.id.localeCompare(right.id));
-        await writeJsonAtomic(root, await connectionsFile(root), { schemaVersion: 1, connections: next });
-        return structuredClone(canonicalBinding);
-      });
+      return connectionManifest.saveConnection(binding);
     },
 
     async removeConnection(connectionId: string): Promise<boolean> {
-      if (!isSafeConnectionId(connectionId)) return false;
-      return enqueueConnections(async () => {
-        const root = await canonicalRoot();
-        const current = await readConnections(root);
-        const next = current.filter((connection) => connection.id !== connectionId);
-        if (next.length === current.length) return false;
-        await writeJsonAtomic(root, await connectionsFile(root), { schemaVersion: 1, connections: next });
-        return true;
-      });
+      return connectionManifest.removeConnection(connectionId);
     },
   };
 };

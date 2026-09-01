@@ -2117,6 +2117,12 @@ export type StudioRendererCanvasInventoryV3 = {
   pieces: StudioRendererPieceV3[];
 };
 
+export type StudioRendererDirectorContextV3 = {
+  brief: string;
+  rules: StudioBriefRule[];
+  briefConversationId: string | null;
+};
+
 export type StudioRendererPieceActivityJobV3 = {
   jobId: string;
   pieceId: string;
@@ -2254,6 +2260,20 @@ export type StudioExportPieceRequestV3 = {
   expectedCatalogRevision: number;
 };
 
+/** Opens native delivery for one current Piece; Main acquires export-catalog authority after the picker. */
+export type StudioDeliverPieceExportRequestV3 = {
+  projectId: string;
+  pieceId: string;
+  expectedRevision: number;
+};
+
+/** Selects one immutable managed export without granting renderer filesystem authority. */
+export type StudioPieceExportArtifactRequestV3 = {
+  projectId: string;
+  expectedCatalogRevision: number;
+  artifactId: string;
+};
+
 /** Healthy deletion uses decoded revision authority; unreadable deletion uses an opaque Main claim. */
 export type StudioDeleteProjectRequestV3 =
   | {
@@ -2295,6 +2315,7 @@ export type StudioProjectLoadResultV3 =
       status: 'supported';
       summary: StudioProjectSummaryV3;
       canvas: StudioRendererCanvasInventoryV3;
+      director: StudioRendererDirectorContextV3;
       activity: StudioRendererCapabilityActivityV3;
       spendPolicy: StudioSpendPolicy | null;
       lastUndo: StudioRendererUndoEntryV3 | null;
@@ -2305,6 +2326,15 @@ export type StudioProjectLoadResultV3 =
 export type StudioCreateProjectResultV3 = {
   status: 'created';
   summary: StudioProjectSummaryV3;
+};
+
+export type StudioBindDirectorConversationResultV3 = {
+  status: 'bound';
+  projectId: string;
+  conversationId: string;
+  revision: number;
+  authoringRevision: number;
+  changed: boolean;
 };
 
 export type StudioPreparePhotoResultV3 = {
@@ -2392,6 +2422,17 @@ export type StudioExportPieceResultV3 = {
   status: 'exported';
   catalog: StudioRendererPieceExportCatalogV3;
 };
+
+/** Native delivery result. The selected destination remains Main-only. */
+export type StudioExportPieceDeliveryResultV3 =
+  | { status: 'cancelled' }
+  | {
+      status: 'copied';
+      artifact: StudioRendererPieceExportArtifactV3;
+      catalog: StudioRendererPieceExportCatalogV3;
+    };
+
+export type StudioRevealPieceExportResultV3 = { status: 'revealed' };
 
 export type StudioDeleteProjectResultV3 = {
   status: 'deleted' | 'not_found';

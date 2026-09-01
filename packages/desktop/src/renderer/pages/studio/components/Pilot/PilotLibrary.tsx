@@ -125,10 +125,7 @@ const UnreadableProjectList: React.FC<{
   );
 };
 
-/**
- * Inactive schema-6 Library surface. The production router and IPC bridge do not import this file;
- * callers must inject the exact Pilot client when the clean cutover is activated.
- */
+/** Schema-6 project library. Callers inject the exact Pilot client boundary. */
 export const PilotLibrary: React.FC<PilotLibraryProps> = ({ client, onOpenProject }) => {
   const { t } = useTranslation();
   const [entries, setEntries] = useState<StudioProjectLibraryEntryV3[]>([]);

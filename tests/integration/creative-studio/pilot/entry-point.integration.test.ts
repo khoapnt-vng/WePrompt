@@ -286,6 +286,41 @@ describe('isolated schema-6 typed entry point', () => {
     );
   });
 
+  it('binds one Director conversation with authoring authority and preserves idempotent replay', async () => {
+    const harness = await createHarness();
+    const created = await harness.entry.createProjectV3({ name: 'Directed photo', brief: 'A paper lantern.' });
+
+    await expect(
+      harness.entry.bindDirectorConversationV3({
+        projectId: created.summary.id,
+        expectedAuthoringRevision: 1,
+        conversationId: 'conversation_1',
+      })
+    ).resolves.toMatchObject({ status: 'bound', changed: true, revision: 2, authoringRevision: 2 });
+    await expect(
+      harness.entry.bindDirectorConversationV3({
+        projectId: created.summary.id,
+        expectedAuthoringRevision: 2,
+        conversationId: 'conversation_1',
+      })
+    ).resolves.toMatchObject({ status: 'bound', changed: false, revision: 2, authoringRevision: 2 });
+    await expect(
+      harness.entry.bindDirectorConversationV3({
+        projectId: created.summary.id,
+        expectedAuthoringRevision: 2,
+        conversationId: 'conversation_2',
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({
+      status: 'supported',
+      director: {
+        brief: 'A paper lantern.',
+        rules: [],
+        briefConversationId: 'conversation_1',
+      },
+    });
+  });
+
   it('discards a provisional quote without durable records and emits the bounded activity update', async () => {
     const harness = await createHarness();
     const updates: unknown[] = [];

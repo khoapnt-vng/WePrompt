@@ -13,7 +13,9 @@ import {
   type StudioCreateProjectRequestV3,
   type StudioDeleteProjectRequestV3,
   type StudioDiscardPreparedPhotoRequestV3,
+  type StudioDeliverPieceExportRequestV3,
   type StudioExportPieceRequestV3,
+  type StudioPieceExportArtifactRequestV3,
   type StudioImportPhotoRequestV3,
   type StudioPiecePhotoSettingsV3,
   type StudioPreparePhotoIntentV3,
@@ -41,6 +43,8 @@ const CANCEL_PIECE_JOB_KEYS = new Set(['projectId', 'pieceId', 'jobId']);
 const RETRY_PIECE_DOWNLOAD_KEYS = new Set(['projectId', 'pieceId', 'jobId', 'expectedRevision']);
 const RESUME_PIECE_JOB_KEYS = new Set(['projectId', 'pieceId', 'jobId', 'expectedRevision']);
 const EXPORT_PIECE_KEYS = new Set(['projectId', 'pieceId', 'expectedRevision', 'expectedCatalogRevision']);
+const DELIVER_PIECE_EXPORT_KEYS = new Set(['projectId', 'pieceId', 'expectedRevision']);
+const EXPORT_PIECE_ARTIFACT_KEYS = new Set(['projectId', 'expectedCatalogRevision', 'artifactId']);
 const DELETE_HEALTHY_PROJECT_KEYS = new Set(['mode', 'projectId', 'expectedRevision']);
 const DELETE_UNREADABLE_PROJECT_KEYS = new Set(['mode', 'projectId', 'deletionClaim']);
 const CONFIRM_PREPARED_PHOTO_KEYS = new Set([
@@ -315,6 +319,42 @@ export const parseStudioExportPieceRequestV3 = (value: unknown): StudioExportPie
     pieceId: snapshot.pieceId,
     expectedRevision: snapshot.expectedRevision,
     expectedCatalogRevision: snapshot.expectedCatalogRevision,
+  };
+};
+
+/** Parses native delivery authority without accepting a renderer-chosen path or export-catalog revision. */
+export const parseStudioDeliverPieceExportRequestV3 = (value: unknown): StudioDeliverPieceExportRequestV3 => {
+  const snapshot = snapshotExactRecord(value, DELIVER_PIECE_EXPORT_KEYS);
+  if (
+    snapshot === null ||
+    !isSafeId(snapshot.projectId) ||
+    !isSafeId(snapshot.pieceId) ||
+    !isPositiveRevision(snapshot.expectedRevision)
+  ) {
+    return invalidPayload();
+  }
+  return {
+    projectId: snapshot.projectId,
+    pieceId: snapshot.pieceId,
+    expectedRevision: snapshot.expectedRevision,
+  };
+};
+
+/** Parses one exact managed-export selection; a path or folder name is never accepted. */
+export const parseStudioPieceExportArtifactRequestV3 = (value: unknown): StudioPieceExportArtifactRequestV3 => {
+  const snapshot = snapshotExactRecord(value, EXPORT_PIECE_ARTIFACT_KEYS);
+  if (
+    snapshot === null ||
+    !isSafeId(snapshot.projectId) ||
+    !isPositiveRevision(snapshot.expectedCatalogRevision) ||
+    !isSafeId(snapshot.artifactId)
+  ) {
+    return invalidPayload();
+  }
+  return {
+    projectId: snapshot.projectId,
+    expectedCatalogRevision: snapshot.expectedCatalogRevision,
+    artifactId: snapshot.artifactId,
   };
 };
 

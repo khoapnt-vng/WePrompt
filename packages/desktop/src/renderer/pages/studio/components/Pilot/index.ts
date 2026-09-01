@@ -5,6 +5,7 @@
  */
 
 export { PilotCanvas, type PilotCanvasProps, type StudioPilotClientV3 } from './PilotCanvas';
+export { PilotDirectorRail } from './PilotDirectorRail';
 export { PilotLibrary, type PilotLibraryProps, type StudioPilotLibraryClientV3 } from './PilotLibrary';
 export {
   PilotSpendingLimitDialog,

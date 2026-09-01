@@ -933,6 +933,12 @@
           "unreadableBody": "{{name}}을(를) 삭제할까요? 이 프로젝트는 안전하게 열 수 없으므로 보호된 일회용 클레임을 사용해 삭제합니다."
         }
       },
+      "director": {
+        "title": "디렉터",
+        "loading": "디렉터 시작 중…",
+        "noModel": "디렉터를 시작하기 전에 Aionrs 모델을 선택하세요.",
+        "failed": "디렉터를 안전하게 연결하지 못했습니다. 프로젝트를 다시 불러오세요."
+      },
       "canvas": {
         "projectActions": "프로젝트 작업",
         "loading": "프로젝트 불러오는 중…",
@@ -1067,6 +1073,8 @@
           "photoImported": "사진을 가져왔습니다.",
           "renameUndone": "마지막 피스 이름 변경을 실행 취소했습니다.",
           "exported": "{{handle}}을(를) 내보냈습니다.",
+          "exportCancelled": "내보내기를 취소했습니다. 내보내기 항목은 생성되지 않았습니다.",
+          "exportRevealed": "폴더에서 내보내기를 표시했습니다.",
           "spendingLimitSaved": "지출 한도를 저장했습니다.",
           "jobTransition": "{{handle}}의 현재 상태는 {{status}}입니다.",
           "freshQuoteRequired": "이전 견적은 더 이상 최신이 아닙니다. 유료 작업을 시작하기 전에 새 비용을 검토하세요.",
@@ -1075,7 +1083,10 @@
         "projectMenu": {
           "label": "프로젝트 메뉴",
           "spendingLimit": "지출 한도",
-          "export": "내보내기"
+          "export": "내보내기",
+          "exportStatus": "{{handle}} 내보내기",
+          "revealExport": "폴더에서 보기",
+          "dismissExport": "닫기"
         },
         "composer": {
           "description": "사진 설명",

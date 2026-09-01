@@ -8,6 +8,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { types as nodeTypes } from 'node:util';
+import { syncDurableDirectory } from '../service/durableDirectory';
 import { STUDIO_PROJECT_SCHEMA_VERSION_V3, type StudioProjectV3 } from '@/common/types/project/creativeStudioTypes';
 import {
   canonicalizeRecordRoot,
@@ -183,6 +184,7 @@ export type CreativeStudioPilotStoreV3 = {
   createProjectV3(input: { name: string; brief: string }): Promise<StudioProjectV3>;
   getProjectV3(projectId: string): Promise<StudioPilotProjectLoadResultV3>;
   loadProjectV3(projectId: string): Promise<StudioProjectV3>;
+  getVerifiedProjectDirectoryV3(projectId: string): Promise<string | null>;
   summarizeProjectV3(projectId: string): Promise<StudioPilotProjectSummaryV3>;
   updateProjectV3(
     projectId: string,
@@ -447,12 +449,7 @@ const parseDeletionMarker = (bytes: string): ProjectDeletionMarkerV3 | null => {
 };
 
 const syncDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<void> => {
-  const handle = await fs.open(directory, 'r');
-  try {
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
+  await syncDurableDirectory(fs, directory);
 };
 
 const writeExclusiveDurable = async (fs: RecordIoFileSystem, file: string, bytes: string): Promise<void> => {
@@ -1311,6 +1308,19 @@ export const createCreativeStudioPilotStoreV3 = (
       if (result.status === 'healthy') return result.project;
       if (result.status === 'not_found') throw new CreativeStudioPilotStoreErrorV3('not_found');
       throw new CreativeStudioPilotStoreErrorV3(result.status);
+    },
+
+    async getVerifiedProjectDirectoryV3(projectId) {
+      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+      }
+      return enqueue(projectId, async () => {
+        const inspection = await inspectProject(await rootState(), projectId);
+        if (inspection.status === 'not_found') return null;
+        if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV3(inspection.status);
+        await assertInspectionCurrent(await rootState(), inspection);
+        return inspection.projectDir;
+      });
     },
 
     async summarizeProjectV3(projectId) {

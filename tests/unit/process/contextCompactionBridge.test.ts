@@ -195,5 +195,6 @@ describe('initAppOperationsBridge', () => {
 
     expect(mocks.contextCompactProvider).toHaveBeenCalledOnce();
     expect(mocks.cancelProvider).toHaveBeenCalledOnce();
+    expect(mocks.initCreativeStudioBridge).toHaveBeenCalledOnce();
   });
 });

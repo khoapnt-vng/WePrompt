@@ -934,6 +934,12 @@
           "unreadableBody": "{{name}} löschen? Dieses Projekt kann nicht sicher geöffnet werden, daher verwendet die Löschung seinen geschützten einmaligen Nachweis."
         }
       },
+      "director": {
+        "title": "Regie",
+        "loading": "Regie wird gestartet…",
+        "noModel": "Wähle ein Aionrs-Modell, bevor du die Regie startest.",
+        "failed": "Die Regie konnte nicht sicher verbunden werden. Lade das Projekt neu."
+      },
       "canvas": {
         "projectActions": "Projektaktionen",
         "loading": "Projekt wird geladen…",
@@ -1068,6 +1074,8 @@
           "photoImported": "Foto importiert.",
           "renameUndone": "Die letzte Umbenennung des Werkstücks wurde rückgängig gemacht.",
           "exported": "{{handle}} exportiert.",
+          "exportCancelled": "Der Export wurde abgebrochen. Es wurde kein Export erstellt.",
+          "exportRevealed": "Der Export wurde im Ordner angezeigt.",
           "spendingLimitSaved": "Ausgabenlimit gespeichert.",
           "jobTransition": "{{handle}} hat jetzt den Status „{{status}}“.",
           "freshQuoteRequired": "Das vorherige Angebot ist nicht mehr aktuell. Prüfe einen neuen Preis, bevor du kostenpflichtige Arbeit startest.",
@@ -1076,7 +1084,10 @@
         "projectMenu": {
           "label": "Projektmenü",
           "spendingLimit": "Ausgabenlimit",
-          "export": "Exportieren"
+          "export": "Exportieren",
+          "exportStatus": "Export für {{handle}}",
+          "revealExport": "Im Ordner anzeigen",
+          "dismissExport": "Schließen"
         },
         "composer": {
           "description": "Fotobeschreibung",

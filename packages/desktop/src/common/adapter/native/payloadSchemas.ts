@@ -324,6 +324,25 @@ const studioV2ProjectInputSchema = z
   })
   .strict();
 const studioV2ProjectRequestSchema = z.object({ projectId: safeIdSchema }).strict();
+const studioPilotProjectRequestSchema = studioV2ProjectRequestSchema;
+const studioPilotRevisionSchema = z.number().finite().int().nonnegative().safe();
+const studioPilotSettingsSchema = z
+  .object({
+    aspectRatio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
+    resolution: z.enum(['720p', '1080p']),
+  })
+  .strict();
+const studioPilotPieceJobRequestSchema = z
+  .object({ projectId: safeIdSchema, pieceId: safeIdSchema, jobId: safeIdSchema })
+  .strict();
+const studioPilotExpectedRevisionRequestSchema = z
+  .object({
+    projectId: safeIdSchema,
+    pieceId: safeIdSchema,
+    jobId: safeIdSchema,
+    expectedRevision: studioPilotRevisionSchema,
+  })
+  .strict();
 const studioV2ProjectStatusRequestSchema = z.preprocess((value) => {
   if (
     typeof value === 'object' &&
@@ -1105,6 +1124,97 @@ export const nativeBridgePayloadSchemas = {
   'creative-studio.save-connection': studioConnectionSchema,
   'creative-studio.remove-connection': z.object({ bindingId: safeIdSchema }).strict(),
   'creative-studio.list-routes': z.object({ projectId: safeIdSchema.optional() }).strict().optional(),
+  'creative-studio-pilot.list-projects': voidPayloadSchema,
+  'creative-studio-pilot.create-project': z
+    .object({ name: z.string().trim().min(1).max(256), brief: z.string().max(16 * 1024) })
+    .strict(),
+  'creative-studio-pilot.load-project': studioPilotProjectRequestSchema,
+  'creative-studio-pilot.get-director-session-server': studioPilotProjectRequestSchema,
+  'creative-studio-pilot.get-director-session-authority': studioPilotProjectRequestSchema,
+  'creative-studio-pilot.bind-director-conversation': z
+    .object({
+      projectId: safeIdSchema,
+      expectedAuthoringRevision: studioPilotRevisionSchema,
+      conversationId: safeIdSchema,
+    })
+    .strict(),
+  'creative-studio-pilot.prepare-photo': z.discriminatedUnion('mode', [
+    z
+      .object({
+        mode: z.literal('create'),
+        projectId: safeIdSchema,
+        expectedAuthoringRevision: studioPilotRevisionSchema,
+        words: z
+          .string()
+          .min(1)
+          .max(16 * 1024),
+        settings: studioPilotSettingsSchema,
+        suggestedHandle: z.string().min(1).max(192).nullable(),
+      })
+      .strict(),
+    z
+      .object({
+        mode: z.literal('retry'),
+        projectId: safeIdSchema,
+        expectedAuthoringRevision: studioPilotRevisionSchema,
+        pieceId: safeIdSchema,
+        sourceJobId: safeIdSchema,
+      })
+      .strict(),
+  ]),
+  'creative-studio-pilot.confirm-prepared-photo': z
+    .object({
+      reservationId: safeIdSchema,
+      quoteId: safeIdSchema,
+      quoteRevision: studioPilotRevisionSchema,
+      explicitHumanConfirmation: z.boolean(),
+      duplicateChargeAcknowledged: z.boolean(),
+    })
+    .strict(),
+  'creative-studio-pilot.discard-prepared-photo': z
+    .object({ reservationId: safeIdSchema, quoteId: safeIdSchema, quoteRevision: studioPilotRevisionSchema })
+    .strict(),
+  'creative-studio-pilot.import-photo': z
+    .object({ projectId: safeIdSchema, expectedAuthoringRevision: studioPilotRevisionSchema })
+    .strict(),
+  'creative-studio-pilot.apply-mutation-batch': z
+    .object({
+      schemaVersion: z.literal(6),
+      projectId: safeIdSchema,
+      expectedAuthoringRevision: studioPilotRevisionSchema,
+      operations: z
+        .array(
+          z.discriminatedUnion('kind', [
+            z.object({ kind: z.literal('edit_project'), name: z.string().trim().min(1).max(256) }).strict(),
+            z.object({ kind: z.literal('set_brief'), brief: z.string().max(16 * 1024) }).strict(),
+            z.object({ kind: z.literal('set_rules'), rules: studioV2RulesSchema }).strict(),
+            z.object({ kind: z.literal('set_spend_policy'), policy: studioV2SpendPolicySchema.nullable() }).strict(),
+            z
+              .object({ kind: z.literal('rename_piece'), pieceId: safeIdSchema, handle: z.string().min(1).max(192) })
+              .strict(),
+            z.object({ kind: z.literal('undo_last'), entryId: safeIdSchema }).strict(),
+          ])
+        )
+        .min(1)
+        .max(STUDIO_MAX_MUTATION_OPERATIONS),
+    })
+    .strict(),
+  'creative-studio-pilot.cancel-job': studioPilotPieceJobRequestSchema,
+  'creative-studio-pilot.resume-job': studioPilotExpectedRevisionRequestSchema,
+  'creative-studio-pilot.retry-download': studioPilotExpectedRevisionRequestSchema,
+  'creative-studio-pilot.list-piece-exports': studioPilotProjectRequestSchema,
+  'creative-studio-pilot.export-piece': z
+    .object({ projectId: safeIdSchema, pieceId: safeIdSchema, expectedRevision: studioPilotRevisionSchema })
+    .strict(),
+  'creative-studio-pilot.reveal-piece-export': z
+    .object({ projectId: safeIdSchema, expectedCatalogRevision: studioPilotRevisionSchema, artifactId: safeIdSchema })
+    .strict(),
+  'creative-studio-pilot.delete-project': z.discriminatedUnion('mode', [
+    z
+      .object({ mode: z.literal('healthy'), projectId: safeIdSchema, expectedRevision: studioPilotRevisionSchema })
+      .strict(),
+    z.object({ mode: z.literal('unreadable'), projectId: safeIdSchema, deletionClaim: safeIdSchema }).strict(),
+  ]),
   'office-artifact.get-state': z.object(officeArtifactRequestShape).strict(),
   'office-artifact.prepare-preview': z.object(officeArtifactRequestShape).strict(),
   'office-artifact.start-preview': z.object({ leaseId: identifierSchema, url: urlSchema.optional() }).strict(),

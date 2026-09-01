@@ -22,6 +22,31 @@
   padding: 0;
 }
 
+.pilotBreadcrumb {
+  z-index: 1;
+  padding-block: 12px 0;
+  padding-inline: clamp(16px, 4vw, 56px);
+  background: var(--color-bg-1);
+}
+
+.pilotBreadcrumb a {
+  color: var(--color-link-6);
+  font-weight: var(--fw-semibold);
+  text-decoration: none;
+}
+
+.pilotBreadcrumb a:focus-visible,
+.pilotBreadcrumb a:hover {
+  text-decoration: underline;
+}
+
+.pilotWorkspace {
+  display: flex;
+  min-height: 0;
+  flex: 1;
+  overflow: hidden;
+}
+
 .page :global(.arco-btn-primary) {
   font-family: var(--font-display);
   font-size: 13.5px;

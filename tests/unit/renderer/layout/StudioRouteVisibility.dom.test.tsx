@@ -50,7 +50,7 @@ describe('Creative Studio route visibility', () => {
     mocks.isElectronDesktop.mockReturnValue(true);
   });
 
-  it.each(['#/studio', '#/studio/project_1/board'])(
+  it.each(['#/studio', '#/studio/project_1'])(
     'redirects disabled Studio request %s before the native Studio page loads',
     async (hash) => {
       mocks.creativeStudioEnabled.current = false;
@@ -62,28 +62,19 @@ describe('Creative Studio route visibility', () => {
     }
   );
 
-  it.each([
-    '#/studio',
-    '#/studio/project_1/table',
-    '#/studio/project_1/board',
-    '#/studio/project_1/cut',
-    '#/studio/project_1/brief',
-  ])('redirects WebUI Studio request %s before the native Studio page loads', async (hash) => {
-    mocks.isElectronDesktop.mockReturnValue(false);
-    const nativePageLoadsBefore = mocks.nativePageLoads;
-    renderAt(hash);
+  it.each(['#/studio', '#/studio/project_1'])(
+    'redirects WebUI Studio request %s before the native Studio page loads',
+    async (hash) => {
+      mocks.isElectronDesktop.mockReturnValue(false);
+      const nativePageLoadsBefore = mocks.nativePageLoads;
+      renderAt(hash);
 
-    await waitFor(() => expect(window.location.hash).toBe('#/guid'));
-    expect(mocks.nativePageLoads).toBe(nativePageLoadsBefore);
-  });
+      await waitFor(() => expect(window.location.hash).toBe('#/guid'));
+      expect(mocks.nativePageLoads).toBe(nativePageLoadsBefore);
+    }
+  );
 
-  it.each([
-    '#/studio',
-    '#/studio/project_1/table',
-    '#/studio/project_1/board',
-    '#/studio/project_1/cut',
-    '#/studio/project_1/brief',
-  ])(
+  it.each(['#/studio', '#/studio/project_1'])(
     'renders the native Studio page for desktop route %s',
     async (hash) => {
       renderAt(hash);
@@ -92,4 +83,12 @@ describe('Creative Studio route visibility', () => {
     },
     20_000
   );
+
+  it.each(['table', 'board', 'cut', 'references'])('does not register the retired %s room route', async (view) => {
+    const nativePageLoadsBefore = mocks.nativePageLoads;
+    renderAt(`#/studio/project_1/${view}`);
+
+    await waitFor(() => expect(window.location.hash).toBe('#/guid'));
+    expect(mocks.nativePageLoads).toBe(nativePageLoadsBefore);
+  });
 });

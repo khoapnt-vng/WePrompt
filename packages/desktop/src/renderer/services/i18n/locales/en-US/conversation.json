@@ -768,6 +768,12 @@
           "unreadableBody": "Delete {{name}}? This project cannot be opened safely, so deletion uses its protected one-time claim."
         }
       },
+      "director": {
+        "title": "Director",
+        "loading": "Starting Director…",
+        "noModel": "Choose an Aionrs model before starting the Director.",
+        "failed": "The Director could not be attached safely. Reload the project to try again."
+      },
       "canvas": {
         "projectActions": "Project actions",
         "loading": "Loading project…",
@@ -902,6 +908,8 @@
           "photoImported": "Photo imported.",
           "renameUndone": "Last Piece rename undone.",
           "exported": "Exported {{handle}}.",
+          "exportCancelled": "Export cancelled. No export was created.",
+          "exportRevealed": "Export revealed in its folder.",
           "spendingLimitSaved": "Spending limit saved.",
           "jobTransition": "{{handle}} is now {{status}}.",
           "freshQuoteRequired": "The previous quote is no longer current. Review a fresh cost before starting paid work.",
@@ -910,7 +918,10 @@
         "projectMenu": {
           "label": "Project menu",
           "spendingLimit": "Spending limit",
-          "export": "Export"
+          "export": "Export",
+          "exportStatus": "Export for {{handle}}",
+          "revealExport": "Reveal in folder",
+          "dismissExport": "Dismiss"
         },
         "composer": {
           "description": "Photo description",

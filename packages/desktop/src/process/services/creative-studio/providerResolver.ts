@@ -63,6 +63,7 @@ export type StudioProviderResolver = {
 };
 
 const IMAGE_ADAPTER: StudioProviderAdapterId = 'weprompt-image-v1';
+const OPENROUTER_VIDEO_ADAPTER: StudioProviderAdapterId = 'openrouter-video-v1';
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const ALL_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
 const ALL_RESOLUTIONS = ['720p', '1080p'] as const;
@@ -122,6 +123,21 @@ const connectionCandidateModels = (provider: IProvider, models: readonly string[
       health: modelHealth(provider, model),
     }))
     .toSorted((left, right) => left.model.localeCompare(right.model));
+
+/** Image-only settings projection. It deliberately avoids refreshing later-phase video catalogues. */
+export const projectStudioImageConnectionCandidates = (providers: readonly IProvider[]): StudioConnectionCandidate[] =>
+  providers
+    .filter((provider) => isSafeProviderId(provider.id) && provider.enabled !== false && providerIsConfigured(provider))
+    .map((provider) => ({
+      providerId: provider.id,
+      providerName: sanitizedProviderName(provider),
+      models: connectionCandidateModels(
+        provider,
+        provider.models.filter((model) => isImageGenSupported(provider, model))
+      ),
+      integrationModels: [] as StudioConnectionCandidate['integrationModels'],
+    }))
+    .toSorted((left, right) => left.providerId.localeCompare(right.providerId));
 
 const imageConstraints = (model: string, capabilities: StudioConnectionCapabilities): StudioRouteConstraints => ({
   aspectRatios: [...ALL_RATIOS],
@@ -367,7 +383,9 @@ export const createStudioProviderResolver = (deps: StudioProviderResolverDeps): 
 
   const listGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> => {
     const [providers, connections] = await Promise.all([deps.listProviders(), deps.listConnections()]);
-    const openRouterCatalogReady = await refreshOpenRouterCatalog(providers);
+    const openRouterCatalogReady =
+      connections.some((binding) => binding.adapterId === OPENROUTER_VIDEO_ADAPTER) &&
+      (await refreshOpenRouterCatalog(providers));
     const uniqueRoutes = new Map<string, StudioGenerationRoute>();
     const rejected = new Map<string, Exclude<StudioGenerationRouteDiagnostic, { status: 'available' }>>();
     for (const binding of connections) {

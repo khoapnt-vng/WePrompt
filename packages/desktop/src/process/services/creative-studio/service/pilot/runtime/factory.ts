@@ -21,13 +21,15 @@ import {
   type StudioPilotMediaStorageStepV3,
   type StudioPilotMediaStoreV3,
   type StudioPilotNativePhotoSelectionV3,
-} from './runtime';
+} from './index';
 import {
   createCreativeStudioPilotEntryPointV3,
   type CreativeStudioPilotEntryPointV3,
   type StudioPilotExportServiceV3,
-} from './entryPoint';
-import type { StudioPilotIdentityKindV3 } from './prepare';
+} from '../entryPoint';
+import type { StudioPilotIdentityKindV3 } from '../prepare';
+import { createStudioPilotDirectorMailbox, type StudioPilotDirectorMailbox } from '../director/mailbox';
+import { createStudioPilotDirectorProcessor, type StudioPilotDirectorProcessor } from '../director/processor';
 
 export type StudioPilotRuntimeIdentityKindV3 =
   | StudioPilotIdentityKindV3
@@ -62,6 +64,8 @@ export type CreativeStudioPilotRuntimeV3 = {
   readonly media: StudioPilotMediaStoreV3;
   readonly jobs: StudioPilotJobManagerV3;
   readonly pieceExports: StudioPieceExportRuntimeV3;
+  readonly directorMailbox: StudioPilotDirectorMailbox;
+  readonly directorProcessor: StudioPilotDirectorProcessor;
   startV3(): Promise<void>;
   dispose(): Promise<void>;
 };
@@ -73,10 +77,7 @@ const timestampReader =
     return Number.isSafeInteger(value) && value >= 0 ? new Date(value).toISOString() : '';
   };
 
-/**
- * Composes the complete inactive schema-6 Main runtime. Nothing here registers production IPC,
- * selects the production Studio service, or grants a schema-5 renderer access to schema-6 data.
- */
+/** Composes the complete schema-6 Main runtime behind its typed entry point. */
 export const createCreativeStudioPilotRuntimeV3 = (
   deps: CreativeStudioPilotRuntimeDepsV3
 ): CreativeStudioPilotRuntimeV3 => {
@@ -144,6 +145,11 @@ export const createCreativeStudioPilotRuntimeV3 = (
     now,
     mintIdentity: mintIdentity === undefined ? undefined : (kind) => mintIdentity(kind),
   });
+  const directorMailbox = createStudioPilotDirectorMailbox({
+    resolveVerifiedProjectDirectory: (projectId) => store.getVerifiedProjectDirectoryV3(projectId),
+    now,
+  });
+  const directorProcessor = createStudioPilotDirectorProcessor({ entryPoint, mailbox: directorMailbox, now });
 
   return {
     entryPoint,
@@ -151,6 +157,8 @@ export const createCreativeStudioPilotRuntimeV3 = (
     media,
     jobs,
     pieceExports,
+    directorMailbox,
+    directorProcessor,
     startV3: () => entryPoint.startV3(),
     dispose: () => entryPoint.dispose(),
   };

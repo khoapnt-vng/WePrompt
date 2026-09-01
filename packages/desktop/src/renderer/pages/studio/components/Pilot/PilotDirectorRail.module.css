@@ -1,0 +1,29 @@
+.rail {
+  display: flex;
+  flex: 0 0 min(420px, 38vw);
+  min-width: 320px;
+  min-height: 0;
+  flex-direction: column;
+  border-inline-start: 1px solid var(--color-border-2);
+  background: var(--color-bg-1);
+}
+
+.header {
+  padding: 12px 16px;
+  border-block-end: 1px solid var(--color-border-2);
+  color: var(--color-text-1);
+  font-weight: 600;
+}
+
+.content {
+  display: grid;
+  min-height: 0;
+  flex: 1;
+  place-items: stretch;
+  overflow: hidden;
+}
+
+.content > [class*='arco-spin'] {
+  align-self: center;
+  justify-self: center;
+}
