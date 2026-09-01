@@ -61,6 +61,7 @@ import {
 } from './mediaProtocol';
 import { getBuiltinMcpScriptPath, getCreativeStudioRootDir } from '@process/utils/initStorage';
 import { BUILTIN_STUDIO_SCRIPT } from '@process/resources/builtinMcp/constants';
+import { createSessionMcpTrustClaim, fingerprintSessionMcpServer } from '@process/backend/sessionMcpTrust';
 
 type RuntimeEnvironment = {
   AIONUI_E2E_TEST?: string;
@@ -296,6 +297,8 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     listProviders: () => requireActiveGraph().listProviders(),
     getAdapterRegistry: () => requireActiveGraph().adapterRegistry,
     getStudioServerScriptPath: () => getBuiltinMcpScriptPath(BUILTIN_STUDIO_SCRIPT),
+    fingerprintSessionMcpServer,
+    createSessionMcpTrustClaim,
     ensureDirectorCommandMailbox: (projectId) => requireActiveGraph().directorCommandMailbox.ensure(projectId),
     rateCard: async (generation) => createConfiguredStudioRateCardV2(generation),
     exportCatalogStore,

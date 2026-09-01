@@ -13,6 +13,7 @@ import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
 import { z as z4 } from 'zod/v4';
 import {
@@ -1556,6 +1557,33 @@ const commandToolResult = (value: unknown): StudioToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(value) }],
 });
 
+/**
+ * `readOnlyHint` describes product authority, not implementation I/O. These
+ * tools cannot change the project, media, authorizations, or spend. A query
+ * may use bounded mailbox request/receipt files as transport bookkeeping;
+ * those artifacts grant no product authority and are not project state.
+ */
+const STUDIO_READ_ONLY_TOOL_ANNOTATIONS = Object.freeze({
+  readOnlyHint: true,
+  destructiveHint: false,
+  idempotentHint: true,
+  openWorldHint: false,
+} satisfies ToolAnnotations);
+
+const STUDIO_ADDITIVE_TOOL_ANNOTATIONS = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: false,
+  idempotentHint: false,
+  openWorldHint: false,
+} satisfies ToolAnnotations);
+
+const STUDIO_DESTRUCTIVE_TOOL_ANNOTATIONS = Object.freeze({
+  readOnlyHint: false,
+  destructiveHint: true,
+  idempotentHint: false,
+  openWorldHint: false,
+} satisfies ToolAnnotations);
+
 export function createStudioApplyEditsHandlerV2(
   config: StudioServerEnv | null,
   deps: StudioDirectorCommandWriterDeps = {}
@@ -1653,8 +1681,9 @@ export function registerStudioToolsV2(
     'studio_list_routes',
     {
       description:
-        'Read the generation routes available to this project and their constraints before drafting shot durations.',
+        'Read the generation routes available to this project and their constraints before drafting shot durations. This does not change project state, generate, authorize, or spend.',
       inputSchema: z.object({}).strict(),
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createListRoutesHandler(config, writerDeps)
   );
@@ -1662,8 +1691,9 @@ export function registerStudioToolsV2(
     'read_storyboard',
     {
       description:
-        'Read the authoritative schema-5 Beat/Shot storyboard, project references, bin, rules, and current video picture before proposing changes.',
+        'Read the authoritative schema-5 Beat/Shot storyboard, project references, bin, rules, and current video picture before proposing changes. This does not change project state, generate, authorize, or spend.',
       inputSchema: z.object({}).strict(),
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createReadStoryboardHandlerV2(config)
   );
@@ -1671,8 +1701,9 @@ export function registerStudioToolsV2(
     'studio_get_conditioning_frame',
     {
       description:
-        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.',
+        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This does not change project state, generate, quote, authorize, or spend.',
       inputSchema: studioGetConditioningFrameInputSchemaV2,
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createStudioGetConditioningFrameHandlerV2(config)
   );
@@ -1682,6 +1713,7 @@ export function registerStudioToolsV2(
       description:
         'Request candidate images for ordered project reference ids after the reference plan is approved. Character sheets must be approved before backgrounds. This only records a request for user approval and never starts paid generation.',
       inputSchema: studioRequestReferenceImagesInputSchemaV2,
+      annotations: STUDIO_ADDITIVE_TOOL_ANNOTATIONS,
     },
     createRequestReferenceImagesHandlerV2(config)
   );
@@ -1691,6 +1723,7 @@ export function registerStudioToolsV2(
       description:
         'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. Author every shootingScript with Shot-specific direction for what is seen and heard, including intended narration, dialogue, ambience, and discrete sound hits; do not repeat project-wide boilerplate. The input schema exposes only proposal-capable authoring operations, including editable project settings and reference prompts, plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
+      annotations: STUDIO_ADDITIVE_TOOL_ANNOTATIONS,
     },
     async (input) =>
       createProposeStoryboardHandlerV2(config)({
@@ -1710,6 +1743,7 @@ export function registerStudioToolsV2(
           forbidden_terms: z.array(z.string().min(1).max(STUDIO_RULE_LIMITS.term)).max(STUDIO_RULE_LIMITS.maxTerms),
         })
         .strict(),
+      annotations: STUDIO_ADDITIVE_TOOL_ANNOTATIONS,
     },
     createProposeBriefRuleHandlerV2(config)
   );
@@ -1719,6 +1753,7 @@ export function registerStudioToolsV2(
       description:
         'Read the current revision first, then apply one bounded ordered batch of direct-capable schema-5 edits to that exact revision. The input schema exposes only direct-capable authoring operations; operational recovery uses studio_apply_free_fix instead. Reference planning and binding are separate Director-direct phases: first set_reference_plan; if a recurring background is discovered later, append it with amend_reference_plan instead of replacing the plan; then request canonical reference images; a human-confirmed generation makes each newest image current; then read the fresh revision and set_shot_reference_binding to current references. Beat Story, Shot Shooting-script, editable project settings, and set_reference_prompt authoring belong in propose_storyboard for human review. set_reference_label, select_reference_image and remove_reference_image remain renderer-only and never Director-callable. This never starts paid generation. Proposal-only and unavailable operations are invalid arguments; capability preflight remains a fail-closed backstop and no rejected operation reaches command evaluation or is applied. Submit the whole proposal-eligible subset to propose_storyboard; split direct operations only when the direct subset is independently valid. Reference-direct operations never belong in a proposal. Never retry a rejected or invalid batch unchanged. The final serialized command record must fit within 256 KiB. Validation errors and unconfirmed results must not be retried; call studio_get_command_status for an unconfirmed commandId.',
       inputSchema: studioApplyEditsInputSchemaV2,
+      annotations: STUDIO_DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
     async (input) =>
       createStudioApplyEditsHandlerV2(
@@ -1735,6 +1770,7 @@ export function registerStudioToolsV2(
       description:
         "Apply one exact free recovery only after an immediately preceding studio_get_project_status call with detail: true returned the same free_fix remedy. Copy that result's projectRevision to expectedRevision and copy its exact dependentShotId or jobId. Only retry_conditioning_frame and terminalize_refused_job are accepted. A refused submission is local terminal cleanup only; submission_unknown and duplicate-charge acknowledgement remain owner-only. This creates no quote, authorization, job, generation request, or spend, although a successful conditioning repair may release work the owner already authorized. Never infer or reuse a stale remedy, and read fresh detailed status again afterward. Unconfirmed results must not be retried; call studio_get_command_status with the commandId.",
       inputSchema: studioApplyFreeFixInputSchemaV2,
+      annotations: STUDIO_DESTRUCTIVE_TOOL_ANNOTATIONS,
     },
     async (input) =>
       createStudioApplyFreeFixHandlerV2(
@@ -1751,6 +1787,7 @@ export function registerStudioToolsV2(
       description:
         "Prepare and record one priced recovery only after an immediately preceding studio_get_project_status call with detail: true returned the exact proposal remedy. Copy that result's projectRevision and complete blocker verbatim. Preparation is free: it creates no authorization, job, provider request, or spend. The resulting card shows the price, and only the person's explicit Confirm button may spend. Never treat a recorded proposal or a typed chat approval as confirmation.",
       inputSchema: studioProposePaidRecoveryInputSchemaV2,
+      annotations: STUDIO_ADDITIVE_TOOL_ANNOTATIONS,
     },
     async (input) =>
       createStudioProposePaidRecoveryHandlerV2(
@@ -1765,8 +1802,9 @@ export function registerStudioToolsV2(
     'studio_get_project_status',
     {
       description:
-        'Read the fresh derived project pipeline status without writing, generating, or spending. Set detail to true only when per-Shot generation, binding, reference, or conditioning diagnosis is needed.',
+        'Read the fresh derived project pipeline status without changing project state, generating, authorizing, or spending. Set detail to true only when per-Shot generation, binding, reference, or conditioning diagnosis is needed.',
       inputSchema: studioGetProjectStatusInputSchemaV2,
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createStudioGetProjectStatusHandlerV2(config, writerDeps)
   );
@@ -1774,8 +1812,9 @@ export function registerStudioToolsV2(
     'studio_get_proposal',
     {
       description:
-        'Read one exact proposal by its complete proposalId. This read never authors the project, generates, authorizes, or spends. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
+        'Read one exact proposal by its complete proposalId. This does not change project state, generate, authorize, or spend. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
       inputSchema: studioGetProposalInputSchemaV2,
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createStudioGetProposalHandlerV2(config, writerDeps)
   );
@@ -1783,8 +1822,9 @@ export function registerStudioToolsV2(
     'studio_get_command_status',
     {
       description:
-        'Read the exact durable or pending current Director mutation or read-query status for one commandId. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
+        'Read the exact durable or pending current Director mutation or read-query status for one commandId. This does not change project state, generate, authorize, or spend. Unsupported, unconfirmed, and indeterminate outcomes must not be retried.',
       inputSchema: studioGetCommandStatusInputSchemaV2,
+      annotations: STUDIO_READ_ONLY_TOOL_ANNOTATIONS,
     },
     createStudioGetCommandStatusHandlerV2(config, writerDeps)
   );

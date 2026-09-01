@@ -507,6 +507,11 @@ export const createStudioPilotConfirmPhotoServiceV3 = (
           };
         });
         deps.preparedPhotos.consume(claim);
+        if (claim.reservation.mode === 'create') {
+          // Creating a Piece advances authoring authority. Every other prepared intent for the
+          // project was derived from the former authored canvas and must disappear immediately.
+          deps.preparedPhotos.invalidateProject(result.projectId, result.authoringRevision);
+        }
         committed = true;
         await dispatchStudioPilotCommittedPhotoV3(deps, result);
         return result;
@@ -515,6 +520,12 @@ export const createStudioPilotConfirmPhotoServiceV3 = (
           const reconciliation = await reconcileStudioPilotPhotoCommitV3(deps.store, commitAttempt);
           if (reconciliation.status === 'committed') {
             deps.preparedPhotos.consume(claim);
+            if (claim.reservation.mode === 'create') {
+              deps.preparedPhotos.invalidateProject(
+                reconciliation.result.projectId,
+                reconciliation.result.authoringRevision
+              );
+            }
             committed = true;
             await dispatchStudioPilotCommittedPhotoV3(deps, reconciliation.result);
             return reconciliation.result;

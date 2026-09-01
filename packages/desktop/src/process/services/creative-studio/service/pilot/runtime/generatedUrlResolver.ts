@@ -116,7 +116,6 @@ export const createStudioPilotGeneratedUrlResolverV3 = (
       throw remoteFailure();
     }
 
-    let closed = false;
     try {
       await downloadRemoteMedia(url, {
         lookup,
@@ -127,7 +126,6 @@ export const createStudioPilotGeneratedUrlResolverV3 = (
       });
       await handle.sync();
       await handle.close();
-      closed = true;
 
       let cleanupPromise: Promise<void> | null = null;
       return {
@@ -141,7 +139,7 @@ export const createStudioPilotGeneratedUrlResolverV3 = (
         },
       };
     } catch (error) {
-      if (!closed) await handle.close().catch((): undefined => undefined);
+      await handle.close().catch((): undefined => undefined);
       await fs.rm(temporaryPath, { force: true }).catch((): undefined => undefined);
       if (error instanceof RemoteMediaError) throw error;
       throw remoteFailure();

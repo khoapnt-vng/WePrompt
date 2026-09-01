@@ -29,6 +29,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPilotPhotoFixtureV3, type PilotPhotoFixtureV3 } from './presentation/realFixture';
 
 const roots: string[] = [];
+const deferred = <T>() => {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
+};
 const schema5ProjectCapture = path.join(
   process.cwd(),
   'tests/fixtures/creative-studio/schema5-baseline/healthy/storage/project_capture'
@@ -90,6 +97,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
   const order: string[] = [];
   const jobs = {
     dispatchCommittedJobV3: vi.fn(async () => undefined),
+    activeJobIdsV3: vi.fn((): ReadonlySet<string> => new Set()),
     cancelJobV3: vi.fn(async () => ({
       status: 'cancelled' as const,
       projectId: 'project_1',
@@ -198,7 +206,8 @@ describe('schema-6 Pilot service error boundary', () => {
 
   it.each([
     [new CreativeStudioPilotContractErrorV3(), 'invalid_payload'],
-    [new StudioPieceRouteResolutionErrorV3(), 'route_unavailable'],
+    [new StudioPieceRouteResolutionErrorV3('route_incompatible'), 'route_incompatible'],
+    [new StudioPieceRouteResolutionErrorV3('route_catalog_unavailable'), 'route_catalog_unavailable'],
     [new StudioPreparedPhotoCacheErrorV3('quote_in_use'), 'quote_in_use'],
     [new StudioPreparedPhotoCacheErrorV3('quote_not_found'), 'quote_not_found'],
     [new StudioPreparedPhotoCacheErrorV3('quote_cache_full'), 'busy'],
@@ -255,7 +264,13 @@ describe('isolated schema-6 typed entry point', () => {
 
     expect(created).toMatchObject({ status: 'created', summary: { pieceCount: 0, currentPieceCount: 0 } });
     expect(listed.entries).toEqual([{ status: 'supported', summary: created.summary }]);
-    expect(loaded).toMatchObject({ status: 'supported', canvas: { pieces: [] }, activity: { jobs: [] } });
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      canvas: { pieces: [] },
+      activity: { jobs: [] },
+      spendPolicy: null,
+      lastUndo: null,
+    });
     expect(exports).toEqual({ revision: 0, artifacts: [] });
     expect(harness.exports.listPieceExportsV3).toHaveBeenCalledWith(created.summary.id);
     expect(prepared.status).toBe('prepared');
@@ -269,6 +284,192 @@ describe('isolated schema-6 typed entry point', () => {
         { source: 'prepared', projectId: created.summary.id },
       ])
     );
+  });
+
+  it('discards a provisional quote without durable records and emits the bounded activity update', async () => {
+    const harness = await createHarness();
+    const updates: unknown[] = [];
+    harness.entry.watchProjectUpdatesV3((update) => updates.push(update));
+    const created = await harness.entry.createProjectV3({ name: 'Declined photo', brief: 'No durable photo yet.' });
+    const before = await harness.store.loadProjectV3(created.summary.id);
+    const prepared = await harness.entry.preparePhotoV3({
+      mode: 'create',
+      projectId: created.summary.id,
+      expectedAuthoringRevision: before.authoringRevision,
+      words: 'A quote the person declines.',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: 'declined_photo',
+    });
+
+    await expect(
+      harness.entry.discardPreparedPhotoV3({
+        reservationId: prepared.quote.reservationId,
+        quoteId: prepared.quote.quoteId,
+        quoteRevision: prepared.quote.quoteRevision,
+      })
+    ).resolves.toEqual({ status: 'discarded', projectId: created.summary.id });
+
+    const after = await harness.store.loadProjectV3(created.summary.id);
+    const loaded = await harness.entry.loadProjectV3(created.summary.id);
+    expect(after).toEqual(before);
+    expect(after).toMatchObject({ pieces: {}, jobs: {}, spendAuthorizations: [] });
+    expect(loaded).toMatchObject({
+      status: 'supported',
+      canvas: { pieces: [] },
+      activity: { jobs: [], preparedPhotoQuotes: [] },
+    });
+    expect(harness.jobs.dispatchCommittedJobV3).not.toHaveBeenCalled();
+    expect(updates.filter((update) => (update as { source?: string }).source === 'prepared')).toEqual([
+      { source: 'prepared', projectId: created.summary.id },
+      { source: 'prepared', projectId: created.summary.id },
+    ]);
+
+    await expect(
+      harness.entry.discardPreparedPhotoV3({
+        reservationId: prepared.quote.reservationId,
+        quoteId: prepared.quote.quoteId,
+        quoteRevision: prepared.quote.quoteRevision,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
+  });
+
+  it('invalidates prepared activity only after successful authoring and import changes', async () => {
+    const harness = await createHarness();
+    const created = await harness.entry.createProjectV3({ name: 'Quote invalidation', brief: 'Original brief.' });
+    const prepare = async (words: string) => {
+      const project = await harness.store.loadProjectV3(created.summary.id);
+      return harness.entry.preparePhotoV3({
+        mode: 'create',
+        projectId: project.id,
+        expectedAuthoringRevision: project.authoringRevision,
+        words,
+        settings: { aspectRatio: '16:9', resolution: '1080p' },
+        suggestedHandle: null,
+      });
+    };
+    const preparedBeforeMutation = await prepare('Quote before authoring.');
+
+    await expect(
+      harness.entry.applyMutationBatchV3({
+        schemaVersion: 6,
+        projectId: created.summary.id,
+        expectedAuthoringRevision: 1,
+        operations: [{ kind: 'set_brief', brief: 'Original brief.' }],
+      })
+    ).rejects.toMatchObject({ code: 'no_change' });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({
+      status: 'supported',
+      activity: {
+        preparedPhotoQuotes: [expect.objectContaining({ reservationId: preparedBeforeMutation.quote.reservationId })],
+      },
+    });
+
+    await expect(
+      harness.entry.applyMutationBatchV3({
+        schemaVersion: 6,
+        projectId: created.summary.id,
+        expectedAuthoringRevision: 1,
+        operations: [{ kind: 'set_brief', brief: 'Changed brief.' }],
+      })
+    ).resolves.toMatchObject({ authoringRevision: 2 });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({
+      status: 'supported',
+      activity: { preparedPhotoQuotes: [] },
+    });
+
+    const preparedBeforeImport = await prepare('Quote before import.');
+    await expect(harness.entry.importPhotoV3({ projectId: created.summary.id })).resolves.toEqual({
+      status: 'cancelled',
+    });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({
+      status: 'supported',
+      activity: {
+        preparedPhotoQuotes: [expect.objectContaining({ reservationId: preparedBeforeImport.quote.reservationId })],
+      },
+    });
+
+    harness.media.importPhotoV3.mockResolvedValueOnce({
+      status: 'imported',
+      projectId: created.summary.id,
+      pieceId: 'piece_imported',
+      assetId: 'asset_imported',
+      revision: 3,
+      authoringRevision: 3,
+    } as never);
+    await expect(harness.entry.importPhotoV3({ projectId: created.summary.id })).resolves.toMatchObject({
+      status: 'imported',
+      projectId: created.summary.id,
+    });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({
+      status: 'supported',
+      activity: { preparedPhotoQuotes: [] },
+    });
+  });
+
+  it('retains a quote prepared from the new authoring revision while import completion invalidates the old one', async () => {
+    const harness = await createHarness();
+    const created = await harness.entry.createProjectV3({ name: 'Import race', brief: 'Before import.' });
+    const before = await harness.store.loadProjectV3(created.summary.id);
+    const stale = await harness.entry.preparePhotoV3({
+      mode: 'create',
+      projectId: before.id,
+      expectedAuthoringRevision: before.authoringRevision,
+      words: 'Prepared before the import commit.',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+    });
+    const importCommitted = deferred<Awaited<ReturnType<typeof harness.store.loadProjectV3>>>();
+    const releaseImportResult = deferred<void>();
+    harness.media.importPhotoV3.mockImplementationOnce(async () => {
+      const current = await harness.store.loadProjectV3(before.id);
+      const committed = await harness.store.updateProjectV3(
+        current.id,
+        (draft) => ({ ...draft, brief: 'Import committed authored meaning.' }),
+        { kind: 'authoring', expectedRevision: current.revision }
+      );
+      importCommitted.resolve(committed);
+      await releaseImportResult.promise;
+      return {
+        status: 'imported',
+        projectId: committed.id,
+        pieceId: 'piece_imported',
+        assetId: 'asset_imported',
+        revision: committed.revision,
+        authoringRevision: committed.authoringRevision,
+      } as never;
+    });
+
+    const importing = harness.entry.importPhotoV3({
+      projectId: before.id,
+      expectedAuthoringRevision: before.authoringRevision,
+    });
+    const committed = await importCommitted.promise;
+    const current = await harness.entry.preparePhotoV3({
+      mode: 'create',
+      projectId: committed.id,
+      expectedAuthoringRevision: committed.authoringRevision,
+      words: 'Prepared after the import commit.',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+    });
+    releaseImportResult.resolve();
+    await expect(importing).resolves.toMatchObject({ status: 'imported' });
+
+    await expect(harness.entry.loadProjectV3(committed.id)).resolves.toMatchObject({
+      status: 'supported',
+      activity: {
+        preparedPhotoQuotes: [expect.objectContaining({ reservationId: current.quote.reservationId })],
+      },
+    });
+    await expect(
+      harness.entry.confirmPreparedPhotoV3({
+        reservationId: stale.quote.reservationId,
+        quoteId: stale.quote.quoteId,
+        quoteRevision: stale.quote.quoteRevision,
+        explicitHumanConfirmation: true,
+        duplicateChargeAcknowledged: false,
+      })
+    ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
   it('isolates a failed healthy reload so one raced project cannot poison the catalogue', async () => {
@@ -302,6 +503,7 @@ describe('isolated schema-6 typed entry point', () => {
       expect(loaded.canvas.pieces[0]).toMatchObject({ handle: 'new_name', priorHandles: ['first_photo'] });
       expect(renamed.undoEntryId).toMatch(/^mutation_/u);
       if (renamed.undoEntryId === null) throw new Error('rename did not return its committed undo authority');
+      expect(loaded.lastUndo).toEqual({ entryId: renamed.undoEntryId, label: 'rename_piece' });
 
       const undone = await fixture.runtime.entryPoint.applyMutationBatchV3({
         schemaVersion: 6,
@@ -312,6 +514,7 @@ describe('isolated schema-6 typed entry point', () => {
       loaded = await fixture.runtime.entryPoint.loadProjectV3(fixture.project.id);
       if (loaded.status !== 'supported') throw new Error('undone fixture became unreadable');
       expect(loaded.canvas.pieces[0]).toMatchObject({ handle: 'first_photo', priorHandles: [] });
+      expect(loaded.lastUndo).toBeNull();
       expect(undone.undoEntryId).toBeNull();
     } finally {
       await fixture.cleanup();
@@ -322,14 +525,16 @@ describe('isolated schema-6 typed entry point', () => {
     const harness = await createHarness();
     const created = await harness.entry.createProjectV3({ name: 'No undo', brief: '' });
 
+    const policy = { currency: 'USD', maxPerBatchMinorUnits: 25 };
     const edited = await harness.entry.applyMutationBatchV3({
       schemaVersion: 6,
       projectId: created.summary.id,
       expectedAuthoringRevision: 1,
-      operations: [{ kind: 'set_brief', brief: 'Changed without a Piece rename.' }],
+      operations: [{ kind: 'set_spend_policy', policy }],
     });
 
     expect(edited).toMatchObject({ authoringRevision: 2, undoEntryId: null });
+    await expect(harness.entry.loadProjectV3(created.summary.id)).resolves.toMatchObject({ spendPolicy: policy });
   });
 
   it('reserves a proposed handle for import and rename only at its matching authoring revision', async () => {
@@ -351,7 +556,7 @@ describe('isolated schema-6 typed entry point', () => {
           expectedAuthoringRevision: fixture.project.authoringRevision,
           operations: [{ kind: 'rename_piece', pieceId: fixture.pieceId, handle: prepared.quote.proposedHandle }],
         })
-      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      ).rejects.toMatchObject({ code: 'handle_collision' });
       const whileCurrent = await fixture.runtime.entryPoint.importPhotoV3({
         projectId: fixture.project.id,
         expectedAuthoringRevision: fixture.project.authoringRevision,
@@ -398,11 +603,35 @@ describe('isolated schema-6 typed entry point', () => {
         fixture.runtime.entryPoint.applyMutationBatchV3(
           batch(installed.authoringRevision, fixture.pieceId, 'first_photo')
         )
-      ).rejects.toMatchObject({ code: 'invalid_payload' });
+      ).rejects.toMatchObject({ code: 'no_change' });
       await expect(fixture.runtime.store.loadProjectV3(installed.id)).resolves.toMatchObject({
         revision: installed.revision,
         authoringRevision: installed.authoringRevision,
       });
+    } finally {
+      await fixture.cleanup();
+    }
+  });
+
+  it('preserves renderer-actionable rename and undo refusal reasons', async () => {
+    const fixture = await createPilotPhotoFixtureV3({ origin: 'imported', fileName: 'Named photo.png' });
+    try {
+      await expect(
+        fixture.runtime.entryPoint.applyMutationBatchV3({
+          schemaVersion: 6,
+          projectId: fixture.project.id,
+          expectedAuthoringRevision: fixture.project.authoringRevision,
+          operations: [{ kind: 'rename_piece', pieceId: fixture.pieceId, handle: 'unsafe\u200dname' }],
+        })
+      ).rejects.toMatchObject({ code: 'invalid_handle' });
+      await expect(
+        fixture.runtime.entryPoint.applyMutationBatchV3({
+          schemaVersion: 6,
+          projectId: fixture.project.id,
+          expectedAuthoringRevision: fixture.project.authoringRevision,
+          operations: [{ kind: 'undo_last', entryId: 'mutation_missing' }],
+        })
+      ).rejects.toMatchObject({ code: 'undo_conflict' });
     } finally {
       await fixture.cleanup();
     }

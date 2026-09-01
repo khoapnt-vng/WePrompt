@@ -879,6 +879,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "Creative Studio",
+        "actionFailed": "Creative Studio konnte diese Aktion nicht abschließen.",
+        "cancel": "Abbrechen",
+        "delete": "Löschen"
+      },
+      "library": {
+        "eyebrow": "Creative Studio Pilot",
+        "title": "Projekte",
+        "subtitle": "Erstelle ein Projekt für Einzelbild-Werkstücke. Filmeinstellungen sind nicht Teil dieses Piloten.",
+        "refresh": "Aktualisieren",
+        "newProject": "Neues Projekt",
+        "projectName": "Projektname",
+        "brief": "Briefing",
+        "nameRequired": "Gib einen Projektnamen ein.",
+        "createProject": "Projekt erstellen",
+        "loading": "Projekte werden geladen…",
+        "refreshing": "Projekte werden aktualisiert…",
+        "projectsUnavailable": "Projekte sind nicht verfügbar.",
+        "refreshUnavailable": "Aktualisierung nicht verfügbar. Die letzte verfügbare Projektliste wird angezeigt.",
+        "emptyTitle": "Noch keine Projekte",
+        "emptyBody": "Erstelle oben ein Projekt, um ein Einzelbild-Werkstück zu beginnen.",
+        "supported": {
+          "title": "Pilotprojekte",
+          "description": "Projekte, die mit dieser Version geöffnet werden können.",
+          "tag": "Unterstützt"
+        },
+        "unsupported": {
+          "title": "Mit einer anderen Studio-Version erstellt",
+          "description": "Diese Projekte verwenden ein anderes Schema und können mit diesem Piloten nicht geöffnet werden.",
+          "tag": "Nicht unterstützt"
+        },
+        "quarantined": {
+          "title": "Projekte, die wiederhergestellt werden müssen",
+          "description": "Diese Projekte konnten nicht sicher dekodiert werden und bleiben in Quarantäne.",
+          "tag": "In Quarantäne"
+        },
+        "deleteUnreadableAccessible": "Nicht lesbares Projekt {{projectId}} löschen",
+        "deleteAccessible": "{{name}} löschen",
+        "facts": {
+          "pieces": "Werkstücke",
+          "currentPhotos": "Aktuelle Fotos",
+          "updated": "Aktualisiert"
+        },
+        "openProject": "{{name}} öffnen",
+        "deleteModal": {
+          "healthyTitle": "Projekt löschen?",
+          "unreadableTitle": "Nicht lesbares Projekt löschen?",
+          "keep": "Projekt behalten",
+          "confirm": "Projekt löschen",
+          "healthyBody": "{{name}} löschen? Die aktuelle Projektrevision wird geprüft, bevor Dateien entfernt werden.",
+          "unreadableBody": "{{name}} löschen? Dieses Projekt kann nicht sicher geöffnet werden, daher verwendet die Löschung seinen geschützten einmaligen Nachweis."
+        }
+      },
+      "canvas": {
+        "projectActions": "Projektaktionen",
+        "loading": "Projekt wird geladen…",
+        "refreshing": "Projekt wird aktualisiert…",
+        "unavailable": "Dieses Creative-Studio-Projekt ist nicht verfügbar.",
+        "startCreating": "Erstellung starten",
+        "boardAccessible": "Foto-Werkstücke",
+        "errors": {
+          "routeCatalogUnavailable": "Fotorouten sind nicht geladen. Aktualisiere die Verfügbarkeit und versuche es erneut.",
+          "routeIncompatible": "Keine Fotoroute unterstützt diese Einstellungen. Ändere Seitenverhältnis oder Auflösung und versuche es erneut.",
+          "capacity": "Dieses Pilotprojekt hat die Grenze von 96 Werkstücken erreicht. Starte ein weiteres Projekt, um mehr Fotos zu erstellen oder zu importieren.",
+          "freshQuoteRequired": "Dieses Angebot ist nicht mehr aktuell. Prüfe einen neuen Preis, bevor du kostenpflichtige Arbeit startest.",
+          "duplicateAcknowledgementRequired": "Bestätige die mögliche doppelte Belastung, um fortzufahren.",
+          "invalidHandle": "Dieser Werkstückname kann nicht verwendet werden. Gib einen sicheren, eindeutigen Namen ein.",
+          "handleCollision": "Ein anderes Werkstück verwendet bereits diesen Namen oder Alias.",
+          "aliasLimit": "Die Grenze früherer Namen für dieses Werkstück ist erreicht.",
+          "noChange": "Es wurde nichts geändert.",
+          "undoConflict": "Das Projekt hat sich geändert, daher kann die letzte Umbenennung nicht rückgängig gemacht werden.",
+          "staleAuthoring": "Das Projekt hat sich geändert. Prüfe den neuesten Stand und versuche es erneut.",
+          "variationGrid": "Statt eines Fotos wurde ein Variantenraster zurückgegeben. Prüfe das Ergebnis, bevor du einen weiteren kostenpflichtigen Versuch startest."
+        },
+        "variationGrid": {
+          "paidRejected": "Der Anbieter hat ein Ergebnis geliefert und berechnet, Creative Studio hat es jedoch abgelehnt, weil es ein Variantenraster ist.",
+          "retryAvailable": "Für dieses Werkstück ist ein geprüfter kostenpflichtiger Neuversuch verfügbar.",
+          "retryExhausted": "Für dieses Werkstück sind keine weiteren kostenpflichtigen Neuversuche verfügbar. Importiere stattdessen ein Foto oder erstelle ein gleichrangiges Werkstück.",
+          "importEscape": "„Foto importieren“ fügt ein separates Werkstück hinzu, ohne erneut Erstellungsgebühren auszulösen."
+        },
+        "quote": {
+          "accessibleName": "Vorbereitetes Fotoangebot",
+          "eyebrow": "Angebot vorbereitet",
+          "retryTitle": "Foto erneut versuchen",
+          "amount": "Betrag",
+          "scope": "Umfang",
+          "scopeValue": "Ein Foto · {{aspectRatio}} · {{resolution}}",
+          "expires": "Gültig bis",
+          "automatic": "Durch das aktive Ausgabenlimit autorisiert. Wird automatisch gestartet.",
+          "reviewRequired": "Prüfe die genauen Kosten, bevor du kostenpflichtige Arbeit startest.",
+          "duplicateAcknowledgement": "Ich verstehe, dass die vorherige Übermittlung an den Anbieter bereits berechnet worden sein könnte.",
+          "confirmCreate": "Bestätigen und Foto erstellen",
+          "confirmRetry": "Bestätigen und erneut versuchen",
+          "discard": "Angebot verwerfen"
+        },
+        "piece": {
+          "eyebrow": "Foto-Werkstück",
+          "generationInProgress": "Das Foto wird erstellt.",
+          "noCurrentImage": "Dieses Werkstück hat kein aktuelles Bild.",
+          "imageUnavailable": "Die aktuellen Bilddaten sind an dieser inaktiven Renderer-Schnittstelle nicht verfügbar.",
+          "currentImageAccessible": "Aktuelles Bild von {{handle}}",
+          "rename": "Werkstück umbenennen",
+          "renameAccessible": "{{handle}} umbenennen",
+          "saveName": "Namen speichern",
+          "cancelRename": "Umbenennen abbrechen"
+        },
+        "pieceStatus": {
+          "queued": "In Warteschlange",
+          "running": "Wird ausgeführt",
+          "needsAttention": "Aufmerksamkeit erforderlich",
+          "failed": "Fehlgeschlagen",
+          "cancelled": "Abgebrochen",
+          "current": "Aktuell"
+        },
+        "jobStatus": {
+          "queuedLocal": "Wartet auf Übermittlung",
+          "submitting": "Wird übermittelt",
+          "queuedRemote": "Beim Anbieter in Warteschlange",
+          "running": "Wird erstellt",
+          "needsAttention": "Aufmerksamkeit erforderlich",
+          "succeeded": "Abgeschlossen",
+          "failed": "Fehlgeschlagen",
+          "cancelled": "Abgebrochen"
+        },
+        "jobErrors": {
+          "invalidRequest": "Die Erstellungsanfrage ist ungültig.",
+          "contentRejected": "Der Anbieter hat diese Anfrage abgelehnt. Überarbeite die Beschreibung vor einem neuen Versuch.",
+          "auth": "Der Anbieter hat die Zugangsdaten abgelehnt.",
+          "quota": "Das Anbieterkonto hat nicht genügend Kontingent.",
+          "rateLimited": "Das Anbieterratenlimit wurde erreicht. Versuche es später erneut.",
+          "providerUnavailable": "Der Erstellungsanbieter ist nicht verfügbar.",
+          "timeout": "Der Anbieter hat nicht rechtzeitig geantwortet.",
+          "pollDeadline": "Der Anbieter meldet keinen Fortschritt mehr. Prüfe ihn erneut, bevor du es wieder versuchst.",
+          "noOutput": "Der Anbieter hat kein verwendbares Foto zurückgegeben.",
+          "variationGrid": "Statt eines Fotos wurde ein Variantenraster erkannt. Prüfe es vor einem neuen Versuch.",
+          "submissionUnknown": "Das Ergebnis der Übermittlung ist unbekannt. Prüfe vor einem neuen Versuch die Warnung zur Doppelbelastung.",
+          "downloadFailed": "Die Erstellung ist abgeschlossen, aber das Foto konnte nicht heruntergeladen werden.",
+          "unsupported": "Diese Anbieterantwort wird nicht unterstützt.",
+          "unknown": "Die Erstellung ist aus unbekanntem Grund fehlgeschlagen."
+        },
+        "retryReasons": {
+          "providerFailure": "Anbieterfehler",
+          "submissionUnknown": "unbekanntes Übermittlungsergebnis",
+          "variationGrid": "Variantenraster",
+          "cancelled": "abgebrochener Versuch"
+        },
+        "provenance": {
+          "accessible": "Herkunft von {{handle}}",
+          "title": "Herkunft",
+          "origin": "Ursprung",
+          "imported": "Importiert",
+          "generated": "Erstellt",
+          "created": "Erstellt",
+          "model": "Modell",
+          "instructionProfile": "Anweisungsprofil",
+          "recordedSpend": "Erfasste Ausgaben"
+        },
+        "history": {
+          "accessible": "Versuchsverlauf für {{handle}}",
+          "title": "Versuchsverlauf",
+          "retryReason": "Grund für neuen Versuch: {{reason}}",
+          "recordedSpend": "Erfasste Ausgaben: {{amount}} ({{currency}})",
+          "created": "Erstellt",
+          "authorized": "Autorisiert",
+          "retryOf": "Wiederholung von Auftrag",
+          "duplicateCharge": "Bestätigung der Doppelbelastung",
+          "acknowledged": "Bestätigt",
+          "notRequired": "Nicht erforderlich"
+        },
+        "actions": {
+          "cancelGeneration": "Erstellung abbrechen",
+          "retryGeneration": "Erstellung erneut versuchen",
+          "retryDownload": "Download erneut versuchen",
+          "checkProvider": "Anbieter erneut prüfen",
+          "undoRename": "Letzte Umbenennung rückgängig machen",
+          "retryRouteCheck": "Routenprüfung wiederholen",
+          "createPhoto": "Foto erstellen",
+          "importPhoto": "Foto importieren",
+          "reviewCost": "Kosten prüfen",
+          "reviewFreshCost": "Neuen Preis prüfen"
+        },
+        "announcements": {
+          "paidWorkStarted": "Kostenpflichtige Fotoarbeit wurde gestartet.",
+          "quoteDiscarded": "Das vorbereitete Angebot wurde verworfen.",
+          "photoImported": "Foto importiert.",
+          "renameUndone": "Die letzte Umbenennung des Werkstücks wurde rückgängig gemacht.",
+          "exported": "{{handle}} exportiert.",
+          "spendingLimitSaved": "Ausgabenlimit gespeichert.",
+          "jobTransition": "{{handle}} hat jetzt den Status „{{status}}“.",
+          "freshQuoteRequired": "Das vorherige Angebot ist nicht mehr aktuell. Prüfe einen neuen Preis, bevor du kostenpflichtige Arbeit startest.",
+          "savedRefreshUnavailable": "Die Aktion wurde gespeichert, aber der aktuelle Projektstand konnte nicht geladen werden. Aktualisieren Sie, bevor Sie eine weitere Aktion ausführen."
+        },
+        "projectMenu": {
+          "label": "Projektmenü",
+          "spendingLimit": "Ausgabenlimit",
+          "export": "Exportieren"
+        },
+        "composer": {
+          "description": "Fotobeschreibung",
+          "aspectRatio": "Seitenverhältnis",
+          "resolution": "Auflösung"
+        }
+      },
+      "spending": {
+        "title": "Ausgabenlimit",
+        "clear": "Limit löschen",
+        "save": "Limit speichern",
+        "description": "Lege den Höchstbetrag fest, den dieses Projekt für einen kostenpflichtigen Fotostapel automatisch autorisieren darf. Diese Einstellung startet keine Erstellung und gibt kein Geld aus.",
+        "currency": "Währungscode",
+        "maximum": "Maximum pro Stapel (Untereinheiten)",
+        "invalid": "Gib einen exakten dreibuchstabigen Währungscode und ein nicht negatives ganzzahliges Limit in Untereinheiten ein."
+      }
+    },
     "workspace": {
       "views": {
         "references": "Referenzen"

@@ -2024,10 +2024,12 @@ export type StudioRendererPreparedPhotoQuoteV3 =
   | (StudioRendererPreparedPhotoQuoteBaseV3 & {
       mode: 'create';
       proposedHandle: string;
+      orderIndex: number;
     })
   | (StudioRendererPreparedPhotoQuoteBaseV3 & {
       mode: 'retry';
       proposedHandle: null;
+      orderIndex: null;
     });
 
 export type StudioConfirmPreparedPhotoRequestV3 = {
@@ -2037,6 +2039,12 @@ export type StudioConfirmPreparedPhotoRequestV3 = {
   explicitHumanConfirmation: boolean;
   duplicateChargeAcknowledged: boolean;
 };
+
+/** Declines an unclaimed quote and releases only its in-memory reservation. */
+export type StudioDiscardPreparedPhotoRequestV3 = Pick<
+  StudioConfirmPreparedPhotoRequestV3,
+  'reservationId' | 'quoteId' | 'quoteRevision'
+>;
 
 export type StudioMutationOperationV3 =
   | { kind: 'edit_project'; name: string }
@@ -2113,8 +2121,16 @@ export type StudioRendererPieceActivityJobV3 = {
   jobId: string;
   pieceId: string;
   status: StudioJobStatus;
+  createdAt: string;
+  updatedAt: string;
   progress: number | null;
   error: StudioPieceJobErrorV3 | null;
+  retryOfJobId: string | null;
+  retryReason: StudioPieceJobRetryReasonV3 | null;
+  duplicateChargeAcknowledged: boolean;
+  authorization: {
+    confirmedAt: string;
+  };
   canCancel: boolean;
   canRetry: boolean;
   canRetryDownload: boolean;
@@ -2129,6 +2145,11 @@ export type StudioRendererCapabilityActivityV3 = {
   projectId: string;
   preparedPhotoQuotes: StudioRendererPreparedPhotoQuoteV3[];
   jobs: StudioRendererPieceActivityJobV3[];
+};
+
+export type StudioRendererUndoEntryV3 = {
+  entryId: string;
+  label: string;
 };
 
 export type StudioPieceExportGeneratedProvenanceV3 = {
@@ -2275,6 +2296,8 @@ export type StudioProjectLoadResultV3 =
       summary: StudioProjectSummaryV3;
       canvas: StudioRendererCanvasInventoryV3;
       activity: StudioRendererCapabilityActivityV3;
+      spendPolicy: StudioSpendPolicy | null;
+      lastUndo: StudioRendererUndoEntryV3 | null;
     }
   | (StudioUnreadableProjectLibraryEntryV3 & { status: 'unsupported' | 'quarantined' })
   | { status: 'not_found'; projectId: string };
@@ -2298,6 +2321,11 @@ export type StudioConfirmPreparedPhotoResultV3 = {
   jobId: string;
   revision: number;
   authoringRevision: number;
+};
+
+export type StudioDiscardPreparedPhotoResultV3 = {
+  status: 'discarded';
+  projectId: string;
 };
 
 export type StudioImportPhotoResultV3 =
@@ -2379,6 +2407,8 @@ export type CreativeStudioPilotErrorCodeV3 =
   | 'stale_project'
   | 'stale_authoring'
   | 'project_piece_capacity_reached'
+  | 'route_catalog_unavailable'
+  | 'route_incompatible'
   | 'route_unavailable'
   | 'rate_not_found'
   | 'variable_price_unsupported'
@@ -2400,8 +2430,22 @@ export type CreativeStudioPilotErrorCodeV3 =
   | 'deletion_claim_expired'
   | 'deletion_claim_mismatch'
   | 'deletion_claim_capacity'
+  | 'invalid_handle'
+  | 'handle_collision'
+  | 'alias_limit'
+  | 'undo_conflict'
+  | 'no_change'
   | 'storage_error'
   | 'runtime_inactive';
+
+/** Renderer-safe Phase-5 failure. Internal paths, provider bodies, and authority snapshots stay in Main. */
+export type StudioPilotCommandErrorV3 = {
+  code: CreativeStudioPilotErrorCodeV3;
+  messageKey: string;
+};
+
+/** Exact IPC envelope for the schema-6 Pilot surface. */
+export type StudioPilotCommandResultV3<T> = { ok: true; data: T } | { ok: false; error: StudioPilotCommandErrorV3 };
 
 /** Task 7 public project names now resolve exclusively to the Beat/Shot contract. */
 export type StudioProject = StudioProjectV2;

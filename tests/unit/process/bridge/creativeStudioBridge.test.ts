@@ -346,9 +346,13 @@ const createService = () =>
     createProject: vi.fn(async () => rendererProject),
     getProject: vi.fn(async () => ({ status: 'supported' as const, project: rendererProject })),
     getBriefSessionServer: vi.fn(async () => ({
-      id: 'studio-brief-project_1',
-      name: 'aionui-creative-studio',
-      transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
+      server: {
+        id: 'studio-brief-project_1',
+        name: 'aionui-creative-studio',
+        transport: { type: 'stdio' as const, command: 'node', args: ['/tmp/builtin-mcp-studio.js'] },
+      },
+      serverFingerprint: 'a'.repeat(64),
+      trustClaim: { payload: 'claim-payload', signature: 'claim-signature' },
     })),
     getDirectorSessionAuthority: vi.fn(async () => ({
       serverId: 'studio-brief-project_1',

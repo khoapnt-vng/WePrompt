@@ -880,6 +880,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "Creative Studio",
+        "actionFailed": "Creative Studio bu işlemi tamamlayamadı.",
+        "cancel": "İptal",
+        "delete": "Sil"
+      },
+      "library": {
+        "eyebrow": "Creative Studio Pilot",
+        "title": "Projeler",
+        "subtitle": "Sabit görüntü Parçaları için bir proje oluşturun. Film ayarları bu Pilot sürümüne dahil değildir.",
+        "refresh": "Yenile",
+        "newProject": "Yeni proje",
+        "projectName": "Proje adı",
+        "brief": "Özet",
+        "nameRequired": "Bir proje adı girin.",
+        "createProject": "Proje oluştur",
+        "loading": "Projeler yükleniyor…",
+        "refreshing": "Projeler yenileniyor…",
+        "projectsUnavailable": "Projeler kullanılamıyor.",
+        "refreshUnavailable": "Yenileme kullanılamıyor. Son kullanılabilir proje listesi gösteriliyor.",
+        "emptyTitle": "Henüz proje yok",
+        "emptyBody": "Sabit görüntü Parçasına başlamak için yukarıdan bir proje oluşturun.",
+        "supported": {
+          "title": "Pilot projeleri",
+          "description": "Bu sürümle açılabilen projeler.",
+          "tag": "Destekleniyor"
+        },
+        "unsupported": {
+          "title": "Başka bir Studio sürümüyle oluşturuldu",
+          "description": "Bu projeler farklı bir şema kullanıyor ve bu Pilot sürümünde açılamaz.",
+          "tag": "Desteklenmiyor"
+        },
+        "quarantined": {
+          "title": "Kurtarma gereken projeler",
+          "description": "Bu projeler güvenli biçimde çözülemedi ve karantinada tutuluyor.",
+          "tag": "Karantinada"
+        },
+        "deleteUnreadableAccessible": "Okunamayan {{projectId}} projesini sil",
+        "deleteAccessible": "{{name}} projesini sil",
+        "facts": {
+          "pieces": "Parçalar",
+          "currentPhotos": "Geçerli fotoğraflar",
+          "updated": "Güncellendi"
+        },
+        "openProject": "{{name}} projesini aç",
+        "deleteModal": {
+          "healthyTitle": "Proje silinsin mi?",
+          "unreadableTitle": "Okunamayan proje silinsin mi?",
+          "keep": "Projeyi tut",
+          "confirm": "Projeyi sil",
+          "healthyBody": "{{name}} silinsin mi? Dosyalar kaldırılmadan önce geçerli proje revizyonu denetlenecek.",
+          "unreadableBody": "{{name}} silinsin mi? Bu proje güvenle açılamadığından, silme işlemi korumalı tek kullanımlık talebi kullanır."
+        }
+      },
+      "canvas": {
+        "projectActions": "Proje işlemleri",
+        "loading": "Proje yükleniyor…",
+        "refreshing": "Proje yenileniyor…",
+        "unavailable": "Bu Creative Studio projesi kullanılamıyor.",
+        "startCreating": "Oluşturmaya başla",
+        "boardAccessible": "Fotoğraf Parçaları",
+        "errors": {
+          "routeCatalogUnavailable": "Fotoğraf rotaları yüklenmedi. Kullanılabilirliği yenileyip yeniden deneyin.",
+          "routeIncompatible": "Bu ayarları destekleyen fotoğraf rotası yok. En-boy oranını veya çözünürlüğü değiştirip yeniden deneyin.",
+          "capacity": "Bu Pilot projesi 96 Parça sınırına ulaştı. Daha fazla fotoğraf oluşturmak veya içe aktarmak için başka bir proje başlatın.",
+          "freshQuoteRequired": "Bu fiyat teklifi artık güncel değil. Ücretli işi başlatmadan önce yeni bir ücreti inceleyin.",
+          "duplicateAcknowledgementRequired": "Devam etmek için olası yinelenen ücreti onaylayın.",
+          "invalidHandle": "Bu Parça adı kullanılamaz. Güvenli ve benzersiz bir ad girin.",
+          "handleCollision": "Başka bir Parça bu adı veya diğer adını zaten kullanıyor.",
+          "aliasLimit": "Bu Parça için önceki ad sınırına ulaşıldı.",
+          "noChange": "Herhangi bir değişiklik yapılmadı.",
+          "undoConflict": "Proje değiştiği için son ad değişikliği geri alınamıyor.",
+          "staleAuthoring": "Proje değişti. En son durumu inceleyip yeniden deneyin.",
+          "variationGrid": "Tek fotoğraf yerine bir varyasyon ızgarası döndürüldü. Ücretli bir yeniden deneme başlatmadan önce sonucu inceleyin."
+        },
+        "variationGrid": {
+          "paidRejected": "Sağlayıcı bir çıktı döndürüp ücretlendirdi ancak çıktı bir varyasyon ızgarası olduğu için Creative Studio bunu reddetti.",
+          "retryAvailable": "Bu Parça için incelenmiş bir ücretli yeniden deneme kullanılabilir.",
+          "retryExhausted": "Bu Parça için başka ücretli yeniden deneme yok. Bunun yerine fotoğraf içe aktarın veya eş düzey bir Parça oluşturun.",
+          "importEscape": "Fotoğraf içe aktarma, başka bir oluşturma ücreti olmadan ayrı bir Parça ekler."
+        },
+        "quote": {
+          "accessibleName": "Hazırlanmış fotoğraf fiyat teklifi",
+          "eyebrow": "Hazırlanmış teklif",
+          "retryTitle": "Fotoğrafı yeniden dene",
+          "amount": "Tutar",
+          "scope": "Kapsam",
+          "scopeValue": "Bir fotoğraf · {{aspectRatio}} · {{resolution}}",
+          "expires": "Sona erme",
+          "automatic": "Etkin harcama sınırı tarafından yetkilendirildi. Otomatik olarak başlatılıyor.",
+          "reviewRequired": "Ücretli işi başlatmadan önce kesin maliyeti inceleyin.",
+          "duplicateAcknowledgement": "Önceki sağlayıcı gönderiminin zaten ücretlendirilmiş olabileceğini anlıyorum.",
+          "confirmCreate": "Onayla ve fotoğraf oluştur",
+          "confirmRetry": "Onayla ve yeniden dene",
+          "discard": "Teklifi at"
+        },
+        "piece": {
+          "eyebrow": "Fotoğraf Parçası",
+          "generationInProgress": "Fotoğraf oluşturuluyor.",
+          "noCurrentImage": "Bu Parçanın geçerli görüntüsü yok.",
+          "imageUnavailable": "Geçerli görüntü verileri bu etkin olmayan oluşturucu sınırında kullanılamıyor.",
+          "currentImageAccessible": "{{handle}} geçerli görüntüsü",
+          "rename": "Parçayı yeniden adlandır",
+          "renameAccessible": "{{handle}} adını değiştir",
+          "saveName": "Adı kaydet",
+          "cancelRename": "Yeniden adlandırmayı iptal et"
+        },
+        "pieceStatus": {
+          "queued": "Sırada",
+          "running": "Çalışıyor",
+          "needsAttention": "İlgilenilmesi gerekiyor",
+          "failed": "Başarısız",
+          "cancelled": "İptal edildi",
+          "current": "Geçerli"
+        },
+        "jobStatus": {
+          "queuedLocal": "Gönderim bekliyor",
+          "submitting": "Gönderiliyor",
+          "queuedRemote": "Sağlayıcı sırasında",
+          "running": "Oluşturuluyor",
+          "needsAttention": "İlgilenilmesi gerekiyor",
+          "succeeded": "Tamamlandı",
+          "failed": "Başarısız",
+          "cancelled": "İptal edildi"
+        },
+        "jobErrors": {
+          "invalidRequest": "Oluşturma isteği geçersiz.",
+          "contentRejected": "Sağlayıcı bu isteği reddetti. Yeniden denemeden önce açıklamayı düzenleyin.",
+          "auth": "Sağlayıcı kimlik bilgilerini reddetti.",
+          "quota": "Sağlayıcı hesabının kotası yetersiz.",
+          "rateLimited": "Sağlayıcı hız sınırına ulaşıldı. Daha sonra yeniden deneyin.",
+          "providerUnavailable": "Oluşturma sağlayıcısı kullanılamıyor.",
+          "timeout": "Sağlayıcı zamanında yanıt vermedi.",
+          "pollDeadline": "Sağlayıcı ilerleme bildirmeyi durdurdu. Yeniden denemeden önce tekrar denetleyin.",
+          "noOutput": "Sağlayıcı kullanılabilir bir fotoğraf döndürmedi.",
+          "variationGrid": "Tek fotoğraf yerine bir varyasyon ızgarası algılandı. Yeniden denemeden önce inceleyin.",
+          "submissionUnknown": "Gönderim sonucu bilinmiyor. Yeniden denemeden önce yinelenen ücret uyarısını inceleyin.",
+          "downloadFailed": "Oluşturma tamamlandı ancak fotoğraf indirilemedi.",
+          "unsupported": "Bu sağlayıcı yanıtı desteklenmiyor.",
+          "unknown": "Oluşturma bilinmeyen bir nedenle başarısız oldu."
+        },
+        "retryReasons": {
+          "providerFailure": "sağlayıcı hatası",
+          "submissionUnknown": "bilinmeyen gönderim sonucu",
+          "variationGrid": "varyasyon ızgarası",
+          "cancelled": "iptal edilmiş deneme"
+        },
+        "provenance": {
+          "accessible": "{{handle}} kaynağı",
+          "title": "Kaynak",
+          "origin": "Köken",
+          "imported": "İçe aktarıldı",
+          "generated": "Oluşturuldu",
+          "created": "Oluşturulma",
+          "model": "Model",
+          "instructionProfile": "Talimat profili",
+          "recordedSpend": "Kaydedilen harcama"
+        },
+        "history": {
+          "accessible": "{{handle}} deneme geçmişi",
+          "title": "Deneme geçmişi",
+          "retryReason": "Yeniden deneme nedeni: {{reason}}",
+          "recordedSpend": "Kaydedilen harcama: {{amount}} ({{currency}})",
+          "created": "Oluşturuldu",
+          "authorized": "Yetkilendirildi",
+          "retryOf": "Yeniden denenen iş",
+          "duplicateCharge": "Yinelenen ücret onayı",
+          "acknowledged": "Onaylandı",
+          "notRequired": "Gerekli değil"
+        },
+        "actions": {
+          "cancelGeneration": "Oluşturmayı iptal et",
+          "retryGeneration": "Oluşturmayı yeniden dene",
+          "retryDownload": "İndirmeyi yeniden dene",
+          "checkProvider": "Sağlayıcıyı yeniden denetle",
+          "undoRename": "Son yeniden adlandırmayı geri al",
+          "retryRouteCheck": "Rota denetimini yeniden dene",
+          "createPhoto": "Fotoğraf oluştur",
+          "importPhoto": "Fotoğraf içe aktar",
+          "reviewCost": "Maliyeti incele",
+          "reviewFreshCost": "Yeni maliyeti incele"
+        },
+        "announcements": {
+          "paidWorkStarted": "Ücretli fotoğraf işi başladı.",
+          "quoteDiscarded": "Hazırlanmış teklif atıldı.",
+          "photoImported": "Fotoğraf içe aktarıldı.",
+          "renameUndone": "Son Parça yeniden adlandırması geri alındı.",
+          "exported": "{{handle}} dışa aktarıldı.",
+          "spendingLimitSaved": "Harcama sınırı kaydedildi.",
+          "jobTransition": "{{handle}} artık {{status}} durumunda.",
+          "freshQuoteRequired": "Önceki fiyat teklifi artık güncel değil. Ücretli işi başlatmadan önce yeni bir maliyeti inceleyin.",
+          "savedRefreshUnavailable": "İşlem kaydedildi ancak en güncel proje durumu yüklenemedi. Başka bir işlem yapmadan önce yenileyin."
+        },
+        "projectMenu": {
+          "label": "Proje menüsü",
+          "spendingLimit": "Harcama sınırı",
+          "export": "Dışa aktar"
+        },
+        "composer": {
+          "description": "Fotoğraf açıklaması",
+          "aspectRatio": "En-boy oranı",
+          "resolution": "Çözünürlük"
+        }
+      },
+      "spending": {
+        "title": "Harcama sınırı",
+        "clear": "Sınırı temizle",
+        "save": "Sınırı kaydet",
+        "description": "Bu projenin bir ücretli fotoğraf grubu için otomatik olarak yetkilendirebileceği en yüksek tutarı ayarlayın. Bu ayar oluşturmayı başlatmaz veya para harcamaz.",
+        "currency": "Para birimi kodu",
+        "maximum": "Grup başına en yüksek tutar (alt birim)",
+        "invalid": "Tam üç harfli bir para birimi kodu ve negatif olmayan tam sayı alt birim sınırı girin."
+      }
+    },
     "workspace": {
       "views": {
         "references": "Referanslar"

@@ -241,20 +241,23 @@ describe('buildSpawnEnv', () => {
     expect(env.PATH).toBe(process.env.PATH); // inherits
   });
 
-  it('passes the local-mode secret and origin allow-list through the environment', () => {
+  it('passes the independent local and session-MCP secrets plus origin allow-list through the environment', () => {
     // Never through argv: `ps` is world-readable, so a flag would publish the
     // secret to every local process.
     const env = buildSpawnEnv(undefined, {
       localToken: 'deadbeef',
+      sessionMcpTrustKey: 'main-only-key',
       allowedOrigins: ['null', 'http://localhost:5173'],
     });
     expect(env.AIONUI_LOCAL_TOKEN).toBe('deadbeef');
+    expect(env.AIONUI_SESSION_MCP_TRUST_KEY).toBe('main-only-key');
     expect(env.AIONUI_LOCAL_ALLOWED_ORIGINS).toBe('null,http://localhost:5173');
   });
 
   it('omits the security vars when no secret or origin is supplied', () => {
     const env = buildSpawnEnv({ cacheDir: '/c', workDir: '/w', logDir: '/l' });
     expect(env.AIONUI_LOCAL_TOKEN).toBeUndefined();
+    expect(env.AIONUI_SESSION_MCP_TRUST_KEY).toBeUndefined();
     expect(env.AIONUI_LOCAL_ALLOWED_ORIGINS).toBeUndefined();
   });
 
@@ -447,6 +450,10 @@ describe('BackendLifecycleManager.start (success path)', () => {
       expect(opts.env.AIONUI_CACHE_DIR).toBe('/c');
       expect(opts.env.AIONUI_WORK_DIR).toBe('/w');
       expect(opts.env.AIONUI_LOG_DIR).toBe('/l');
+      expect(opts.env.AIONUI_SESSION_MCP_TRUST_KEY).toBe(mgr.sessionMcpTrustKey);
+      expect(mgr.sessionMcpTrustKey).toMatch(/^[A-Za-z0-9_-]{43}$/);
+      expect(mgr.sessionMcpTrustKey).not.toBe(mgr.localToken);
+      expect(spawnCall[1]).not.toContain(mgr.sessionMcpTrustKey);
       expect((spawnCall[2] as { detached?: boolean }).detached).toBe(process.platform !== 'win32');
       expect(mkdirSync).toHaveBeenCalledWith('/db/path', { recursive: true });
       expect(mkdirSync).toHaveBeenCalledWith('/log/dir', { recursive: true });

@@ -7,6 +7,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants as fsConstants, promises as nodeFs } from 'node:fs';
 import path from 'node:path';
+import type { Readable } from 'node:stream';
 import {
   STUDIO_MAX_ASSETS_V3,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
@@ -76,6 +77,7 @@ const INTENT_KEYS = new Set([
 
 type StudioPilotImageMimeTypeV3 = 'image/jpeg' | 'image/png' | 'image/webp';
 type StudioPilotMediaFileSystemV3 = typeof nodeFs;
+type StudioPilotMediaFileHandleV3 = Awaited<ReturnType<StudioPilotMediaFileSystemV3['open']>>;
 type StudioPilotMediaIdentityKindV3 = 'piece' | 'asset' | 'media_intent';
 
 export type StudioPilotNativePhotoSelectionV3 = { path: string; fileName: string };
@@ -122,6 +124,12 @@ export type StudioPilotVerifiedManagedAssetV3 = {
   absolutePath: string;
 };
 
+/** Renderer-protocol-safe projection. The managed path and integrity proof remain Main-only. */
+export type StudioPilotResolvedManagedAssetV3 = {
+  asset: Pick<StudioAssetV3, 'mimeType' | 'byteSize'>;
+  openVerifiedStream(start?: number, end?: number): Promise<Readable>;
+};
+
 export type StudioPilotMediaStorageStepV3 =
   | 'media:stage_durable'
   | 'media:intent_durable'
@@ -156,6 +164,7 @@ export type StudioPilotMediaStoreV3 = {
   recoverProjectMediaV3(projectId: string): Promise<void>;
   recoverAllMediaV3(): Promise<void>;
   verifyManagedAssetV3(input: { projectId: string; assetId: string }): Promise<StudioPilotVerifiedManagedAssetV3>;
+  resolveManagedAssetV3(projectId: string, assetId: string): Promise<StudioPilotResolvedManagedAssetV3 | null>;
 };
 
 type StudioPilotMediaDirectoriesV3 = {
@@ -202,6 +211,15 @@ type StudioPilotMediaIntentV3 = {
 
 type NodeError = { code?: unknown };
 type CrashState = { preserveResidue: boolean };
+type StudioPilotManagedFileProofV3 = {
+  dev: string;
+  ino: string;
+  byteSize: number;
+  mtimeMs: number;
+  ctimeMs: number;
+  sha256: string;
+  mimeType: StudioPilotImageMimeTypeV3;
+};
 
 const isNodeError = (error: unknown): error is NodeError => typeof error === 'object' && error !== null;
 const hasErrorCode = (error: unknown, code: string): boolean => isNodeError(error) && error.code === code;
@@ -683,6 +701,48 @@ const intentOwnedByProject = (project: StudioProjectV3, intent: StudioPilotMedia
         project.jobs[intent.jobId]?.providerJobId === intent.providerJobId;
 };
 
+const managedAssetOwnedByProject = (project: StudioProjectV3, asset: StudioAssetV3): boolean => {
+  const current = project.assets[asset.id];
+  const piece = project.pieces[asset.pieceId];
+  if (
+    current === undefined ||
+    piece === undefined ||
+    asset.projectId !== project.id ||
+    current.projectId !== project.id ||
+    current.pieceId !== piece.id ||
+    piece.currentAssetId !== current.id
+  ) {
+    return false;
+  }
+  if (current.origin === 'imported') {
+    return current.producerJobId === null && current.compositionDigest === null && piece.jobIds.length === 0;
+  }
+  const producer = project.jobs[current.producerJobId];
+  return (
+    producer !== undefined &&
+    producer.target.pieceId === piece.id &&
+    producer.status === 'succeeded' &&
+    producer.outputAssetId === current.id
+  );
+};
+
+const managedAssetFactsEqual = (left: StudioAssetV3, right: StudioAssetV3): boolean =>
+  left.id === right.id &&
+  left.projectId === right.projectId &&
+  left.pieceId === right.pieceId &&
+  left.mediaKind === right.mediaKind &&
+  left.mimeType === right.mimeType &&
+  left.managedAsset.collection === right.managedAsset.collection &&
+  left.managedAsset.fileName === right.managedAsset.fileName &&
+  left.byteSize === right.byteSize &&
+  left.sha256 === right.sha256 &&
+  left.width === right.width &&
+  left.height === right.height &&
+  left.createdAt === right.createdAt &&
+  left.origin === right.origin &&
+  left.producerJobId === right.producerJobId &&
+  left.compositionDigest === right.compositionDigest;
+
 const identityAvailable = (project: StudioProjectV3, ...identities: string[]): boolean => {
   const unavailable = new Set([
     project.id,
@@ -826,6 +886,120 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
       inspected.height !== expected.height
     ) {
       return storageFailure();
+    }
+  };
+
+  const openVerifiedManagedFile = async (
+    filePath: string,
+    asset: StudioAssetV3,
+    expectedProof?: StudioPilotManagedFileProofV3
+  ): Promise<{ handle: StudioPilotMediaFileHandleV3; proof: StudioPilotManagedFileProofV3 }> => {
+    let handle: StudioPilotMediaFileHandleV3 | null = null;
+    try {
+      const before = await fs.lstat(filePath);
+      const beforeDev = String(before.dev);
+      const beforeIno = String(before.ino);
+      if (
+        !before.isFile() ||
+        before.isSymbolicLink() ||
+        before.size !== asset.byteSize ||
+        !Number.isFinite(before.mtimeMs) ||
+        !Number.isFinite(before.ctimeMs) ||
+        (await fs.realpath(filePath)) !== filePath ||
+        (expectedProof !== undefined &&
+          (beforeDev !== expectedProof.dev ||
+            beforeIno !== expectedProof.ino ||
+            before.size !== expectedProof.byteSize ||
+            before.mtimeMs !== expectedProof.mtimeMs ||
+            before.ctimeMs !== expectedProof.ctimeMs))
+      ) {
+        return storageFailure();
+      }
+      const flags =
+        process.platform === 'win32' || typeof fsConstants.O_NOFOLLOW !== 'number'
+          ? fsConstants.O_RDONLY
+          : fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW;
+      handle = await fs.open(filePath, flags);
+      const opened = await handle.stat();
+      if (
+        !opened.isFile() ||
+        String(opened.dev) !== beforeDev ||
+        String(opened.ino) !== beforeIno ||
+        opened.size !== before.size ||
+        opened.mtimeMs !== before.mtimeMs ||
+        opened.ctimeMs !== before.ctimeMs
+      ) {
+        return storageFailure();
+      }
+
+      const hash = createHash('sha256');
+      const signature = Buffer.alloc(12);
+      let signatureLength = 0;
+      let position = 0;
+      const buffer = Buffer.alloc(64 * 1024);
+      while (position < asset.byteSize) {
+        // eslint-disable-next-line no-await-in-loop
+        const { bytesRead } = await handle.read(
+          buffer,
+          0,
+          Math.min(buffer.length, asset.byteSize - position),
+          position
+        );
+        if (bytesRead < 1) return storageFailure();
+        const bytes = buffer.subarray(0, bytesRead);
+        hash.update(bytes);
+        if (signatureLength < signature.length) {
+          const copied = Math.min(signature.length - signatureLength, bytesRead);
+          bytes.copy(signature, signatureLength, 0, copied);
+          signatureLength += copied;
+        }
+        position += bytesRead;
+      }
+
+      const after = await handle.stat();
+      const afterPath = await fs.lstat(filePath);
+      if (
+        !after.isFile() ||
+        String(after.dev) !== beforeDev ||
+        String(after.ino) !== beforeIno ||
+        after.size !== before.size ||
+        after.mtimeMs !== before.mtimeMs ||
+        after.ctimeMs !== before.ctimeMs ||
+        !afterPath.isFile() ||
+        afterPath.isSymbolicLink() ||
+        String(afterPath.dev) !== beforeDev ||
+        String(afterPath.ino) !== beforeIno ||
+        afterPath.size !== before.size ||
+        afterPath.mtimeMs !== before.mtimeMs ||
+        afterPath.ctimeMs !== before.ctimeMs ||
+        hash.digest('hex') !== asset.sha256 ||
+        mimeFromSignature(signature.subarray(0, signatureLength)) !== asset.mimeType
+      ) {
+        return storageFailure();
+      }
+      const proof: StudioPilotManagedFileProofV3 = {
+        dev: beforeDev,
+        ino: beforeIno,
+        byteSize: asset.byteSize,
+        mtimeMs: before.mtimeMs,
+        ctimeMs: before.ctimeMs,
+        sha256: asset.sha256,
+        mimeType: asset.mimeType as StudioPilotImageMimeTypeV3,
+      };
+      if (
+        expectedProof !== undefined &&
+        (proof.sha256 !== expectedProof.sha256 || proof.mimeType !== expectedProof.mimeType)
+      ) {
+        return storageFailure();
+      }
+      const owned = handle;
+      handle = null;
+      return { handle: owned, proof };
+    } catch (error) {
+      if (error instanceof CreativeStudioPilotServiceErrorV3) throw error;
+      return storageFailure();
+    } finally {
+      await handle?.close().catch((): undefined => undefined);
     }
   };
 
@@ -1825,6 +1999,102 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
     }
   };
 
+  const resolveManagedAssetV3 = async (
+    projectId: string,
+    assetId: string
+  ): Promise<StudioPilotResolvedManagedAssetV3 | null> => {
+    if (
+      typeof projectId !== 'string' ||
+      !SAFE_ID.test(projectId) ||
+      typeof assetId !== 'string' ||
+      !SAFE_ID.test(assetId)
+    ) {
+      return null;
+    }
+    try {
+      const resolved = await withRecoveredProjectAuthority(projectId, async (authority, directories) => {
+        const asset = authority.project.assets[assetId];
+        if (
+          asset === undefined ||
+          !managedAssetOwnedByProject(authority.project, asset) ||
+          !MIME_TYPES.has(asset.mimeType as StudioPilotImageMimeTypeV3)
+        ) {
+          throw new CreativeStudioPilotServiceErrorV3('not_found');
+        }
+        await authority.assertCurrent();
+        const absolutePath = path.join(
+          asset.managedAsset.collection === 'imports' ? directories.imports : directories.assets,
+          asset.managedAsset.fileName
+        );
+        const opened = await openVerifiedManagedFile(absolutePath, asset);
+        try {
+          await authority.assertCurrent();
+          return {
+            asset: structuredClone(asset),
+            absolutePath,
+            proof: opened.proof,
+          };
+        } finally {
+          await opened.handle.close();
+        }
+      });
+
+      const capturedAsset = resolved.asset;
+      const capturedPath = resolved.absolutePath;
+      const capturedProof = resolved.proof;
+      return {
+        asset: { mimeType: capturedAsset.mimeType, byteSize: capturedAsset.byteSize },
+        openVerifiedStream: async (start, end) => {
+          const rangeStart = start ?? 0;
+          const rangeEnd = end ?? capturedAsset.byteSize - 1;
+          if (
+            !Number.isSafeInteger(rangeStart) ||
+            !Number.isSafeInteger(rangeEnd) ||
+            rangeStart < 0 ||
+            rangeEnd < rangeStart ||
+            rangeEnd >= capturedAsset.byteSize
+          ) {
+            throw new CreativeStudioPilotServiceErrorV3('invalid_payload');
+          }
+          try {
+            return await withRecoveredProjectAuthority(projectId, async (authority, directories) => {
+              const current = authority.project.assets[assetId];
+              if (
+                current === undefined ||
+                !managedAssetOwnedByProject(authority.project, current) ||
+                !managedAssetFactsEqual(capturedAsset, current)
+              ) {
+                throw new CreativeStudioPilotServiceErrorV3('storage_error');
+              }
+              await authority.assertCurrent();
+              const currentPath = path.join(
+                current.managedAsset.collection === 'imports' ? directories.imports : directories.assets,
+                current.managedAsset.fileName
+              );
+              if (currentPath !== capturedPath) throw new CreativeStudioPilotServiceErrorV3('storage_error');
+              const opened = await openVerifiedManagedFile(currentPath, current, capturedProof);
+              try {
+                await authority.assertCurrent();
+                return opened.handle.createReadStream({
+                  autoClose: true,
+                  start: rangeStart,
+                  end: rangeEnd,
+                });
+              } catch (error) {
+                await opened.handle.close().catch((): undefined => undefined);
+                throw error;
+              }
+            });
+          } catch (error) {
+            return normalizeCreativeStudioPilotErrorV3(error);
+          }
+        },
+      };
+    } catch {
+      return null;
+    }
+  };
+
   return {
     importPhotoV3,
     publishGeneratedOutputV3,
@@ -1840,5 +2110,6 @@ export const createStudioPilotMediaStoreV3 = (options: StudioPilotMediaStoreOpti
       }
     },
     verifyManagedAssetV3,
+    resolveManagedAssetV3,
   };
 };

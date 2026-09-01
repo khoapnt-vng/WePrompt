@@ -713,6 +713,221 @@
   },
   "notFound": "Conversation not found or has been deleted",
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "Creative Studio",
+        "actionFailed": "Creative Studio could not complete that action.",
+        "cancel": "Cancel",
+        "delete": "Delete"
+      },
+      "library": {
+        "eyebrow": "Creative Studio Pilot",
+        "title": "Projects",
+        "subtitle": "Create a project for still-image Pieces. Film settings are not part of this Pilot.",
+        "refresh": "Refresh",
+        "newProject": "New project",
+        "projectName": "Project name",
+        "brief": "Brief",
+        "nameRequired": "Enter a project name.",
+        "createProject": "Create project",
+        "loading": "Loading projects…",
+        "refreshing": "Refreshing projects…",
+        "projectsUnavailable": "Projects unavailable.",
+        "refreshUnavailable": "Refresh unavailable. Showing the last available project list.",
+        "emptyTitle": "No projects yet",
+        "emptyBody": "Create a project above to start a still-image Piece.",
+        "supported": {
+          "title": "Pilot projects",
+          "description": "Projects that can be opened by this version.",
+          "tag": "Supported"
+        },
+        "unsupported": {
+          "title": "Created by another Studio version",
+          "description": "These projects use a different schema and cannot be opened by this Pilot.",
+          "tag": "Unsupported"
+        },
+        "quarantined": {
+          "title": "Projects that need recovery",
+          "description": "These projects could not be decoded safely and remain quarantined.",
+          "tag": "Quarantined"
+        },
+        "deleteUnreadableAccessible": "Delete unreadable project {{projectId}}",
+        "deleteAccessible": "Delete {{name}}",
+        "facts": {
+          "pieces": "Pieces",
+          "currentPhotos": "Current photos",
+          "updated": "Updated"
+        },
+        "openProject": "Open {{name}}",
+        "deleteModal": {
+          "healthyTitle": "Delete project?",
+          "unreadableTitle": "Delete unreadable project?",
+          "keep": "Keep project",
+          "confirm": "Delete project",
+          "healthyBody": "Delete {{name}}? The current project revision will be checked before any files are removed.",
+          "unreadableBody": "Delete {{name}}? This project cannot be opened safely, so deletion uses its protected one-time claim."
+        }
+      },
+      "canvas": {
+        "projectActions": "Project actions",
+        "loading": "Loading project…",
+        "refreshing": "Refreshing project…",
+        "unavailable": "This Creative Studio project is unavailable.",
+        "startCreating": "Start creating",
+        "boardAccessible": "Photo Pieces",
+        "errors": {
+          "routeCatalogUnavailable": "Photo routes are not loaded. Refresh availability and try again.",
+          "routeIncompatible": "No photo route supports these settings. Change the aspect ratio or resolution and try again.",
+          "capacity": "This Pilot project has reached 96 Pieces. Start another project to create or import more photos.",
+          "freshQuoteRequired": "This quote is no longer current. Review a fresh cost before starting paid work.",
+          "duplicateAcknowledgementRequired": "Acknowledge the possible duplicate charge to continue.",
+          "invalidHandle": "That Piece name cannot be used. Enter a safe, unique name.",
+          "handleCollision": "Another Piece already uses that name or alias.",
+          "aliasLimit": "This Piece has reached its limit of prior names.",
+          "noChange": "Nothing changed.",
+          "undoConflict": "The project changed, so the last rename cannot be undone.",
+          "staleAuthoring": "The project changed. Review the latest state and try again.",
+          "variationGrid": "A variation grid was returned instead of one photo. Review the result before starting another paid attempt."
+        },
+        "variationGrid": {
+          "paidRejected": "The provider returned and charged for an output, but Creative Studio refused it because it is a variation grid.",
+          "retryAvailable": "One reviewed paid retry is available for this Piece.",
+          "retryExhausted": "No more paid retries are available for this Piece. Import a photo or create a sibling Piece instead.",
+          "importEscape": "Import photo adds a separate Piece without another generation charge."
+        },
+        "quote": {
+          "accessibleName": "Prepared photo quote",
+          "eyebrow": "Prepared quote",
+          "retryTitle": "Retry photo",
+          "amount": "Amount",
+          "scope": "Scope",
+          "scopeValue": "One photo · {{aspectRatio}} · {{resolution}}",
+          "expires": "Expires",
+          "automatic": "Authorized by the active spending limit. Starting automatically.",
+          "reviewRequired": "Review the exact cost before starting paid work.",
+          "duplicateAcknowledgement": "I understand the earlier provider submission may already have been charged.",
+          "confirmCreate": "Confirm and create photo",
+          "confirmRetry": "Confirm and retry",
+          "discard": "Discard quote"
+        },
+        "piece": {
+          "eyebrow": "Photo Piece",
+          "generationInProgress": "Photo generation is in progress.",
+          "noCurrentImage": "This Piece does not have a current image.",
+          "imageUnavailable": "Current image bytes are not available to this inactive renderer seam.",
+          "currentImageAccessible": "{{handle}} current image",
+          "rename": "Rename Piece",
+          "renameAccessible": "Rename {{handle}}",
+          "saveName": "Save name",
+          "cancelRename": "Cancel rename"
+        },
+        "pieceStatus": {
+          "queued": "Queued",
+          "running": "Running",
+          "needsAttention": "Needs attention",
+          "failed": "Failed",
+          "cancelled": "Cancelled",
+          "current": "Current"
+        },
+        "jobStatus": {
+          "queuedLocal": "Waiting to submit",
+          "submitting": "Submitting",
+          "queuedRemote": "Queued by provider",
+          "running": "Generating",
+          "needsAttention": "Needs attention",
+          "succeeded": "Completed",
+          "failed": "Failed",
+          "cancelled": "Cancelled"
+        },
+        "jobErrors": {
+          "invalidRequest": "The generation request is invalid.",
+          "contentRejected": "The provider rejected this request. Revise the description before retrying.",
+          "auth": "The provider rejected the credentials.",
+          "quota": "The provider account has insufficient quota.",
+          "rateLimited": "The provider rate limit was reached. Try again later.",
+          "providerUnavailable": "The generation provider is unavailable.",
+          "timeout": "The provider did not respond in time.",
+          "pollDeadline": "The provider stopped reporting progress. Check it again before retrying.",
+          "noOutput": "The provider returned no usable photo.",
+          "variationGrid": "A variation grid was detected instead of one photo. Review it before retrying.",
+          "submissionUnknown": "The submission outcome is unknown. Review the duplicate-charge warning before retrying.",
+          "downloadFailed": "Generation completed, but the photo could not be downloaded.",
+          "unsupported": "This provider response is not supported.",
+          "unknown": "The generation failed for an unknown reason."
+        },
+        "retryReasons": {
+          "providerFailure": "provider failure",
+          "submissionUnknown": "unknown submission outcome",
+          "variationGrid": "variation grid",
+          "cancelled": "cancelled attempt"
+        },
+        "provenance": {
+          "accessible": "Provenance for {{handle}}",
+          "title": "Provenance",
+          "origin": "Origin",
+          "imported": "Imported",
+          "generated": "Generated",
+          "created": "Created",
+          "model": "Model",
+          "instructionProfile": "Instruction profile",
+          "recordedSpend": "Recorded spend"
+        },
+        "history": {
+          "accessible": "Attempt history for {{handle}}",
+          "title": "Attempt history",
+          "retryReason": "Retry reason: {{reason}}",
+          "recordedSpend": "Recorded spend: {{amount}} ({{currency}})",
+          "created": "Created",
+          "authorized": "Authorized",
+          "retryOf": "Retry of job",
+          "duplicateCharge": "Duplicate-charge acknowledgement",
+          "acknowledged": "Acknowledged",
+          "notRequired": "Not required"
+        },
+        "actions": {
+          "cancelGeneration": "Cancel generation",
+          "retryGeneration": "Retry generation",
+          "retryDownload": "Retry download",
+          "checkProvider": "Check provider again",
+          "undoRename": "Undo last rename",
+          "retryRouteCheck": "Retry route check",
+          "createPhoto": "Create photo",
+          "importPhoto": "Import photo",
+          "reviewCost": "Review cost",
+          "reviewFreshCost": "Review fresh cost"
+        },
+        "announcements": {
+          "paidWorkStarted": "Paid photo work started.",
+          "quoteDiscarded": "Prepared quote discarded.",
+          "photoImported": "Photo imported.",
+          "renameUndone": "Last Piece rename undone.",
+          "exported": "Exported {{handle}}.",
+          "spendingLimitSaved": "Spending limit saved.",
+          "jobTransition": "{{handle}} is now {{status}}.",
+          "freshQuoteRequired": "The previous quote is no longer current. Review a fresh cost before starting paid work.",
+          "savedRefreshUnavailable": "The action was saved, but the latest project state could not be loaded. Refresh before taking another action."
+        },
+        "projectMenu": {
+          "label": "Project menu",
+          "spendingLimit": "Spending limit",
+          "export": "Export"
+        },
+        "composer": {
+          "description": "Photo description",
+          "aspectRatio": "Aspect ratio",
+          "resolution": "Resolution"
+        }
+      },
+      "spending": {
+        "title": "Spending limit",
+        "clear": "Clear limit",
+        "save": "Save limit",
+        "description": "Set the maximum this project can authorize automatically for one paid photo batch. This setting does not start generation or spend money.",
+        "currency": "Currency code",
+        "maximum": "Maximum per batch (minor units)",
+        "invalid": "Enter an exact three-letter currency code and a non-negative whole-number minor-unit limit."
+      }
+    },
     "rules": {
       "open": "Rules",
       "title": "Rules",

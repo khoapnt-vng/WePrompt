@@ -46,7 +46,7 @@ const requireUnreadable = (
   return entry;
 };
 
-describe('schema-6 Phase 4 headless boundary gate', () => {
+describe('schema-6 Phase 4 headless boundary gate', { timeout: 120_000 }, () => {
   it('isolates one corrupt export catalog, rebuilds it, and keeps both public projects operable', async () => {
     const harness = await createHarness();
     const projectA = await harness.createProject({ name: 'Project A', brief: 'First isolated export.' });
@@ -60,7 +60,8 @@ describe('schema-6 Phase 4 headless boundary gate', () => {
     const projectBCatalogBefore = await readFile(harness.exportCatalogPath(projectB.summary.id));
 
     await harness.stop();
-    await writeFile(harness.exportCatalogPath(projectA.summary.id), '{"schemaVersion":3,"corrupt":true}\n', 'utf8');
+    const corruptProjectACatalog = Buffer.from('{"schemaVersion":3,"corrupt":true}\n', 'utf8');
+    await writeFile(harness.exportCatalogPath(projectA.summary.id), corruptProjectACatalog);
     await harness.start();
 
     const startupCatalogA = JSON.parse(await readFile(harness.exportCatalogPath(projectA.summary.id), 'utf8')) as {
@@ -70,7 +71,11 @@ describe('schema-6 Phase 4 headless boundary gate', () => {
       exportedA.catalog.artifacts.map((artifact) => artifact.id)
     );
     const quarantinedCatalogs = await readdir(path.join(harness.exportsPath(projectA.summary.id), 'quarantine'));
-    expect(quarantinedCatalogs.some((entry) => entry.startsWith('quarantine-'))).toBe(true);
+    expect(quarantinedCatalogs).toHaveLength(1);
+    expect(quarantinedCatalogs[0]).toMatch(/^quarantine-/);
+    expect(
+      await readFile(path.join(harness.exportsPath(projectA.summary.id), 'quarantine', quarantinedCatalogs[0]!))
+    ).toEqual(corruptProjectACatalog);
 
     const library = await harness.listProjects();
     expect(

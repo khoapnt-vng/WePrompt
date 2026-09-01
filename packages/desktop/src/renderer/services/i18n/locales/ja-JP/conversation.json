@@ -878,6 +878,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "Creative Studio",
+        "actionFailed": "Creative Studio はこの操作を完了できませんでした。",
+        "cancel": "キャンセル",
+        "delete": "削除"
+      },
+      "library": {
+        "eyebrow": "Creative Studio パイロット",
+        "title": "プロジェクト",
+        "subtitle": "静止画のピース用プロジェクトを作成します。このパイロットには映像設定は含まれません。",
+        "refresh": "更新",
+        "newProject": "新規プロジェクト",
+        "projectName": "プロジェクト名",
+        "brief": "概要",
+        "nameRequired": "プロジェクト名を入力してください。",
+        "createProject": "プロジェクトを作成",
+        "loading": "プロジェクトを読み込み中…",
+        "refreshing": "プロジェクトを更新中…",
+        "projectsUnavailable": "プロジェクトを利用できません。",
+        "refreshUnavailable": "更新できません。最後に取得できたプロジェクト一覧を表示しています。",
+        "emptyTitle": "プロジェクトはまだありません",
+        "emptyBody": "上でプロジェクトを作成し、静止画ピースを始めてください。",
+        "supported": {
+          "title": "パイロットプロジェクト",
+          "description": "このバージョンで開けるプロジェクトです。",
+          "tag": "対応"
+        },
+        "unsupported": {
+          "title": "別の Studio バージョンで作成",
+          "description": "これらのプロジェクトは別のスキーマを使用しているため、このパイロットでは開けません。",
+          "tag": "非対応"
+        },
+        "quarantined": {
+          "title": "復旧が必要なプロジェクト",
+          "description": "これらのプロジェクトは安全にデコードできなかったため、隔離されたままです。",
+          "tag": "隔離済み"
+        },
+        "deleteUnreadableAccessible": "読み取れないプロジェクト {{projectId}} を削除",
+        "deleteAccessible": "{{name}} を削除",
+        "facts": {
+          "pieces": "ピース",
+          "currentPhotos": "現在の写真",
+          "updated": "更新日時"
+        },
+        "openProject": "{{name}} を開く",
+        "deleteModal": {
+          "healthyTitle": "プロジェクトを削除しますか？",
+          "unreadableTitle": "読み取れないプロジェクトを削除しますか？",
+          "keep": "プロジェクトを残す",
+          "confirm": "プロジェクトを削除",
+          "healthyBody": "{{name}} を削除しますか？ファイルを削除する前に、現在のプロジェクトリビジョンを確認します。",
+          "unreadableBody": "{{name}} を削除しますか？このプロジェクトは安全に開けないため、保護された一回限りのクレームを使って削除します。"
+        }
+      },
+      "canvas": {
+        "projectActions": "プロジェクト操作",
+        "loading": "プロジェクトを読み込み中…",
+        "refreshing": "プロジェクトを更新中…",
+        "unavailable": "この Creative Studio プロジェクトは利用できません。",
+        "startCreating": "作成を開始",
+        "boardAccessible": "写真ピース",
+        "errors": {
+          "routeCatalogUnavailable": "写真ルートが読み込まれていません。利用状況を更新して、もう一度お試しください。",
+          "routeIncompatible": "この設定に対応する写真ルートがありません。アスペクト比または解像度を変更して、もう一度お試しください。",
+          "capacity": "このパイロットプロジェクトは 96 ピースの上限に達しました。さらに写真を作成または読み込むには、別のプロジェクトを始めてください。",
+          "freshQuoteRequired": "この見積もりは最新ではありません。有料処理を開始する前に、新しい費用を確認してください。",
+          "duplicateAcknowledgementRequired": "続行するには、重複課金の可能性を確認してください。",
+          "invalidHandle": "このピース名は使用できません。安全で一意の名前を入力してください。",
+          "handleCollision": "別のピースがすでにこの名前または別名を使用しています。",
+          "aliasLimit": "このピースは以前の名前の上限に達しました。",
+          "noChange": "変更はありません。",
+          "undoConflict": "プロジェクトが変更されたため、直前の名前変更を元に戻せません。",
+          "staleAuthoring": "プロジェクトが変更されました。最新の状態を確認して、もう一度お試しください。",
+          "variationGrid": "1 枚の写真ではなくバリエーショングリッドが返されました。別の有料試行を始める前に結果を確認してください。"
+        },
+        "variationGrid": {
+          "paidRejected": "プロバイダーは出力を返して課金しましたが、バリエーショングリッドだったため Creative Studio が拒否しました。",
+          "retryAvailable": "このピースでは、確認済みの有料再試行をあと 1 回利用できます。",
+          "retryExhausted": "このピースでは、これ以上有料で再試行できません。代わりに写真を読み込むか、同階層のピースを作成してください。",
+          "importEscape": "「写真を読み込む」は、生成料金を追加せずに別のピースを追加します。"
+        },
+        "quote": {
+          "accessibleName": "準備済みの写真見積もり",
+          "eyebrow": "準備済みの見積もり",
+          "retryTitle": "写真を再試行",
+          "amount": "金額",
+          "scope": "範囲",
+          "scopeValue": "写真 1 枚 · {{aspectRatio}} · {{resolution}}",
+          "expires": "有効期限",
+          "automatic": "有効な支出上限で承認されています。自動的に開始します。",
+          "reviewRequired": "有料処理を開始する前に、正確な費用を確認してください。",
+          "duplicateAcknowledgement": "以前のプロバイダー送信ですでに課金されている可能性があることを理解しました。",
+          "confirmCreate": "確認して写真を作成",
+          "confirmRetry": "確認して再試行",
+          "discard": "見積もりを破棄"
+        },
+        "piece": {
+          "eyebrow": "写真ピース",
+          "generationInProgress": "写真を生成しています。",
+          "noCurrentImage": "このピースには現在の画像がありません。",
+          "imageUnavailable": "この非アクティブなレンダラー境界では、現在の画像データを利用できません。",
+          "currentImageAccessible": "{{handle}} の現在の画像",
+          "rename": "ピース名を変更",
+          "renameAccessible": "{{handle}} の名前を変更",
+          "saveName": "名前を保存",
+          "cancelRename": "名前変更をキャンセル"
+        },
+        "pieceStatus": {
+          "queued": "待機中",
+          "running": "実行中",
+          "needsAttention": "確認が必要",
+          "failed": "失敗",
+          "cancelled": "キャンセル済み",
+          "current": "現在"
+        },
+        "jobStatus": {
+          "queuedLocal": "送信待ち",
+          "submitting": "送信中",
+          "queuedRemote": "プロバイダーで待機中",
+          "running": "生成中",
+          "needsAttention": "確認が必要",
+          "succeeded": "完了",
+          "failed": "失敗",
+          "cancelled": "キャンセル済み"
+        },
+        "jobErrors": {
+          "invalidRequest": "生成リクエストが無効です。",
+          "contentRejected": "プロバイダーがこのリクエストを拒否しました。説明を修正してから再試行してください。",
+          "auth": "プロバイダーが認証情報を拒否しました。",
+          "quota": "プロバイダーアカウントの割り当てが不足しています。",
+          "rateLimited": "プロバイダーのレート上限に達しました。後でもう一度お試しください。",
+          "providerUnavailable": "生成プロバイダーを利用できません。",
+          "timeout": "プロバイダーから時間内に応答がありませんでした。",
+          "pollDeadline": "プロバイダーからの進捗報告が止まりました。再試行する前にもう一度確認してください。",
+          "noOutput": "プロバイダーから使用可能な写真が返されませんでした。",
+          "variationGrid": "1 枚の写真ではなくバリエーショングリッドが検出されました。再試行する前に確認してください。",
+          "submissionUnknown": "送信結果が不明です。再試行する前に、重複課金の警告を確認してください。",
+          "downloadFailed": "生成は完了しましたが、写真をダウンロードできませんでした。",
+          "unsupported": "このプロバイダー応答には対応していません。",
+          "unknown": "不明な理由で生成に失敗しました。"
+        },
+        "retryReasons": {
+          "providerFailure": "プロバイダーの失敗",
+          "submissionUnknown": "送信結果が不明",
+          "variationGrid": "バリエーショングリッド",
+          "cancelled": "キャンセルされた試行"
+        },
+        "provenance": {
+          "accessible": "{{handle}} の来歴",
+          "title": "来歴",
+          "origin": "出所",
+          "imported": "読み込み済み",
+          "generated": "生成済み",
+          "created": "作成日時",
+          "model": "モデル",
+          "instructionProfile": "指示プロファイル",
+          "recordedSpend": "記録済み支出"
+        },
+        "history": {
+          "accessible": "{{handle}} の試行履歴",
+          "title": "試行履歴",
+          "retryReason": "再試行の理由：{{reason}}",
+          "recordedSpend": "記録済み支出：{{amount}}（{{currency}}）",
+          "created": "作成日時",
+          "authorized": "承認日時",
+          "retryOf": "再試行元のジョブ",
+          "duplicateCharge": "重複課金の確認",
+          "acknowledged": "確認済み",
+          "notRequired": "不要"
+        },
+        "actions": {
+          "cancelGeneration": "生成をキャンセル",
+          "retryGeneration": "生成を再試行",
+          "retryDownload": "ダウンロードを再試行",
+          "checkProvider": "プロバイダーを再確認",
+          "undoRename": "直前の名前変更を元に戻す",
+          "retryRouteCheck": "ルート確認を再試行",
+          "createPhoto": "写真を作成",
+          "importPhoto": "写真を読み込む",
+          "reviewCost": "費用を確認",
+          "reviewFreshCost": "新しい費用を確認"
+        },
+        "announcements": {
+          "paidWorkStarted": "有料の写真処理を開始しました。",
+          "quoteDiscarded": "準備済みの見積もりを破棄しました。",
+          "photoImported": "写真を読み込みました。",
+          "renameUndone": "直前のピース名変更を元に戻しました。",
+          "exported": "{{handle}} を書き出しました。",
+          "spendingLimitSaved": "支出上限を保存しました。",
+          "jobTransition": "{{handle}} は現在「{{status}}」です。",
+          "freshQuoteRequired": "以前の見積もりは最新ではありません。有料処理を開始する前に、新しい費用を確認してください。",
+          "savedRefreshUnavailable": "操作は保存されましたが、最新のプロジェクト状態を読み込めませんでした。別の操作を行う前に更新してください。"
+        },
+        "projectMenu": {
+          "label": "プロジェクトメニュー",
+          "spendingLimit": "支出上限",
+          "export": "書き出す"
+        },
+        "composer": {
+          "description": "写真の説明",
+          "aspectRatio": "アスペクト比",
+          "resolution": "解像度"
+        }
+      },
+      "spending": {
+        "title": "支出上限",
+        "clear": "上限をクリア",
+        "save": "上限を保存",
+        "description": "このプロジェクトが有料写真バッチ 1 回に自動承認できる最大額を設定します。この設定だけで生成が始まったり、料金が発生したりすることはありません。",
+        "currency": "通貨コード",
+        "maximum": "バッチごとの上限（最小通貨単位）",
+        "invalid": "正確な 3 文字の通貨コードと、0 以上の整数の最小通貨単位上限を入力してください。"
+      }
+    },
     "workspace": {
       "views": {
         "references": "リファレンス"

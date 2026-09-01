@@ -19,11 +19,12 @@ export type StudioPieceRouteAndRateV3 = {
 };
 
 export class StudioPieceRouteResolutionErrorV3 extends Error {
-  readonly code = 'route_unavailable' as const;
+  readonly code: 'route_catalog_unavailable' | 'route_incompatible';
 
-  constructor() {
-    super('No eligible Creative Studio photo route is available');
+  constructor(code: 'route_catalog_unavailable' | 'route_incompatible' = 'route_incompatible') {
+    super(code);
     this.name = 'StudioPieceRouteResolutionErrorV3';
+    this.code = code;
   }
 }
 
@@ -42,14 +43,19 @@ export const resolveStudioPieceRouteAndRateV3 = async (
   resolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>,
   settings: StudioPiecePhotoSettingsV3
 ): Promise<StudioPieceRouteAndRateV3> => {
-  const catalog = await resolver.listGenerationRoutes();
+  let catalog: Awaited<ReturnType<StudioProviderResolver['listGenerationRoutes']>>;
+  try {
+    catalog = await resolver.listGenerationRoutes();
+  } catch {
+    throw new StudioPieceRouteResolutionErrorV3('route_catalog_unavailable');
+  }
   const route = catalog.routes.find((candidate) => routeSupportsSettings(candidate, settings));
-  if (route === undefined) throw new StudioPieceRouteResolutionErrorV3();
+  if (route === undefined) throw new StudioPieceRouteResolutionErrorV3('route_incompatible');
 
   const rateCard = createConfiguredStudioRateCardV2(catalog);
   const rate = rateCard.entries.find((candidate) => candidate.routeId === route.choiceId);
   if (rate === undefined || rate.kind !== 'image' || rate.rateUnit !== 'generation') {
-    throw new StudioPieceRouteResolutionErrorV3();
+    throw new StudioPieceRouteResolutionErrorV3('route_incompatible');
   }
   return {
     routeId: route.choiceId,

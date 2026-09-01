@@ -46,6 +46,7 @@ import type { BackendStartupFailureInfo } from './common/types/platform/electron
 import { registerWindowMaximizeListeners } from '@process/bridge';
 import { BackendLifecycleManager } from '@aionui/web-host';
 import { resolveBinaryPath } from '@process/backend';
+import { installSessionMcpTrustKeyProvider } from '@process/backend/sessionMcpTrust';
 import { initializeFeedbackBridge } from './process/bridge/feedbackBridge';
 import {
   createCreativeStudioCloseHandshake,
@@ -250,6 +251,7 @@ const backendManager = new BackendLifecycleManager(
   },
   resolveBinaryPath
 );
+installSessionMcpTrustKeyProvider(() => backendManager.sessionMcpTrustKey);
 
 const isPresentationBackendRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object' && !Array.isArray(value);

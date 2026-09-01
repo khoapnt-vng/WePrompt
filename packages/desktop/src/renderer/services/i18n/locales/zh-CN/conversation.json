@@ -878,6 +878,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "创意工作室",
+        "actionFailed": "创意工作室无法完成此操作。",
+        "cancel": "取消",
+        "delete": "删除"
+      },
+      "library": {
+        "eyebrow": "创意工作室试用版",
+        "title": "项目",
+        "subtitle": "创建用于静态图像作品的项目。此试用版不包含影片设置。",
+        "refresh": "刷新",
+        "newProject": "新建项目",
+        "projectName": "项目名称",
+        "brief": "简报",
+        "nameRequired": "请输入项目名称。",
+        "createProject": "创建项目",
+        "loading": "正在加载项目…",
+        "refreshing": "正在刷新项目…",
+        "projectsUnavailable": "项目不可用。",
+        "refreshUnavailable": "无法刷新。正在显示上次可用的项目列表。",
+        "emptyTitle": "暂无项目",
+        "emptyBody": "请在上方创建项目，以开始制作静态图像作品。",
+        "supported": {
+          "title": "试用版项目",
+          "description": "可由此版本打开的项目。",
+          "tag": "受支持"
+        },
+        "unsupported": {
+          "title": "由其他工作室版本创建",
+          "description": "这些项目使用不同的架构，无法由此试用版打开。",
+          "tag": "不受支持"
+        },
+        "quarantined": {
+          "title": "需要恢复的项目",
+          "description": "无法安全解码这些项目，因此它们仍处于隔离状态。",
+          "tag": "已隔离"
+        },
+        "deleteUnreadableAccessible": "删除无法读取的项目 {{projectId}}",
+        "deleteAccessible": "删除 {{name}}",
+        "facts": {
+          "pieces": "作品",
+          "currentPhotos": "当前照片",
+          "updated": "更新时间"
+        },
+        "openProject": "打开 {{name}}",
+        "deleteModal": {
+          "healthyTitle": "删除项目？",
+          "unreadableTitle": "删除无法读取的项目？",
+          "keep": "保留项目",
+          "confirm": "删除项目",
+          "healthyBody": "删除 {{name}}？移除任何文件之前，将检查当前项目修订版。",
+          "unreadableBody": "删除 {{name}}？此项目无法安全打开，因此删除操作会使用受保护的一次性凭据。"
+        }
+      },
+      "canvas": {
+        "projectActions": "项目操作",
+        "loading": "正在加载项目…",
+        "refreshing": "正在刷新项目…",
+        "unavailable": "此创意工作室项目不可用。",
+        "startCreating": "开始创作",
+        "boardAccessible": "照片作品",
+        "errors": {
+          "routeCatalogUnavailable": "照片路线尚未加载。请刷新可用性后重试。",
+          "routeIncompatible": "没有照片路线支持这些设置。请更改宽高比或分辨率后重试。",
+          "capacity": "此试用版项目已达到 96 个作品的上限。请新建项目以创建或导入更多照片。",
+          "freshQuoteRequired": "此报价已不是最新版本。开始付费工作前，请查看新的费用。",
+          "duplicateAcknowledgementRequired": "请确认可能产生重复收费，以继续操作。",
+          "invalidHandle": "无法使用此作品名称。请输入安全且唯一的名称。",
+          "handleCollision": "其他作品已使用此名称或别名。",
+          "aliasLimit": "此作品已达到历史名称数量上限。",
+          "noChange": "没有发生任何更改。",
+          "undoConflict": "项目已更改，因此无法撤销上次重命名。",
+          "staleAuthoring": "项目已更改。请查看最新状态后重试。",
+          "variationGrid": "返回的是变体网格，而非单张照片。开始另一次付费尝试前，请先查看结果。"
+        },
+        "variationGrid": {
+          "paidRejected": "提供商已返回结果并收取费用，但创意工作室因其为变体网格而拒绝了该结果。",
+          "retryAvailable": "此作品还有一次经审核的付费重试机会。",
+          "retryExhausted": "此作品已没有更多付费重试机会。请改为导入照片或创建同级作品。",
+          "importEscape": "“导入照片”会添加一个独立作品，不会再次产生生成费用。"
+        },
+        "quote": {
+          "accessibleName": "已准备的照片报价",
+          "eyebrow": "已准备报价",
+          "retryTitle": "重试照片",
+          "amount": "金额",
+          "scope": "范围",
+          "scopeValue": "一张照片 · {{aspectRatio}} · {{resolution}}",
+          "expires": "到期时间",
+          "automatic": "已获当前支出限额授权。即将自动开始。",
+          "reviewRequired": "开始付费工作前，请核对确切费用。",
+          "duplicateAcknowledgement": "我了解先前提交给提供商的请求可能已产生费用。",
+          "confirmCreate": "确认并创建照片",
+          "confirmRetry": "确认并重试",
+          "discard": "丢弃报价"
+        },
+        "piece": {
+          "eyebrow": "照片作品",
+          "generationInProgress": "正在生成照片。",
+          "noCurrentImage": "此作品没有当前图像。",
+          "imageUnavailable": "此非活动渲染器接口无法获取当前图像数据。",
+          "currentImageAccessible": "{{handle}} 的当前图像",
+          "rename": "重命名作品",
+          "renameAccessible": "重命名 {{handle}}",
+          "saveName": "保存名称",
+          "cancelRename": "取消重命名"
+        },
+        "pieceStatus": {
+          "queued": "已排队",
+          "running": "运行中",
+          "needsAttention": "需要处理",
+          "failed": "失败",
+          "cancelled": "已取消",
+          "current": "当前"
+        },
+        "jobStatus": {
+          "queuedLocal": "等待提交",
+          "submitting": "正在提交",
+          "queuedRemote": "已在提供商处排队",
+          "running": "正在生成",
+          "needsAttention": "需要处理",
+          "succeeded": "已完成",
+          "failed": "失败",
+          "cancelled": "已取消"
+        },
+        "jobErrors": {
+          "invalidRequest": "生成请求无效。",
+          "contentRejected": "提供商拒绝了此请求。请修改描述后重试。",
+          "auth": "提供商拒绝了凭据。",
+          "quota": "提供商账户额度不足。",
+          "rateLimited": "已达到提供商速率限制。请稍后重试。",
+          "providerUnavailable": "生成提供商不可用。",
+          "timeout": "提供商未及时响应。",
+          "pollDeadline": "提供商已停止报告进度。重试前请再次检查。",
+          "noOutput": "提供商未返回可用照片。",
+          "variationGrid": "检测到变体网格，而非单张照片。重试前请先检查。",
+          "submissionUnknown": "提交结果未知。重试前请查看重复收费警告。",
+          "downloadFailed": "生成已完成，但无法下载照片。",
+          "unsupported": "不支持此提供商响应。",
+          "unknown": "生成因未知原因失败。"
+        },
+        "retryReasons": {
+          "providerFailure": "提供商失败",
+          "submissionUnknown": "提交结果未知",
+          "variationGrid": "变体网格",
+          "cancelled": "尝试已取消"
+        },
+        "provenance": {
+          "accessible": "{{handle}} 的来源信息",
+          "title": "来源信息",
+          "origin": "来源",
+          "imported": "已导入",
+          "generated": "已生成",
+          "created": "创建时间",
+          "model": "模型",
+          "instructionProfile": "指令配置",
+          "recordedSpend": "已记录支出"
+        },
+        "history": {
+          "accessible": "{{handle}} 的尝试历史",
+          "title": "尝试历史",
+          "retryReason": "重试原因：{{reason}}",
+          "recordedSpend": "已记录支出：{{amount}}（{{currency}}）",
+          "created": "创建时间",
+          "authorized": "授权时间",
+          "retryOf": "重试的任务",
+          "duplicateCharge": "重复收费确认",
+          "acknowledged": "已确认",
+          "notRequired": "无需确认"
+        },
+        "actions": {
+          "cancelGeneration": "取消生成",
+          "retryGeneration": "重试生成",
+          "retryDownload": "重试下载",
+          "checkProvider": "再次检查提供商",
+          "undoRename": "撤销上次重命名",
+          "retryRouteCheck": "重试路线检查",
+          "createPhoto": "创建照片",
+          "importPhoto": "导入照片",
+          "reviewCost": "查看费用",
+          "reviewFreshCost": "查看新费用"
+        },
+        "announcements": {
+          "paidWorkStarted": "付费照片工作已开始。",
+          "quoteDiscarded": "已丢弃准备好的报价。",
+          "photoImported": "照片已导入。",
+          "renameUndone": "已撤销上次作品重命名。",
+          "exported": "已导出 {{handle}}。",
+          "spendingLimitSaved": "支出限额已保存。",
+          "jobTransition": "{{handle}} 现在处于“{{status}}”状态。",
+          "freshQuoteRequired": "先前的报价已不是最新版本。开始付费工作前，请查看新的费用。",
+          "savedRefreshUnavailable": "操作已保存，但无法加载最新的项目状态。请刷新后再执行其他操作。"
+        },
+        "projectMenu": {
+          "label": "项目菜单",
+          "spendingLimit": "支出限额",
+          "export": "导出"
+        },
+        "composer": {
+          "description": "照片描述",
+          "aspectRatio": "宽高比",
+          "resolution": "分辨率"
+        }
+      },
+      "spending": {
+        "title": "支出限额",
+        "clear": "清除限额",
+        "save": "保存限额",
+        "description": "设置此项目可为一次付费照片批次自动授权的最高金额。此设置不会启动生成或产生支出。",
+        "currency": "货币代码",
+        "maximum": "每批最高金额（最小货币单位）",
+        "invalid": "请输入准确的三字母货币代码和非负整数的最小货币单位限额。"
+      }
+    },
     "workspace": {
       "views": {
         "references": "参考图"

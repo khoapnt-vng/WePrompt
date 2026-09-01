@@ -19,6 +19,7 @@ import {
   parseStudioConfirmPreparedPhotoRequestV3,
   parseStudioCreateProjectRequestV3,
   parseStudioDeleteProjectRequestV3,
+  parseStudioDiscardPreparedPhotoRequestV3,
   parseStudioExportPieceRequestV3,
   parseStudioImportPhotoRequestV3,
   parseStudioPreparePhotoIntentV3,
@@ -33,7 +34,7 @@ const expectInvalid = (value: () => unknown): void => {
 };
 
 describe('CS4 Pilot public wire contracts', () => {
-  it('snapshots the exact create, create-photo, retry, confirmation, and mutation inputs', () => {
+  it('snapshots the exact create, create-photo, retry, confirmation, discard, and mutation inputs', () => {
     const create = { name: 'Light on Water', brief: 'One photograph.' };
     expect(parseStudioCreateProjectRequestV3(create)).toEqual(create);
 
@@ -71,6 +72,15 @@ describe('CS4 Pilot public wire contracts', () => {
     };
     expect(parseStudioConfirmPreparedPhotoRequestV3(confirm)).toEqual(confirm);
 
+    const discard = {
+      reservationId: 'reservation_1',
+      quoteId: 'quote_1',
+      quoteRevision: 1,
+    };
+    const parsedDiscard = parseStudioDiscardPreparedPhotoRequestV3(discard);
+    expect(parsedDiscard).toEqual(discard);
+    expect(parsedDiscard).not.toBe(discard);
+
     const batch = {
       schemaVersion: 6 as const,
       projectId: 'project_1',
@@ -81,6 +91,13 @@ describe('CS4 Pilot public wire contracts', () => {
     expect(parsedBatch).toEqual(batch);
     expect(parsedBatch).not.toBe(batch);
     expect(parsedBatch.operations).not.toBe(batch.operations);
+
+    expect(() =>
+      parseStudioApplyMutationBatchRequestV3({
+        ...batch,
+        operations: [{ kind: 'rename_piece', pieceId: 'piece_1', handle: 'unsafe\u200dname' }],
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_handle' }));
   });
 
   it('admits only Main-targeting import, cancel, Piece export, and deletion shapes', () => {
@@ -194,6 +211,49 @@ describe('CS4 Pilot public wire contracts', () => {
         duplicateChargeAcknowledged: false,
         authoringFingerprint: 'a'.repeat(64),
       })
+    );
+    expectInvalid(() =>
+      parseStudioDiscardPreparedPhotoRequestV3({
+        reservationId: 'reservation_1',
+        quoteId: 'quote_1',
+        quoteRevision: 1,
+        authorizationId: 'authorization_1',
+      })
+    );
+  });
+
+  it('rejects hostile discard records without reading accessors or inherited authority', () => {
+    const inherited = Object.create({ quoteId: 'quote_1' }) as Record<string, unknown>;
+    Object.assign(inherited, { reservationId: 'reservation_1', quoteRevision: 1 });
+    expectInvalid(() => parseStudioDiscardPreparedPhotoRequestV3(inherited));
+
+    let getterReads = 0;
+    const accessor = Object.create(null) as Record<string, unknown>;
+    Object.defineProperties(accessor, {
+      reservationId: { enumerable: true, value: 'reservation_1' },
+      quoteId: {
+        enumerable: true,
+        get: () => {
+          getterReads += 1;
+          return 'quote_1';
+        },
+      },
+      quoteRevision: { enumerable: true, value: 1 },
+    });
+    expectInvalid(() => parseStudioDiscardPreparedPhotoRequestV3(accessor));
+    expect(getterReads).toBe(0);
+
+    expectInvalid(() =>
+      parseStudioDiscardPreparedPhotoRequestV3(
+        new Proxy(
+          { reservationId: 'reservation_1', quoteId: 'quote_1', quoteRevision: 1 },
+          {
+            ownKeys: () => {
+              throw new Error('hostile proxy');
+            },
+          }
+        )
+      )
     );
   });
 

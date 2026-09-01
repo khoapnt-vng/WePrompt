@@ -39,13 +39,13 @@ const STORE_ERROR_CODES: Readonly<Record<CreativeStudioPilotStoreErrorCodeV3, Cr
 export const normalizeCreativeStudioPilotErrorV3 = (error: unknown): never => {
   if (error instanceof CreativeStudioPilotServiceErrorV3) throw error;
   if (error instanceof CreativeStudioPilotContractErrorV3) {
-    throw new CreativeStudioPilotServiceErrorV3('invalid_payload');
+    throw new CreativeStudioPilotServiceErrorV3(error.code);
   }
   if (error instanceof CreativeStudioPilotStoreErrorV3) {
     throw new CreativeStudioPilotServiceErrorV3(STORE_ERROR_CODES[error.code]);
   }
   if (error instanceof StudioPieceRouteResolutionErrorV3) {
-    throw new CreativeStudioPilotServiceErrorV3('route_unavailable');
+    throw new CreativeStudioPilotServiceErrorV3(error.code);
   }
   if (error instanceof StudioPreparedPhotoCacheErrorV3) {
     const code: CreativeStudioPilotErrorCodeV3 =

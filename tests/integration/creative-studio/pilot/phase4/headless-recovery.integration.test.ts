@@ -41,7 +41,7 @@ afterEach(async () => {
   await Promise.allSettled(current.map((harness) => harness.cleanup()));
 });
 
-describe('schema-6 Pilot Phase 4 failure and recovery lifecycle', () => {
+describe('schema-6 Pilot Phase 4 failure and recovery lifecycle', { timeout: 120_000 }, () => {
   it('keeps a rejected Piece retry on the same Piece with a fresh exact quote and authorization', async () => {
     const harness = await phase4Harness();
     const projectId = await projectIdFor(harness, 'Rejected then retried');
@@ -377,7 +377,7 @@ describe('schema-6 Pilot Phase 4 failure and recovery lifecycle', () => {
   });
 });
 
-describe('schema-6 Pilot Phase 4 restart matrix', () => {
+describe('schema-6 Pilot Phase 4 restart matrix', { timeout: 120_000 }, () => {
   it('restarts one durable queued_local Job through the public commit observer', async () => {
     const harness = await phase4Harness();
     const projectId = await projectIdFor(harness, 'Restart queued local');
@@ -482,7 +482,11 @@ describe('schema-6 Pilot Phase 4 restart matrix', () => {
     const harness = await phase4Harness();
     const projectId = await projectIdFor(harness, 'Restart needs attention');
     harness.enqueueTaskScript({
-      pollSteps: [{ kind: 'malformed' }, { kind: 'succeeded', output: { kind: 'managed_file' } }],
+      pollSteps: [
+        { kind: 'malformed' },
+        { kind: 'hold', status: 'queued' },
+        { kind: 'succeeded', output: { kind: 'managed_file' } },
+      ],
     });
     const created = await createPhotoJob(harness, projectId);
     await expect(harness.waitForJob(projectId, created.queued.jobId, 'needs_attention')).resolves.toMatchObject({
@@ -501,6 +505,22 @@ describe('schema-6 Pilot Phase 4 restart matrix', () => {
     });
 
     await harness.restart();
+    await expect.poll(() => harness.remoteState.tasks.get(providerJobId!)?.holdObserved).toBe(true);
+    const whileRestartPolling = await harness.loadSupported(projectId);
+    expect(whileRestartPolling.activity.jobs.find((job) => job.jobId === created.queued.jobId)).toMatchObject({
+      status: 'needs_attention',
+      error: { code: 'poll_deadline' },
+      canResume: false,
+    });
+    await expect(
+      harness.entryPoint.resumeJobV3({
+        projectId,
+        pieceId: created.queued.pieceId,
+        jobId: created.queued.jobId,
+        expectedRevision: whileRestartPolling.canvas.revision,
+      })
+    ).rejects.toMatchObject({ code: 'busy' });
+    expect(harness.releaseTaskHold(providerJobId!)).toBe(true);
     await expect(harness.waitForJob(projectId, created.queued.jobId, 'succeeded')).resolves.toMatchObject({
       pieceId: created.queued.pieceId,
       recordedSpend: { currency: 'USD' },

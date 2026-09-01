@@ -16,6 +16,7 @@ import type {
   TChatConversation,
   TProviderWithModel,
 } from '@/common/config/storage';
+import { SESSION_MCP_RESOLVER_PROFILE } from '@/common/config/storage';
 import { BUILTIN_STUDIO_NAME } from '@/common/config/builtinCapabilities';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import {
@@ -178,6 +179,7 @@ const isSafeDirectorConversationId = (value: unknown): value is string =>
   typeof value === 'string' && SAFE_STUDIO_ID.test(value);
 const SAFE_CHOICE_ID = /^choice_[a-f0-9]{24}$/;
 const CATALOG_VERSION = /^[a-f0-9]{16}$/;
+const SESSION_MCP_FINGERPRINT = /^[a-f0-9]{64}$/;
 const MAX_ROUTE_OPTIONS = 256;
 const ASPECT_RATIOS = ['16:9', '9:16', '1:1', '4:3', '3:4'] as const;
 const RESOLUTIONS = ['720p', '1080p'] as const;
@@ -449,7 +451,8 @@ const canonicalJson = (value: unknown): string => JSON.stringify(withOrderedKeys
 export const hasExactDirectorMcpSnapshot = (
   conversation: unknown,
   projectId: string,
-  descriptor?: ISessionMcpServer
+  descriptor?: ISessionMcpServer,
+  expectedFingerprint?: string
 ): conversation is DirectorConversation => {
   if (
     !isRecord(conversation) ||
@@ -466,17 +469,23 @@ export const hasExactDirectorMcpSnapshot = (
 
   const statuses = extra.mcp_statuses;
   const sessionServers = extra.session_mcp_servers;
+  const trustSnapshots = extra.session_mcp_trust;
   if (
+    Object.hasOwn(extra, 'selected_session_mcp_trust_claims') ||
     !Array.isArray(statuses) ||
     statuses.some((status) => !isRecord(status)) ||
     !Array.isArray(sessionServers) ||
-    sessionServers.some((server) => !isRecord(server))
+    sessionServers.some((server) => !isRecord(server)) ||
+    !Array.isArray(trustSnapshots) ||
+    trustSnapshots.length !== 1 ||
+    trustSnapshots.some((snapshot) => !isRecord(snapshot))
   ) {
     return false;
   }
   const statusRecords = statuses as Record<string, unknown>[];
   const sessionServerRecords = sessionServers as Record<string, unknown>[];
   const sessionServer = sessionServerRecords[0];
+  const trustSnapshot = trustSnapshots[0] as Record<string, unknown>;
   const snapshotMatches =
     hasExactUniqueMembers(extra.mcp_server_ids, []) &&
     hasExactUniqueMembers(extra.mcp_servers, [BUILTIN_STUDIO_NAME]) &&
@@ -489,7 +498,13 @@ export const hasExactDirectorMcpSnapshot = (
       sessionServerRecords.map((server) => server.id),
       [serverId]
     ) &&
-    sessionServerRecords.every((server) => server.name === BUILTIN_STUDIO_NAME);
+    sessionServerRecords.every((server) => server.name === BUILTIN_STUDIO_NAME) &&
+    hasExactKeys(trustSnapshot, ['server_id', 'server_fingerprint', 'resolver_profile']) &&
+    trustSnapshot.server_id === serverId &&
+    typeof trustSnapshot.server_fingerprint === 'string' &&
+    SESSION_MCP_FINGERPRINT.test(trustSnapshot.server_fingerprint) &&
+    trustSnapshot.resolver_profile === SESSION_MCP_RESOLVER_PROFILE &&
+    (expectedFingerprint === undefined || trustSnapshot.server_fingerprint === expectedFingerprint);
   if (!snapshotMatches || !hasSafeDirectorTransport(sessionServer, projectId)) return false;
 
   if (descriptor === undefined) return true;
@@ -534,7 +549,10 @@ const checkPersistedDirectorAuthority = (
 ): Promise<DirectorAuthorityOutcome> => {
   if (!hasExactDirectorMcpSnapshot(conversation, projectId)) return Promise.resolve({ kind: 'mismatch' });
   const key = `${projectId}\0${conversation.id}`;
-  const snapshot = JSON.stringify(conversation.extra.session_mcp_servers);
+  const snapshot = JSON.stringify({
+    servers: conversation.extra.session_mcp_servers,
+    trust: conversation.extra.session_mcp_trust,
+  });
   const existing = directorAuthorityChecks.get(key);
   if (existing?.snapshot === snapshot) return existing.promise;
   const promise = ipcBridge.creativeStudio.getDirectorSessionAuthority
@@ -575,7 +593,8 @@ type DirectorClaimantRecovery =
  */
 const recoverDirectorClaimant = async (
   projectId: string,
-  descriptor: ISessionMcpServer
+  descriptor: ISessionMcpServer,
+  expectedFingerprint: string
 ): Promise<DirectorClaimantRecovery> => {
   let page: Awaited<ReturnType<typeof ipcBridge.database.getUserConversations.invoke>>;
   try {
@@ -602,7 +621,10 @@ const recoverDirectorClaimant = async (
   const items = untrustedPage.items as TChatConversation[];
   const claimants = items.filter((conversation) => conversation.extra.studio_project_id === projectId);
   if (claimants.length === 0) return { kind: 'none' };
-  if (claimants.length !== 1 || !hasExactDirectorMcpSnapshot(claimants[0], projectId, descriptor)) {
+  if (
+    claimants.length !== 1 ||
+    !hasExactDirectorMcpSnapshot(claimants[0], projectId, descriptor, expectedFingerprint)
+  ) {
     return { kind: 'conflict' };
   }
 
@@ -708,10 +730,11 @@ const createDirectorConversation = async (input: {
   if (descriptorResult.ok === false) {
     throw new DirectorConversationStartError(descriptorResult.error.messageKey, retryPolicy);
   }
-  const descriptor = descriptorResult.data;
+  const { server: descriptor, serverFingerprint, trustClaim } = descriptorResult.data;
   if (
     descriptor.id !== expectedServerId(input.projectId) ||
     descriptor.name !== BUILTIN_STUDIO_NAME ||
+    !SESSION_MCP_FINGERPRINT.test(serverFingerprint) ||
     !hasSafeDirectorTransport(descriptor, input.projectId)
   ) {
     throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, retryPolicy);
@@ -730,12 +753,13 @@ const createDirectorConversation = async (input: {
       custom_workspace: false,
       selected_mcp_server_ids: [],
       selected_session_mcp_servers: [descriptor],
+      selected_session_mcp_trust_claims: [trustClaim],
     },
   };
   let conversation: unknown = null;
   let created = false;
   if (input.claimantPolicy !== 'bypass') {
-    const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
+    const recovery = await recoverDirectorClaimant(input.projectId, descriptor, serverFingerprint);
     if (recovery.kind === 'trusted') conversation = recovery.conversation;
     if (recovery.kind === 'conflict') {
       throw new DirectorConversationConflictError();
@@ -752,7 +776,7 @@ const createDirectorConversation = async (input: {
       conversation = await ipcBridge.conversation.create.invoke(request);
       created = true;
     } catch (error) {
-      const recovery = await recoverDirectorClaimant(input.projectId, descriptor);
+      const recovery = await recoverDirectorClaimant(input.projectId, descriptor, serverFingerprint);
       if (recovery.kind === 'trusted') conversation = recovery.conversation;
       else if (recovery.kind === 'conflict') {
         throw new DirectorConversationConflictError();
@@ -776,7 +800,7 @@ const createDirectorConversation = async (input: {
     throw new DirectorConversationConflictError();
   }
   const typedConversation = conversation as TChatConversation;
-  if (!hasExactDirectorMcpSnapshot(typedConversation, input.projectId, descriptor)) {
+  if (!hasExactDirectorMcpSnapshot(typedConversation, input.projectId, descriptor, serverFingerprint)) {
     throw new DirectorConversationStartError(DIRECTOR_SESSION_VERIFICATION_KEY, 'require-claimant');
   }
   // After validation, so a conversation about to be rejected is never briefed.

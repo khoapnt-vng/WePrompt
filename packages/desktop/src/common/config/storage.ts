@@ -277,6 +277,8 @@ export type TChatConversation =
           mcp_statuses?: IConversationMcpStatus[];
           /** Session-only MCP server snapshot persisted at creation time. */
           session_mcp_servers?: ISessionMcpServer[];
+          /** AionCore-owned authentication evidence for persisted session MCP servers. */
+          session_mcp_trust?: ISessionMcpTrustSnapshot[];
           /** 预设助手 ID，用于在会话面板显示助手名称和头像 / Preset assistant ID for displaying name and avatar in conversation panel */
           preset_assistant_id?: string;
           /** 是否置顶会话 / Whether this conversation is pinned */
@@ -498,6 +500,8 @@ export type TChatConversation =
         mcp_statuses?: IConversationMcpStatus[];
         /** Session-only MCP server snapshot persisted at creation time. */
         session_mcp_servers?: ISessionMcpServer[];
+        /** AionCore-owned authentication evidence for persisted session MCP servers. */
+        session_mcp_trust?: ISessionMcpTrustSnapshot[];
         /** Preset assistant ID */
         preset_assistant_id?: string;
         /** Whether this conversation is pinned */
@@ -684,6 +688,37 @@ export interface IMcpServer {
 }
 
 export type ISessionMcpServer = Pick<IMcpServer, 'id' | 'name' | 'transport'>;
+
+/**
+ * Opaque, short-lived proof that Electron Main constructed one exact session
+ * MCP descriptor. AionCore consumes this during conversation creation and does
+ * not persist it in conversation extra.
+ */
+export type ISessionMcpTrustClaim = {
+  payload: string;
+  signature: string;
+};
+
+/**
+ * Versioned Core-owned resolution policy applied after authenticating the
+ * logical session MCP descriptor. A profile change invalidates old trust
+ * snapshots instead of silently widening which executable may be launched.
+ */
+export const SESSION_MCP_RESOLVER_PROFILE = 'aioncore.session-mcp-resolver.v1' as const;
+
+/** AionCore-owned durable evidence for an authenticated logical session MCP server. */
+export type ISessionMcpTrustSnapshot = {
+  server_id: string;
+  server_fingerprint: string;
+  resolver_profile: typeof SESSION_MCP_RESOLVER_PROFILE;
+};
+
+/** Main-produced descriptor response; the claim travels separately from the server snapshot. */
+export type IAttestedSessionMcpServer = {
+  server: ISessionMcpServer;
+  serverFingerprint: string;
+  trustClaim: ISessionMcpTrustClaim;
+};
 
 export type IConversationMcpStatusKind = 'loaded' | 'failed' | 'unsupported';
 

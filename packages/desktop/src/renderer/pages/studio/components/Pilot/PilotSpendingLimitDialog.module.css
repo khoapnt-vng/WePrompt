@@ -1,0 +1,33 @@
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.body,
+.field {
+  display: grid;
+}
+
+.body {
+  gap: 16px;
+}
+
+.field {
+  gap: 4px;
+}
+
+.description,
+.error {
+  margin: 0;
+}
+
+.description {
+  color: var(--color-text-2);
+}
+
+.error {
+  color: rgb(var(--danger-6));
+}

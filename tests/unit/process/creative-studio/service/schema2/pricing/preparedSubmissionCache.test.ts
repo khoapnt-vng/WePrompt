@@ -273,6 +273,7 @@ type PieceAdmissionOptionsV3 = {
   pieceId?: string;
   quoteId?: string;
   quoteRevision?: number;
+  authoringRevision?: number;
   words?: string;
   proposedHandle?: string;
   jobId?: string;
@@ -289,12 +290,13 @@ const makePieceAdmissionV3 = (options: PieceAdmissionOptionsV3 = {}): StudioPrep
   const pieceId = options.pieceId ?? 'piece_1';
   const quoteId = options.quoteId ?? 'quote_piece_1';
   const quoteRevision = options.quoteRevision ?? 1;
+  const authoringRevision = options.authoringRevision ?? 3;
   const words = options.words ?? 'A neon dai pai dong in warm rain.';
   const settings = { aspectRatio: '16:9' as const, resolution: '1080p' as const };
   const authoringFingerprint = 'e'.repeat(64);
   const composition = composeStudioPieceGenerationV3({
     projectRevisionAtPreparation: 8,
-    authoringRevision: 3,
+    authoringRevision,
     authoringFingerprintVersion: 1,
     authoringFingerprint,
     brief: 'One standalone photograph.',
@@ -311,7 +313,7 @@ const makePieceAdmissionV3 = (options: PieceAdmissionOptionsV3 = {}): StudioPrep
     quoteRevision,
     projectId,
     projectRevisionAtPreparation: 8,
-    authoringRevision: 3,
+    authoringRevision,
     authoringFingerprintVersion: 1,
     authoringFingerprint,
     rateCardDigest: 'f'.repeat(64),
@@ -338,7 +340,7 @@ const makePieceAdmissionV3 = (options: PieceAdmissionOptionsV3 = {}): StudioPrep
     provider: imageRoute,
     cancellationPolicy: 'queued_and_running' as const,
     quote: unstampedQuote,
-    authoringRevision: 3,
+    authoringRevision,
     authoringFingerprintVersion: 1 as const,
     authoringFingerprint,
     projectRevisionAtPreparation: 8,
@@ -705,6 +707,7 @@ describe('inactive StudioPreparedPhotoCacheV3', () => {
       reservationId: 'reservation_piece_1',
       mode: 'create',
       proposedHandle: 'dai_pai_dong',
+      orderIndex: 0,
       preparedAt: PREPARED_AT,
       expiresAt: EXPIRES_AT,
       quote: { expiresAt: EXPIRES_AT },
@@ -726,6 +729,7 @@ describe('inactive StudioPreparedPhotoCacheV3', () => {
       duplicateChargeAcknowledgementRequired: false,
       mode: 'create',
       proposedHandle: 'dai_pai_dong',
+      orderIndex: 0,
     });
     for (const forbidden of [
       'provider',
@@ -761,6 +765,7 @@ describe('inactive StudioPreparedPhotoCacheV3', () => {
     expect(unknownCache.list('project_piece_1')[0]).toMatchObject({
       mode: 'retry',
       proposedHandle: null,
+      orderIndex: null,
       spendPolicyClassification: 'within_cap',
       requiresExplicitHumanAction: true,
       duplicateChargeAcknowledgementRequired: true,
@@ -1116,6 +1121,161 @@ describe('inactive StudioPreparedPhotoCacheV3', () => {
       () => cache.claim({ reservationId: 'reservation_piece_1', quoteId: 'quote_piece_1', quoteRevision: 1 }),
       'quote_not_found'
     );
+  });
+
+  it('discards only the exact idle quote, releases its handle, and notifies renderer activity', () => {
+    const changes: string[] = [];
+    const cache = new StudioPreparedPhotoCacheV3({
+      now: () => PREPARED_AT_MS,
+      onChange: (projectId) => changes.push(projectId),
+    });
+    cache.admit(makePieceAdmissionV3());
+    const exact = { reservationId: 'reservation_piece_1', quoteId: 'quote_piece_1', quoteRevision: 1 };
+
+    expectCacheCode(() => cache.discard({ ...exact, quoteId: 'quote_stale' }), 'quote_not_found');
+    expectCacheCode(() => cache.discard({ ...exact, quoteRevision: 2 }), 'quote_not_found');
+    expect(cache.list('project_piece_1')).toHaveLength(1);
+    expect(cache.reservedCreateHandles('project_piece_1')).toEqual(['dai_pai_dong']);
+
+    expect(cache.discard(exact)).toBe('project_piece_1');
+    expect(cache.list('project_piece_1')).toEqual([]);
+    expect(cache.reservedCreateHandles('project_piece_1')).toEqual([]);
+    expect(changes).toEqual(['project_piece_1', 'project_piece_1']);
+    expectCacheCode(() => cache.discard(exact), 'quote_not_found');
+  });
+
+  it('releases per-project capacity and refuses to discard a claimed quote', () => {
+    const cache = new StudioPreparedPhotoCacheV3({ now: () => PREPARED_AT_MS });
+    for (let index = 0; index < STUDIO_MAX_PREPARED_QUOTE_SESSIONS_PER_PROJECT; index += 1) {
+      cache.admit(
+        makePieceAdmissionV3({
+          reservationId: `reservation_capacity_${index}`,
+          quoteId: `quote_capacity_${index}`,
+          quoteRevision: index + 1,
+          pieceId: `piece_capacity_${index}`,
+          proposedHandle: `piece_capacity_${index}`,
+        })
+      );
+    }
+    const first = {
+      reservationId: 'reservation_capacity_0',
+      quoteId: 'quote_capacity_0',
+      quoteRevision: 1,
+    };
+    const claim = cache.claim(first);
+    expectCacheCode(() => cache.discard(first), 'quote_in_use');
+    cache.release(claim);
+    expect(cache.discard(first)).toBe('project_piece_1');
+
+    expect(() =>
+      cache.admit(
+        makePieceAdmissionV3({
+          reservationId: 'reservation_capacity_replacement',
+          quoteId: 'quote_capacity_replacement',
+          quoteRevision: STUDIO_MAX_PREPARED_QUOTE_SESSIONS_PER_PROJECT + 1,
+          pieceId: 'piece_capacity_replacement',
+          proposedHandle: 'piece_capacity_0',
+        })
+      )
+    ).not.toThrow();
+    expect(cache.list('project_piece_1')).toHaveLength(STUDIO_MAX_PREPARED_QUOTE_SESSIONS_PER_PROJECT);
+  });
+
+  it('invalidates one project atomically while retaining claimed cleanup authority', () => {
+    const changes: string[] = [];
+    const cache = new StudioPreparedPhotoCacheV3({
+      now: () => PREPARED_AT_MS,
+      onChange: (projectId) => changes.push(projectId),
+    });
+    const first = makePieceAdmissionV3({
+      projectId: 'project_invalidate',
+      reservationId: 'reservation_invalidate_1',
+      quoteId: 'quote_invalidate_1',
+      pieceId: 'piece_invalidate_1',
+      proposedHandle: 'invalidate_1',
+    });
+    const second = makePieceAdmissionV3({
+      projectId: 'project_invalidate',
+      reservationId: 'reservation_invalidate_2',
+      quoteId: 'quote_invalidate_2',
+      quoteRevision: 2,
+      pieceId: 'piece_invalidate_2',
+      proposedHandle: 'invalidate_2',
+    });
+    cache.admit(first);
+    cache.admit(second);
+    cache.admit(
+      makePieceAdmissionV3({
+        projectId: 'project_invalidate',
+        reservationId: 'reservation_current',
+        quoteId: 'quote_current',
+        quoteRevision: 4,
+        pieceId: 'piece_current',
+        proposedHandle: 'current',
+        authoringRevision: 4,
+      })
+    );
+    cache.admit(
+      makePieceAdmissionV3({
+        projectId: 'project_invalidate',
+        reservationId: 'reservation_newer',
+        quoteId: 'quote_newer',
+        quoteRevision: 5,
+        pieceId: 'piece_newer',
+        proposedHandle: 'newer',
+        authoringRevision: 5,
+      })
+    );
+    cache.admit(
+      makePieceAdmissionV3({
+        projectId: 'project_untouched',
+        reservationId: 'reservation_untouched',
+        quoteId: 'quote_untouched',
+        pieceId: 'piece_untouched',
+        proposedHandle: 'untouched',
+      })
+    );
+    const claim = cache.claim({
+      reservationId: 'reservation_invalidate_1',
+      quoteId: 'quote_invalidate_1',
+      quoteRevision: 1,
+    });
+    changes.length = 0;
+
+    expectCacheCode(() => cache.invalidateProject('../project_invalidate', 4), 'quote_not_found');
+    expectCacheCode(() => cache.invalidateProject('project_invalidate', 0), 'quote_not_found');
+    expect(cache.invalidateProject('project_missing', 4)).toBe(0);
+    expect(changes).toEqual([]);
+    expect(cache.invalidateProject('project_invalidate', 4)).toBe(2);
+    expect(changes).toEqual(['project_invalidate']);
+    expect(cache.list('project_invalidate')).toEqual([
+      expect.objectContaining({ reservationId: 'reservation_current' }),
+      expect.objectContaining({ reservationId: 'reservation_newer' }),
+    ]);
+    expect(cache.list('project_untouched')).toHaveLength(1);
+    expectCacheCode(
+      () =>
+        cache.claim({
+          reservationId: 'reservation_invalidate_1',
+          quoteId: 'quote_invalidate_1',
+          quoteRevision: 1,
+        }),
+      'quote_not_found'
+    );
+    expectCacheCode(
+      () =>
+        cache.claim({
+          reservationId: 'reservation_invalidate_2',
+          quoteId: 'quote_invalidate_2',
+          quoteRevision: 2,
+        }),
+      'quote_not_found'
+    );
+    expect(cache.invalidateProject('project_invalidate', 4)).toBe(0);
+
+    cache.release(claim);
+    expect(changes).toEqual(['project_invalidate', 'project_invalidate']);
+    expect(() => cache.admit(first)).not.toThrow();
   });
 
   it('expires at the exact TTL boundary, notifies projections, and restarts empty', () => {

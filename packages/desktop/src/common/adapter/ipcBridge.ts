@@ -18,10 +18,12 @@ import { bridge } from '@/common/platform/bridge';
 import type { OpenDialogOptions } from 'electron';
 import type {
   ICssTheme,
+  IAttestedSessionMcpServer,
   GuidPresentationHandoffClaim,
   IMcpServer,
   IProvider,
   ISessionMcpServer,
+  ISessionMcpTrustClaim,
   TChatConversation,
   TContextSnapshot,
   TContextHandoffItem,
@@ -1254,7 +1256,7 @@ export const creativeStudio = {
   getProject: bridge.buildProvider<StudioCommandResult<StudioProjectLoadResultV2>, StudioProjectRequestV2>(
     'creative-studio.get-project'
   ),
-  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<ISessionMcpServer>, StudioProjectRequestV2>(
+  getBriefSessionServer: bridge.buildProvider<StudioCommandResult<IAttestedSessionMcpServer>, StudioProjectRequestV2>(
     'creative-studio.get-brief-session-server'
   ),
   getDirectorSessionAuthority: bridge.buildProvider<
@@ -2143,6 +2145,8 @@ export interface ICreateConversationParams {
     exclude_auto_inject_skills?: string[];
     selected_mcp_server_ids?: string[];
     selected_session_mcp_servers?: ISessionMcpServer[];
+    /** Transient Main attestations consumed and stripped by AionCore during create. */
+    selected_session_mcp_trust_claims?: ISessionMcpTrustClaim[];
     codex_model?: string;
     thought_level?: string;
     cached_config_options?: import('../types/platform/acpTypes').AcpSessionConfigOption[];

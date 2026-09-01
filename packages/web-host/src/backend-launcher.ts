@@ -239,6 +239,7 @@ export function buildSpawnEnv(dirs?: BackendDirConfig, security?: BackendSecurit
         }
       : {}),
     ...(security?.localToken ? { AIONUI_LOCAL_TOKEN: security.localToken } : {}),
+    ...(security?.sessionMcpTrustKey ? { AIONUI_SESSION_MCP_TRUST_KEY: security.sessionMcpTrustKey } : {}),
     ...(security?.allowedOrigins?.length ? { AIONUI_LOCAL_ALLOWED_ORIGINS: security.allowedOrigins.join(',') } : {}),
   };
 }
@@ -253,6 +254,8 @@ export function buildSpawnEnv(dirs?: BackendDirConfig, security?: BackendSecurit
  */
 export type BackendSecurityConfig = {
   localToken?: string;
+  /** Main-only key used to attest exact session MCP descriptors. Never expose this through preload. */
+  sessionMcpTrustKey?: string;
   allowedOrigins?: string[];
 };
 
@@ -542,6 +545,7 @@ export class BackendLifecycleManager {
   private childProcess: ChildProcess | null = null;
   private _port = 0;
   private _localToken = '';
+  private _sessionMcpTrustKey = '';
   private _status: BackendStatus = 'stopped';
   private _lastDbPath = '';
   private _lastLogDir?: string;
@@ -569,6 +573,16 @@ export class BackendLifecycleManager {
    */
   get localToken(): string {
     return this._localToken;
+  }
+
+  /**
+   * Per-backend-launch key shared only by Electron Main and AionCore.
+   *
+   * Unlike {@link localToken}, this must never cross the preload bridge: it is
+   * the provenance boundary for signed built-in session MCP descriptors.
+   */
+  get sessionMcpTrustKey(): string {
+    return this._sessionMcpTrustKey;
   }
 
   get status(): BackendStatus {
@@ -697,6 +711,7 @@ export class BackendLifecycleManager {
     // this secret. Mint a fresh one per spawn so a restart invalidates whatever
     // the previous renderer held.
     this._localToken = createLocalToken();
+    this._sessionMcpTrustKey = randomBytes(32).toString('base64url');
 
     const args = buildSpawnArgs({
       port: this._port,
@@ -727,6 +742,7 @@ export class BackendLifecycleManager {
         stdio: ['pipe', 'pipe', 'pipe'],
         env: buildSpawnEnv(dirs, {
           localToken: this._localToken,
+          sessionMcpTrustKey: this._sessionMcpTrustKey,
           allowedOrigins: options?.allowedOrigins,
         }),
         cwd: dirs?.workDir ?? dbPath,

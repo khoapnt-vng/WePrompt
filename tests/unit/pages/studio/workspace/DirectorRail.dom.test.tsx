@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { SESSION_MCP_RESOLVER_PROFILE } from '@/common/config/storage';
 import type { IProvider, ISessionMcpServer, TChatConversation, TProviderWithModel } from '@/common/config/storage';
 import type { IMessageAcpToolCall, IMessageToolGroup } from '@/common/chat/chatLib';
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
@@ -258,6 +259,10 @@ const descriptor: ISessionMcpServer = {
   },
 };
 
+const trustClaim = { payload: 'claim-payload', signature: 'claim-signature' };
+const serverFingerprint = 'a'.repeat(64);
+const attestedDescriptor = { server: descriptor, serverFingerprint, trustClaim };
+
 const authority = {
   serverId: descriptor.id,
   serverName: descriptor.name,
@@ -334,6 +339,13 @@ const exactConversation = (
       mcp_servers: [descriptor.name],
       mcp_statuses: [{ id: descriptor.id, name: descriptor.name, status: 'loaded' }],
       session_mcp_servers: [descriptor],
+      session_mcp_trust: [
+        {
+          server_id: descriptor.id,
+          server_fingerprint: serverFingerprint,
+          resolver_profile: SESSION_MCP_RESOLVER_PROFILE,
+        },
+      ],
       ...extra,
     },
   }) as Extract<TChatConversation, { type: 'aionrs' }>;
@@ -1232,7 +1244,7 @@ describe('DirectorRail', () => {
       .mockReset()
       .mockReturnValueOnce('conversation_director')
       .mockReturnValue('conversation_director_retry');
-    harness.descriptor.mockReset().mockResolvedValue(ok(descriptor));
+    harness.descriptor.mockReset().mockResolvedValue(ok(attestedDescriptor));
     harness.authority.mockReset().mockResolvedValue(ok(authority));
     harness.create
       .mockReset()
@@ -1325,7 +1337,8 @@ describe('DirectorRail', () => {
 
   it('accepts only a reciprocal Aionrs owner with the exact curated MCP snapshot', () => {
     const exact = exactConversation();
-    expect(hasExactDirectorMcpSnapshot(exact, 'project_1', descriptor)).toBe(true);
+    expect(hasExactDirectorMcpSnapshot(exact, 'project_1', descriptor, serverFingerprint)).toBe(true);
+    expect(hasExactDirectorMcpSnapshot(exact, 'project_1', descriptor, 'b'.repeat(64))).toBe(false);
     expect(hasExactDirectorMcpSnapshot(exact, 'project_2')).toBe(false);
     expect(hasExactDirectorMcpSnapshot({ ...exact, type: 'acp' } as TChatConversation, 'project_1')).toBe(false);
     expect(hasExactDirectorMcpSnapshot(exact, 'project_1', { ...descriptor, name: 'not-studio' })).toBe(false);
@@ -1406,6 +1419,59 @@ describe('DirectorRail', () => {
     });
     expect(hasExactDirectorMcpSnapshot(forgedAuthority, 'project_1')).toBe(true);
     expect(hasExactDirectorAuthoritySnapshot(forgedAuthority, 'project_1', authority)).toBe(false);
+  });
+
+  it('requires Core-owned trust readback and rejects retained transient claims', () => {
+    expect(
+      hasExactDirectorMcpSnapshot(
+        exactConversation('conversation_untrusted', { session_mcp_trust: undefined }),
+        'project_1',
+        descriptor,
+        serverFingerprint
+      )
+    ).toBe(false);
+    expect(
+      hasExactDirectorMcpSnapshot(
+        exactConversation('conversation_unknown_resolver', {
+          session_mcp_trust: [
+            {
+              server_id: descriptor.id,
+              server_fingerprint: serverFingerprint,
+              resolver_profile: 'aioncore.session-mcp-resolver.v2',
+            } as never,
+          ],
+        }),
+        'project_1',
+        descriptor,
+        serverFingerprint
+      )
+    ).toBe(false);
+    expect(
+      hasExactDirectorMcpSnapshot(
+        exactConversation('conversation_ambiguous_trust', {
+          session_mcp_trust: [
+            {
+              server_id: descriptor.id,
+              server_fingerprint: serverFingerprint,
+              resolver_profile: SESSION_MCP_RESOLVER_PROFILE,
+            },
+            {
+              server_id: descriptor.id,
+              server_fingerprint: serverFingerprint,
+              resolver_profile: SESSION_MCP_RESOLVER_PROFILE,
+            },
+          ],
+        }),
+        'project_1',
+        descriptor,
+        serverFingerprint
+      )
+    ).toBe(false);
+    const retainedTransient = exactConversation() as TChatConversation & {
+      extra: TChatConversation['extra'] & { selected_session_mcp_trust_claims: unknown };
+    };
+    retainedTransient.extra.selected_session_mcp_trust_claims = [trustClaim];
+    expect(hasExactDirectorMcpSnapshot(retainedTransient, 'project_1', descriptor, serverFingerprint)).toBe(false);
   });
 
   it('accepts only a bounded, coherent, deeply exact route catalog', () => {
@@ -1533,6 +1599,7 @@ describe('DirectorRail', () => {
         studio_project_id: 'project_1',
         selected_mcp_server_ids: [],
         selected_session_mcp_servers: [descriptor],
+        selected_session_mcp_trust_claims: [trustClaim],
       },
     });
     expect(harness.bind).toHaveBeenCalledWith({
@@ -1843,7 +1910,9 @@ describe('DirectorRail', () => {
   );
 
   it('reports an unverifiable descriptor as a session error', async () => {
-    harness.descriptor.mockResolvedValueOnce(ok({ ...descriptor, name: 'ambient-server' }));
+    harness.descriptor.mockResolvedValueOnce(
+      ok({ ...attestedDescriptor, server: { ...descriptor, name: 'ambient-server' } })
+    );
     render(<DirectorRail project={project()} />);
     expect(await screen.findByRole('alert')).toHaveTextContent(
       'Creative Studio could not verify the Director session configuration.'
@@ -1891,6 +1960,21 @@ describe('DirectorRail', () => {
     expect(harness.bind).not.toHaveBeenCalled();
   });
 
+  it('refuses a successful create when Core did not consume and persist the trust claim', async () => {
+    const oldCoreResult = exactConversation('8a49d04b', { session_mcp_trust: undefined }) as TChatConversation & {
+      extra: TChatConversation['extra'] & { selected_session_mcp_trust_claims: unknown };
+    };
+    oldCoreResult.extra.selected_session_mcp_trust_claims = [trustClaim];
+    harness.create.mockResolvedValueOnce(oldCoreResult);
+    render(<DirectorRail project={project()} />);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Creative Studio could not verify the Director session configuration.'
+    );
+    expect(harness.bind).not.toHaveBeenCalled();
+    expect(screen.queryByRole('textbox', { name: 'Director composer' })).toBeNull();
+  });
+
   it('offers deliberate Start fresh when an invalid successful create has no recoverable claimant', async () => {
     const drifted = exactConversation('8a49d04b', {
       mcp_servers: [descriptor.name, 'ambient-server'],
@@ -1917,7 +2001,7 @@ describe('DirectorRail', () => {
       mcp_servers: [descriptor.name, 'ambient-server'],
     });
     harness.descriptor
-      .mockResolvedValueOnce(ok(descriptor))
+      .mockResolvedValueOnce(ok(attestedDescriptor))
       .mockRejectedValueOnce(new Error('descriptor bridge unavailable'));
     harness.create.mockResolvedValueOnce(drifted);
     render(<DirectorRail project={project()} />);

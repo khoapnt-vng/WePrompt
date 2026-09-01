@@ -48,7 +48,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
-import type { IProvider } from '@/common/config/storage';
+import type { IProvider, ISessionMcpServer, ISessionMcpTrustClaim } from '@/common/config/storage';
 import {
   createCreativeStudioStore,
   CreativeStudioStoreError,
@@ -577,6 +577,8 @@ describe('CreativeStudioServiceV2', () => {
       importBedAudioFromPathV2?: StudioMediaStore['importBedAudioFromPathV2'];
       detachBedAudioV2?: StudioMediaStore['detachBedAudioV2'];
       analyzeVideoAudioV2?: StudioMediaStore['analyzeVideoAudioV2'];
+      fingerprintSessionMcpServer?: ((server: ISessionMcpServer) => string) | null;
+      createSessionMcpTrustClaim?: ((server: ISessionMcpServer) => ISessionMcpTrustClaim) | null;
     } = {}
   ) => {
     let current = structuredClone(project);
@@ -984,6 +986,10 @@ describe('CreativeStudioServiceV2', () => {
     const onProjectUpdated = vi.fn();
     const ensureDirectorCommandMailbox = vi.fn(async () => undefined);
     const getStudioServerScriptPath = vi.fn(() => '/bundled/builtin-mcp-studio.js');
+    const fingerprintSessionMcpServer = vi.fn(options.fingerprintSessionMcpServer ?? (() => 'a'.repeat(64)));
+    const createSessionMcpTrustClaim = vi.fn(
+      options.createSessionMcpTrustClaim ?? (() => ({ payload: 'claim-payload', signature: 'claim-signature' }))
+    );
     const validateConnection = vi.fn(async () => ({ ok: true as const, capabilities: { maxConditioningImages: 3 } }));
     const adapterRegistry = new Map([
       [
@@ -1038,6 +1044,8 @@ describe('CreativeStudioServiceV2', () => {
       listProviders,
       getAdapterRegistry: () => adapterRegistry as never,
       getStudioServerScriptPath,
+      ...(options.fingerprintSessionMcpServer === null ? {} : { fingerprintSessionMcpServer }),
+      ...(options.createSessionMcpTrustClaim === null ? {} : { createSessionMcpTrustClaim }),
       ensureDirectorCommandMailbox,
       preparedSubmissionCache: options.preparedSubmissionCache,
       createConnectionId: options.createConnectionId,
@@ -1115,6 +1123,8 @@ describe('CreativeStudioServiceV2', () => {
       loadRateCard,
       ensureDirectorCommandMailbox,
       getStudioServerScriptPath,
+      fingerprintSessionMcpServer,
+      createSessionMcpTrustClaim,
       getProject: (): StudioProjectV2 => structuredClone(current),
       setProject: (next: StudioProjectV2): void => {
         current = structuredClone(next);
@@ -4233,7 +4243,8 @@ describe('CreativeStudioServiceV2', () => {
     const project = makeSchema2ServiceProject();
     const harness = makeHarness(project);
 
-    const descriptor = await harness.service.getBriefSessionServer({ projectId: project.id });
+    const attested = await harness.service.getBriefSessionServer({ projectId: project.id });
+    const descriptor = attested.server;
 
     expect(harness.ensureDirectorCommandMailbox).toHaveBeenCalledWith(project.id);
     expect(harness.resolveProposalPathsV2).toHaveBeenCalledWith(project.id);
@@ -4253,11 +4264,40 @@ describe('CreativeStudioServiceV2', () => {
         }),
       },
     });
+    expect(attested.trustClaim).toEqual({ payload: 'claim-payload', signature: 'claim-signature' });
+    expect(attested.serverFingerprint).toBe('a'.repeat(64));
+    expect(harness.fingerprintSessionMcpServer).toHaveBeenCalledOnce();
+    expect(harness.fingerprintSessionMcpServer).toHaveBeenCalledWith(descriptor);
+    expect(harness.createSessionMcpTrustClaim).toHaveBeenCalledOnce();
+    expect(harness.createSessionMcpTrustClaim).toHaveBeenCalledWith(descriptor);
+    expect(descriptor.transport).not.toHaveProperty('env.AIONUI_SESSION_MCP_TRUST_KEY');
     const routeCatalog = JSON.parse(
       (descriptor.transport.type === 'stdio' ? descriptor.transport.env?.[STUDIO_ENV.routeCatalog] : undefined) ?? '{}'
     ) as Record<string, unknown>;
     expect(Object.keys(routeCatalog)).toEqual(['image', 'video', 'catalogVersion']);
     expect(routeCatalog).not.toHaveProperty('storyboard');
+  });
+
+  it('fails closed when the Main-only session MCP trust authority is unavailable', async () => {
+    const project = makeSchema2ServiceProject();
+    const missingAuthority = makeHarness(project, {
+      fingerprintSessionMcpServer: null,
+      createSessionMcpTrustClaim: null,
+    });
+    await expect(missingAuthority.service.getBriefSessionServer({ projectId: project.id })).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Creative Studio MCP trust authority is unavailable',
+    });
+
+    const failedAuthority = makeHarness(project, {
+      createSessionMcpTrustClaim: () => {
+        throw new Error('signer unavailable');
+      },
+    });
+    await expect(failedAuthority.service.getBriefSessionServer({ projectId: project.id })).rejects.toMatchObject({
+      code: 'storage_error',
+      message: 'Creative Studio MCP trust authority is unavailable',
+    });
   });
 
   it('reads exact Director transport authority without creating sidecars, resolving providers, or mutating', async () => {
@@ -8830,6 +8870,38 @@ describe('Studio MCP schema-2 server', () => {
         'studio_propose_paid_recovery',
         'studio_request_reference_images',
       ]);
+      const readOnlyAnnotations = {
+        readOnlyHint: true,
+        destructiveHint: false,
+        idempotentHint: true,
+        openWorldHint: false,
+      };
+      const additiveAnnotations = {
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false,
+      };
+      const destructiveAnnotations = {
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false,
+      };
+      expect(Object.fromEntries(tools.map((tool) => [tool.name, tool.annotations]))).toEqual({
+        studio_list_routes: readOnlyAnnotations,
+        read_storyboard: readOnlyAnnotations,
+        studio_get_conditioning_frame: readOnlyAnnotations,
+        studio_request_reference_images: additiveAnnotations,
+        propose_storyboard: additiveAnnotations,
+        propose_brief_rule: additiveAnnotations,
+        studio_apply_edits: destructiveAnnotations,
+        studio_apply_free_fix: destructiveAnnotations,
+        studio_propose_paid_recovery: additiveAnnotations,
+        studio_get_project_status: readOnlyAnnotations,
+        studio_get_proposal: readOnlyAnnotations,
+        studio_get_command_status: readOnlyAnnotations,
+      });
       expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
       expect(conditioningFrameTool?.inputSchema).toMatchObject({
         type: 'object',
@@ -9084,7 +9156,9 @@ describe('Studio MCP schema-2 server', () => {
       expect(projectStatusValidator({ detail: true, extra: 'secret' })).toMatchObject({ valid: false });
       expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: true }).success).toBe(true);
       expect(studioGetProjectStatusInputSchemaV2.safeParse({ detail: 1 }).success).toBe(false);
-      expect(projectStatusTool?.description).toMatch(/without writing, generating, or spending/i);
+      expect(projectStatusTool?.description).toMatch(
+        /without changing project state, generating, authorizing, or spending/i
+      );
       const proposalTool = tools.find((tool) => tool.name === 'studio_get_proposal');
       const getProposalValidator = new AjvJsonSchemaValidator().getValidator(proposalTool?.inputSchema as never);
       expect(proposalTool?.inputSchema).toMatchObject({
@@ -9096,7 +9170,7 @@ describe('Studio MCP schema-2 server', () => {
       expect(getProposalValidator({ proposalId: 'proposal_exact', extra: true })).toMatchObject({ valid: false });
       expect(getProposalValidator({ proposalId: '../unsafe' })).toMatchObject({ valid: false });
       expect(studioGetProposalInputSchemaV2.safeParse({ proposalId: 'proposal_exact' }).success).toBe(true);
-      expect(proposalTool?.description).toMatch(/never authors the project, generates, authorizes, or spends/i);
+      expect(proposalTool?.description).toMatch(/does not change project state, generate, authorize, or spend/i);
       expect(proposalTool?.description).toMatch(/never silently rebase, apply, or replace/i);
       const commandStatus = tools.find((tool) => tool.name === 'studio_get_command_status');
       expect(commandStatus?.description).toMatch(/durable.*mutation or read-query status/i);

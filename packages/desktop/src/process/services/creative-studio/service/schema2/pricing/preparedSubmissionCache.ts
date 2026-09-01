@@ -17,6 +17,7 @@ import {
   STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   type StudioCancellationPolicy,
   type StudioConfirmPreparedPhotoRequestV3,
+  type StudioDiscardPreparedPhotoRequestV3,
   type StudioPreparedSubmissionOptionsV2,
   type StudioPreparedSubmissionRequestV2,
   type StudioPreparedPhotoReservationV3,
@@ -929,8 +930,13 @@ export class StudioPreparedPhotoCacheV3 {
     };
     const projection: StudioRendererPreparedPhotoQuoteV3 = deepFreeze(
       reservation.mode === 'create'
-        ? { ...projectionBase, mode: 'create', proposedHandle: reservation.proposedHandle }
-        : { ...projectionBase, mode: 'retry', proposedHandle: null }
+        ? {
+            ...projectionBase,
+            mode: 'create',
+            proposedHandle: reservation.proposedHandle,
+            orderIndex: reservation.orderIndex,
+          }
+        : { ...projectionBase, mode: 'retry', proposedHandle: null, orderIndex: null }
     );
 
     const evictionPlan = this.#planEvictions(reservation.projectId, byteSize);
@@ -1014,6 +1020,59 @@ export class StudioPreparedPhotoCacheV3 {
     entry.claimedBy = claim;
     this.#claimEntries.set(claim, entry);
     return claim;
+  }
+
+  /** Releases a renderer-declined quote without creating any durable Piece, Job, or authorization. */
+  discard(input: StudioDiscardPreparedPhotoRequestV3): string {
+    this.#assertOpen();
+    this.#expire(this.#readClock());
+    if (
+      !exactRecordV3(input, PHOTO_CLAIM_KEYS_V3) ||
+      !isSafeIdV3(input.reservationId) ||
+      !isSafeIdV3(input.quoteId) ||
+      !Number.isSafeInteger(input.quoteRevision) ||
+      input.quoteRevision < 1
+    ) {
+      throw new StudioPreparedPhotoCacheErrorV3('quote_not_found');
+    }
+    const entry = this.#reservations.get(input.reservationId);
+    if (
+      entry === undefined ||
+      entry.expired ||
+      entry.reservation.quote.id !== input.quoteId ||
+      entry.reservation.quote.quoteRevision !== input.quoteRevision
+    ) {
+      throw new StudioPreparedPhotoCacheErrorV3('quote_not_found');
+    }
+    if (entry.claimedBy !== null) throw new StudioPreparedPhotoCacheErrorV3('quote_in_use');
+    const projectId = entry.reservation.projectId;
+    this.#remove(entry, true);
+    return projectId;
+  }
+
+  /** Invalidates quotes derived from an older authoring authority after a durable authored change. */
+  invalidateProject(projectId: string, currentAuthoringRevision: number): number {
+    if (!isSafeIdV3(projectId) || !Number.isSafeInteger(currentAuthoringRevision) || currentAuthoringRevision < 1) {
+      throw new StudioPreparedPhotoCacheErrorV3('quote_not_found');
+    }
+    // A durable authoring commit may settle while runtime disposal is closing this memory-only
+    // cache. `close()` already removes every entry, so the post-commit invalidation must remain a
+    // no-op rather than turn a successful durable operation into a reported failure.
+    if (this.#closed) return 0;
+    const matches = [...this.#entries].filter(
+      (entry) =>
+        !entry.expired &&
+        entry.reservation.projectId === projectId &&
+        entry.reservation.authoringRevision < currentAuthoringRevision
+    );
+    if (matches.length === 0) return 0;
+    for (const entry of matches) {
+      entry.expired = true;
+      this.#reservations.delete(entry.reservation.reservationId);
+      if (entry.claimedBy === null) this.#remove(entry, false);
+    }
+    this.#notify(projectId);
+    return matches.length;
   }
 
   release(claim: StudioPreparedPhotoClaimV3): void {

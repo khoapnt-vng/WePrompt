@@ -277,8 +277,9 @@ describe('schema-6 Pilot Phase 4 headless lifecycle', { timeout: 120_000 }, () =
       expectedAuthoringRevision: staleBeforeEdit.canvas.authoringRevision,
       operations: [{ kind: 'set_brief', brief: 'Authoring moved after the quote.' }],
     });
+    expect((await value.loadSupported(staleProject.summary.id)).activity.preparedPhotoQuotes).toEqual([]);
     await expect(value.confirm(stale, { explicitHumanConfirmation: true })).rejects.toMatchObject({
-      code: 'stale_quote',
+      code: 'quote_not_found',
     });
 
     const expiredProject = await value.createProject('Expired confirmation');

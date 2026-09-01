@@ -8,7 +8,12 @@ import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { isDeepStrictEqual } from 'node:util';
-import type { IProvider, ISessionMcpServer } from '@/common/config/storage';
+import type {
+  IAttestedSessionMcpServer,
+  IProvider,
+  ISessionMcpServer,
+  ISessionMcpTrustClaim,
+} from '@/common/config/storage';
 import {
   isStudioPricingRefusalReasonV2,
   STUDIO_SHOT_AUDIO_ANALYSIS_PROFILE_V1,
@@ -253,7 +258,7 @@ export type CreativeStudioServiceV2 = {
   createProject(input: CreateStudioProjectInputV2): Promise<StudioRendererProjectV2>;
   getProject(projectId: string): Promise<StudioProjectLoadResultV2>;
   deleteProject(input: { projectId: string; expectedRevision: number }): Promise<boolean>;
-  getBriefSessionServer(input: { projectId: string }): Promise<ISessionMcpServer>;
+  getBriefSessionServer(input: { projectId: string }): Promise<IAttestedSessionMcpServer>;
   getDirectorSessionAuthority(input: { projectId: string }): Promise<StudioDirectorSessionAuthorityV2>;
   bindDirectorConversation(
     input: StudioBindDirectorConversationRequestV2
@@ -361,6 +366,8 @@ export type CreativeStudioServiceV2Deps = {
   listProviders?: () => Promise<IProvider[]>;
   getAdapterRegistry?: () => GenerationProviderAdapterRegistry;
   getStudioServerScriptPath?: () => string;
+  fingerprintSessionMcpServer?: (server: ISessionMcpServer) => string;
+  createSessionMcpTrustClaim?: (server: ISessionMcpServer) => ISessionMcpTrustClaim;
   ensureDirectorCommandMailbox?: (projectId: string) => Promise<void>;
   createConnectionId?: () => string;
   rateCard?: (generation: StudioGenerationRouteCatalog) => Promise<StudioRateCardV2>;
@@ -2818,13 +2825,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       return deleted;
     },
 
-    async getBriefSessionServer(input): Promise<ISessionMcpServer> {
+    async getBriefSessionServer(input): Promise<IAttestedSessionMcpServer> {
       if (!isRecord(input) || !hasExactKeys(input, ['projectId'])) {
         throw invalid('Invalid Studio project request');
       }
       assertSafeId(input.projectId, 'project id');
       if (deps.getStudioServerScriptPath === undefined) {
         throw new CreativeStudioStoreError('storage_error', 'Creative Studio MCP script path is unavailable');
+      }
+      if (deps.fingerprintSessionMcpServer === undefined || deps.createSessionMcpTrustClaim === undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Creative Studio MCP trust authority is unavailable');
       }
       const project = await loadSupported(input.projectId);
       await deps.ensureDirectorCommandMailbox?.(input.projectId);
@@ -2836,7 +2846,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (proposalPaths.projectDir !== referencePaths.projectDir) {
         throw new CreativeStudioStoreError('storage_error', 'Studio sidecar authority mismatch');
       }
-      return {
+      const server: ISessionMcpServer = {
         id: `studio-brief-${input.projectId}`,
         name: BUILTIN_STUDIO_NAME,
         transport: {
@@ -2852,6 +2862,20 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           },
         },
       };
+      let serverFingerprint: string;
+      let trustClaim: ISessionMcpTrustClaim;
+      try {
+        serverFingerprint = deps.fingerprintSessionMcpServer(server);
+        trustClaim = deps.createSessionMcpTrustClaim(server);
+      } catch (error) {
+        const failure = new CreativeStudioStoreError(
+          'storage_error',
+          'Creative Studio MCP trust authority is unavailable'
+        );
+        failure.cause = error;
+        throw failure;
+      }
+      return { server, serverFingerprint, trustClaim };
     },
 
     async getDirectorSessionAuthority(input): Promise<StudioDirectorSessionAuthorityV2> {

@@ -11,6 +11,7 @@ import {
   type StudioConfirmPreparedPhotoResultV3,
   type StudioCreateProjectResultV3,
   type StudioDeleteProjectResultV3,
+  type StudioDiscardPreparedPhotoResultV3,
   type StudioExportPieceResultV3,
   type StudioImportPhotoResultV3,
   type StudioPieceJobV3,
@@ -34,6 +35,7 @@ import {
   parseStudioApplyMutationBatchRequestV3,
   parseStudioCreateProjectRequestV3,
   parseStudioDeleteProjectRequestV3,
+  parseStudioDiscardPreparedPhotoRequestV3,
 } from './contracts';
 import { createStudioPilotConfirmPhotoServiceV3 } from './confirmation';
 import { CreativeStudioPilotServiceErrorV3, normalizeCreativeStudioPilotErrorV3 } from './errors';
@@ -77,6 +79,7 @@ export type CreativeStudioPilotEntryPointV3 = {
   loadProjectV3(projectId: string): Promise<StudioProjectLoadResultV3>;
   preparePhotoV3(input: unknown): Promise<StudioPreparePhotoResultV3>;
   confirmPreparedPhotoV3(input: unknown): Promise<StudioConfirmPreparedPhotoResultV3>;
+  discardPreparedPhotoV3(input: unknown): Promise<StudioDiscardPreparedPhotoResultV3>;
   importPhotoV3(input: unknown): Promise<StudioImportPhotoResultV3>;
   applyMutationBatchV3(input: unknown): Promise<StudioApplyMutationBatchResultV3>;
   cancelJobV3(input: unknown): Promise<StudioCancelPieceJobResultV3>;
@@ -102,6 +105,15 @@ const mutationFailure = (error: StudioMutationErrorV3): never => {
   }
   if (error.reasonCode === 'piece_not_found') {
     throw new CreativeStudioPilotServiceErrorV3('not_found');
+  }
+  if (
+    error.reasonCode === 'invalid_handle' ||
+    error.reasonCode === 'handle_collision' ||
+    error.reasonCode === 'alias_limit' ||
+    error.reasonCode === 'undo_conflict' ||
+    error.reasonCode === 'no_change'
+  ) {
+    throw new CreativeStudioPilotServiceErrorV3(error.reasonCode);
   }
   throw new CreativeStudioPilotServiceErrorV3('invalid_payload');
 };
@@ -234,7 +246,19 @@ export const createCreativeStudioPilotEntryPointV3 = (
           status: 'supported',
           summary: toStudioProjectSummaryV3(loaded.project),
           canvas: toStudioRendererCanvasInventoryV3(loaded.project),
-          activity: toStudioRendererCapabilityActivityV3(loaded.project, quotes),
+          activity: toStudioRendererCapabilityActivityV3(
+            loaded.project,
+            quotes,
+            deps.jobs.activeJobIdsV3(loaded.project.id)
+          ),
+          spendPolicy: loaded.project.spendPolicy === null ? null : { ...loaded.project.spendPolicy },
+          lastUndo:
+            loaded.project.undoHistory.at(-1) === undefined
+              ? null
+              : {
+                  entryId: loaded.project.undoHistory.at(-1)!.id,
+                  label: loaded.project.undoHistory.at(-1)!.label,
+                },
         };
       } catch (error) {
         return normalizeCreativeStudioPilotErrorV3(error);
@@ -251,9 +275,24 @@ export const createCreativeStudioPilotEntryPointV3 = (
       return confirm.confirmPreparedPhotoV3(input);
     },
 
-    importPhotoV3(input) {
+    async discardPreparedPhotoV3(input) {
       assertActive();
-      return deps.media.importPhotoV3(input);
+      try {
+        const request = parseStudioDiscardPreparedPhotoRequestV3(input);
+        const projectId = preparedPhotos.discard(request);
+        return { status: 'discarded', projectId };
+      } catch (error) {
+        return normalizeCreativeStudioPilotErrorV3(error);
+      }
+    },
+
+    async importPhotoV3(input) {
+      assertActive();
+      const result = await deps.media.importPhotoV3(input);
+      if (result.status === 'imported') {
+        preparedPhotos.invalidateProject(result.projectId, result.authoringRevision);
+      }
+      return result;
     },
 
     async applyMutationBatchV3(input) {
@@ -290,6 +329,7 @@ export const createCreativeStudioPilotEntryPointV3 = (
             kind: 'authoring',
             expectedRevision: authority.project.revision,
           });
+          preparedPhotos.invalidateProject(committed.id, committed.authoringRevision);
           return {
             projectId: committed.id,
             revision: committed.revision,

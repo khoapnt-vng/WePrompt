@@ -878,6 +878,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "創意工作室",
+        "actionFailed": "創意工作室無法完成此操作。",
+        "cancel": "取消",
+        "delete": "刪除"
+      },
+      "library": {
+        "eyebrow": "創意工作室試行版",
+        "title": "專案",
+        "subtitle": "建立用於靜態影像作品的專案。此試行版不包含影片設定。",
+        "refresh": "重新整理",
+        "newProject": "新增專案",
+        "projectName": "專案名稱",
+        "brief": "簡報",
+        "nameRequired": "請輸入專案名稱。",
+        "createProject": "建立專案",
+        "loading": "正在載入專案…",
+        "refreshing": "正在重新整理專案…",
+        "projectsUnavailable": "專案無法使用。",
+        "refreshUnavailable": "無法重新整理。正在顯示上次可用的專案清單。",
+        "emptyTitle": "尚無專案",
+        "emptyBody": "請在上方建立專案，以開始製作靜態影像作品。",
+        "supported": {
+          "title": "試行版專案",
+          "description": "可由此版本開啟的專案。",
+          "tag": "支援"
+        },
+        "unsupported": {
+          "title": "由其他工作室版本建立",
+          "description": "這些專案使用不同的結構描述，無法由此試行版開啟。",
+          "tag": "不支援"
+        },
+        "quarantined": {
+          "title": "需要復原的專案",
+          "description": "無法安全解碼這些專案，因此它們仍處於隔離狀態。",
+          "tag": "已隔離"
+        },
+        "deleteUnreadableAccessible": "刪除無法讀取的專案 {{projectId}}",
+        "deleteAccessible": "刪除 {{name}}",
+        "facts": {
+          "pieces": "作品",
+          "currentPhotos": "目前照片",
+          "updated": "更新時間"
+        },
+        "openProject": "開啟 {{name}}",
+        "deleteModal": {
+          "healthyTitle": "刪除專案？",
+          "unreadableTitle": "刪除無法讀取的專案？",
+          "keep": "保留專案",
+          "confirm": "刪除專案",
+          "healthyBody": "刪除 {{name}}？移除任何檔案前，將檢查目前的專案修訂版。",
+          "unreadableBody": "刪除 {{name}}？此專案無法安全開啟，因此刪除作業會使用受保護的一次性憑證。"
+        }
+      },
+      "canvas": {
+        "projectActions": "專案操作",
+        "loading": "正在載入專案…",
+        "refreshing": "正在重新整理專案…",
+        "unavailable": "此創意工作室專案無法使用。",
+        "startCreating": "開始創作",
+        "boardAccessible": "照片作品",
+        "errors": {
+          "routeCatalogUnavailable": "照片路線尚未載入。請重新整理可用性後再試一次。",
+          "routeIncompatible": "沒有照片路線支援這些設定。請變更長寬比或解析度後再試一次。",
+          "capacity": "此試行版專案已達 96 個作品的上限。請建立另一個專案以建立或匯入更多照片。",
+          "freshQuoteRequired": "此報價已不是最新版本。開始付費工作前，請檢查新的費用。",
+          "duplicateAcknowledgementRequired": "請確認可能產生重複收費，以繼續操作。",
+          "invalidHandle": "無法使用此作品名稱。請輸入安全且唯一的名稱。",
+          "handleCollision": "其他作品已使用此名稱或別名。",
+          "aliasLimit": "此作品已達歷史名稱數量上限。",
+          "noChange": "沒有任何變更。",
+          "undoConflict": "專案已變更，因此無法復原上次重新命名。",
+          "staleAuthoring": "專案已變更。請檢查最新狀態後再試一次。",
+          "variationGrid": "傳回的是變化網格，而非單張照片。開始另一次付費嘗試前，請先檢查結果。"
+        },
+        "variationGrid": {
+          "paidRejected": "供應商已傳回結果並收取費用，但創意工作室因其為變化網格而拒絕該結果。",
+          "retryAvailable": "此作品還有一次經檢查的付費重試機會。",
+          "retryExhausted": "此作品已沒有更多付費重試機會。請改為匯入照片或建立同層作品。",
+          "importEscape": "「匯入照片」會新增獨立作品，不會再次產生生成費用。"
+        },
+        "quote": {
+          "accessibleName": "已準備的照片報價",
+          "eyebrow": "已準備報價",
+          "retryTitle": "重試照片",
+          "amount": "金額",
+          "scope": "範圍",
+          "scopeValue": "一張照片 · {{aspectRatio}} · {{resolution}}",
+          "expires": "到期時間",
+          "automatic": "已獲目前支出上限授權。即將自動開始。",
+          "reviewRequired": "開始付費工作前，請檢查確切費用。",
+          "duplicateAcknowledgement": "我了解先前提交給供應商的要求可能已產生費用。",
+          "confirmCreate": "確認並建立照片",
+          "confirmRetry": "確認並重試",
+          "discard": "捨棄報價"
+        },
+        "piece": {
+          "eyebrow": "照片作品",
+          "generationInProgress": "正在產生照片。",
+          "noCurrentImage": "此作品沒有目前影像。",
+          "imageUnavailable": "此非作用中轉譯器介面無法取得目前影像資料。",
+          "currentImageAccessible": "{{handle}} 的目前影像",
+          "rename": "重新命名作品",
+          "renameAccessible": "重新命名 {{handle}}",
+          "saveName": "儲存名稱",
+          "cancelRename": "取消重新命名"
+        },
+        "pieceStatus": {
+          "queued": "已排入佇列",
+          "running": "執行中",
+          "needsAttention": "需要處理",
+          "failed": "失敗",
+          "cancelled": "已取消",
+          "current": "目前"
+        },
+        "jobStatus": {
+          "queuedLocal": "等待提交",
+          "submitting": "正在提交",
+          "queuedRemote": "已在供應商端排入佇列",
+          "running": "正在產生",
+          "needsAttention": "需要處理",
+          "succeeded": "已完成",
+          "failed": "失敗",
+          "cancelled": "已取消"
+        },
+        "jobErrors": {
+          "invalidRequest": "產生要求無效。",
+          "contentRejected": "供應商拒絕了此要求。請修改描述後重試。",
+          "auth": "供應商拒絕了憑證。",
+          "quota": "供應商帳戶額度不足。",
+          "rateLimited": "已達供應商速率限制。請稍後再試。",
+          "providerUnavailable": "產生服務供應商無法使用。",
+          "timeout": "供應商未及時回應。",
+          "pollDeadline": "供應商已停止回報進度。重試前請再次檢查。",
+          "noOutput": "供應商未傳回可用的照片。",
+          "variationGrid": "偵測到變化網格，而非單張照片。重試前請先檢查。",
+          "submissionUnknown": "提交結果未知。重試前請查看重複收費警告。",
+          "downloadFailed": "產生已完成，但無法下載照片。",
+          "unsupported": "不支援此供應商回應。",
+          "unknown": "產生因未知原因失敗。"
+        },
+        "retryReasons": {
+          "providerFailure": "供應商失敗",
+          "submissionUnknown": "提交結果未知",
+          "variationGrid": "變化網格",
+          "cancelled": "嘗試已取消"
+        },
+        "provenance": {
+          "accessible": "{{handle}} 的來源資訊",
+          "title": "來源資訊",
+          "origin": "來源",
+          "imported": "已匯入",
+          "generated": "已產生",
+          "created": "建立時間",
+          "model": "模型",
+          "instructionProfile": "指令設定檔",
+          "recordedSpend": "已記錄支出"
+        },
+        "history": {
+          "accessible": "{{handle}} 的嘗試記錄",
+          "title": "嘗試記錄",
+          "retryReason": "重試原因：{{reason}}",
+          "recordedSpend": "已記錄支出：{{amount}}（{{currency}}）",
+          "created": "建立時間",
+          "authorized": "授權時間",
+          "retryOf": "重試的工作",
+          "duplicateCharge": "重複收費確認",
+          "acknowledged": "已確認",
+          "notRequired": "不需要"
+        },
+        "actions": {
+          "cancelGeneration": "取消產生",
+          "retryGeneration": "重試產生",
+          "retryDownload": "重試下載",
+          "checkProvider": "再次檢查供應商",
+          "undoRename": "復原上次重新命名",
+          "retryRouteCheck": "重試路線檢查",
+          "createPhoto": "建立照片",
+          "importPhoto": "匯入照片",
+          "reviewCost": "檢查費用",
+          "reviewFreshCost": "檢查新費用"
+        },
+        "announcements": {
+          "paidWorkStarted": "付費照片工作已開始。",
+          "quoteDiscarded": "已捨棄準備好的報價。",
+          "photoImported": "照片已匯入。",
+          "renameUndone": "已復原上次作品重新命名。",
+          "exported": "已匯出 {{handle}}。",
+          "spendingLimitSaved": "支出上限已儲存。",
+          "jobTransition": "{{handle}} 現在處於「{{status}}」狀態。",
+          "freshQuoteRequired": "先前的報價已不是最新版本。開始付費工作前，請檢查新的費用。",
+          "savedRefreshUnavailable": "操作已儲存，但無法載入最新的專案狀態。請重新整理後再執行其他操作。"
+        },
+        "projectMenu": {
+          "label": "專案選單",
+          "spendingLimit": "支出上限",
+          "export": "匯出"
+        },
+        "composer": {
+          "description": "照片描述",
+          "aspectRatio": "長寬比",
+          "resolution": "解析度"
+        }
+      },
+      "spending": {
+        "title": "支出上限",
+        "clear": "清除上限",
+        "save": "儲存上限",
+        "description": "設定此專案可為一次付費照片批次自動授權的最高金額。此設定不會開始產生或花費金錢。",
+        "currency": "貨幣代碼",
+        "maximum": "每批最高金額（最小貨幣單位）",
+        "invalid": "請輸入正確的三字母貨幣代碼，以及非負整數的最小貨幣單位上限。"
+      }
+    },
     "workspace": {
       "views": {
         "references": "參考圖"

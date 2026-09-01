@@ -884,6 +884,221 @@
     }
   },
   "creativeStudio": {
+    "pilot": {
+      "common": {
+        "productName": "Creative Studio",
+        "actionFailed": "O Creative Studio não conseguiu concluir esta ação.",
+        "cancel": "Cancelar",
+        "delete": "Excluir"
+      },
+      "library": {
+        "eyebrow": "Piloto do Creative Studio",
+        "title": "Projetos",
+        "subtitle": "Crie um projeto para Peças de imagem estática. As configurações de filme não fazem parte deste Piloto.",
+        "refresh": "Atualizar",
+        "newProject": "Novo projeto",
+        "projectName": "Nome do projeto",
+        "brief": "Briefing",
+        "nameRequired": "Digite um nome para o projeto.",
+        "createProject": "Criar projeto",
+        "loading": "Carregando projetos…",
+        "refreshing": "Atualizando projetos…",
+        "projectsUnavailable": "Projetos indisponíveis.",
+        "refreshUnavailable": "Não foi possível atualizar. Mostrando a última lista de projetos disponível.",
+        "emptyTitle": "Ainda não há projetos",
+        "emptyBody": "Crie um projeto acima para começar uma Peça de imagem estática.",
+        "supported": {
+          "title": "Projetos do Piloto",
+          "description": "Projetos que podem ser abertos por esta versão.",
+          "tag": "Compatível"
+        },
+        "unsupported": {
+          "title": "Criados por outra versão do Studio",
+          "description": "Estes projetos usam outro esquema e não podem ser abertos por este Piloto.",
+          "tag": "Incompatível"
+        },
+        "quarantined": {
+          "title": "Projetos que precisam de recuperação",
+          "description": "Não foi possível decodificar estes projetos com segurança, e eles continuam em quarentena.",
+          "tag": "Em quarentena"
+        },
+        "deleteUnreadableAccessible": "Excluir projeto ilegível {{projectId}}",
+        "deleteAccessible": "Excluir {{name}}",
+        "facts": {
+          "pieces": "Peças",
+          "currentPhotos": "Fotos atuais",
+          "updated": "Atualizado"
+        },
+        "openProject": "Abrir {{name}}",
+        "deleteModal": {
+          "healthyTitle": "Excluir projeto?",
+          "unreadableTitle": "Excluir projeto ilegível?",
+          "keep": "Manter projeto",
+          "confirm": "Excluir projeto",
+          "healthyBody": "Excluir {{name}}? A revisão atual do projeto será verificada antes da remoção de qualquer arquivo.",
+          "unreadableBody": "Excluir {{name}}? Este projeto não pode ser aberto com segurança; por isso, a exclusão usa sua credencial protegida de uso único."
+        }
+      },
+      "canvas": {
+        "projectActions": "Ações do projeto",
+        "loading": "Carregando projeto…",
+        "refreshing": "Atualizando projeto…",
+        "unavailable": "Este projeto do Creative Studio está indisponível.",
+        "startCreating": "Começar a criar",
+        "boardAccessible": "Peças de foto",
+        "errors": {
+          "routeCatalogUnavailable": "As rotas de foto não foram carregadas. Atualize a disponibilidade e tente novamente.",
+          "routeIncompatible": "Nenhuma rota de foto aceita estas configurações. Altere a proporção ou a resolução e tente novamente.",
+          "capacity": "Este projeto Piloto atingiu o limite de 96 Peças. Inicie outro projeto para criar ou importar mais fotos.",
+          "freshQuoteRequired": "Este orçamento não está mais atualizado. Analise um novo custo antes de iniciar o trabalho pago.",
+          "duplicateAcknowledgementRequired": "Confirme a possibilidade de cobrança duplicada para continuar.",
+          "invalidHandle": "Este nome de Peça não pode ser usado. Digite um nome seguro e exclusivo.",
+          "handleCollision": "Outra Peça já usa esse nome ou apelido.",
+          "aliasLimit": "O limite de nomes anteriores desta Peça foi atingido.",
+          "noChange": "Nada foi alterado.",
+          "undoConflict": "O projeto mudou, portanto não é possível desfazer a última renomeação.",
+          "staleAuthoring": "O projeto mudou. Analise o estado mais recente e tente novamente.",
+          "variationGrid": "Foi retornada uma grade de variações em vez de uma foto. Analise o resultado antes de iniciar outra tentativa paga."
+        },
+        "variationGrid": {
+          "paidRejected": "O provedor retornou e cobrou uma saída, mas o Creative Studio a recusou por ser uma grade de variações.",
+          "retryAvailable": "Há uma nova tentativa paga e revisada disponível para esta Peça.",
+          "retryExhausted": "Não há mais tentativas pagas para esta Peça. Importe uma foto ou crie uma Peça no mesmo nível.",
+          "importEscape": "Importar foto adiciona uma Peça separada sem outra cobrança de geração."
+        },
+        "quote": {
+          "accessibleName": "Orçamento de foto preparado",
+          "eyebrow": "Orçamento preparado",
+          "retryTitle": "Tentar foto novamente",
+          "amount": "Valor",
+          "scope": "Escopo",
+          "scopeValue": "Uma foto · {{aspectRatio}} · {{resolution}}",
+          "expires": "Validade",
+          "automatic": "Autorizado pelo limite de gastos ativo. Iniciando automaticamente.",
+          "reviewRequired": "Confira o custo exato antes de iniciar o trabalho pago.",
+          "duplicateAcknowledgement": "Entendo que o envio anterior ao provedor pode já ter sido cobrado.",
+          "confirmCreate": "Confirmar e criar foto",
+          "confirmRetry": "Confirmar e tentar novamente",
+          "discard": "Descartar orçamento"
+        },
+        "piece": {
+          "eyebrow": "Peça de foto",
+          "generationInProgress": "A foto está sendo gerada.",
+          "noCurrentImage": "Esta Peça não tem uma imagem atual.",
+          "imageUnavailable": "Os dados da imagem atual não estão disponíveis nesta fronteira inativa do renderizador.",
+          "currentImageAccessible": "Imagem atual de {{handle}}",
+          "rename": "Renomear Peça",
+          "renameAccessible": "Renomear {{handle}}",
+          "saveName": "Salvar nome",
+          "cancelRename": "Cancelar renomeação"
+        },
+        "pieceStatus": {
+          "queued": "Na fila",
+          "running": "Em andamento",
+          "needsAttention": "Requer atenção",
+          "failed": "Falhou",
+          "cancelled": "Cancelada",
+          "current": "Atual"
+        },
+        "jobStatus": {
+          "queuedLocal": "Aguardando envio",
+          "submitting": "Enviando",
+          "queuedRemote": "Na fila do provedor",
+          "running": "Gerando",
+          "needsAttention": "Requer atenção",
+          "succeeded": "Concluída",
+          "failed": "Falhou",
+          "cancelled": "Cancelada"
+        },
+        "jobErrors": {
+          "invalidRequest": "A solicitação de geração é inválida.",
+          "contentRejected": "O provedor recusou esta solicitação. Revise a descrição antes de tentar novamente.",
+          "auth": "O provedor recusou as credenciais.",
+          "quota": "A conta do provedor não tem cota suficiente.",
+          "rateLimited": "O limite de solicitações do provedor foi atingido. Tente novamente mais tarde.",
+          "providerUnavailable": "O provedor de geração está indisponível.",
+          "timeout": "O provedor não respondeu a tempo.",
+          "pollDeadline": "O provedor parou de informar o progresso. Verifique novamente antes de repetir.",
+          "noOutput": "O provedor não retornou uma foto utilizável.",
+          "variationGrid": "Foi detectada uma grade de variações em vez de uma foto. Analise-a antes de tentar novamente.",
+          "submissionUnknown": "O resultado do envio é desconhecido. Leia o aviso de cobrança duplicada antes de tentar novamente.",
+          "downloadFailed": "A geração terminou, mas não foi possível baixar a foto.",
+          "unsupported": "Esta resposta do provedor não é compatível.",
+          "unknown": "A geração falhou por um motivo desconhecido."
+        },
+        "retryReasons": {
+          "providerFailure": "falha do provedor",
+          "submissionUnknown": "resultado de envio desconhecido",
+          "variationGrid": "grade de variações",
+          "cancelled": "tentativa cancelada"
+        },
+        "provenance": {
+          "accessible": "Proveniência de {{handle}}",
+          "title": "Proveniência",
+          "origin": "Origem",
+          "imported": "Importada",
+          "generated": "Gerada",
+          "created": "Criada",
+          "model": "Modelo",
+          "instructionProfile": "Perfil de instruções",
+          "recordedSpend": "Gasto registrado"
+        },
+        "history": {
+          "accessible": "Histórico de tentativas de {{handle}}",
+          "title": "Histórico de tentativas",
+          "retryReason": "Motivo da nova tentativa: {{reason}}",
+          "recordedSpend": "Gasto registrado: {{amount}} ({{currency}})",
+          "created": "Criada",
+          "authorized": "Autorizada",
+          "retryOf": "Nova tentativa do trabalho",
+          "duplicateCharge": "Confirmação de cobrança duplicada",
+          "acknowledged": "Confirmada",
+          "notRequired": "Não exigida"
+        },
+        "actions": {
+          "cancelGeneration": "Cancelar geração",
+          "retryGeneration": "Tentar geração novamente",
+          "retryDownload": "Tentar download novamente",
+          "checkProvider": "Verificar provedor novamente",
+          "undoRename": "Desfazer última renomeação",
+          "retryRouteCheck": "Repetir verificação de rota",
+          "createPhoto": "Criar foto",
+          "importPhoto": "Importar foto",
+          "reviewCost": "Analisar custo",
+          "reviewFreshCost": "Analisar novo custo"
+        },
+        "announcements": {
+          "paidWorkStarted": "O trabalho pago de foto começou.",
+          "quoteDiscarded": "O orçamento preparado foi descartado.",
+          "photoImported": "Foto importada.",
+          "renameUndone": "A última renomeação da Peça foi desfeita.",
+          "exported": "{{handle}} exportada.",
+          "spendingLimitSaved": "Limite de gastos salvo.",
+          "jobTransition": "{{handle}} agora está com o status {{status}}.",
+          "freshQuoteRequired": "O orçamento anterior não está mais atualizado. Analise um novo custo antes de iniciar o trabalho pago.",
+          "savedRefreshUnavailable": "A ação foi salva, mas não foi possível carregar o estado mais recente do projeto. Atualize antes de realizar outra ação."
+        },
+        "projectMenu": {
+          "label": "Menu do projeto",
+          "spendingLimit": "Limite de gastos",
+          "export": "Exportar"
+        },
+        "composer": {
+          "description": "Descrição da foto",
+          "aspectRatio": "Proporção",
+          "resolution": "Resolução"
+        }
+      },
+      "spending": {
+        "title": "Limite de gastos",
+        "clear": "Limpar limite",
+        "save": "Salvar limite",
+        "description": "Defina o valor máximo que este projeto pode autorizar automaticamente para um lote pago de fotos. Esta configuração não inicia a geração nem gasta dinheiro.",
+        "currency": "Código da moeda",
+        "maximum": "Máximo por lote (unidades monetárias mínimas)",
+        "invalid": "Digite um código de moeda exato de três letras e um limite inteiro não negativo em unidades monetárias mínimas."
+      }
+    },
     "workspace": {
       "views": {
         "references": "Referências"

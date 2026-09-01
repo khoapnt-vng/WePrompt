@@ -8,6 +8,7 @@ import { types as nodeTypes } from 'node:util';
 import {
   STUDIO_MAX_JOBS_PER_PIECE_V3,
   STUDIO_MAX_JOBS_V3,
+  STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_SPEND_AUTHORIZATIONS_V3,
   type StudioPieceJobV3,
   type StudioPiecePhotoSettingsV3,
@@ -43,6 +44,7 @@ const PREPARED_QUOTE_KEYS = new Set([
   'duplicateChargeAcknowledgementRequired',
   'mode',
   'proposedHandle',
+  'orderIndex',
 ]);
 const PHOTO_SETTINGS_KEYS = new Set(['aspectRatio', 'resolution']);
 const PREPARED_QUOTE_CLASSIFICATIONS = new Set(['within_cap', 'no_policy', 'currency_mismatch', 'over_cap']);
@@ -175,11 +177,22 @@ const snapshotPreparedQuote = (value: unknown, projectId: string): StudioRendere
     requiresExplicitHumanAction: snapshot.requiresExplicitHumanAction,
     duplicateChargeAcknowledgementRequired: snapshot.duplicateChargeAcknowledgementRequired,
   };
-  if (snapshot.mode === 'create' && isCanonicalStudioPieceHandleV3(snapshot.proposedHandle)) {
-    return { ...base, mode: 'create', proposedHandle: snapshot.proposedHandle };
+  if (
+    snapshot.mode === 'create' &&
+    isCanonicalStudioPieceHandleV3(snapshot.proposedHandle) &&
+    Number.isSafeInteger(snapshot.orderIndex) &&
+    (snapshot.orderIndex as number) >= 0 &&
+    (snapshot.orderIndex as number) < STUDIO_MAX_PIECES_V3
+  ) {
+    return {
+      ...base,
+      mode: 'create',
+      proposedHandle: snapshot.proposedHandle,
+      orderIndex: snapshot.orderIndex as number,
+    };
   }
-  if (snapshot.mode === 'retry' && snapshot.proposedHandle === null) {
-    return { ...base, mode: 'retry', proposedHandle: null };
+  if (snapshot.mode === 'retry' && snapshot.proposedHandle === null && snapshot.orderIndex === null) {
+    return { ...base, mode: 'retry', proposedHandle: null, orderIndex: null };
   }
   return invalidProjection();
 };
@@ -378,23 +391,33 @@ export const toStudioRendererCanvasInventoryV3 = (value: unknown): StudioRendere
 /** Projects transient quotes and persisted Job capabilities without any Main-only execution authority. */
 export const toStudioRendererCapabilityActivityV3 = (
   value: unknown,
-  preparedPhotoQuotes: unknown
+  preparedPhotoQuotes: unknown,
+  activeJobIds: ReadonlySet<string> = new Set()
 ): StudioRendererCapabilityActivityV3 => {
   const project = requireProject(value);
   const children = retryChildren(project);
   const jobs: StudioRendererPieceActivityJobV3[] = project.pieceOrder.flatMap((pieceId) =>
     project.pieces[pieceId]!.jobIds.map((jobId) => {
       const job = project.jobs[jobId]!;
+      const authorization = project.spendAuthorizations.find((candidate) => candidate.id === job.authorizationId)!;
       return {
         jobId: job.id,
         pieceId,
         status: job.status,
+        createdAt: job.createdAt,
+        updatedAt: job.updatedAt,
         progress: job.progress,
         error: job.error === null ? null : { code: job.error.code, messageKey: job.error.messageKey },
+        retryOfJobId: job.retryOfJobId,
+        retryReason: job.retryReason,
+        duplicateChargeAcknowledged: job.duplicateChargeAcknowledged,
+        authorization: {
+          confirmedAt: authorization.confirmedAt,
+        },
         canCancel: canCancelJob(job),
         canRetry: canRetryJob(project, job, children),
         canRetryDownload: canRetryJobDownload(project, job, children),
-        canResume: canResumeJob(project, job, children),
+        canResume: !activeJobIds.has(job.id) && canResumeJob(project, job, children),
         recordedSpend:
           job.spendReceipt === null
             ? null

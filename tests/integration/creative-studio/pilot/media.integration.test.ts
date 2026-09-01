@@ -653,9 +653,9 @@ describe('schema-6 managed photo transactions', () => {
     expect(project.spendAuthorizations).toHaveLength(1);
     expect(Object.keys(project.jobs)).toHaveLength(1);
     expect(dispatch).toHaveBeenCalledOnce();
-    expect(harness.preparedPhotos.list(project.id)).toEqual([
-      expect.objectContaining({ reservationId: staleReservation.quote.reservationId }),
-    ]);
+    // The stale lease is ignored while admitting the current quote, then removed once that
+    // quote's create commit advances authoring authority.
+    expect(harness.preparedPhotos.list(project.id)).toEqual([]);
     await expect(
       prepare.preparePhotoV3({
         mode: 'create',
@@ -666,7 +666,7 @@ describe('schema-6 managed photo transactions', () => {
         suggestedHandle: null,
       })
     ).rejects.toMatchObject({ code: 'project_piece_capacity_reached' });
-    expect(harness.preparedPhotos.list(project.id)).toHaveLength(1);
+    expect(harness.preparedPhotos.list(project.id)).toHaveLength(0);
   });
 
   it.each<StudioPilotMediaStorageStepV3>([

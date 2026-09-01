@@ -28,9 +28,27 @@ const actionIcons: Record<string, React.ReactNode> = {
   mcp: <Api theme='outline' size={ICON_SIZE} fill={iconColors.secondary} data-testid='permission-icon-mcp' />,
 };
 
+const isBidiControl = (codePoint: number): boolean =>
+  codePoint === 0x061c ||
+  codePoint === 0x200e ||
+  codePoint === 0x200f ||
+  (codePoint >= 0x202a && codePoint <= 0x202e) ||
+  (codePoint >= 0x2066 && codePoint <= 0x2069);
+
+/** Preserve identity exactly in the message model while making controls visible in the DOM. */
+export const escapePermissionIdentityForDisplay = (input: string): string =>
+  Array.from(input, (character) => {
+    const codePoint = character.codePointAt(0);
+    if (codePoint === undefined) return '';
+    if ((codePoint >= 0 && codePoint <= 0x1f) || (codePoint >= 0x7f && codePoint <= 0x9f) || isBidiControl(codePoint)) {
+      return `\\u{${codePoint.toString(16).toUpperCase().padStart(4, '0')}}`;
+    }
+    return character;
+  }).join('');
+
 const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ message }) => {
   const { t } = useTranslation();
-  const { options = [], description, title, action, call_id, command_type } = message.content || {};
+  const { options = [], description, title, action, call_id, command_type, mcp_identity } = message.content || {};
 
   // Which option is in flight, rather than a bare boolean: the pressed button gets Arco's
   // spinner while its siblings only grey out, so a slow confirm shows WHICH answer is pending.
@@ -38,10 +56,23 @@ const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ messag
   const [hasResponded, setHasResponded] = useState(false);
 
   const summary = summarizePermission({ action, command: description, commandType: command_type });
+  const rawMcpIdentity =
+    command_type === 'mcp' &&
+    typeof mcp_identity?.server_name === 'string' &&
+    typeof mcp_identity.tool_name === 'string'
+      ? mcp_identity
+      : undefined;
+  const visibleMcpIdentity = rawMcpIdentity
+    ? {
+        serverName: escapePermissionIdentityForDisplay(rawMcpIdentity.server_name),
+        toolName: escapePermissionIdentityForDisplay(rawMcpIdentity.tool_name),
+      }
+    : undefined;
+  const visibleCommand = rawMcpIdentity ? escapePermissionIdentityForDisplay(summary.command) : summary.command;
   const icon = summary.destructive ? (
     <Attention theme='outline' size={ICON_SIZE} fill={iconColors.danger} data-testid='permission-icon-destructive' />
   ) : (
-    actionIcons[action || ''] || (
+    actionIcons[summary.intentKey === 'messages.permission.intent.tool' ? 'mcp' : action || ''] || (
       <Lock theme='outline' size={ICON_SIZE} fill={iconColors.secondary} data-testid='permission-icon-generic' />
     )
   );
@@ -83,9 +114,18 @@ const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ messag
             <Text className='text-13px text-danger'>{t('messages.permission.destructiveWarning')}</Text>
           </div>
         )}
-        {summary.command && (
+        {visibleMcpIdentity && (
+          <div
+            className='rd-6px p-x-10px p-y-8px font-mono text-12px text-t-secondary [word-break:break-all]'
+            style={{ background: 'var(--bg-2)' }}
+            data-testid='permission-mcp-identity'
+          >
+            {t('messages.confirmation.allowMCPTool', visibleMcpIdentity)}
+          </div>
+        )}
+        {visibleCommand && (
           <div className='rd-6px p-x-10px p-y-8px' style={{ background: 'var(--bg-2)' }}>
-            <Text className='font-mono text-12px text-t-secondary [word-break:break-all]'>{summary.command}</Text>
+            <Text className='font-mono text-12px text-t-secondary [word-break:break-all]'>{visibleCommand}</Text>
           </div>
         )}
         {!hasResponded && (
@@ -100,6 +140,10 @@ const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ messag
                   // casual default — mute it so auto-approving deletes is deliberate.
                   const isAlwaysAllow = /always/i.test(value);
                   const deEmphasize = isDeny || (summary.destructive && isAlwaysAllow);
+                  const optionParams =
+                    visibleMcpIdentity && value === 'proceed_always'
+                      ? { ...option.params, ...visibleMcpIdentity }
+                      : option.params;
                   return (
                     <Button
                       key={value || `option_${index}`}
@@ -113,7 +157,7 @@ const MessagePermission: React.FC<MessagePermissionProps> = React.memo(({ messag
                       onClick={() => void handleConfirm(value)}
                       data-testid={`message-permission-option-${value || `option_${index}`}`}
                     >
-                      {t(option.label, { ...option.params, defaultValue: option.label })}
+                      {t(option.label, { ...optionParams, defaultValue: option.label })}
                     </Button>
                   );
                 })}

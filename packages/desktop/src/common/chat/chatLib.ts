@@ -420,6 +420,13 @@ export type TMessage =
   | IMessageAvailableCommands;
 
 // 统一所有需要用户交互的用户类型
+export interface IMcpConfirmationIdentity {
+  /** Exact server identity used by the backend approval authority. */
+  server_name: string;
+  /** Exact raw tool name used by the backend approval authority. */
+  tool_name: string;
+}
+
 export interface IConfirmation<Option extends any = any> {
   title?: string;
   id: string;
@@ -436,6 +443,11 @@ export interface IConfirmation<Option extends any = any> {
    * Used for "always allow" permission memory
    */
   command_type?: string;
+  /**
+   * Raw identity for an exact MCP-tool approval. This is data, not display
+   * text; renderers must visibly escape control and bidi characters.
+   */
+  mcp_identity?: IMcpConfirmationIdentity;
 }
 
 const isObject = (value: unknown): value is Record<string, unknown> =>

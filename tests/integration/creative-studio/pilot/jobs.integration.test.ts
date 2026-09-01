@@ -62,6 +62,7 @@ type HarnessOptions = {
   adapterMode?: AdapterMode;
   submitGate?: Promise<void>;
   listProvidersGate?: Promise<void>;
+  onListProvidersStarted?: () => void;
   publicationGate?: Promise<void>;
   publicationFailureTailGate?: Promise<void>;
   cancellationGate?: Promise<void>;
@@ -446,6 +447,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
     adapters,
     listProviders: async () => {
       calls.listProviders += 1;
+      options.onListProvidersStarted?.();
       await options.listProvidersGate;
       return structuredClone(availableProviders);
     },
@@ -616,11 +618,15 @@ describe('schema-6 Piece job manager', () => {
     const listProvidersGate = new Promise<void>((resolve) => {
       releaseProviderLookup = resolve;
     });
-    const harness = await createHarness({ listProvidersGate });
-    for (let attempt = 0; attempt < 100 && harness.calls.listProviders === 0; attempt += 1) {
-      // eslint-disable-next-line no-await-in-loop -- wait for the scheduler's already-loaded context to reach the gate.
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    }
+    let markProviderLookupStarted: (() => void) | undefined;
+    const providerLookupStarted = new Promise<void>((resolve) => {
+      markProviderLookupStarted = resolve;
+    });
+    const harness = await createHarness({
+      listProvidersGate,
+      onListProvidersStarted: () => markProviderLookupStarted?.(),
+    });
+    await providerLookupStarted;
     expect(harness.calls.listProviders).toBe(1);
     const queued = await harness.store.loadProjectV3(harness.projectId);
     await harness.store.updateProjectV3(
@@ -1950,6 +1956,40 @@ describe('schema-6 Piece job manager', () => {
       expect(project.spendAuthorizations).toHaveLength(1);
     }
   );
+
+  it('refuses a second resume while a poll-deadline recovery flight is active', async () => {
+    let releasePoll: (() => void) | undefined;
+    const pollGate = new Promise<void>((resolve) => {
+      releasePoll = resolve;
+    });
+    const harness = await createHarness({ dispatchImmediately: false });
+    const waiting = await setRestartStatus(harness, 'needs_attention');
+    harness.setPollSnapshots([{ status: 'queued' }, { status: 'succeeded', outputs: [harness.output] }]);
+    harness.setPollGate(pollGate);
+
+    await harness.manager.resumePendingJobsV3([harness.projectId]);
+    await expect.poll(() => harness.calls.poll).toBe(1);
+    expect(harness.manager.activeJobIdsV3(harness.projectId)).toEqual(new Set([harness.confirmed.jobId]));
+    await expect(
+      settleWithin(
+        harness.manager.resumeJobV3({
+          projectId: harness.projectId,
+          pieceId: harness.confirmed.pieceId,
+          jobId: harness.confirmed.jobId,
+          expectedRevision: waiting.revision,
+        })
+      )
+    ).rejects.toMatchObject({ code: 'busy' });
+
+    releasePoll?.();
+    harness.setPollGate(undefined);
+    await harness.manager.waitForIdleV3();
+    expect(harness.manager.activeJobIdsV3(harness.projectId)).toEqual(new Set());
+    expect((await harness.store.loadProjectV3(harness.projectId)).jobs[harness.confirmed.jobId]).toMatchObject({
+      status: 'succeeded',
+      providerJobId: 'provider_job_existing',
+    });
+  });
 
   it.each([
     ['invalid_media', 'no_output'],

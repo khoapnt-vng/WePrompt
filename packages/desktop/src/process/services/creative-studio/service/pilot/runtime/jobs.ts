@@ -117,6 +117,7 @@ export type StudioPilotJobManagerDepsV3 = {
 
 export type StudioPilotJobManagerV3 = {
   dispatchCommittedJobV3(projectId: string, jobId: string): Promise<void>;
+  activeJobIdsV3(projectId: string): ReadonlySet<string>;
   cancelJobV3(input: unknown): Promise<StudioCancelPieceJobResultV3>;
   resumeJobV3(input: unknown): Promise<StudioResumePieceJobResultV3>;
   retryDownloadV3(input: unknown): Promise<StudioRetryPieceDownloadResultV3>;
@@ -749,19 +750,23 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
       return candidateJob;
     };
 
-    const schedulerTail = active.get(key);
+    const schedulerTail = kind === 'download' ? active.get(key) : undefined;
     let candidateJob: StudioPieceJobV3;
-    if (schedulerTail !== undefined) {
+    if (active.has(key)) {
+      // A download recovery can observe a terminal durable failure while the scheduler Promise is
+      // only waiting for its final microtask to unwind. A poll-deadline recovery is nonterminal:
+      // its active scheduler may keep polling for the full provider deadline, so a second public
+      // resume must fail fast instead of joining that long-lived flight.
+      if (schedulerTail === undefined) throw new CreativeStudioPilotServiceErrorV3('busy');
       try {
-        candidateJob = await loadEligibleCandidate();
+        await loadEligibleCandidate();
       } catch {
         // Preserve the public arbitration contract for ordinary queued/running work, stale
         // recovery requests, and mismatched targets while this Job is already owned in memory.
         throw new CreativeStudioPilotServiceErrorV3('busy');
       }
-      // The durable failure is already renderer-actionable, but its scheduler Promise may remain
-      // registered until the same microtask unwinds. Join only that proven terminal/actionable tail;
-      // never make an ineligible recovery request wait on ordinary queued or running provider work.
+      // The terminal download failure is already renderer-actionable, but its scheduler Promise may
+      // remain registered until the same microtask unwinds. Join only that proven terminal tail.
       await schedulerTail;
       if (disposed) throw new CreativeStudioPilotServiceErrorV3('runtime_inactive');
       if (providerCancellationClaims.has(key)) throw new CreativeStudioPilotServiceErrorV3('busy');
@@ -865,6 +870,11 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
   };
 
   return {
+    activeJobIdsV3(projectId) {
+      const prefix = `${projectId}\0`;
+      return new Set([...active.keys()].filter((key) => key.startsWith(prefix)).map((key) => key.slice(prefix.length)));
+    },
+
     async dispatchCommittedJobV3(projectId, jobId) {
       if (disposed) throw new CreativeStudioPilotServiceErrorV3('runtime_inactive');
       if (providerCancellationClaims.has(executionKey(projectId, jobId))) {

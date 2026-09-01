@@ -72,11 +72,24 @@ describe('resolveStudioPieceRouteAndRateV3', () => {
   });
 
   it('fails closed when no eligible image route exists', async () => {
-    await expect(
-      resolveStudioPieceRouteAndRateV3(resolver([route('offline', { health: 'unavailable' })]), {
-        aspectRatio: '16:9',
-        resolution: '720p',
-      })
-    ).rejects.toBeInstanceOf(StudioPieceRouteResolutionErrorV3);
+    const refusal = resolveStudioPieceRouteAndRateV3(resolver([route('offline', { health: 'unavailable' })]), {
+      aspectRatio: '16:9',
+      resolution: '720p',
+    });
+    await expect(refusal).rejects.toBeInstanceOf(StudioPieceRouteResolutionErrorV3);
+    await expect(refusal).rejects.toMatchObject({ code: 'route_incompatible' });
+  });
+
+  it('distinguishes an unreadable route catalogue from incompatible settings', async () => {
+    const refusal = resolveStudioPieceRouteAndRateV3(
+      {
+        listGenerationRoutes: async () => {
+          throw new Error('provider storage unavailable');
+        },
+      },
+      { aspectRatio: '16:9', resolution: '720p' }
+    );
+
+    await expect(refusal).rejects.toMatchObject({ code: 'route_catalog_unavailable' });
   });
 });

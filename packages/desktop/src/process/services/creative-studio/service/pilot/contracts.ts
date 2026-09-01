@@ -12,6 +12,7 @@ import {
   type StudioConfirmPreparedPhotoRequestV3,
   type StudioCreateProjectRequestV3,
   type StudioDeleteProjectRequestV3,
+  type StudioDiscardPreparedPhotoRequestV3,
   type StudioExportPieceRequestV3,
   type StudioImportPhotoRequestV3,
   type StudioPiecePhotoSettingsV3,
@@ -21,7 +22,7 @@ import {
   type StudioRetryPieceDownloadRequestV3,
   type StudioResumePieceJobRequestV3,
 } from '@/common/types/project/creativeStudioTypes';
-import { parseStudioMutationBatchV3 } from '../schema2/mutations/pieceCatalogV3';
+import { parseStudioMutationBatchV3, StudioMutationErrorV3 } from '../schema2/mutations/pieceCatalogV3';
 
 const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const DELETION_CLAIM = /^studio-delete-v3_[A-Za-z0-9_-]{32,256}$/;
@@ -49,14 +50,16 @@ const CONFIRM_PREPARED_PHOTO_KEYS = new Set([
   'explicitHumanConfirmation',
   'duplicateChargeAcknowledged',
 ]);
+const DISCARD_PREPARED_PHOTO_KEYS = new Set(['reservationId', 'quoteId', 'quoteRevision']);
 const PHOTO_SETTINGS_KEYS = new Set(['aspectRatio', 'resolution']);
 
 export class CreativeStudioPilotContractErrorV3 extends Error {
-  readonly code = 'invalid_payload' as const;
+  readonly code: 'invalid_payload' | 'invalid_handle';
 
-  constructor() {
-    super('invalid_payload');
+  constructor(code: 'invalid_payload' | 'invalid_handle' = 'invalid_payload') {
+    super(code);
     this.name = 'CreativeStudioPilotContractErrorV3';
+    this.code = code;
   }
 }
 
@@ -207,11 +210,32 @@ export const parseStudioConfirmPreparedPhotoRequestV3 = (value: unknown): Studio
   };
 };
 
+/** Parses only the identity of the provisional quote the renderer is declining. */
+export const parseStudioDiscardPreparedPhotoRequestV3 = (value: unknown): StudioDiscardPreparedPhotoRequestV3 => {
+  const snapshot = snapshotExactRecord(value, DISCARD_PREPARED_PHOTO_KEYS);
+  if (
+    snapshot === null ||
+    !isSafeId(snapshot.reservationId) ||
+    !isSafeId(snapshot.quoteId) ||
+    !isPositiveRevision(snapshot.quoteRevision)
+  ) {
+    return invalidPayload();
+  }
+  return {
+    reservationId: snapshot.reservationId,
+    quoteId: snapshot.quoteId,
+    quoteRevision: snapshot.quoteRevision,
+  };
+};
+
 /** Reuses the single hostile-input-safe schema-6 mutation parser behind the Pilot service name. */
 export const parseStudioApplyMutationBatchRequestV3 = (value: unknown): StudioApplyMutationBatchRequestV3 => {
   try {
     return parseStudioMutationBatchV3(value);
-  } catch {
+  } catch (error) {
+    if (error instanceof StudioMutationErrorV3 && error.reasonCode === 'invalid_handle') {
+      throw new CreativeStudioPilotContractErrorV3('invalid_handle');
+    }
     return invalidPayload();
   }
 };

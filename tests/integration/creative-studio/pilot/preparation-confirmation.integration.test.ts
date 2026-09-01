@@ -641,6 +641,22 @@ describe('schema-6 photo preparation and confirmation', () => {
     expect(Object.keys(reloaded.jobs)).toHaveLength(2);
   });
 
+  it('invalidates sibling prepared intents after a create changes authored canvas meaning', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    const first = await prepareCreate(harness);
+    const sibling = await prepareCreate(harness);
+
+    expect(harness.preparedPhotos.list(harness.project().id)).toEqual([
+      expect.objectContaining({ reservationId: first.quote.reservationId }),
+      expect.objectContaining({ reservationId: sibling.quote.reservationId }),
+    ]);
+
+    await expect(confirmPrepared(harness, first)).resolves.toMatchObject({ status: 'queued' });
+    expect(harness.preparedPhotos.list(harness.project().id)).toEqual([]);
+    await expect(confirmPrepared(harness, sibling)).rejects.toMatchObject({ code: 'quote_not_found' });
+    expect((await harness.store.loadProjectV3(harness.project().id)).pieceOrder).toHaveLength(1);
+  });
+
   it('records retry confirmation as runtime activity without staling an unrelated prepared create', async () => {
     const harness = await createHarness({ policy: 'within_cap' });
     const predecessor = await createRetryablePiece(harness, 'provider_unavailable');

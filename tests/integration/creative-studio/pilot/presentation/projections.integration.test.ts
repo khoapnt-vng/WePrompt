@@ -9,6 +9,7 @@
 
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+  STUDIO_MAX_PIECES_V3,
   type StudioPieceJobV3,
   type StudioProjectV3,
   type StudioRendererPreparedPhotoQuoteV3,
@@ -177,14 +178,25 @@ describe('CS4 Pilot renderer-safe projections', () => {
     const real = await fixture('generated', 'failed');
     const failed = await loadProject(real);
     const sourceJob = jobOf(failed, real.jobId);
+    const sourceAuthorization = failed.spendAuthorizations.find(
+      (authorization) => authorization.id === sourceJob.authorizationId
+    )!;
     const failedActivity = toStudioRendererCapabilityActivityV3(failed, []);
     expect(failedActivity.jobs).toEqual([
       {
         jobId: sourceJob.id,
         pieceId: real.pieceId,
         status: 'failed',
+        createdAt: sourceJob.createdAt,
+        updatedAt: sourceJob.updatedAt,
         progress: null,
         error: sourceJob.error,
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        authorization: {
+          confirmedAt: sourceAuthorization.confirmedAt,
+        },
         canCancel: false,
         canRetry: true,
         canRetryDownload: false,
@@ -220,6 +232,16 @@ describe('CS4 Pilot renderer-safe projections', () => {
       { jobId: sourceJob.id, canRetry: false },
       { jobId: confirmed.jobId, canRetry: true },
     ]);
+    expect(childActivity.jobs[1]).toMatchObject({
+      retryOfJobId: sourceJob.id,
+      retryReason: 'provider_failure',
+      duplicateChargeAcknowledged: false,
+      authorization: {
+        confirmedAt: failedRetry.spendAuthorizations.find(
+          (authorization) => authorization.id === failedRetry.jobs[confirmed.jobId]!.authorizationId
+        )!.confirmedAt,
+      },
+    });
 
     // Projection-state matrix boundary: queued_local is a pre-submit form of the same public Job.
     const queued = explicitProjectTransform(failed, (draft) => {
@@ -260,6 +282,10 @@ describe('CS4 Pilot renderer-safe projections', () => {
       canRetryDownload: true,
       canResume: false,
     });
+    expect(toStudioRendererCapabilityActivityV3(downloadFailed, [], new Set([jobId])).jobs[0]).toMatchObject({
+      canRetryDownload: true,
+      canResume: false,
+    });
 
     const pollDeadline = explicitProjectTransform(downloadFailed, (draft) => {
       Object.assign(draft.jobs[jobId]!, {
@@ -275,6 +301,10 @@ describe('CS4 Pilot renderer-safe projections', () => {
       canRetry: false,
       canRetryDownload: false,
       canResume: true,
+    });
+    expect(toStudioRendererCapabilityActivityV3(pollDeadline, [], new Set([jobId])).jobs[0]).toMatchObject({
+      canRetryDownload: false,
+      canResume: false,
     });
 
     const failedReal = await fixture('generated', 'failed');
@@ -550,7 +580,10 @@ describe('CS4 Pilot renderer-safe projections', () => {
         duplicateChargeAcknowledgementRequired: true,
         requiresExplicitHumanAction: false,
       }),
-      alterQuote(validQuote, { mode: 'retry', proposedHandle: 'not-null' } as never),
+      alterQuote(validQuote, { orderIndex: -1 }),
+      alterQuote(validQuote, { orderIndex: STUDIO_MAX_PIECES_V3 }),
+      alterQuote(validQuote, { mode: 'retry', proposedHandle: 'not-null', orderIndex: null } as never),
+      alterQuote(validQuote, { mode: 'retry', proposedHandle: null, orderIndex: 0 } as never),
     ];
     for (const malformedQuote of malformedQuotes) {
       expect(() => toStudioRendererCapabilityActivityV3(project, [malformedQuote])).toThrow(
