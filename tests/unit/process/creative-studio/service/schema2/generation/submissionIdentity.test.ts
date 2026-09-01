@@ -34,10 +34,10 @@ const makePersistedPieceJob = (
   retryReason,
   composition: {
     inputs: {
-      schemaVersion: 2 as const,
+      schemaVersion: 3 as const,
       projectRevisionAtPreparation: 1,
       authoringRevision: 1,
-      authoringFingerprintVersion: 1 as const,
+      authoringFingerprintVersion: 2 as const,
       authoringFingerprint: 'a'.repeat(64),
       brief: '',
       rules: [],
@@ -45,7 +45,7 @@ const makePersistedPieceJob = (
       purpose: 'piece_image' as const,
       conditioningInputs: [] as [],
       route: { providerId: 'provider_1', adapterId: 'weprompt-image-v1' as const, model: 'image-model' },
-      instructionProfile: 'weprompt-image-v1.piece-image.v1',
+      instructionProfile: 'weprompt-image-v1.piece-image.v2',
     },
     prompt: `PHOTO REQUEST\n${words}`,
   },
@@ -230,6 +230,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 0,
       words: 'A quiet photograph.',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
     const fingerprint = createStudioAuthoringFingerprintV3({ project, prepared });
     const runtimeOnlyChange = {
@@ -260,6 +261,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 0,
       words: 'A quiet photograph.',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
     const withoutPolicy = createStudioAuthoringFingerprintV3({ project, prepared });
     const withPolicyProject = {
@@ -288,6 +290,50 @@ describe('inactive Piece identities and authoring fingerprint', () => {
     expect(createStudioAuthoringFingerprintV3({ project: { ...withPolicyProject, spendPolicy: null }, prepared })).toBe(
       withoutPolicy
     );
+  });
+
+  it('binds ordered reference Piece and asset facts into authoring authority', () => {
+    const project = createEmptyStudioProjectV3(
+      { name: 'Reference-bound photograph', brief: '' },
+      'project_1',
+      '2026-08-30T00:00:00.000Z'
+    );
+    const first = {
+      pieceId: 'piece_reference_1',
+      assetId: 'asset_reference_1',
+      sha256: '1'.repeat(64),
+      mimeType: 'image/png' as const,
+      byteSize: 128,
+    };
+    const second = {
+      pieceId: 'piece_reference_2',
+      assetId: 'asset_reference_2',
+      sha256: '2'.repeat(64),
+      mimeType: 'image/webp' as const,
+      byteSize: 256,
+    };
+    const prepared = {
+      mode: 'create' as const,
+      reservedPieceId: 'piece_target',
+      proposedHandle: 'target',
+      orderIndex: 0,
+      words: 'A reference-guided photograph.',
+      settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [first, second],
+    };
+    const fingerprint = createStudioAuthoringFingerprintV3({ project, prepared });
+    expect(
+      createStudioAuthoringFingerprintV3({
+        project,
+        prepared: { ...prepared, conditioningInputs: [second, first] },
+      })
+    ).not.toBe(fingerprint);
+    expect(
+      createStudioAuthoringFingerprintV3({
+        project,
+        prepared: { ...prepared, conditioningInputs: [first, { ...second, sha256: '3'.repeat(64) }] },
+      })
+    ).not.toBe(fingerprint);
   });
 
   it('canonicalizes Piece-map insertion order and separates create from retry authority', () => {
@@ -327,6 +373,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 2,
       words: '東京の夜景',
       settings: { aspectRatio: '16:9' as const, resolution: '1080p' as const },
+      conditioningInputs: [],
     };
     const first = createStudioAuthoringFingerprintV3({ project, prepared: create });
     const reordered = createStudioAuthoringFingerprintV3({
@@ -341,10 +388,11 @@ describe('inactive Piece identities and authoring fingerprint', () => {
         sourceJobId: 'job_a',
         words: '東京の夜景',
         settings: create.settings,
+        conditioningInputs: [],
       },
     });
     expect(first).toMatch(/^[a-f0-9]{64}$/);
-    expect(first).toBe('50d0987ab810157168d8682ff31696159351df68dcf700e5559688b20a2f86f1');
+    expect(first).toBe('a004637e4cc13dd47db2cf3144679cb07de76954c5c4ca18c405fa971af83946');
     expect(first).toBe(reordered);
     expect(first).not.toBe(retry);
     expect(
@@ -427,9 +475,10 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       sourceJobId: 'job_1',
       words: 'Exact words',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
     const base = createStudioAuthoringFingerprintV3({ project, prepared });
-    expect(base).toBe('a7f813be705d6b86e07953cd02263dfccaebf10d717e717bb79e0b6ba154d8d6');
+    expect(base).toBe('6bd6205cc0bbb17534edd9c51c26f98e051cc10389a7e5f7df6b3bd90cf5ed75');
     const { jobs: omittedJobs, ...projectWithoutJobs } = project;
     void omittedJobs;
     expect(() =>
@@ -561,6 +610,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 1,
       words: 'A quiet photograph.',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
 
     expect(createStudioAuthoringFingerprintV3({ project, prepared: create })).toMatch(/^[a-f0-9]{64}$/);
@@ -591,6 +641,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 0,
       words: 'A quiet photograph.',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
 
     expect(() =>
@@ -677,6 +728,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
           orderIndex: 1,
           words: 'A quiet portrait.',
           settings: { aspectRatio: '4:3', resolution: '1080p' },
+          conditioningInputs: [],
         },
       })
     ).toMatch(/^[a-f0-9]{64}$/);
@@ -690,6 +742,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
           orderIndex: 1,
           words: 'A quiet portrait.',
           settings: { aspectRatio: '3:4', resolution: '720p' },
+          conditioningInputs: [],
         },
       })
     ).toMatch(/^[a-f0-9]{64}$/);
@@ -710,6 +763,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
             sourceJobId: 'job_2',
             words: 'Retry exactly.',
             settings: { aspectRatio: '1:1', resolution: '720p' },
+            conditioningInputs: [],
           },
         })
       ).toMatch(/^[a-f0-9]{64}$/);
@@ -747,6 +801,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       orderIndex: 1,
       words: 'A new photograph.',
       settings: { aspectRatio: '16:9' as const, resolution: '1080p' as const },
+      conditioningInputs: [],
     };
     const { name: ignoredName, ...missingName } = project;
     void ignoredName;
@@ -805,6 +860,7 @@ describe('inactive Piece identities and authoring fingerprint', () => {
       sourceJobId: 'job_1',
       words: 'Retry exactly.',
       settings: { aspectRatio: '1:1' as const, resolution: '720p' as const },
+      conditioningInputs: [],
     };
     const invalidRetries: unknown[] = [
       { ...retry, existingPieceId: 'piece_missing' },

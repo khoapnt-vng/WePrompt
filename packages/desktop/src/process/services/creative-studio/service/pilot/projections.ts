@@ -8,6 +8,7 @@ import { types as nodeTypes } from 'node:util';
 import {
   STUDIO_MAX_JOBS_PER_PIECE_V3,
   STUDIO_MAX_JOBS_V3,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_SPEND_AUTHORIZATIONS_V3,
   type StudioPieceJobV3,
@@ -35,6 +36,7 @@ const PREPARED_QUOTE_KEYS = new Set([
   'targetPieceId',
   'words',
   'settings',
+  'referencePieceIds',
   'currency',
   'lowerMinorUnits',
   'upperMinorUnits',
@@ -131,6 +133,7 @@ const requireProject = (value: unknown): StudioProjectV3 => {
 const snapshotPreparedQuote = (value: unknown, projectId: string): StudioRendererPreparedPhotoQuoteV3 => {
   const snapshot = snapshotExactRecord(value, PREPARED_QUOTE_KEYS);
   const settings = snapshotPhotoSettings(snapshot?.settings);
+  const referencePieceIds = snapshotDenseArray(snapshot?.referencePieceIds);
   let normalizedWords: string;
   try {
     normalizedWords = normalizeStudioPieceWordsV3(snapshot?.words as string);
@@ -147,6 +150,10 @@ const snapshotPreparedQuote = (value: unknown, projectId: string): StudioRendere
     typeof snapshot.words !== 'string' ||
     normalizedWords !== snapshot.words ||
     settings === null ||
+    referencePieceIds === null ||
+    referencePieceIds.length > STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3 ||
+    referencePieceIds.some((pieceId) => !isSafeId(pieceId)) ||
+    new Set(referencePieceIds).size !== referencePieceIds.length ||
     typeof snapshot.currency !== 'string' ||
     !CURRENCY.test(snapshot.currency) ||
     !isPositiveInteger(snapshot.lowerMinorUnits) ||
@@ -168,6 +175,7 @@ const snapshotPreparedQuote = (value: unknown, projectId: string): StudioRendere
     targetPieceId: snapshot.targetPieceId,
     words: snapshot.words,
     settings,
+    referencePieceIds: referencePieceIds as string[],
     currency: snapshot.currency,
     lowerMinorUnits: snapshot.lowerMinorUnits,
     upperMinorUnits: snapshot.upperMinorUnits,
@@ -320,6 +328,7 @@ const currentProvenance = (
     producerJobId: producer.id,
     model: producer.provider.model,
     instructionProfile: producer.composition.inputs.instructionProfile,
+    conditioningPieceIds: producer.composition.inputs.conditioningInputs.map((input) => input.pieceId),
     recordedSpend: {
       currency: receipt.currency,
       totalMinorUnits: receipt.totalMinorUnits,

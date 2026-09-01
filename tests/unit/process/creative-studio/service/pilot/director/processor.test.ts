@@ -43,6 +43,7 @@ const prepareCommand = (): StudioPilotDirectorCommand => ({
   words: 'Neon reflected in wet pavement',
   settings: { aspectRatio: '16:9', resolution: '1080p' },
   suggestedHandle: 'night_reflection',
+  referencePieceIds: ['piece_reference'],
 });
 
 const renameCommand = (): StudioPilotDirectorCommand => ({
@@ -157,6 +158,7 @@ describe('Pilot Director command processor', () => {
       words: command.words,
       settings: command.settings,
       suggestedHandle: command.suggestedHandle,
+      referencePieceIds: command.referencePieceIds,
     });
   });
 

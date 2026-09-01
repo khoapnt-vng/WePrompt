@@ -40,6 +40,7 @@ const fixture = async (
     brief: origin === 'generated' ? 'One quiet photograph.' : '',
     words: 'Moonlight reflected on calm water.',
     suggestedHandle: 'light_on_water',
+    referencePieceIds: [],
     format: origin === 'imported' ? 'jpeg' : 'png',
     fileName: origin === 'imported' ? 'عکس‌های شب.jpg' : undefined,
   });
@@ -59,6 +60,7 @@ const prepareCreateQuote = async (value: PilotPhotoFixtureV3): Promise<StudioRen
     words: 'A silver lake at night.',
     settings: { aspectRatio: '16:9', resolution: '1080p' },
     suggestedHandle: 'silver_lake',
+    referencePieceIds: [],
   });
   return prepared.quote;
 };
@@ -138,7 +140,8 @@ describe('CS4 Pilot renderer-safe projections', () => {
               createdAt: asset.createdAt,
               producerJobId: job.id,
               model: 'image-model-v1',
-              instructionProfile: 'weprompt-image-v1.piece-image.v1',
+              instructionProfile: 'weprompt-image-v1.piece-image.v2',
+              conditioningPieceIds: [],
               recordedSpend: { currency: receipt.currency, totalMinorUnits: receipt.totalMinorUnits },
             },
           },
@@ -150,7 +153,8 @@ describe('CS4 Pilot renderer-safe projections', () => {
       createdAt: asset.createdAt,
       producerJobId: job.id,
       model: 'image-model-v1',
-      instructionProfile: 'weprompt-image-v1.piece-image.v1',
+      instructionProfile: 'weprompt-image-v1.piece-image.v2',
+      conditioningPieceIds: [],
       recordedSpend: { currency: receipt.currency, totalMinorUnits: receipt.totalMinorUnits },
     });
   });

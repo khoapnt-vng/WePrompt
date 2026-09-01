@@ -102,6 +102,7 @@ export const createStudioPilotDirectorProcessor = (
           words: command.words,
           settings: { ...command.settings },
           suggestedHandle: command.suggestedHandle,
+          referencePieceIds: [...command.referencePieceIds],
         });
         return {
           ...base(command),

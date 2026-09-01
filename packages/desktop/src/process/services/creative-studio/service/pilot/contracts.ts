@@ -7,6 +7,7 @@
 import { types as nodeTypes } from 'node:util';
 import {
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   type StudioApplyMutationBatchRequestV3,
   type StudioCancelPieceJobRequestV3,
   type StudioConfirmPreparedPhotoRequestV3,
@@ -36,6 +37,7 @@ const PREPARE_PHOTO_KEYS = new Set([
   'words',
   'settings',
   'suggestedHandle',
+  'referencePieceIds',
 ]);
 const RETRY_PIECE_JOB_KEYS = new Set(['mode', 'projectId', 'expectedAuthoringRevision', 'pieceId', 'sourceJobId']);
 const IMPORT_PHOTO_KEYS = new Set(['projectId', 'expectedAuthoringRevision']);
@@ -99,6 +101,38 @@ const isSuggestedHandle = (value: unknown): value is string | null =>
   value === null ||
   (typeof value === 'string' && value.length > 0 && value.length <= STUDIO_MAX_GENERATION_PROMPT_LENGTH);
 
+const snapshotReferencePieceIds = (value: unknown): string[] | null => {
+  try {
+    if (
+      !Array.isArray(value) ||
+      nodeTypes.isProxy(value) ||
+      Object.getPrototypeOf(value) !== Array.prototype ||
+      value.length > STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3
+    ) {
+      return null;
+    }
+    const ownKeys = Reflect.ownKeys(value);
+    if (
+      ownKeys.length !== value.length + 1 ||
+      ownKeys.at(-1) !== 'length' ||
+      ownKeys.slice(0, -1).some((key, index) => key !== String(index))
+    ) {
+      return null;
+    }
+    const ids: string[] = [];
+    for (let index = 0; index < value.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+      if (descriptor === undefined || !descriptor.enumerable || !Object.hasOwn(descriptor, 'value')) return null;
+      const candidate = descriptor.value;
+      if (!isSafeId(candidate) || ids.includes(candidate)) return null;
+      ids.push(candidate);
+    }
+    return ids;
+  } catch {
+    return null;
+  }
+};
+
 const snapshotPhotoSettings = (value: unknown): StudioPiecePhotoSettingsV3 | null => {
   const snapshot = snapshotExactRecord(value, PHOTO_SETTINGS_KEYS);
   if (
@@ -137,6 +171,7 @@ export const parseStudioPreparePhotoRequestV3 = (value: unknown): StudioPrepareP
   const snapshot = snapshotExactRecord(value, PREPARE_PHOTO_KEYS);
   const settings = snapshotPhotoSettings(snapshot?.settings);
   const suggestedHandle = snapshot?.suggestedHandle;
+  const referencePieceIds = snapshotReferencePieceIds(snapshot?.referencePieceIds);
   if (
     snapshot === null ||
     snapshot.mode !== 'create' ||
@@ -147,7 +182,8 @@ export const parseStudioPreparePhotoRequestV3 = (value: unknown): StudioPrepareP
     snapshot.words.length > STUDIO_MAX_GENERATION_PROMPT_LENGTH ||
     snapshot.words.normalize('NFKC').replace(/\s+/gu, ' ').trim().length === 0 ||
     settings === null ||
-    !isSuggestedHandle(suggestedHandle)
+    !isSuggestedHandle(suggestedHandle) ||
+    referencePieceIds === null
   ) {
     return invalidPayload();
   }
@@ -158,6 +194,7 @@ export const parseStudioPreparePhotoRequestV3 = (value: unknown): StudioPrepareP
     words: snapshot.words,
     settings,
     suggestedHandle,
+    referencePieceIds,
   };
 };
 

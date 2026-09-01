@@ -2162,7 +2162,7 @@ describe('inactive fixed-price Piece quote', () => {
     const composition = composeStudioPieceGenerationV3({
       projectRevisionAtPreparation: 8,
       authoringRevision: 3,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'e'.repeat(64),
       brief: 'One standalone photograph.',
       rules: [],
@@ -2184,7 +2184,7 @@ describe('inactive fixed-price Piece quote', () => {
       projectId: 'project_1',
       projectRevisionAtPreparation: 8,
       authoringRevision: 3,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'e'.repeat(64),
       rateCardDigest: 'f'.repeat(64),
       currency: 'USD',

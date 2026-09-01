@@ -15,7 +15,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { parseStudioApplyMutationBatchRequestV3, parseStudioPreparePhotoRequestV3 } from '../contracts';
 
-export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 11 as const;
+export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 12 as const;
 export const STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES = 64 * 1024;
 export const STUDIO_PILOT_DIRECTOR_RECEIPT_MAX_BYTES = 1024 * 1024;
 export const STUDIO_PILOT_DIRECTOR_MAX_DEADLINE_MS = 5 * 60 * 1000;
@@ -43,6 +43,7 @@ export type StudioPilotDirectorPreparePhotoCommand = StudioPilotDirectorCommandB
   words: string;
   settings: StudioPiecePhotoSettingsV3;
   suggestedHandle: string | null;
+  referencePieceIds: string[];
 };
 
 export type StudioPilotDirectorRenamePieceCommand = StudioPilotDirectorCommandBase & {
@@ -140,6 +141,7 @@ const PREPARE_PHOTO_KEYS = new Set([
   'words',
   'settings',
   'suggestedHandle',
+  'referencePieceIds',
 ]);
 const RENAME_PIECE_KEYS = new Set([...COMMON_KEYS, 'expectedAuthoringRevision', 'pieceId', 'handle']);
 const SUCCEEDED_RECEIPT_KEYS = new Set([
@@ -345,6 +347,7 @@ export const parseStudioPilotDirectorCommand = (value: unknown): StudioPilotDire
         words: snapshot.words,
         settings: snapshot.settings,
         suggestedHandle: snapshot.suggestedHandle,
+        referencePieceIds: snapshot.referencePieceIds,
       });
       return { status: 'valid', command: snapshot as StudioPilotDirectorPreparePhotoCommand };
     }

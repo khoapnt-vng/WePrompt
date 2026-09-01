@@ -42,6 +42,7 @@ import {
   type StudioE2EFakeTaskScript,
 } from '@/process/services/creative-studio/adapters/e2eFakeAdapter';
 import { createStudioProviderResolver } from '@/process/services/creative-studio/providerResolver';
+import { createStudioConnectionManifestV1 } from '@/process/services/creative-studio/store/connectionManifest';
 import {
   createCreativeStudioPilotRuntimeV3,
   type CreativeStudioPilotEntryPointV3,
@@ -84,6 +85,7 @@ export type Phase4PrepareCreateOptions = {
   words?: string;
   settings?: StudioPiecePhotoSettingsV3;
   suggestedHandle?: string | null;
+  referencePieceIds?: string[];
 };
 
 export type Phase4ConfirmOptions = {
@@ -313,22 +315,27 @@ export const createPhase4Harness = async (options: Phase4HarnessOptions = {}): P
     await action.released;
   };
 
-  const constructRuntime = (): {
+  const connectionManifest = createStudioConnectionManifestV1({ rootDir });
+
+  const constructRuntime = async (): Promise<{
     runtime: CreativeStudioPilotRuntimeV3;
     fake: StudioE2EFakeBundle;
-  } => {
+  }> => {
     const nextFake = createStudioE2EFakeBundle({ rootDir, catalogProfile: 'lifecycle', remoteState });
+    for (const connection of nextFake.connections) {
+      if (connection.adapterId === 'weprompt-image-v1' && connection.model === 'weprompt-e2e-image') {
+        // Exercise the same durable manifest boundary as production rather than injecting a route catalog.
+        // eslint-disable-next-line no-await-in-loop -- the manifest serializes its own crash-safe writes.
+        await connectionManifest.saveConnection(connection);
+      }
+    }
     const listProviders = async () => {
       dependencyCounts.listProviders += 1;
       return [structuredClone(nextFake.provider)];
     };
     const listConnections = async () => {
       dependencyCounts.listConnections += 1;
-      return structuredClone(
-        nextFake.connections.filter(
-          (connection) => connection.adapterId === 'weprompt-image-v1' && connection.model === 'weprompt-e2e-image'
-        )
-      );
+      return connectionManifest.listConnections();
     };
     const providerResolver = createStudioProviderResolver({ listProviders, listConnections });
     const baseAdapters = createGenerationProviderAdapterRegistry({ image: { workspaceDir: sandbox } });
@@ -366,7 +373,7 @@ export const createPhase4Harness = async (options: Phase4HarnessOptions = {}): P
   const start = async (): Promise<void> => {
     if (cleaned) throw new Error('Phase 4 harness has been cleaned up');
     if (runtime !== null || fake !== null) return;
-    const constructed = constructRuntime();
+    const constructed = await constructRuntime();
     const nextRuntime = constructed.runtime;
     const nextFake = constructed.fake;
     fake = nextFake;
@@ -496,7 +503,7 @@ export const createPhase4Harness = async (options: Phase4HarnessOptions = {}): P
     },
     async createDetachedRuntime() {
       if (cleaned) throw new Error('Phase 4 harness has been cleaned up');
-      const constructed = constructRuntime();
+      const constructed = await constructRuntime();
       let disposed = false;
       const detached: Phase4DetachedRuntime = {
         runtime: constructed.runtime,
@@ -541,6 +548,7 @@ export const createPhase4Harness = async (options: Phase4HarnessOptions = {}): P
         words: prepareOptions.words ?? 'A quiet photograph in soft morning light.',
         settings: prepareOptions.settings ?? DEFAULT_SETTINGS,
         suggestedHandle: prepareOptions.suggestedHandle ?? null,
+        referencePieceIds: prepareOptions.referencePieceIds ?? [],
       });
     },
     async prepareRetry(projectId, pieceId, sourceJobId, revision) {

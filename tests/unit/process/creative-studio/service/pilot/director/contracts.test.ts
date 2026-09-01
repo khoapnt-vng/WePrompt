@@ -32,9 +32,10 @@ const prepareCommand = (): StudioPilotDirectorCommand => ({
   words: 'Lantern light on rain',
   settings: { aspectRatio: '16:9', resolution: '1080p' },
   suggestedHandle: 'lantern_rain',
+  referencePieceIds: ['piece_reference'],
 });
 
-describe('Pilot Director schema-11 contracts', () => {
+describe('Pilot Director schema-12 contracts', () => {
   it.each<StudioPilotDirectorCommand>([
     { ...commandBase, policy: 'get_project_status' },
     prepareCommand(),
@@ -49,8 +50,8 @@ describe('Pilot Director schema-11 contracts', () => {
     expect(parseStudioPilotDirectorCommand(command)).toEqual({ status: 'valid', command });
   });
 
-  it('rejects schema 10 without interpreting it as schema 11', () => {
-    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 10 })).toEqual({
+  it('rejects schema 11 without interpreting it as schema 12', () => {
+    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 11 })).toEqual({
       status: 'unsupported_version',
       commandId: 'command_1',
       projectId: 'project_1',
@@ -113,7 +114,7 @@ describe('Pilot Director schema-11 contracts', () => {
   it('rejects old-version and accessor-backed receipts', () => {
     const command = prepareCommand();
     const oldReceipt = {
-      schemaVersion: 10,
+      schemaVersion: 11,
       commandId: command.commandId,
       projectId: command.projectId,
       policy: command.policy,

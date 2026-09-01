@@ -244,6 +244,7 @@ const createRunningGeneratedHarness = async (options: {
     words: 'rain on neon',
     settings: { aspectRatio: '16:9', resolution: '1080p' },
     suggestedHandle: null,
+    referencePieceIds: [],
   });
   const confirmed = await confirm.confirmPreparedPhotoV3({
     reservationId: prepared.quote.reservationId,
@@ -610,6 +611,7 @@ describe('schema-6 managed photo transactions', () => {
       words: 'A reservation that will become stale',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: 'stale_capacity_lease',
+      referencePieceIds: [],
     });
     pickerMode = 'advance';
     const advanced = await harness.media.importPhotoV3({
@@ -636,6 +638,7 @@ describe('schema-6 managed photo transactions', () => {
       words: 'The generated final slot',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: 'current_capacity_lease',
+      referencePieceIds: [],
     });
     resolvePicker!({ path: blocked, fileName: 'Imported final slot.png' });
 
@@ -664,6 +667,7 @@ describe('schema-6 managed photo transactions', () => {
         words: 'Impossible ninety-seventh Piece',
         settings: { aspectRatio: '16:9', resolution: '1080p' },
         suggestedHandle: null,
+        referencePieceIds: [],
       })
     ).rejects.toMatchObject({ code: 'project_piece_capacity_reached' });
     expect(harness.preparedPhotos.list(project.id)).toHaveLength(0);

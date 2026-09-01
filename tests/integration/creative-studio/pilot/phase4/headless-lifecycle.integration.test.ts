@@ -65,6 +65,7 @@ describe('schema-6 Pilot Phase 4 headless lifecycle', { timeout: 120_000 }, () =
       expectedAuthoringRevision: policy.authoringRevision,
       words: 'A single pool of moonlight resting on dark water.',
       suggestedHandle: 'moonlit_water',
+      referencePieceIds: [],
     });
 
     expect(prepared.quote).toMatchObject({
@@ -174,6 +175,55 @@ describe('schema-6 Pilot Phase 4 headless lifecycle', { timeout: 120_000 }, () =
         firstFrameAssetId: null,
       }),
     ]);
+  });
+
+  it('resolves two current Pieces through the durable connection manifest and forwards their exact assets', async () => {
+    const value = await harness();
+    const created = await value.createProject({
+      name: 'Referenced portrait',
+      brief: 'One coherent photograph, guided by the selected Pieces.',
+    });
+    await value.enqueueImport({ fileName: 'Red coat.png' });
+    const firstImport = await value.importPhoto(created.summary.id);
+    await value.enqueueImport({ fileName: 'Rainy street.png', bytes: Buffer.from(value.sourceBytes) });
+    const secondImport = await value.importPhoto(created.summary.id);
+    if (firstImport.status !== 'imported' || secondImport.status !== 'imported') {
+      throw new Error('Reference fixture import was cancelled');
+    }
+    const before = await value.loadSupported(created.summary.id);
+    const firstReference = before.canvas.pieces.find((piece) => piece.id === firstImport.pieceId);
+    const secondReference = before.canvas.pieces.find((piece) => piece.id === secondImport.pieceId);
+    if (
+      firstReference === undefined ||
+      firstReference.currentAsset === null ||
+      secondReference === undefined ||
+      secondReference.currentAsset === null
+    ) {
+      throw new Error('Reference fixture did not publish current assets');
+    }
+
+    value.enqueueTaskScript({ submit: { kind: 'complete', output: { kind: 'managed_file' } } });
+    const prepared = await value.prepareCreate(created.summary.id, {
+      words: 'The person in the red coat walking through the rainy street.',
+      referencePieceIds: [firstReference.id, secondReference.id],
+    });
+    expect(prepared.quote.referencePieceIds).toEqual([firstReference.id, secondReference.id]);
+    const confirmed = await value.confirm(prepared);
+    await value.waitForJob(created.summary.id, confirmed.jobId, 'succeeded');
+
+    expect(value.fake.getProviderRequestLog().requests.at(-1)).toMatchObject({
+      conditioningAssetIds: [firstReference.currentAsset.id, secondReference.currentAsset.id],
+    });
+    const resolverEvidence = await value.evidenceCounts(created.summary.id);
+    expect(resolverEvidence.resolverRouteCalls).toBeGreaterThan(0);
+    expect(resolverEvidence.providerLookups).toBeGreaterThan(0);
+    const after = await value.loadSupported(created.summary.id);
+    expect(after.canvas.pieces.find((piece) => piece.id === confirmed.pieceId)?.currentAsset?.provenance).toMatchObject(
+      {
+        origin: 'generated',
+        conditioningPieceIds: [firstReference.id, secondReference.id],
+      }
+    );
   });
 
   it.each([

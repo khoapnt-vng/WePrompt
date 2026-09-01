@@ -42,6 +42,7 @@ describe('Studio Pilot renderer client', () => {
         words: 'Light on water',
         settings: { aspectRatio: '16:9' as const, resolution: '720p' as const },
         suggestedHandle: null,
+        referencePieceIds: [],
       },
       confirm: {
         reservationId: 'reservation_1',

@@ -44,7 +44,8 @@ export type StudioPilotConfirmPhotoDepsV3 = {
   providerResolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>;
   resolveRouteAndRate?: (
     resolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>,
-    settings: StudioPiecePhotoSettingsV3
+    settings: StudioPiecePhotoSettingsV3,
+    conditioningInputCount: number
   ) => Promise<StudioPieceRouteAndRateV3>;
   dispatchCommittedJob: (projectId: string, jobId: string) => Promise<void>;
   onDispatchError?: (projectId: string, jobId: string) => void;
@@ -136,6 +137,25 @@ const reservationIdsRemainAvailable = (
   return new Set(candidates).size === candidates.length && candidates.every((candidate) => !unavailable.has(candidate));
 };
 
+const conditioningInputsRemainCurrent = (
+  project: StudioProjectV3,
+  reservation: StudioPreparedPhotoReservationV3
+): boolean =>
+  reservation.conditioningInputs.every((input) => {
+    const piece = Object.hasOwn(project.pieces, input.pieceId) ? project.pieces[input.pieceId] : undefined;
+    const asset = Object.hasOwn(project.assets, input.assetId) ? project.assets[input.assetId] : undefined;
+    return (
+      piece !== undefined &&
+      asset !== undefined &&
+      piece.currentAssetId === input.assetId &&
+      asset.projectId === project.id &&
+      asset.pieceId === input.pieceId &&
+      asset.sha256 === input.sha256 &&
+      asset.mimeType === input.mimeType &&
+      asset.byteSize === input.byteSize
+    );
+  });
+
 const assertReservationAuthoringAuthority = (
   project: StudioProjectV3,
   reservation: StudioPreparedPhotoReservationV3
@@ -150,6 +170,9 @@ const assertReservationAuthoringAuthority = (
     throw new CreativeStudioPilotServiceErrorV3('stale_quote');
   }
   if (!reservationIdsRemainAvailable(project, reservation)) {
+    throw new CreativeStudioPilotServiceErrorV3('stale_quote');
+  }
+  if (!conditioningInputsRemainCurrent(project, reservation)) {
     throw new CreativeStudioPilotServiceErrorV3('stale_quote');
   }
   if (reservation.mode === 'create') {
@@ -177,6 +200,7 @@ const createAuthoringFingerprint = (project: StudioProjectV3, reservation: Studi
           orderIndex: reservation.orderIndex,
           words: reservation.words,
           settings: reservation.settings,
+          conditioningInputs: reservation.conditioningInputs,
         },
       })
     : createStudioAuthoringFingerprintV3({
@@ -187,6 +211,7 @@ const createAuthoringFingerprint = (project: StudioProjectV3, reservation: Studi
           sourceJobId: reservation.sourceJobId,
           words: reservation.words,
           settings: reservation.settings,
+          conditioningInputs: reservation.conditioningInputs,
         },
       });
 
@@ -210,7 +235,7 @@ const rederiveQuote = (
       settings: reservation.settings,
     },
     purpose: 'piece_image',
-    conditioningInputs: [],
+    conditioningInputs: reservation.conditioningInputs,
     route: routeAndRate.provider,
     instructionProfile: deriveStudioPieceInstructionProfileV3(routeAndRate.provider),
   });
@@ -440,7 +465,11 @@ export const createStudioPilotConfirmPhotoServiceV3 = (
             throw new CreativeStudioPilotServiceErrorV3('storage_error');
           }
           assertConfirmationDecision(request, reservation, project, nowMs);
-          const routeAndRate = await resolveRouteAndRate(deps.providerResolver, reservation.settings);
+          const routeAndRate = await resolveRouteAndRate(
+            deps.providerResolver,
+            reservation.settings,
+            reservation.conditioningInputs.length
+          );
           const rederived = rederiveQuote(project, reservation, routeAndRate);
           const revalidation = revalidateStudioPieceSubmissionQuoteV3({
             reservationId: reservation.reservationId,
@@ -483,7 +512,11 @@ export const createStudioPilotConfirmPhotoServiceV3 = (
               authorizeBeforeReplace: async () => {
                 const finalNow = readClock(now);
                 assertConfirmationDecision(request, reservation, project, finalNow);
-                const finalRouteAndRate = await resolveRouteAndRate(deps.providerResolver, reservation.settings);
+                const finalRouteAndRate = await resolveRouteAndRate(
+                  deps.providerResolver,
+                  reservation.settings,
+                  reservation.conditioningInputs.length
+                );
                 const finalQuote = rederiveQuote(project, reservation, finalRouteAndRate);
                 const finalValidation = revalidateStudioPieceSubmissionQuoteV3({
                   reservationId: reservation.reservationId,

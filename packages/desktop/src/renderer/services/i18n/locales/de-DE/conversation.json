@@ -959,7 +959,8 @@
           "noChange": "Es wurde nichts geändert.",
           "undoConflict": "Das Projekt hat sich geändert, daher kann die letzte Umbenennung nicht rückgängig gemacht werden.",
           "staleAuthoring": "Das Projekt hat sich geändert. Prüfe den neuesten Stand und versuche es erneut.",
-          "variationGrid": "Statt eines Fotos wurde ein Variantenraster zurückgegeben. Prüfe das Ergebnis, bevor du einen weiteren kostenpflichtigen Versuch startest."
+          "variationGrid": "Statt eines Fotos wurde ein Variantenraster zurückgegeben. Prüfe das Ergebnis, bevor du einen weiteren kostenpflichtigen Versuch startest.",
+          "invalidReference": "Mindestens eine ausgewählte Referenz ist nicht mehr aktuell. Wähle aktuelle Foto-Pieces aus und prüfe die Kosten erneut."
         },
         "variationGrid": {
           "paidRejected": "Der Anbieter hat ein Ergebnis geliefert und berechnet, Creative Studio hat es jedoch abgelehnt, weil es ein Variantenraster ist.",
@@ -980,7 +981,8 @@
           "duplicateAcknowledgement": "Ich verstehe, dass die vorherige Übermittlung an den Anbieter bereits berechnet worden sein könnte.",
           "confirmCreate": "Bestätigen und Foto erstellen",
           "confirmRetry": "Bestätigen und erneut versuchen",
-          "discard": "Angebot verwerfen"
+          "discard": "Angebot verwerfen",
+          "visualReferences": "Visuelle Referenzen"
         },
         "piece": {
           "eyebrow": "Foto-Werkstück",
@@ -1042,7 +1044,8 @@
           "created": "Erstellt",
           "model": "Modell",
           "instructionProfile": "Anweisungsprofil",
-          "recordedSpend": "Erfasste Ausgaben"
+          "recordedSpend": "Erfasste Ausgaben",
+          "visualReferences": "Visuelle Referenzen"
         },
         "history": {
           "accessible": "Versuchsverlauf für {{handle}}",
@@ -1092,7 +1095,10 @@
         "composer": {
           "description": "Fotobeschreibung",
           "aspectRatio": "Seitenverhältnis",
-          "resolution": "Auflösung"
+          "resolution": "Auflösung",
+          "visualReferences": "Visuelle Referenzen",
+          "visualReferencesHint": "Wähle bis zu {{maximum}} aktuelle Pieces als Orientierung für dieses Foto.",
+          "visualReferencesCount": "{{selected}} von {{maximum}} ausgewählt"
         }
       },
       "spending": {

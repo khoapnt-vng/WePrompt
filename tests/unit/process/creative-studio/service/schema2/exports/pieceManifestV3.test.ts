@@ -84,10 +84,10 @@ const generatedProject = (): StudioProjectV3 => {
   const project = createEmptyStudioProjectV3({ name: 'Pilot', brief: 'A quiet portrait' }, 'project_1', T0);
   const composition: StudioPieceGenerationCompositionV3 = {
     inputs: {
-      schemaVersion: 2,
+      schemaVersion: 3,
       projectRevisionAtPreparation: 1,
       authoringRevision: 1,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: digest,
       brief: project.brief,
       rules: [],
@@ -100,7 +100,7 @@ const generatedProject = (): StudioProjectV3 => {
       purpose: 'piece_image',
       conditioningInputs: [],
       route: provider,
-      instructionProfile: 'weprompt-image-v1.piece-image.v1',
+      instructionProfile: 'weprompt-image-v1.piece-image.v2',
     },
     prompt: 'A quiet portrait, soft window light.',
   };
@@ -128,7 +128,7 @@ const generatedProject = (): StudioProjectV3 => {
     projectId: project.id,
     projectRevisionAtPreparation: 1,
     authoringRevision: 1,
-    authoringFingerprintVersion: 1,
+    authoringFingerprintVersion: 2,
     authoringFingerprint: digest,
     rateCardDigest: 'b'.repeat(64),
     currency: 'USD',
@@ -195,7 +195,7 @@ const generatedProject = (): StudioProjectV3 => {
     requestPlan,
     spendReceipt: receipt,
     authoringRevision: 1,
-    authoringFingerprintVersion: 1,
+    authoringFingerprintVersion: 2,
     authoringFingerprint: digest,
     projectRevisionAtPreparation: 1,
     projectRevisionAtAuthorization: 2,

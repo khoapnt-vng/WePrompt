@@ -13,6 +13,8 @@ import {
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
   STUDIO_MAX_GENERATION_PROMPT_LENGTH,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
@@ -29,6 +31,7 @@ import {
   type StudioPieceGenerationCompositionInputSnapshotV3,
   type StudioPieceGenerationCompositionV3,
   type StudioPieceGenerationTargetV3,
+  type StudioPieceConditioningInputSnapshotV3,
   type StudioProviderAdapterId,
   type StudioResolution,
 } from '@/common/types/project/creativeStudioTypes';
@@ -338,7 +341,7 @@ export const studioGenerationCompositionDigestV2 = (composition: StudioGeneratio
   createHash('sha256').update(JSON.stringify(composition), 'utf8').digest('hex');
 
 const PIECE_IMAGE_ADAPTER_ID: StudioProviderAdapterId = 'weprompt-image-v1';
-export const STUDIO_CURRENT_PIECE_INSTRUCTION_PROFILE_V3 = `${PIECE_IMAGE_ADAPTER_ID}.piece-image.v1`;
+export const STUDIO_CURRENT_PIECE_INSTRUCTION_PROFILE_V3 = `${PIECE_IMAGE_ADAPTER_ID}.piece-image.v2`;
 const STUDIO_PIECE_INSTRUCTION_PROFILE_V3 = /^weprompt-image-v1\.piece-image\.v[1-9][0-9]*$/u;
 
 /**
@@ -501,6 +504,45 @@ const validatePieceSettingsV3 = (value: unknown): boolean =>
   typeof value.resolution === 'string' &&
   RESOLUTIONS.has(value.resolution as StudioResolution);
 
+const clonePieceConditioningInputsV3 = (value: unknown): StudioPieceConditioningInputSnapshotV3[] => {
+  if (!isDenseArrayV3(value, STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3)) {
+    throw new TypeError('Piece photo conditioning inputs exceed the route-independent bound');
+  }
+  const pieceIds = new Set<string>();
+  const assetIds = new Set<string>();
+  return value.map((candidate, index) => {
+    if (!hasExactStringKeysV3(candidate, ['pieceId', 'assetId', 'sha256', 'mimeType', 'byteSize'])) {
+      throw new TypeError(`conditioningInputs[${index}] is invalid`);
+    }
+    assertSafeIdV3(candidate.pieceId, `conditioningInputs[${index}].pieceId`);
+    assertSafeIdV3(candidate.assetId, `conditioningInputs[${index}].assetId`);
+    if (
+      pieceIds.has(candidate.pieceId) ||
+      assetIds.has(candidate.assetId) ||
+      typeof candidate.sha256 !== 'string' ||
+      !LOWERCASE_SHA256.test(candidate.sha256) ||
+      (candidate.mimeType !== 'image/jpeg' &&
+        candidate.mimeType !== 'image/png' &&
+        candidate.mimeType !== 'image/webp') ||
+      typeof candidate.byteSize !== 'number' ||
+      !Number.isSafeInteger(candidate.byteSize) ||
+      candidate.byteSize < 1 ||
+      candidate.byteSize > STUDIO_MAX_IMAGE_ASSET_BYTES_V3
+    ) {
+      throw new TypeError(`conditioningInputs[${index}] is invalid`);
+    }
+    pieceIds.add(candidate.pieceId);
+    assetIds.add(candidate.assetId);
+    return {
+      pieceId: candidate.pieceId,
+      assetId: candidate.assetId,
+      sha256: candidate.sha256,
+      mimeType: candidate.mimeType,
+      byteSize: candidate.byteSize,
+    };
+  });
+};
+
 /** Normalizes authored Piece words without dropping or transliterating any script. */
 export const normalizeStudioPieceWordsV3 = (value: string): string => {
   if (typeof value !== 'string') throw new TypeError('words must be text');
@@ -521,6 +563,11 @@ const composePiecePromptV3 = (inputs: StudioPieceGenerationCompositionInputSnaps
     ...(inputs.brief.trim().length === 0 ? [] : [`PROJECT BRIEF\n${inputs.brief.trim()}`]),
     ...(inputs.rules.length === 0 ? [] : [renderStudioRulesBlock(inputs.rules).trim()]),
     `PHOTO REQUEST\n${inputs.source.words}`,
+    ...(inputs.conditioningInputs.length === 0
+      ? []
+      : [
+          'VISUAL REFERENCES\nUse the provided images in their listed order as visual guidance. Preserve recognizable subjects, materials, palette, and setting details when relevant to the photo request. Produce one unified photograph, never a grid or collage.',
+        ]),
     `RENDER SETTINGS\nAspect ratio: ${inputs.source.settings.aspectRatio}\nResolution: ${inputs.source.settings.resolution}\nModel: ${inputs.route.model}\nInstruction profile: ${inputs.instructionProfile}`,
     'OUTPUT\nCreate exactly one standalone photograph. Do not create a grid, contact sheet, split frame, caption, label, border, or UI.',
   ];
@@ -531,7 +578,7 @@ const composePiecePromptV3 = (inputs: StudioPieceGenerationCompositionInputSnaps
   return prompt;
 };
 
-/** Composes the inactive schema-2 provenance for one text-only Piece photograph. */
+/** Composes schema-3 provenance for one text-only or image-conditioned Piece photograph. */
 export const composeStudioPieceGenerationV3 = (
   input: StudioPieceGenerationCompositionInputV3
 ): StudioPieceGenerationCompositionV3 => {
@@ -571,9 +618,7 @@ export const composeStudioPieceGenerationV3 = (
   assertSafeIdV3(snapshot.source.pieceId, 'source.pieceId');
   if (!validatePieceSettingsV3(snapshot.source.settings)) throw new TypeError('Piece photo settings are invalid');
   const words = normalizeStudioPieceWordsV3(snapshot.source.words);
-  if (!isDenseArrayV3(snapshot.conditioningInputs, 0)) {
-    throw new TypeError('Piece photo conditioning inputs must be exactly empty');
-  }
+  const conditioningInputs = clonePieceConditioningInputsV3(snapshot.conditioningInputs);
   if (snapshot.purpose !== 'piece_image') throw new TypeError('Piece sources require piece_image');
   if (!isSafePieceModelV3(snapshot.route.model)) throw new TypeError('Piece photo route model is invalid');
   const route = cloneRouteV3(snapshot.route);
@@ -593,7 +638,7 @@ export const composeStudioPieceGenerationV3 = (
     rules: cloneRules(snapshot.rules),
     source: { kind: 'piece', pieceId: snapshot.source.pieceId, words, settings },
     purpose: 'piece_image',
-    conditioningInputs: [],
+    conditioningInputs,
     route,
     instructionProfile: profile,
   };
@@ -646,7 +691,14 @@ export const validateStudioPieceGenerationCompositionV3 = (
       normalizeStudioPieceWordsV3(inputs.source.words) !== inputs.source.words ||
       !validatePieceSettingsV3(inputs.source.settings) ||
       inputs.purpose !== 'piece_image' ||
-      !isDenseArrayV3(inputs.conditioningInputs, 0) ||
+      (() => {
+        try {
+          clonePieceConditioningInputsV3(inputs.conditioningInputs);
+          return false;
+        } catch {
+          return true;
+        }
+      })() ||
       !hasExactStringKeysV3(inputs.route, ['providerId', 'adapterId', 'model']) ||
       inputs.route.adapterId !== PIECE_IMAGE_ADAPTER_ID ||
       typeof inputs.route.providerId !== 'string' ||

@@ -27,6 +27,7 @@ const preparedQuote = (
   orderIndex: 0,
   words: 'Morning light across a quiet lake',
   settings: { aspectRatio: '16:9', resolution: '720p' },
+  referencePieceIds: [],
   currency: 'USD',
   lowerMinorUnits: 125,
   upperMinorUnits: 125,
@@ -347,9 +348,51 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
         words: 'Tall reeds reflected at blue hour',
         settings: { aspectRatio: '9:16', resolution: '1080p' },
         suggestedHandle: null,
+        referencePieceIds: [],
       })
     );
     expect(client.confirmPreparedPhotoV3).not.toHaveBeenCalled();
+  });
+
+  it('uses the same bounded ordered reference operation as the Director path', async () => {
+    const pieces = [
+      importedPiece('piece_coat', 'red_coat'),
+      importedPiece('piece_street', 'rainy_street'),
+      importedPiece('piece_lantern', 'paper_lantern'),
+    ];
+    const quote = preparedQuote({
+      targetPieceId: 'piece_target',
+      referencePieceIds: ['piece_coat', 'piece_street'],
+      spendPolicyClassification: 'no_policy',
+      requiresExplicitHumanAction: true,
+    });
+    const client = makeClient(supportedProject({ pieces }));
+    client.preparePhotoV3.mockResolvedValueOnce({ status: 'prepared', quote });
+    renderEnglish(<PilotCanvas projectId='project_1' client={client} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Create photo' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '#red_coat' }));
+    fireEvent.click(screen.getByRole('checkbox', { name: '#rainy_street' }));
+    expect(screen.getByRole('checkbox', { name: '#paper_lantern' })).toBeDisabled();
+    fireEvent.change(screen.getByRole('textbox', { name: 'Photo description' }), {
+      target: { value: 'The red coat crossing the rainy street.' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Review cost' }));
+
+    await waitFor(() =>
+      expect(client.preparePhotoV3).toHaveBeenCalledWith({
+        mode: 'create',
+        projectId: 'project_1',
+        expectedAuthoringRevision: 2,
+        words: 'The red coat crossing the rainy street.',
+        settings: { aspectRatio: '16:9', resolution: '720p' },
+        suggestedHandle: null,
+        referencePieceIds: ['piece_coat', 'piece_street'],
+      })
+    );
+    const quoteCard = await screen.findByRole('article', { name: 'Prepared photo quote' });
+    expect(within(quoteCard).getByText('#red_coat')).toBeInTheDocument();
+    expect(within(quoteCard).getByText('#rainy_street')).toBeInTheDocument();
   });
 
   it('requires an explicit bounded action when the quote is not within an active cap', async () => {
@@ -1014,6 +1057,7 @@ describe('inactive Creative Studio 4 Pilot canvas', () => {
           producerJobId: 'job_generated',
           model: 'gemini-3-pro-image-preview',
           instructionProfile: 'studio-piece-photo-v1',
+          conditioningPieceIds: [],
           recordedSpend: { currency: 'USD', totalMinorUnits: 321 },
         },
       },

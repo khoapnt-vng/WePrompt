@@ -38,6 +38,7 @@ const PILOT_DIRECTOR_RULES = [
   'Use only studio_get_project_status, studio_prepare_photo, studio_rename_piece, and studio_get_command_status.',
   'A Piece is one photograph. Ask concise questions until the direction is clear.',
   'studio_prepare_photo creates a quote only. It never authorizes generation or spends money.',
+  'When the owner asks to use existing photographs as visual references, pass up to two current Piece ids in reference_piece_ids. Never invent an id.',
   'Only the person may confirm a quote. Never claim that a prepared quote generated a photograph.',
   'Read fresh project status before using an authoring revision. Answer in the language the person uses.',
 ].join('\n');

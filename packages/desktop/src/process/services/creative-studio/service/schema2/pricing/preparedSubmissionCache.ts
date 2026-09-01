@@ -7,7 +7,9 @@
 import { types as nodeTypes } from 'node:util';
 
 import {
+  STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
   STUDIO_MAX_JOBS_PER_PIECE_V3,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_PREPARED_QUOTE_CACHE_BYTES_GLOBAL,
   STUDIO_MAX_PREPARED_QUOTE_CACHE_BYTES_PER_PROJECT,
@@ -484,6 +486,7 @@ const CREATE_RESERVATION_KEYS_V3 = new Set([
   'idempotencyKey',
   'words',
   'settings',
+  'conditioningInputs',
   'provider',
   'cancellationPolicy',
   'quote',
@@ -507,6 +510,7 @@ const RETRY_RESERVATION_KEYS_V3 = new Set([
   'idempotencyKey',
   'words',
   'settings',
+  'conditioningInputs',
   'provider',
   'cancellationPolicy',
   'quote',
@@ -719,12 +723,13 @@ const validatePreparedPhotoReservationV3 = (reservation: StudioPreparedPhotoRese
     reservation.words.length === 0 ||
     reservation.words !== reservation.words.normalize('NFKC').replace(/\s+/gu, ' ').trim() ||
     !validSettingsV3(reservation.settings) ||
+    !exactDenseArrayV3(reservation.conditioningInputs, STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3) ||
     (reservation.cancellationPolicy !== 'none' &&
       reservation.cancellationPolicy !== 'queued_only' &&
       reservation.cancellationPolicy !== 'queued_and_running') ||
     !Number.isSafeInteger(reservation.authoringRevision) ||
     reservation.authoringRevision < 1 ||
-    reservation.authoringFingerprintVersion !== 1 ||
+    reservation.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
     !/^[a-f0-9]{64}$/.test(reservation.authoringFingerprint) ||
     !Number.isSafeInteger(reservation.projectRevisionAtPreparation) ||
     reservation.projectRevisionAtPreparation < 1 ||
@@ -744,6 +749,7 @@ const validatePreparedPhotoReservationV3 = (reservation: StudioPreparedPhotoRese
     reservation.quote.item.requestPlan.snapshot.composition.inputs.source.words !== reservation.words ||
     reservation.quote.item.requestPlan.snapshot.settings.aspectRatio !== reservation.settings.aspectRatio ||
     reservation.quote.item.requestPlan.snapshot.settings.resolution !== reservation.settings.resolution ||
+    !jsonEqual(reservation.quote.item.requestPlan.snapshot.conditioningInputs, reservation.conditioningInputs) ||
     !providerEqualsV3(reservation.provider, reservation.quote.item.requestPlan.snapshot.composition.inputs.route)
   ) {
     return invariant('photo_reservation_mismatch');
@@ -920,6 +926,7 @@ export class StudioPreparedPhotoCacheV3 {
       targetPieceId: reservation.targetPieceId,
       words: reservation.words,
       settings: { ...reservation.settings },
+      referencePieceIds: reservation.conditioningInputs.map((input) => input.pieceId),
       currency: reservation.quote.currency,
       lowerMinorUnits: reservation.quote.lowerMinorUnits,
       upperMinorUnits: reservation.quote.upperMinorUnits,

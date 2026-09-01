@@ -170,6 +170,7 @@ export const createPilotPhotoFixtureV3 = async (options: PilotPhotoFixtureOption
         words: options.words ?? 'Moonlight reflected on calm water.',
         settings: { aspectRatio: options.aspectRatio ?? '16:9', resolution: '1080p' },
         suggestedHandle: options.suggestedHandle ?? null,
+        referencePieceIds: [],
       });
       const confirmed = await runtime.entryPoint.confirmPreparedPhotoV3({
         reservationId: prepared.quote.reservationId,

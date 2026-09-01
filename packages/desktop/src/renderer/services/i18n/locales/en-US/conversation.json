@@ -793,7 +793,8 @@
           "noChange": "Nothing changed.",
           "undoConflict": "The project changed, so the last rename cannot be undone.",
           "staleAuthoring": "The project changed. Review the latest state and try again.",
-          "variationGrid": "A variation grid was returned instead of one photo. Review the result before starting another paid attempt."
+          "variationGrid": "A variation grid was returned instead of one photo. Review the result before starting another paid attempt.",
+          "invalidReference": "One or more selected references are no longer current. Choose current photo Pieces and review the cost again."
         },
         "variationGrid": {
           "paidRejected": "The provider returned and charged for an output, but Creative Studio refused it because it is a variation grid.",
@@ -814,7 +815,8 @@
           "duplicateAcknowledgement": "I understand the earlier provider submission may already have been charged.",
           "confirmCreate": "Confirm and create photo",
           "confirmRetry": "Confirm and retry",
-          "discard": "Discard quote"
+          "discard": "Discard quote",
+          "visualReferences": "Visual references"
         },
         "piece": {
           "eyebrow": "Photo Piece",
@@ -876,7 +878,8 @@
           "created": "Created",
           "model": "Model",
           "instructionProfile": "Instruction profile",
-          "recordedSpend": "Recorded spend"
+          "recordedSpend": "Recorded spend",
+          "visualReferences": "Visual references"
         },
         "history": {
           "accessible": "Attempt history for {{handle}}",
@@ -926,7 +929,10 @@
         "composer": {
           "description": "Photo description",
           "aspectRatio": "Aspect ratio",
-          "resolution": "Resolution"
+          "resolution": "Resolution",
+          "visualReferences": "Visual references",
+          "visualReferencesHint": "Choose up to {{maximum}} current Pieces to guide this photo.",
+          "visualReferencesCount": "{{selected}} of {{maximum}} selected"
         }
       },
       "spending": {

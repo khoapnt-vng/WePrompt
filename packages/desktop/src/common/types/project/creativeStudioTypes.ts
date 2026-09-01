@@ -1692,9 +1692,9 @@ export type CreateStudioProjectInputV2 = {
  */
 export const STUDIO_PROJECT_SCHEMA_VERSION_V3 = 6 as const;
 export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3 = 6 as const;
-export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3 = 2 as const;
+export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3 = 3 as const;
 export const STUDIO_EXPORT_SCHEMA_VERSION_V3 = 3 as const;
-export const STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 = 1 as const;
+export const STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 = 2 as const;
 export const STUDIO_MAX_PIECES_V3 = 96;
 export const STUDIO_MAX_PIECE_HANDLE_SCALARS_V3 = 48;
 export const STUDIO_MAX_PIECE_HANDLE_UTF8_BYTES_V3 = 192;
@@ -1704,6 +1704,7 @@ export const STUDIO_MAX_ASSETS_V3 = STUDIO_MAX_PIECES_V3;
 export const STUDIO_MAX_JOBS_V3 = STUDIO_MAX_PIECES_V3 * STUDIO_MAX_JOBS_PER_PIECE_V3;
 export const STUDIO_MAX_SPEND_AUTHORIZATIONS_V3 = STUDIO_MAX_JOBS_V3;
 export const STUDIO_MAX_UNDO_ENTRIES_V3 = 20;
+export const STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3 = 2;
 /** Schema-6 owns this limit; later schema-5 changes must not silently alter the Pilot contract. */
 export const STUDIO_MAX_IMAGE_ASSET_BYTES_V3 = 50 * 1024 * 1024;
 /** Export-3 retains the five newest immutable artifacts for each Piece. */
@@ -1726,6 +1727,15 @@ export type StudioPieceGenerationSourceV3 = {
   settings: StudioPiecePhotoSettingsV3;
 };
 
+/** Exact current Piece asset frozen into a quoted image-conditioned request by Main. */
+export type StudioPieceConditioningInputSnapshotV3 = {
+  pieceId: string;
+  assetId: string;
+  sha256: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  byteSize: number;
+};
+
 export type StudioPieceGenerationCompositionInputSnapshotV3 = {
   schemaVersion: typeof STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3;
   projectRevisionAtPreparation: number;
@@ -1736,7 +1746,7 @@ export type StudioPieceGenerationCompositionInputSnapshotV3 = {
   rules: StudioBriefRule[];
   source: StudioPieceGenerationSourceV3;
   purpose: StudioPieceImagePurposeV3;
-  conditioningInputs: [];
+  conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
   route: StudioMediaModelRef;
   instructionProfile: string;
 };
@@ -1750,7 +1760,7 @@ export type StudioPieceGenerationCompositionV3 = {
 export type StudioPieceGenerationRequestSnapshotV3 = {
   composition: StudioPieceGenerationCompositionV3;
   settings: StudioPiecePhotoSettingsV3;
-  conditioningInputs: [];
+  conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
 };
 
 export type StudioPieceGenerationRequestPlanV3 = {
@@ -1979,6 +1989,7 @@ type StudioPreparedPhotoReservationBaseV3 = {
   idempotencyKey: string;
   words: string;
   settings: StudioPiecePhotoSettingsV3;
+  conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
   provider: StudioProviderRef;
   cancellationPolicy: StudioCancellationPolicy;
   quote: StudioPieceSubmissionQuoteV3;
@@ -2011,6 +2022,7 @@ type StudioRendererPreparedPhotoQuoteBaseV3 = {
   targetPieceId: string;
   words: string;
   settings: StudioPiecePhotoSettingsV3;
+  referencePieceIds: string[];
   currency: string;
   lowerMinorUnits: number;
   upperMinorUnits: number;
@@ -2085,6 +2097,7 @@ export type StudioRendererPieceCurrentProvenanceV3 =
       producerJobId: string;
       model: string;
       instructionProfile: string;
+      conditioningPieceIds: string[];
       recordedSpend: {
         currency: string;
         totalMinorUnits: number;
@@ -2210,6 +2223,7 @@ export type StudioPreparePhotoRequestV3 = {
   words: string;
   settings: StudioPiecePhotoSettingsV3;
   suggestedHandle: string | null;
+  referencePieceIds: string[];
 };
 
 /** Exact same-Piece retry preparation input; words and settings are copied from the predecessor. */
@@ -2451,6 +2465,7 @@ export type CreativeStudioPilotErrorCodeV3 =
   | 'route_catalog_unavailable'
   | 'route_incompatible'
   | 'route_unavailable'
+  | 'invalid_reference'
   | 'rate_not_found'
   | 'variable_price_unsupported'
   | 'quote_not_found'

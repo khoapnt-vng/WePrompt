@@ -5,6 +5,7 @@
  */
 
 import {
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,
   type StudioJobStatus,
   type StudioApplyMutationBatchRequestV3,
@@ -149,6 +150,8 @@ const errorCopy = (error: unknown, t: TFunction): string => {
           return t(`${PILOT_I18N_ROOT}.canvas.errors.routeCatalogUnavailable`);
         case 'route_incompatible':
           return t(`${PILOT_I18N_ROOT}.canvas.errors.routeIncompatible`);
+        case 'invalid_reference':
+          return t(`${PILOT_I18N_ROOT}.canvas.errors.invalidReference`);
         case 'project_piece_capacity_reached':
           return t(`${PILOT_I18N_ROOT}.canvas.errors.capacity`);
         case 'quote_not_found':
@@ -220,6 +223,7 @@ const formatTimestamp = (timestamp: string, locale: string): string => {
 
 const QuoteCard: React.FC<{
   quote: StudioRendererPreparedPhotoQuoteV3;
+  pieces: StudioRendererPieceV3[];
   busy: boolean;
   onConfirm: (
     quote: StudioRendererPreparedPhotoQuoteV3,
@@ -227,7 +231,7 @@ const QuoteCard: React.FC<{
     explicitHumanConfirmation: boolean
   ) => Promise<void>;
   onDiscard: (quote: StudioRendererPreparedPhotoQuoteV3) => Promise<void>;
-}> = ({ quote, busy, onConfirm, onDiscard }) => {
+}> = ({ quote, pieces, busy, onConfirm, onDiscard }) => {
   const { t, i18n } = useTranslation();
   const [duplicateAcknowledged, setDuplicateAcknowledged] = useState(false);
   const automatic =
@@ -295,6 +299,21 @@ const QuoteCard: React.FC<{
             resolution: quote.settings.resolution,
           })}
         </dd>
+        {quote.referencePieceIds.length > 0 && (
+          <>
+            <dt>{t(`${PILOT_I18N_ROOT}.canvas.quote.visualReferences`)}</dt>
+            <dd className={styles.referenceHandles}>
+              {quote.referencePieceIds.map((pieceId) => {
+                const handle = pieces.find((piece) => piece.id === pieceId)?.handle;
+                return (
+                  <bdi key={pieceId} dir='auto'>
+                    {handle === undefined ? pieceId : `#${handle}`}
+                  </bdi>
+                );
+              })}
+            </dd>
+          </>
+        )}
         <dt>{t(`${PILOT_I18N_ROOT}.canvas.quote.expires`)}</dt>
         <dd>
           <time dateTime={quote.expiresAt}>{formatTimestamp(quote.expiresAt, i18n.language)}</time>
@@ -465,7 +484,14 @@ const PieceCard: React.FC<{
       </header>
 
       {quotes.map((quote) => (
-        <QuoteCard key={quoteKey(quote)} quote={quote} busy={busy} onConfirm={onConfirm} onDiscard={onDiscard} />
+        <QuoteCard
+          key={quoteKey(quote)}
+          quote={quote}
+          pieces={project.canvas.pieces}
+          busy={busy}
+          onConfirm={onConfirm}
+          onDiscard={onDiscard}
+        />
       ))}
 
       {piece.currentAsset === null ? (
@@ -549,6 +575,21 @@ const PieceCard: React.FC<{
                 <dd>{piece.currentAsset.provenance.model}</dd>
                 <dt>{t(`${PILOT_I18N_ROOT}.canvas.provenance.instructionProfile`)}</dt>
                 <dd>{piece.currentAsset.provenance.instructionProfile}</dd>
+                {piece.currentAsset.provenance.conditioningPieceIds.length > 0 && (
+                  <>
+                    <dt>{t(`${PILOT_I18N_ROOT}.canvas.provenance.visualReferences`)}</dt>
+                    <dd className={styles.referenceHandles}>
+                      {piece.currentAsset.provenance.conditioningPieceIds.map((pieceId) => {
+                        const handle = project.canvas.pieces.find((candidate) => candidate.id === pieceId)?.handle;
+                        return (
+                          <bdi key={pieceId} dir='auto'>
+                            {handle === undefined ? pieceId : `#${handle}`}
+                          </bdi>
+                        );
+                      })}
+                    </dd>
+                  </>
+                )}
                 <dt>{t(`${PILOT_I18N_ROOT}.canvas.provenance.recordedSpend`)}</dt>
                 <dd>
                   {formatMinorUnits(
@@ -734,6 +775,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
   const [composerOpen, setComposerOpen] = useState(false);
   const [words, setWords] = useState('');
   const [settings, setSettings] = useState<StudioPiecePhotoSettingsV3>({ aspectRatio: '16:9', resolution: '720p' });
+  const [referencePieceIds, setReferencePieceIds] = useState<string[]>([]);
   const [localQuotes, setLocalQuotes] = useState<StudioRendererPreparedPhotoQuoteV3[]>([]);
   const [suppressedQuoteKeys, setSuppressedQuoteKeys] = useState<Set<string>>(() => new Set());
   const [busy, setBusy] = useState(false);
@@ -752,6 +794,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
 
   const openComposer = (): void => {
     restoreCreateFocus.current = false;
+    setReferencePieceIds([]);
     setComposerOpen(true);
   };
 
@@ -801,6 +844,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
     lastSupportedProject.current = null;
     setProject(null);
     setLocalQuotes([]);
+    setReferencePieceIds([]);
     setSuppressedQuoteKeys(new Set());
     setLoadState('uninitialised');
     setError(null);
@@ -984,6 +1028,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
         words: words.trim(),
         settings,
         suggestedHandle: null,
+        referencePieceIds,
       });
       setSuppressedQuoteKeys((current) => {
         const key = quoteKey(result.quote);
@@ -1040,6 +1085,7 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
           if (quote.mode === 'create') {
             setWords(quote.words);
             setSettings({ ...quote.settings });
+            setReferencePieceIds([...quote.referencePieceIds]);
             setComposerOpen(true);
           }
           await refresh().catch((): undefined => undefined);
@@ -1166,6 +1212,13 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
   };
 
   const currentPieces = project?.canvas.pieces.filter((piece) => piece.currentAsset !== null) ?? [];
+  const toggleReferencePiece = (pieceId: string, checked: boolean): void => {
+    setReferencePieceIds((current) => {
+      if (!checked) return current.filter((candidate) => candidate !== pieceId);
+      if (current.includes(pieceId) || current.length >= STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3) return current;
+      return [...current, pieceId];
+    });
+  };
   const projectMenu = (
     <Menu>
       <Menu.Item key='spending-limit' onClick={() => setSpendingLimitOpen(true)}>
@@ -1322,6 +1375,51 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
               </Select>
             </div>
           </div>
+          {currentPieces.length > 0 && (
+            <section className={styles.referencePicker} aria-labelledby='pilot-photo-references-title'>
+              <div className={styles.referencePickerHeader}>
+                <div>
+                  <h3 id='pilot-photo-references-title' className={styles.referencePickerTitle}>
+                    {t(`${PILOT_I18N_ROOT}.canvas.composer.visualReferences`)}
+                  </h3>
+                  <p className={styles.referencePickerHint}>
+                    {t(`${PILOT_I18N_ROOT}.canvas.composer.visualReferencesHint`, {
+                      maximum: STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
+                    })}
+                  </p>
+                </div>
+                <span className={styles.referenceCount}>
+                  {t(`${PILOT_I18N_ROOT}.canvas.composer.visualReferencesCount`, {
+                    selected: referencePieceIds.length,
+                    maximum: STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
+                  })}
+                </span>
+              </div>
+              <div className={styles.referenceOptions}>
+                {currentPieces.map((piece) => {
+                  const selected = referencePieceIds.includes(piece.id);
+                  const unavailable = !selected && referencePieceIds.length >= STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3;
+                  const assetUrl = piece.currentAsset === null ? null : assetUrlFor?.(projectId, piece.currentAsset);
+                  return (
+                    <div key={piece.id} className={styles.referenceOption} data-selected={selected || undefined}>
+                      {assetUrl !== null && assetUrl !== undefined && (
+                        <img className={styles.referenceThumbnail} src={assetUrl} alt='' />
+                      )}
+                      <span className={styles.referenceOptionCopy}>
+                        <Checkbox
+                          checked={selected}
+                          disabled={busy || unavailable}
+                          onChange={(checked) => toggleReferencePiece(piece.id, checked)}
+                        >
+                          <bdi dir='auto'>#{piece.handle}</bdi>
+                        </Checkbox>
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <div className={styles.formActions}>
             <Button
               type='primary'
@@ -1346,7 +1444,14 @@ export const PilotCanvas: React.FC<PilotCanvasProps> = ({
         >
           {boardItems.map((item) =>
             item.kind === 'quote' ? (
-              <QuoteCard key={item.key} quote={item.quote} busy={busy} onConfirm={confirm} onDiscard={discard} />
+              <QuoteCard
+                key={item.key}
+                quote={item.quote}
+                pieces={project.canvas.pieces}
+                busy={busy}
+                onConfirm={confirm}
+                onDiscard={discard}
+              />
             ) : (
               <PieceCard
                 key={item.key}

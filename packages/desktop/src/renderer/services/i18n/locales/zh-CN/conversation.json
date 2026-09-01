@@ -958,7 +958,8 @@
           "noChange": "没有发生任何更改。",
           "undoConflict": "项目已更改，因此无法撤销上次重命名。",
           "staleAuthoring": "项目已更改。请查看最新状态后重试。",
-          "variationGrid": "返回的是变体网格，而非单张照片。开始另一次付费尝试前，请先查看结果。"
+          "variationGrid": "返回的是变体网格，而非单张照片。开始另一次付费尝试前，请先查看结果。",
+          "invalidReference": "一个或多个所选参考不再是当前版本。请选择当前照片 Piece，并重新核对费用。"
         },
         "variationGrid": {
           "paidRejected": "提供商已返回结果并收取费用，但创意工作室因其为变体网格而拒绝了该结果。",
@@ -979,7 +980,8 @@
           "duplicateAcknowledgement": "我了解先前提交给提供商的请求可能已产生费用。",
           "confirmCreate": "确认并创建照片",
           "confirmRetry": "确认并重试",
-          "discard": "丢弃报价"
+          "discard": "丢弃报价",
+          "visualReferences": "视觉参考"
         },
         "piece": {
           "eyebrow": "照片作品",
@@ -1041,7 +1043,8 @@
           "created": "创建时间",
           "model": "模型",
           "instructionProfile": "指令配置",
-          "recordedSpend": "已记录支出"
+          "recordedSpend": "已记录支出",
+          "visualReferences": "视觉参考"
         },
         "history": {
           "accessible": "{{handle}} 的尝试历史",
@@ -1091,7 +1094,10 @@
         "composer": {
           "description": "照片描述",
           "aspectRatio": "宽高比",
-          "resolution": "分辨率"
+          "resolution": "分辨率",
+          "visualReferences": "视觉参考",
+          "visualReferencesHint": "选择最多 {{maximum}} 个当前 Piece 来指导这张照片。",
+          "visualReferencesCount": "已选择 {{selected}}/{{maximum}}"
         }
       },
       "spending": {

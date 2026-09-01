@@ -130,7 +130,8 @@ export const registerPilotStudioTools = (
   server.registerTool(
     'studio_prepare_photo',
     {
-      description: 'Prepare one quoted Piece from exact words. This creates no authorization and cannot spend.',
+      description:
+        'Prepare one quoted Piece from exact words and up to two current Piece references. This creates no authorization and cannot spend.',
       inputSchema: z
         .object({
           expected_authoring_revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
@@ -138,6 +139,7 @@ export const registerPilotStudioTools = (
           aspect_ratio: z.enum(['16:9', '9:16', '1:1', '4:3', '3:4']),
           resolution: z.enum(['720p', '1080p']),
           suggested_handle: z.string().min(1).max(256).nullable().optional(),
+          reference_piece_ids: z.array(z.string().regex(SAFE_ID)).max(2).default([]),
         })
         .strict(),
       annotations: MUTATING,
@@ -152,6 +154,7 @@ export const registerPilotStudioTools = (
           words: input.words,
           settings: { aspectRatio: input.aspect_ratio, resolution: input.resolution },
           suggestedHandle: input.suggested_handle ?? null,
+          referencePieceIds: input.reference_piece_ids,
         },
         dependencies
       )

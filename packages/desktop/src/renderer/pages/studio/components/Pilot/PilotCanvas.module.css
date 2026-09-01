@@ -94,6 +94,70 @@
   gap: 12px;
 }
 
+.referencePicker {
+  display: grid;
+  gap: 12px;
+}
+
+.referencePickerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.referencePickerTitle,
+.referencePickerHint {
+  margin: 0;
+}
+
+.referencePickerTitle {
+  font-size: 14px;
+}
+
+.referencePickerHint,
+.referenceCount {
+  color: var(--pilot-muted);
+  font-size: 12px;
+}
+
+.referenceOptions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: 10px;
+}
+
+.referenceOption {
+  display: grid;
+  min-inline-size: 0;
+  padding: 10px;
+  border: 1px solid var(--pilot-border);
+  border-radius: 8px;
+  background: var(--color-bg-1);
+  gap: 8px;
+}
+
+.referenceOption[data-selected='true'] {
+  border-color: rgb(var(--primary-6));
+  background: var(--color-primary-light-1);
+}
+
+.referenceThumbnail {
+  display: block;
+  inline-size: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.referenceOptionCopy,
+.referenceHandles {
+  display: flex;
+  flex-wrap: wrap;
+  min-inline-size: 0;
+  gap: 6px 10px;
+}
+
 .field {
   display: grid;
   min-inline-size: 0;

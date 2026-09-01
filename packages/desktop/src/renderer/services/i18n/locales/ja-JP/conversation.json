@@ -958,7 +958,8 @@
           "noChange": "変更はありません。",
           "undoConflict": "プロジェクトが変更されたため、直前の名前変更を元に戻せません。",
           "staleAuthoring": "プロジェクトが変更されました。最新の状態を確認して、もう一度お試しください。",
-          "variationGrid": "1 枚の写真ではなくバリエーショングリッドが返されました。別の有料試行を始める前に結果を確認してください。"
+          "variationGrid": "1 枚の写真ではなくバリエーショングリッドが返されました。別の有料試行を始める前に結果を確認してください。",
+          "invalidReference": "選択した参照の一部が最新ではありません。現在の写真 Piece を選び、料金をもう一度確認してください。"
         },
         "variationGrid": {
           "paidRejected": "プロバイダーは出力を返して課金しましたが、バリエーショングリッドだったため Creative Studio が拒否しました。",
@@ -979,7 +980,8 @@
           "duplicateAcknowledgement": "以前のプロバイダー送信ですでに課金されている可能性があることを理解しました。",
           "confirmCreate": "確認して写真を作成",
           "confirmRetry": "確認して再試行",
-          "discard": "見積もりを破棄"
+          "discard": "見積もりを破棄",
+          "visualReferences": "ビジュアル参照"
         },
         "piece": {
           "eyebrow": "写真ピース",
@@ -1041,7 +1043,8 @@
           "created": "作成日時",
           "model": "モデル",
           "instructionProfile": "指示プロファイル",
-          "recordedSpend": "記録済み支出"
+          "recordedSpend": "記録済み支出",
+          "visualReferences": "ビジュアル参照"
         },
         "history": {
           "accessible": "{{handle}} の試行履歴",
@@ -1091,7 +1094,10 @@
         "composer": {
           "description": "写真の説明",
           "aspectRatio": "アスペクト比",
-          "resolution": "解像度"
+          "resolution": "解像度",
+          "visualReferences": "ビジュアル参照",
+          "visualReferencesHint": "この写真のガイドとして、現在の Piece を最大 {{maximum}} 個選択します。",
+          "visualReferencesCount": "{{maximum}} 個中 {{selected}} 個を選択"
         }
       },
       "spending": {

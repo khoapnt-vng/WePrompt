@@ -23,6 +23,7 @@ import {
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_JOBS_PER_PIECE_V3,
   STUDIO_MAX_JOBS_V3,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_PIECE_PRIOR_HANDLES_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
@@ -52,6 +53,7 @@ import {
   type StudioJobV2,
   type StudioJobPurpose,
   type StudioPieceGenerationCompositionV3,
+  type StudioPieceConditioningInputSnapshotV3,
   type StudioPieceGenerationRequestPlanV3,
   type StudioPieceGenerationTargetV3,
   type StudioPieceJobRetryReasonV3,
@@ -2761,6 +2763,7 @@ const MANAGED_ASSET_KEYS_V3 = new Set(['collection', 'fileName']);
 const PHOTO_SETTINGS_KEYS_V3 = new Set(['aspectRatio', 'resolution']);
 const PIECE_TARGET_KEYS_V3 = new Set(['kind', 'pieceId']);
 const PIECE_SOURCE_KEYS_V3 = new Set(['kind', 'pieceId', 'words', 'settings']);
+const PIECE_CONDITIONING_INPUT_KEYS_V3 = new Set(['pieceId', 'assetId', 'sha256', 'mimeType', 'byteSize']);
 const COMPOSITION_KEYS_V3 = new Set(['inputs', 'prompt']);
 const COMPOSITION_INPUT_KEYS_V3 = new Set([
   'schemaVersion',
@@ -2929,6 +2932,46 @@ const validatePiecePhotoSettingsV3 = (value: unknown): boolean =>
 const validatePieceTargetV3 = (value: unknown): boolean =>
   isRecord(value) && hasExactKeys(value, PIECE_TARGET_KEYS_V3) && value.kind === 'piece' && isSafeId(value.pieceId);
 
+const validatePieceConditioningInputsV3 = (value: unknown): value is StudioPieceConditioningInputSnapshotV3[] => {
+  if (!isDenseArray(value, STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3)) return false;
+  const pieceIds = new Set<string>();
+  const assetIds = new Set<string>();
+  return value.every((input) => {
+    if (
+      !isRecord(input) ||
+      !hasExactKeys(input, PIECE_CONDITIONING_INPUT_KEYS_V3) ||
+      !isSafeId(input.pieceId) ||
+      !isSafeId(input.assetId) ||
+      !isLowercaseDigest(input.sha256) ||
+      !isStudioReferenceImageMimeType(input.mimeType) ||
+      !isIntegerInRange(input.byteSize, 1, STUDIO_MAX_IMAGE_ASSET_BYTES_V3) ||
+      pieceIds.has(input.pieceId) ||
+      assetIds.has(input.assetId)
+    ) {
+      return false;
+    }
+    pieceIds.add(input.pieceId);
+    assetIds.add(input.assetId);
+    return true;
+  });
+};
+
+const pieceConditioningInputsEqualV3 = (left: unknown, right: unknown): boolean =>
+  validatePieceConditioningInputsV3(left) &&
+  validatePieceConditioningInputsV3(right) &&
+  left.length === right.length &&
+  left.every((input, index) => {
+    const candidate = right[index];
+    return (
+      candidate !== undefined &&
+      input.pieceId === candidate.pieceId &&
+      input.assetId === candidate.assetId &&
+      input.sha256 === candidate.sha256 &&
+      input.mimeType === candidate.mimeType &&
+      input.byteSize === candidate.byteSize
+    );
+  });
+
 const validatePieceCompositionV3 = (value: unknown): value is StudioPieceGenerationCompositionV3 => {
   if (
     !isRecord(value) ||
@@ -2955,8 +2998,7 @@ const validatePieceCompositionV3 = (value: unknown): value is StudioPieceGenerat
     !isCanonicalPieceWordsV3(inputs.source.words) ||
     !validatePiecePhotoSettingsV3(inputs.source.settings) ||
     inputs.purpose !== 'piece_image' ||
-    !isDenseArray(inputs.conditioningInputs, 0) ||
-    inputs.conditioningInputs.length !== 0 ||
+    !validatePieceConditioningInputsV3(inputs.conditioningInputs) ||
     !validateProvider(inputs.route) ||
     (inputs.route as StudioProviderRef).adapterId !== 'weprompt-image-v1' ||
     !isStudioPieceInstructionProfileV3(inputs.instructionProfile) ||
@@ -2979,14 +3021,16 @@ const validatePieceRequestPlanV3 = (value: unknown): value is StudioPieceGenerat
     !hasExactKeys(value.snapshot, REQUEST_SNAPSHOT_KEYS_V3) ||
     !validatePieceCompositionV3(value.snapshot.composition) ||
     !validatePiecePhotoSettingsV3(value.snapshot.settings) ||
-    !isDenseArray(value.snapshot.conditioningInputs, 0) ||
-    value.snapshot.conditioningInputs.length !== 0
+    !validatePieceConditioningInputsV3(value.snapshot.conditioningInputs)
   ) {
     return false;
   }
   return (
     photoSettingsEqualV3(value.snapshot.settings, value.snapshot.composition.inputs.source.settings) &&
-    value.snapshot.composition.inputs.conditioningInputs.length === value.snapshot.conditioningInputs.length
+    pieceConditioningInputsEqualV3(
+      value.snapshot.composition.inputs.conditioningInputs,
+      value.snapshot.conditioningInputs
+    )
   );
 };
 
@@ -3667,6 +3711,25 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
     ) {
       return false;
     }
+    for (const input of job.requestPlan.snapshot.conditioningInputs) {
+      const referencePiece = ownValue(project.pieces, input.pieceId);
+      const referenceAsset = ownValue(project.assets, input.assetId);
+      if (
+        referencePiece === undefined ||
+        referencePiece.id === piece.id ||
+        referencePiece.currentAssetId !== input.assetId ||
+        referencePiece.createdAt > authorization.confirmedAt ||
+        referenceAsset === undefined ||
+        referenceAsset.projectId !== project.id ||
+        referenceAsset.pieceId !== referencePiece.id ||
+        referenceAsset.sha256 !== input.sha256 ||
+        referenceAsset.mimeType !== input.mimeType ||
+        referenceAsset.byteSize !== input.byteSize ||
+        referenceAsset.createdAt > authorization.confirmedAt
+      ) {
+        return false;
+      }
+    }
     usedAuthorizationIds.add(job.authorizationId);
     if (job.status === 'succeeded') {
       const asset = ownValue(project.assets, job.outputAssetId!);
@@ -3695,6 +3758,10 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
       predecessor.purpose !== job.purpose ||
       predecessor.composition.inputs.source.words !== job.composition.inputs.source.words ||
       !photoSettingsEqualV3(predecessor.composition.inputs.source.settings, job.composition.inputs.source.settings) ||
+      !pieceConditioningInputsEqualV3(
+        predecessor.requestPlan.snapshot.conditioningInputs,
+        job.requestPlan.snapshot.conditioningInputs
+      ) ||
       job.retryReason === null ||
       !pieceRetryReasonMatchesPredecessorV3(job.retryReason, predecessor)
     ) {

@@ -11,6 +11,7 @@ import {
   STUDIO_MAX_PIECES_V3,
   STUDIO_PREPARED_QUOTE_TTL_SECONDS,
   type StudioPieceJobRetryReasonV3,
+  type StudioPieceConditioningInputSnapshotV3,
   type StudioPiecePhotoSettingsV3,
   type StudioPreparePhotoIntentV3,
   type StudioPreparePhotoResultV3,
@@ -42,7 +43,8 @@ export type StudioPilotPreparePhotoDepsV3 = {
   providerResolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>;
   resolveRouteAndRate?: (
     resolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>,
-    settings: StudioPiecePhotoSettingsV3
+    settings: StudioPiecePhotoSettingsV3,
+    conditioningInputCount: number
   ) => Promise<StudioPieceRouteAndRateV3>;
   now?: () => number;
   mintIdentity?: (kind: StudioPilotIdentityKindV3) => string;
@@ -90,6 +92,38 @@ const readClock = (now: () => number): number => {
   return value;
 };
 
+const resolveConditioningInputs = (
+  project: StudioProjectV3,
+  referencePieceIds: readonly string[]
+): StudioPieceConditioningInputSnapshotV3[] =>
+  referencePieceIds.map((pieceId) => {
+    const piece = Object.hasOwn(project.pieces, pieceId) ? project.pieces[pieceId] : undefined;
+    const asset =
+      piece?.currentAssetId !== null &&
+      piece?.currentAssetId !== undefined &&
+      Object.hasOwn(project.assets, piece.currentAssetId)
+        ? project.assets[piece.currentAssetId]
+        : undefined;
+    if (
+      piece === undefined ||
+      asset === undefined ||
+      asset.projectId !== project.id ||
+      asset.pieceId !== piece.id ||
+      asset.id !== piece.currentAssetId ||
+      asset.mediaKind !== 'image' ||
+      (asset.mimeType !== 'image/jpeg' && asset.mimeType !== 'image/png' && asset.mimeType !== 'image/webp')
+    ) {
+      throw new CreativeStudioPilotServiceErrorV3('invalid_reference');
+    }
+    return {
+      pieceId: piece.id,
+      assetId: asset.id,
+      sha256: asset.sha256,
+      mimeType: asset.mimeType,
+      byteSize: asset.byteSize,
+    };
+  });
+
 const mintUniqueIdentity = (
   kind: StudioPilotIdentityKindV3,
   mintIdentity: (kind: StudioPilotIdentityKindV3) => string,
@@ -111,6 +145,7 @@ const retryAuthority = (
 ): {
   words: string;
   settings: StudioPiecePhotoSettingsV3;
+  conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
   retryReason: StudioPieceJobRetryReasonV3;
   lineage: Extract<StudioPreparedPhotoReservationV3, { mode: 'retry' }>['lineage'];
 } => {
@@ -142,6 +177,7 @@ const retryAuthority = (
   return {
     words: sourceJob.composition.inputs.source.words,
     settings: { ...sourceJob.composition.inputs.source.settings },
+    conditioningInputs: structuredClone(sourceJob.composition.inputs.conditioningInputs),
     retryReason,
     lineage,
   };
@@ -179,6 +215,10 @@ export const createStudioPilotPreparePhotoServiceV3 = (
           const words = intent.mode === 'create' ? normalizeStudioPieceWordsV3(intent.words) : retry!.words;
           const settings: StudioPiecePhotoSettingsV3 =
             intent.mode === 'create' ? { ...intent.settings } : retry!.settings;
+          const conditioningInputs =
+            intent.mode === 'create'
+              ? resolveConditioningInputs(project, intent.referencePieceIds)
+              : retry!.conditioningInputs;
           const unavailableHandles = studioPieceHandleNamespaceV3(project, null, reservedCreateHandles);
           const proposedHandle =
             intent.mode === 'create'
@@ -205,6 +245,7 @@ export const createStudioPilotPreparePhotoServiceV3 = (
                     orderIndex,
                     words,
                     settings,
+                    conditioningInputs,
                   },
                 })
               : createStudioAuthoringFingerprintV3({
@@ -215,9 +256,10 @@ export const createStudioPilotPreparePhotoServiceV3 = (
                     sourceJobId: intent.sourceJobId,
                     words,
                     settings,
+                    conditioningInputs,
                   },
                 });
-          const routeAndRate = await resolveRouteAndRate(deps.providerResolver, settings);
+          const routeAndRate = await resolveRouteAndRate(deps.providerResolver, settings, conditioningInputs.length);
           const composition = composeStudioPieceGenerationV3({
             projectRevisionAtPreparation: project.revision,
             authoringRevision: project.authoringRevision,
@@ -227,7 +269,7 @@ export const createStudioPilotPreparePhotoServiceV3 = (
             rules: project.rules,
             source: { kind: 'piece', pieceId: targetPieceId, words, settings },
             purpose: 'piece_image',
-            conditioningInputs: [],
+            conditioningInputs,
             route: routeAndRate.provider,
             instructionProfile: deriveStudioPieceInstructionProfileV3(routeAndRate.provider),
           });
@@ -265,6 +307,7 @@ export const createStudioPilotPreparePhotoServiceV3 = (
                   idempotencyKey,
                   words,
                   settings,
+                  conditioningInputs,
                   provider: routeAndRate.provider,
                   cancellationPolicy: routeAndRate.cancellationPolicy,
                   quote: unstampedQuote,
@@ -286,6 +329,7 @@ export const createStudioPilotPreparePhotoServiceV3 = (
                   idempotencyKey,
                   words,
                   settings,
+                  conditioningInputs,
                   provider: routeAndRate.provider,
                   cancellationPolicy: routeAndRate.cancellationPolicy,
                   quote: unstampedQuote,

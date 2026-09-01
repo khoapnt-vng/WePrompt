@@ -5,6 +5,7 @@
  */
 
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
+import type { Readable } from 'node:stream';
 import {
   isValidProviderJobId,
   type StudioCancelPieceJobResultV3,
@@ -19,6 +20,7 @@ import type {
   GenerationProviderAdapterRegistry,
   ProviderJobSnapshot,
   ProviderOutput,
+  ResolvedProviderInput,
   ResolvedStudioGenerationRequest,
 } from '@process/services/creative-studio/adapters';
 import { ProviderDeadlineError, runWithProviderDeadline } from '@process/services/creative-studio/adapters';
@@ -72,6 +74,13 @@ const ERROR_MESSAGE_KEYS: Readonly<Record<StudioPieceJobErrorCodeV3, string>> = 
 };
 
 export type StudioPilotGeneratedMediaPublisherV3 = {
+  resolveManagedAssetV3(
+    projectId: string,
+    assetId: string
+  ): Promise<{
+    asset: { mimeType: string; byteSize: number };
+    openVerifiedStream(start?: number, end?: number): Promise<Readable>;
+  } | null>;
   publishGeneratedOutputV3(input: {
     projectId: string;
     pieceId: string;
@@ -202,6 +211,54 @@ const providerAvailable = (provider: IProvider, model: string): boolean =>
 
 const providerCredentialsAvailable = (provider: IProvider): boolean =>
   provider.api_key.trim().length > 0 && provider.base_url.trim().length > 0;
+
+const resolveConditioningImages = async (
+  media: StudioPilotGeneratedMediaPublisherV3,
+  project: StudioProjectV3,
+  job: StudioPieceJobV3
+): Promise<ResolvedProviderInput[]> =>
+  Promise.all(
+    job.requestPlan.snapshot.conditioningInputs.map(async (input) => {
+      const piece = project.pieces[input.pieceId];
+      const asset = project.assets[input.assetId];
+      if (
+        piece === undefined ||
+        asset === undefined ||
+        piece.currentAssetId !== input.assetId ||
+        asset.projectId !== project.id ||
+        asset.pieceId !== input.pieceId ||
+        asset.sha256 !== input.sha256 ||
+        asset.mimeType !== input.mimeType ||
+        asset.byteSize !== input.byteSize
+      ) {
+        throw new CreativeStudioPilotServiceErrorV3('invalid_media');
+      }
+      const resolved = await media.resolveManagedAssetV3(project.id, input.assetId);
+      if (
+        resolved === null ||
+        resolved.asset.mimeType !== input.mimeType ||
+        resolved.asset.byteSize !== input.byteSize
+      ) {
+        throw new CreativeStudioPilotServiceErrorV3('invalid_media');
+      }
+      return {
+        assetId: input.assetId,
+        mimeType: input.mimeType,
+        byteSize: input.byteSize,
+        openStream: () => resolved.openVerifiedStream(),
+        asDataUrl: async (maxBytes) => {
+          if (!Number.isSafeInteger(maxBytes) || maxBytes < input.byteSize) {
+            throw new CreativeStudioPilotServiceErrorV3('invalid_media');
+          }
+          const chunks: Buffer[] = [];
+          for await (const chunk of await resolved.openVerifiedStream()) chunks.push(Buffer.from(chunk));
+          const bytes = Buffer.concat(chunks);
+          if (bytes.byteLength !== input.byteSize) throw new CreativeStudioPilotServiceErrorV3('invalid_media');
+          return `data:${input.mimeType};base64,${bytes.toString('base64')}`;
+        },
+      };
+    })
+  );
 
 const isProviderJobSnapshot = (value: unknown): value is ProviderJobSnapshot => {
   if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'status')) return false;
@@ -378,10 +435,12 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
       requiresLiveRoute &&
       (route === undefined ||
         !route.constraints.aspectRatios.includes(settings.aspectRatio) ||
-        !route.constraints.resolutions.includes(settings.resolution))
+        !route.constraints.resolutions.includes(settings.resolution) ||
+        route.constraints.maxConditioningImages < job.requestPlan.snapshot.conditioningInputs.length)
     ) {
       throw new CreativeStudioPilotServiceErrorV3('route_unavailable');
     }
+    const conditioningImages = requiresLiveRoute ? await resolveConditioningImages(deps.media, project, job) : [];
     const request: ResolvedStudioGenerationRequest = {
       prompt: job.composition.prompt,
       mediaKind: 'image',
@@ -390,8 +449,8 @@ export const createStudioPilotJobManagerV3 = (deps: StudioPilotJobManagerDepsV3)
       durationSeconds: 1,
       idempotencyKey: job.idempotencyKey,
       ...(route === undefined ? {} : { routeConstraints: structuredClone(route.constraints) }),
-      conditioningImages: [],
-      conditioningImageLimit: 0,
+      conditioningImages,
+      conditioningImageLimit: route?.constraints.maxConditioningImages ?? conditioningImages.length,
     };
     const resolvedProvider = providerWithModel(provider, job.provider.model);
     if (requiresLiveRoute) {

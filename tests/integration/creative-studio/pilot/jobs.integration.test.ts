@@ -487,6 +487,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
     words: 'Silver train under rain',
     settings: { aspectRatio: '16:9', resolution: '1080p' },
     suggestedHandle: null,
+    referencePieceIds: [],
   });
   const confirmed = await confirm.confirmPreparedPhotoV3({
     reservationId: prepared.quote.reservationId,
@@ -509,6 +510,7 @@ const createHarness = async (options: HarnessOptions = {}) => {
       words: 'Second silver train under rain',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const additionalConfirmed = await confirm.confirmPreparedPhotoV3({
       reservationId: additionalPrepared.quote.reservationId,

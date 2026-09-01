@@ -18,6 +18,7 @@ import {
   type StudioGenerationRequestSnapshot,
   type StudioGenerationRequestTemplate,
   type StudioJobPurpose,
+  type StudioPieceConditioningInputSnapshotV3,
   type StudioPieceGenerationCompositionV3,
   type StudioPieceGenerationRequestPlanV3,
 } from '@/common/types/project/creativeStudioTypes';
@@ -287,22 +288,60 @@ const hasExactOwnKeysV3 = (value: unknown, keys: readonly string[]): value is Re
   }
 };
 
-const isExactlyEmptyDenseArrayV3 = (value: unknown): value is [] => {
+const pieceConditioningInputsEqualV3 = (
+  value: unknown,
+  expected: readonly StudioPieceConditioningInputSnapshotV3[]
+): boolean => {
   try {
-    return (
+    if (
       !nodeTypes.isProxy(value) &&
       Array.isArray(value) &&
-      value.length === 0 &&
-      Object.getPrototypeOf(value) === Array.prototype &&
-      Reflect.ownKeys(value).length === 1 &&
-      Reflect.ownKeys(value)[0] === 'length'
-    );
+      value.length === expected.length &&
+      Object.getPrototypeOf(value) === Array.prototype
+    ) {
+      const ownKeys = Reflect.ownKeys(value);
+      if (
+        ownKeys.length !== value.length + 1 ||
+        ownKeys.some(
+          (key) =>
+            key !== 'length' &&
+            (typeof key !== 'string' || !/^(0|[1-9][0-9]*)$/u.test(key) || Number(key) >= value.length)
+        )
+      ) {
+        return false;
+      }
+      for (let index = 0; index < value.length; index += 1) {
+        const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+        const input = expected[index];
+        if (
+          descriptor === undefined ||
+          !descriptor.enumerable ||
+          !Object.hasOwn(descriptor, 'value') ||
+          input === undefined
+        ) {
+          return false;
+        }
+        const candidate = descriptor.value;
+        if (
+          !hasExactOwnKeysV3(candidate, ['pieceId', 'assetId', 'sha256', 'mimeType', 'byteSize']) ||
+          candidate.pieceId !== input.pieceId ||
+          candidate.assetId !== input.assetId ||
+          candidate.sha256 !== input.sha256 ||
+          candidate.mimeType !== input.mimeType ||
+          candidate.byteSize !== input.byteSize
+        ) {
+          return false;
+        }
+      }
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
 };
 
-/** Builds the only Pilot-1 request plan: one unconditioned, resolved Piece image. */
+/** Builds one resolved Piece-image request from the exact frozen composition. */
 export const createStudioPieceGenerationRequestPlanV3 = (input: {
   composition: StudioPieceGenerationCompositionV3;
 }): StudioPieceGenerationRequestPlanV3 => {
@@ -311,7 +350,7 @@ export const createStudioPieceGenerationRequestPlanV3 = (input: {
   }
   const candidate = input.composition;
   if (!validateStudioPieceGenerationCompositionV3(candidate)) {
-    throw new TypeError('Piece request requires a valid composition schema 2');
+    throw new TypeError('Piece request requires a valid composition schema 3');
   }
   const composition = structuredClone(candidate);
   return {
@@ -322,7 +361,7 @@ export const createStudioPieceGenerationRequestPlanV3 = (input: {
         aspectRatio: composition.inputs.source.settings.aspectRatio,
         resolution: composition.inputs.source.settings.resolution,
       },
-      conditioningInputs: [],
+      conditioningInputs: structuredClone(composition.inputs.conditioningInputs),
     },
   };
 };
@@ -339,7 +378,7 @@ export const validateStudioPieceGenerationRequestPlanV3 = (
   return (
     value.snapshot.settings.aspectRatio === composition.inputs.source.settings.aspectRatio &&
     value.snapshot.settings.resolution === composition.inputs.source.settings.resolution &&
-    isExactlyEmptyDenseArrayV3(value.snapshot.conditioningInputs)
+    pieceConditioningInputsEqualV3(value.snapshot.conditioningInputs, composition.inputs.conditioningInputs)
   );
 };
 
@@ -351,5 +390,5 @@ export const studioPieceGenerationRequestPlansEqualV3 = (
   studioPieceGenerationCompositionsEqualV3(left.snapshot.composition, right.snapshot.composition) &&
   left.snapshot.settings.aspectRatio === right.snapshot.settings.aspectRatio &&
   left.snapshot.settings.resolution === right.snapshot.settings.resolution &&
-  left.snapshot.conditioningInputs.length === 0 &&
-  right.snapshot.conditioningInputs.length === 0;
+  pieceConditioningInputsEqualV3(left.snapshot.conditioningInputs, right.snapshot.conditioningInputs) &&
+  pieceConditioningInputsEqualV3(right.snapshot.conditioningInputs, left.snapshot.conditioningInputs);

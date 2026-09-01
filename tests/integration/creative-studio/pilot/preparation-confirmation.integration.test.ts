@@ -54,7 +54,10 @@ const writePng = async (file: string): Promise<string> => {
   return file;
 };
 
-const route = (choiceId = 'route_image'): StudioGenerationRouteCatalog['routes'][number] => ({
+const route = (
+  choiceId = 'route_image',
+  maxConditioningImages = 0
+): StudioGenerationRouteCatalog['routes'][number] => ({
   choiceId,
   providerId: `provider_${choiceId}`,
   providerName: 'Image provider',
@@ -68,7 +71,7 @@ const route = (choiceId = 'route_image'): StudioGenerationRouteCatalog['routes']
     minDurationSeconds: 1,
     maxDurationSeconds: 60,
     supportsFirstFrame: false,
-    maxConditioningImages: 0,
+    maxConditioningImages,
     silentOutput: true,
   },
   cancellationPolicy: 'queued_only',
@@ -122,8 +125,8 @@ const createHarness = async (
     options.mintIdentity ?? ((kind: StudioPilotIdentityKindV3): string => `${kind}_${++identitySequence}`);
   const resolveRouteAndRate: NonNullable<
     Parameters<typeof createStudioPilotPreparePhotoServiceV3>[0]['resolveRouteAndRate']
-  > = vi.fn(async (resolver, settings) => {
-    const resolved = await resolveStudioPieceRouteAndRateV3(resolver, settings);
+  > = vi.fn(async (resolver, settings, conditioningInputCount) => {
+    const resolved = await resolveStudioPieceRouteAndRateV3(resolver, settings, conditioningInputCount);
     return rateMinorUnits === resolved.rateMinorUnits
       ? resolved
       : { ...resolved, rateMinorUnits, rateCardDigest: 'f'.repeat(64) };
@@ -243,6 +246,7 @@ const prepareCreate = async (harness: Awaited<ReturnType<typeof createHarness>>)
     words: '  rain   on neon  ',
     settings: { aspectRatio: '16:9', resolution: '1080p' },
     suggestedHandle: null,
+    referencePieceIds: [],
   });
 
 const confirmPrepared = async (
@@ -316,6 +320,145 @@ describe('schema-6 photo preparation and confirmation', () => {
     const restartedCache = new StudioPreparedPhotoCacheV3();
     expect(restartedCache.list(harness.project().id)).toEqual([]);
     expect(harness.preparedPhotos.list(harness.project().id)).toHaveLength(1);
+  });
+
+  it('freezes two exact current Piece assets and retains them unchanged across a retry', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    await importDurablePieces(harness, 2);
+    harness.setRoutes([route('route_image', 2)]);
+    const referencePieceIds = ['piece_seed_001', 'piece_seed_002'];
+
+    const prepared = await harness.prepare.preparePhotoV3({
+      mode: 'create',
+      projectId: harness.project().id,
+      expectedAuthoringRevision: harness.project().authoringRevision,
+      words: 'A red coat beneath the rainy awning.',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+      referencePieceIds,
+    });
+    expect(prepared.quote.referencePieceIds).toEqual(referencePieceIds);
+    const expectedInputs = [
+      {
+        pieceId: 'piece_seed_001',
+        assetId: 'asset_seed_001',
+        sha256: 'd'.repeat(64),
+        mimeType: 'image/png',
+        byteSize: 1,
+      },
+      {
+        pieceId: 'piece_seed_002',
+        assetId: 'asset_seed_002',
+        sha256: 'd'.repeat(64),
+        mimeType: 'image/png',
+        byteSize: 1,
+      },
+    ];
+    const confirmed = await confirmPrepared(harness, prepared);
+    let project = await harness.store.loadProjectV3(harness.project().id);
+    expect(project.jobs[confirmed.jobId]?.requestPlan.snapshot.conditioningInputs).toEqual(expectedInputs);
+    project = await harness.store.updateProjectV3(
+      project.id,
+      (draft) => {
+        const job = draft.jobs[confirmed.jobId]!;
+        job.status = 'failed';
+        job.error = {
+          code: 'provider_unavailable',
+          messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+        };
+        return draft;
+      },
+      { kind: 'runtime', expectedRevision: project.revision }
+    );
+    harness.setProject(project);
+
+    const retry = await harness.prepare.preparePhotoV3({
+      mode: 'retry',
+      projectId: project.id,
+      expectedAuthoringRevision: project.authoringRevision,
+      pieceId: confirmed.pieceId,
+      sourceJobId: confirmed.jobId,
+    });
+
+    expect(retry.quote.referencePieceIds).toEqual(referencePieceIds);
+    const retryConfirmed = await confirmPrepared(harness, retry);
+    expect(
+      (await harness.store.loadProjectV3(project.id)).jobs[retryConfirmed.jobId]?.requestPlan.snapshot
+        .conditioningInputs
+    ).toEqual(expectedInputs);
+  });
+
+  it('fails before route or spend work for a missing reference Piece', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    harness.setRoutes([route('route_image', 2)]);
+    harness.resolveRouteAndRate.mockClear();
+
+    await expect(
+      harness.prepare.preparePhotoV3({
+        mode: 'create',
+        projectId: harness.project().id,
+        expectedAuthoringRevision: harness.project().authoringRevision,
+        words: 'A red coat beneath the rainy awning.',
+        settings: { aspectRatio: '16:9', resolution: '1080p' },
+        suggestedHandle: null,
+        referencePieceIds: ['piece_missing'],
+      })
+    ).rejects.toMatchObject({ code: 'invalid_reference' });
+    expect(harness.resolveRouteAndRate).not.toHaveBeenCalled();
+    expect(harness.preparedPhotos.list(harness.project().id)).toEqual([]);
+    expect((await harness.store.loadProjectV3(harness.project().id)).spendAuthorizations).toEqual([]);
+  });
+
+  it('fails before quote or spend when the selected route cannot carry the frozen references', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    await importDurablePieces(harness, 1);
+    harness.resolveRouteAndRate.mockClear();
+
+    await expect(
+      harness.prepare.preparePhotoV3({
+        mode: 'create',
+        projectId: harness.project().id,
+        expectedAuthoringRevision: harness.project().authoringRevision,
+        words: 'A red coat beneath the rainy awning.',
+        settings: { aspectRatio: '16:9', resolution: '1080p' },
+        suggestedHandle: null,
+        referencePieceIds: ['piece_seed_001'],
+      })
+    ).rejects.toMatchObject({ code: 'route_incompatible' });
+    expect(harness.resolveRouteAndRate).toHaveBeenCalledOnce();
+    expect(harness.preparedPhotos.list(harness.project().id)).toEqual([]);
+    expect((await harness.store.loadProjectV3(harness.project().id)).spendAuthorizations).toEqual([]);
+  });
+
+  it('rejects a prepared reference snapshot after its current asset changes and spends nothing', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    await importDurablePieces(harness, 1);
+    harness.setRoutes([route('route_image', 2)]);
+    const prepared = await harness.prepare.preparePhotoV3({
+      mode: 'create',
+      projectId: harness.project().id,
+      expectedAuthoringRevision: harness.project().authoringRevision,
+      words: 'A red coat beneath the rainy awning.',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+      referencePieceIds: ['piece_seed_001'],
+    });
+    const current = await harness.store.loadProjectV3(harness.project().id);
+    const changed = await harness.store.updateProjectV3(
+      current.id,
+      (draft) => {
+        draft.assets.asset_seed_001!.sha256 = 'e'.repeat(64);
+        return draft;
+      },
+      { kind: 'authoring', expectedRevision: current.revision }
+    );
+    harness.setProject(changed);
+
+    await expect(confirmPrepared(harness, prepared)).rejects.toMatchObject({ code: 'stale_quote' });
+    const after = await harness.store.loadProjectV3(current.id);
+    expect(after.spendAuthorizations).toEqual([]);
+    expect(Object.keys(after.jobs)).toEqual([]);
+    expect(harness.dispatch).not.toHaveBeenCalled();
   });
 
   it('retries a reservation identity that collides with persisted authorization history', async () => {

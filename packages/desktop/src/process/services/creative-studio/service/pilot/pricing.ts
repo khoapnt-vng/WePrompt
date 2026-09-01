@@ -28,12 +28,17 @@ export class StudioPieceRouteResolutionErrorV3 extends Error {
   }
 }
 
-const routeSupportsSettings = (route: StudioGenerationRoute, settings: StudioPiecePhotoSettingsV3): boolean =>
+const routeSupportsSettings = (
+  route: StudioGenerationRoute,
+  settings: StudioPiecePhotoSettingsV3,
+  conditioningInputCount: number
+): boolean =>
   route.kind === 'image' &&
   route.adapterId === 'weprompt-image-v1' &&
   route.health !== 'unavailable' &&
   route.constraints.aspectRatios.includes(settings.aspectRatio) &&
-  route.constraints.resolutions.includes(settings.resolution);
+  route.constraints.resolutions.includes(settings.resolution) &&
+  route.constraints.maxConditioningImages >= conditioningInputCount;
 
 /**
  * Resolves the first eligible route from Main's already deterministic catalog and joins it to the
@@ -41,15 +46,19 @@ const routeSupportsSettings = (route: StudioGenerationRoute, settings: StudioPie
  */
 export const resolveStudioPieceRouteAndRateV3 = async (
   resolver: Pick<StudioProviderResolver, 'listGenerationRoutes'>,
-  settings: StudioPiecePhotoSettingsV3
+  settings: StudioPiecePhotoSettingsV3,
+  conditioningInputCount = 0
 ): Promise<StudioPieceRouteAndRateV3> => {
+  if (!Number.isSafeInteger(conditioningInputCount) || conditioningInputCount < 0) {
+    throw new StudioPieceRouteResolutionErrorV3('route_incompatible');
+  }
   let catalog: Awaited<ReturnType<StudioProviderResolver['listGenerationRoutes']>>;
   try {
     catalog = await resolver.listGenerationRoutes();
   } catch {
     throw new StudioPieceRouteResolutionErrorV3('route_catalog_unavailable');
   }
-  const route = catalog.routes.find((candidate) => routeSupportsSettings(candidate, settings));
+  const route = catalog.routes.find((candidate) => routeSupportsSettings(candidate, settings, conditioningInputCount));
   if (route === undefined) throw new StudioPieceRouteResolutionErrorV3('route_incompatible');
 
   const rateCard = createConfiguredStudioRateCardV2(catalog);

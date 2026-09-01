@@ -3,6 +3,8 @@
 **Date:** 2026-08-30 · **Revision 3** · **Status:** owner-approved, binding
 **Supersedes:** revisions 1 and 2, and the four-view workspace IA
 
+**Photo-depth amendment:** 2026-09-01 · **Status:** owner-approved, binding
+
 > Revision 3 is a clean contract, not a compatibility amendment. It corrects Revision 2's schema-5
 > defaulting, completes the standalone-photo generation contract, separates quoted intent from a
 > durable Piece, and narrows Pilot 1 to what the product can actually finish.
@@ -11,6 +13,12 @@
 > its coexistence premise. Production stays on the schema-5 four-view workspace through Phase 4.
 > Phase 5 selects the schema-6 canvas and removes the four views in the same clean cutover; no
 > production reader serves both schemas.
+
+> **Photo-depth ruling:** after the initial Pilot 1 cutover and before Phase 6, Create photo may use
+> zero, one, or two current photograph Pieces as visual conditioning. This is a bounded Piece
+> selection, not the semantic character/background Reference workflow deferred to Phase 6. It
+> advances generation composition 2 → 3, authoring fingerprint 1 → 2, and Director command 11 → 12
+> independently; project schema remains 6. There is no migration or compatibility reader.
 
 ---
 
@@ -82,13 +90,13 @@ semantics changes.
 
 ### Contracts that move for Pilot 1
 
-| Contract               | Revision | Reason                                                            |
-| ---------------------- | -------: | ----------------------------------------------------------------- |
-| Studio project         |    5 → 6 | First-class Piece storage and exact CS4 invariants                |
-| Generation composition |    1 → 2 | A real Piece source and `piece_image` purpose                     |
-| Mutation batch         |    5 → 6 | Typed, undoable Piece rename                                      |
-| Director command       |  10 → 11 | Add typed Piece preparation/rename capability in Phase 5          |
-| Export catalog/sidecar |    2 → 3 | Add exact standalone-Piece image and provenance export in Phase 3 |
+| Contract               |     Revision | Reason                                                            |
+| ---------------------- | -----------: | ----------------------------------------------------------------- |
+| Studio project         |        5 → 6 | First-class Piece storage and exact CS4 invariants                |
+| Generation composition |    1 → 2 → 3 | Add Piece generation, then exact bounded Piece conditioning       |
+| Mutation batch         |        5 → 6 | Typed, undoable Piece rename                                      |
+| Director command       | 10 → 11 → 12 | Add Piece commands, then bounded `referencePieceIds` selection    |
+| Export catalog/sidecar |        2 → 3 | Add exact standalone-Piece image and provenance export in Phase 3 |
 
 These versions activate only with the phase that lands every reader and writer for that contract;
 they are not coupled to the project-schema bump. Assembly adds no contract in Pilot 1 because it
@@ -99,9 +107,10 @@ it if a later approved proposal operation changes its shape or authority.
 
 ## Piece-capable generation provenance
 
-`StudioGenerationCompositionV2` remains immutable request provenance, but its schema independently
-moves to version 2. The new version adds a genuine Piece arm rather than pretending a standalone
-photo is a Shot or project Reference.
+`StudioGenerationCompositionV2` remains immutable request provenance. Schema 2 added a genuine
+Piece arm rather than pretending a standalone photo is a Shot or project Reference. The
+photo-depth amendment advances that same independent contract to schema 3 without changing project
+schema 6.
 
 A Piece image request has all of these matching facts:
 
@@ -111,7 +120,8 @@ A Piece image request has all of these matching facts:
   photo settings
 - resolved provider route and model revision
 - exact prompt composition sent to the provider
-- an exact empty conditioning-input list; image-conditioned creation is deferred to Phase 6
+- an exact ordered list of zero, one, or two conditioning snapshots, each freezing the selected
+  Piece id plus its current asset id, SHA-256, MIME type, and byte size
 - quote revision, authorization provenance, and producer linkage
 
 Validators enforce the source/purpose/target relationship as a biconditional. Quote, authorization,
@@ -128,10 +138,12 @@ cutover rejects. No stored prompt is recomposed or rewritten to make it look cur
 
 ### Create photo
 
-1. The person or Director drafts wording. Main resolves the route, rate, request-scoped photo
-   settings, and a new immutable `pieceId`.
-2. Main prepares a quote that freezes the reserved id, prompt composition, route, revision,
-   provenance facts, settings, currency, and exact price. **No Piece or Job exists yet.**
+1. The person or Director drafts wording and may select up to two current photograph Pieces. Main
+   resolves those Piece ids to their exact current assets, then resolves the route, rate,
+   request-scoped photo settings, and a new immutable `pieceId`.
+2. Main prepares a quote that freezes the reserved id, prompt composition, ordered conditioning
+   snapshots, route, revision, provenance facts, settings, currency, and exact price. **No Piece or
+   Job exists yet.**
 3. The renderer shows a provisional quote block in the future Piece's board position. It is visibly
    quoted intent, not a Director proposal card, a durable Piece, or canvas inventory.
 4. Immediately before authorization, Main rederives the quote from current state. Stale or changed
@@ -397,7 +409,9 @@ projections, provenance, and standalone-photo export behind an isolated CS4 Main
 Exercise the complete Main lifecycle with zero Beats and zero Shots: import, quote, stale/duplicate
 confirmation, within-cap authorization, outside-cap explicit action, dispatch, failure, retry,
 restart recovery, invalid output, quarantine containment, reload, and export. This is a headless
-integration gate, not the user E2E.
+integration gate, not the user E2E. Route resolution in this gate must read a durable
+`connectionManifest` through the production `createStudioProviderResolver` composition; tests must
+not inject a pre-resolved provider catalogue that bypasses that boundary.
 
 ### Phase 5 — Pilot canvas and user E2E
 
@@ -406,6 +420,16 @@ photo; provisional quote presentation; cost/authorization state; durable Piece p
 rename, provenance, reload, and export; Director integration; all twelve locales; RTL, responsive,
 accessibility, and theme behavior. Retire the four CS3 views and film-only app-bar controls here. Run
 the actual renderer-to-Main Pilot journey.
+
+### Photo-depth tranche — bounded visual conditioning
+
+Before Phase 6, add a current-Piece picker to Create photo and the same typed field to the direct
+Director command. Main alone resolves ids, freezes asset facts, revalidates them before spend, and
+loads the exact managed bytes after authorization. A route whose frozen capability admits fewer
+images is ineligible before quote. Retry copies the predecessor's ordered conditioning snapshots;
+it cannot silently select newer assets. Generated provenance exposes the ordered Piece ids, while
+provider secrets and storage paths remain Main-only. No semantic Reference entity, approval
+lifecycle, proposal card, superseded-asset model, or Assembly field is introduced.
 
 ### Phase 6 — Assembly and later modalities
 

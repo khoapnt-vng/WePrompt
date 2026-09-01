@@ -634,7 +634,7 @@ describe('inactive Piece spend authorization and receipt', () => {
     const composition = composeStudioPieceGenerationV3({
       projectRevisionAtPreparation: 5,
       authoringRevision: 2,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'a'.repeat(64),
       brief: '',
       rules: [],
@@ -656,7 +656,7 @@ describe('inactive Piece spend authorization and receipt', () => {
       projectId: 'project_1',
       projectRevisionAtPreparation: 5,
       authoringRevision: 2,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'a'.repeat(64),
       rateCardDigest: 'b'.repeat(64),
       currency: 'USD',

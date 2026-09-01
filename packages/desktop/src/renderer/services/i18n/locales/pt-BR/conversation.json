@@ -964,7 +964,8 @@
           "noChange": "Nada foi alterado.",
           "undoConflict": "O projeto mudou, portanto não é possível desfazer a última renomeação.",
           "staleAuthoring": "O projeto mudou. Analise o estado mais recente e tente novamente.",
-          "variationGrid": "Foi retornada uma grade de variações em vez de uma foto. Analise o resultado antes de iniciar outra tentativa paga."
+          "variationGrid": "Foi retornada uma grade de variações em vez de uma foto. Analise o resultado antes de iniciar outra tentativa paga.",
+          "invalidReference": "Uma ou mais referências selecionadas não são mais atuais. Escolha Pieces de foto atuais e revise o custo novamente."
         },
         "variationGrid": {
           "paidRejected": "O provedor retornou e cobrou uma saída, mas o Creative Studio a recusou por ser uma grade de variações.",
@@ -985,7 +986,8 @@
           "duplicateAcknowledgement": "Entendo que o envio anterior ao provedor pode já ter sido cobrado.",
           "confirmCreate": "Confirmar e criar foto",
           "confirmRetry": "Confirmar e tentar novamente",
-          "discard": "Descartar orçamento"
+          "discard": "Descartar orçamento",
+          "visualReferences": "Referências visuais"
         },
         "piece": {
           "eyebrow": "Peça de foto",
@@ -1047,7 +1049,8 @@
           "created": "Criada",
           "model": "Modelo",
           "instructionProfile": "Perfil de instruções",
-          "recordedSpend": "Gasto registrado"
+          "recordedSpend": "Gasto registrado",
+          "visualReferences": "Referências visuais"
         },
         "history": {
           "accessible": "Histórico de tentativas de {{handle}}",
@@ -1097,7 +1100,10 @@
         "composer": {
           "description": "Descrição da foto",
           "aspectRatio": "Proporção",
-          "resolution": "Resolução"
+          "resolution": "Resolução",
+          "visualReferences": "Referências visuais",
+          "visualReferencesHint": "Escolha até {{maximum}} Pieces atuais para orientar esta foto.",
+          "visualReferencesCount": "{{selected}} de {{maximum}} selecionadas"
         }
       },
       "spending": {

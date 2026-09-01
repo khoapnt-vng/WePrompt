@@ -960,7 +960,8 @@
           "noChange": "Herhangi bir değişiklik yapılmadı.",
           "undoConflict": "Proje değiştiği için son ad değişikliği geri alınamıyor.",
           "staleAuthoring": "Proje değişti. En son durumu inceleyip yeniden deneyin.",
-          "variationGrid": "Tek fotoğraf yerine bir varyasyon ızgarası döndürüldü. Ücretli bir yeniden deneme başlatmadan önce sonucu inceleyin."
+          "variationGrid": "Tek fotoğraf yerine bir varyasyon ızgarası döndürüldü. Ücretli bir yeniden deneme başlatmadan önce sonucu inceleyin.",
+          "invalidReference": "Seçilen referanslardan biri veya birkaçı artık güncel değil. Güncel fotoğraf Piece öğelerini seçip maliyeti yeniden inceleyin."
         },
         "variationGrid": {
           "paidRejected": "Sağlayıcı bir çıktı döndürüp ücretlendirdi ancak çıktı bir varyasyon ızgarası olduğu için Creative Studio bunu reddetti.",
@@ -981,7 +982,8 @@
           "duplicateAcknowledgement": "Önceki sağlayıcı gönderiminin zaten ücretlendirilmiş olabileceğini anlıyorum.",
           "confirmCreate": "Onayla ve fotoğraf oluştur",
           "confirmRetry": "Onayla ve yeniden dene",
-          "discard": "Teklifi at"
+          "discard": "Teklifi at",
+          "visualReferences": "Görsel referanslar"
         },
         "piece": {
           "eyebrow": "Fotoğraf Parçası",
@@ -1043,7 +1045,8 @@
           "created": "Oluşturulma",
           "model": "Model",
           "instructionProfile": "Talimat profili",
-          "recordedSpend": "Kaydedilen harcama"
+          "recordedSpend": "Kaydedilen harcama",
+          "visualReferences": "Görsel referanslar"
         },
         "history": {
           "accessible": "{{handle}} deneme geçmişi",
@@ -1093,7 +1096,10 @@
         "composer": {
           "description": "Fotoğraf açıklaması",
           "aspectRatio": "En-boy oranı",
-          "resolution": "Çözünürlük"
+          "resolution": "Çözünürlük",
+          "visualReferences": "Görsel referanslar",
+          "visualReferencesHint": "Bu fotoğrafa yön vermek için en fazla {{maximum}} güncel Piece seçin.",
+          "visualReferencesCount": "{{maximum}} öğeden {{selected}} seçildi"
         }
       },
       "spending": {

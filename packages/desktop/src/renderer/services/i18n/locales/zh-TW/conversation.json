@@ -958,7 +958,8 @@
           "noChange": "沒有任何變更。",
           "undoConflict": "專案已變更，因此無法復原上次重新命名。",
           "staleAuthoring": "專案已變更。請檢查最新狀態後再試一次。",
-          "variationGrid": "傳回的是變化網格，而非單張照片。開始另一次付費嘗試前，請先檢查結果。"
+          "variationGrid": "傳回的是變化網格，而非單張照片。開始另一次付費嘗試前，請先檢查結果。",
+          "invalidReference": "一個或多個所選參考已不是目前版本。請選擇目前的照片 Piece，並重新檢查費用。"
         },
         "variationGrid": {
           "paidRejected": "供應商已傳回結果並收取費用，但創意工作室因其為變化網格而拒絕該結果。",
@@ -979,7 +980,8 @@
           "duplicateAcknowledgement": "我了解先前提交給供應商的要求可能已產生費用。",
           "confirmCreate": "確認並建立照片",
           "confirmRetry": "確認並重試",
-          "discard": "捨棄報價"
+          "discard": "捨棄報價",
+          "visualReferences": "視覺參考"
         },
         "piece": {
           "eyebrow": "照片作品",
@@ -1041,7 +1043,8 @@
           "created": "建立時間",
           "model": "模型",
           "instructionProfile": "指令設定檔",
-          "recordedSpend": "已記錄支出"
+          "recordedSpend": "已記錄支出",
+          "visualReferences": "視覺參考"
         },
         "history": {
           "accessible": "{{handle}} 的嘗試記錄",
@@ -1091,7 +1094,10 @@
         "composer": {
           "description": "照片描述",
           "aspectRatio": "長寬比",
-          "resolution": "解析度"
+          "resolution": "解析度",
+          "visualReferences": "視覺參考",
+          "visualReferencesHint": "選擇最多 {{maximum}} 個目前的 Piece 來引導這張照片。",
+          "visualReferencesCount": "已選擇 {{selected}}/{{maximum}}"
         }
       },
       "spending": {

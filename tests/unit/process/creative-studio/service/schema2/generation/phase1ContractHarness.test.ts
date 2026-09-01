@@ -82,6 +82,7 @@ const makeSucceededProject = (): StudioProjectV3 => {
     orderIndex: 0,
     words: 'Moonlight reflected on calm water.',
     settings,
+    conditioningInputs: [],
   };
   const authoringFingerprint = createStudioAuthoringFingerprintV3({ project: preparedProject, prepared });
   const composition = composeStudioPieceGenerationV3({
@@ -216,9 +217,9 @@ describe('CS4 Phase 1 Piece contract harness', () => {
     }).toEqual({
       projectSchema: 6,
       mutationBatchSchema: 6,
-      compositionSchema: 2,
+      compositionSchema: 3,
       exportSchema: 3,
-      authoringFingerprint: 1,
+      authoringFingerprint: 2,
     });
     expect({
       pieces: STUDIO_MAX_PIECES_V3,

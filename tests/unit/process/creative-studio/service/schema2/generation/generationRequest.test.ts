@@ -262,7 +262,7 @@ describe('inactive Piece image request plan', () => {
     composeStudioPieceGenerationV3({
       projectRevisionAtPreparation: 3,
       authoringRevision: 2,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'd'.repeat(64),
       brief: '',
       rules: [],
@@ -295,6 +295,61 @@ describe('inactive Piece image request plan', () => {
     expect(studioPieceGenerationRequestPlansEqualV3(plan, structuredClone(plan))).toBe(true);
   });
 
+  it('copies exact ordered Piece references and detects stored-plan tampering', () => {
+    const base = makePieceComposition();
+    const reference = {
+      pieceId: 'piece_reference',
+      assetId: 'asset_reference',
+      sha256: 'a'.repeat(64),
+      mimeType: 'image/png' as const,
+      byteSize: 512,
+    };
+    const composition = {
+      ...base,
+      inputs: { ...base.inputs, conditioningInputs: [reference] },
+    };
+    const plan = createStudioPieceGenerationRequestPlanV3({ composition });
+    expect(plan.snapshot.conditioningInputs).toEqual([reference]);
+    expect(plan.snapshot.conditioningInputs).not.toBe(composition.inputs.conditioningInputs);
+    expect(validateStudioPieceGenerationRequestPlanV3(plan)).toBe(true);
+    expect(
+      validateStudioPieceGenerationRequestPlanV3({
+        ...plan,
+        snapshot: {
+          ...plan.snapshot,
+          conditioningInputs: [{ ...reference, sha256: 'b'.repeat(64) }],
+        },
+      })
+    ).toBe(false);
+    expect(
+      studioPieceGenerationRequestPlansEqualV3(plan, {
+        ...plan,
+        snapshot: {
+          ...plan.snapshot,
+          conditioningInputs: [{ ...reference, byteSize: reference.byteSize + 1 }],
+        },
+      })
+    ).toBe(false);
+
+    let getterCalls = 0;
+    const accessorInputs: unknown[] = [];
+    Object.defineProperty(accessorInputs, '0', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return reference;
+      },
+    });
+    accessorInputs.length = 1;
+    expect(
+      validateStudioPieceGenerationRequestPlanV3({
+        ...plan,
+        snapshot: { ...plan.snapshot, conditioningInputs: accessorInputs },
+      })
+    ).toBe(false);
+    expect(getterCalls).toBe(0);
+  });
+
   it('rejects accessor-backed constructor input without invoking it', () => {
     let getterCalls = 0;
     const hostile = {} as { composition: ReturnType<typeof makePieceComposition> };
@@ -310,7 +365,7 @@ describe('inactive Piece image request plan', () => {
     expect(getterCalls).toBe(0);
   });
 
-  it('rejects settings drift, conditioning, deferred shape, and film baggage', () => {
+  it('rejects settings drift, malformed conditioning, deferred shape, and film baggage', () => {
     const plan = createStudioPieceGenerationRequestPlanV3({ composition: makePieceComposition() });
     expect(
       validateStudioPieceGenerationRequestPlanV3({

@@ -107,6 +107,7 @@ const generatedHarness = async (): Promise<Harness> =>
     brief: 'One quiet photograph.',
     words: 'Moonlight reflected on calm water.',
     suggestedHandle: 'generated_lake',
+    referencePieceIds: [],
     aspectRatio: '4:3',
   });
 

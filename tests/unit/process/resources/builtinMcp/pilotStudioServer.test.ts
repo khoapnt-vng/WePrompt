@@ -5,11 +5,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { STUDIO_PILOT_ENV } from '@/common/types/project/creativeStudioPilotMcpEnv';
 import { parsePilotStudioServerEnv, registerPilotStudioTools } from '@process/resources/builtinMcp/pilotStudioServer';
+import { STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION } from '@process/services/creative-studio/service/pilot/director/contracts';
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
-describe('schema-11 Pilot Studio MCP server', () => {
+describe('schema-12 Pilot Studio MCP server', () => {
   it('accepts only one safe project identity and absolute directory', () => {
     const projectDir = path.resolve('/tmp/studio-project');
     expect(
@@ -80,7 +81,7 @@ describe('schema-11 Pilot Studio MCP server', () => {
     const readStatus = vi.fn(async (_projectId: string, commandId: string) => ({
       status: 'terminal' as const,
       receipt: {
-        schemaVersion: 11,
+        schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
         commandId,
         projectId: 'project_1',
         status: 'succeeded' as const,
@@ -115,6 +116,7 @@ describe('schema-11 Pilot Studio MCP server', () => {
       aspect_ratio: '16:9',
       resolution: '1080p',
       suggested_handle: null,
+      reference_piece_ids: ['piece_reference'],
     } as never);
     await handlers.get('studio_rename_piece')?.({
       expected_authoring_revision: 4,
@@ -129,6 +131,7 @@ describe('schema-11 Pilot Studio MCP server', () => {
         policy: 'prepare_photo',
         expectedAuthoringRevision: 3,
         suggestedHandle: null,
+        referencePieceIds: ['piece_reference'],
       }),
       expect.objectContaining({
         policy: 'rename_piece',

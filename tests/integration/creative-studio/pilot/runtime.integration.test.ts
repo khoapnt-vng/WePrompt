@@ -154,6 +154,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'A second photograph',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const exportCatalog = await runtime.entryPoint.listPieceExportsV3(created.summary.id);
     const exported = await runtime.entryPoint.exportPieceV3({
@@ -293,6 +294,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'A transient first photograph',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     await expect(firstMain.entryPoint.loadProjectV3(created.summary.id)).resolves.toMatchObject({
       status: 'supported',
@@ -318,6 +320,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'A durable failed photograph',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const confirmed = await secondMain.entryPoint.confirmPreparedPhotoV3({
       reservationId: replacementCreate.quote.reservationId,
@@ -476,6 +479,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'One recovered photograph',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const confirmed = await runtime.entryPoint.confirmPreparedPhotoV3({
       reservationId: prepared.quote.reservationId,
@@ -622,6 +626,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'A photograph that survives a cancellation race',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const confirmed = await firstMain.entryPoint.confirmPreparedPhotoV3({
       reservationId: prepared.quote.reservationId,
@@ -782,6 +787,7 @@ describe('composed schema-6 Pilot runtime', () => {
       words: 'Aurora reflected in still water',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     expect(prepared.quote).toMatchObject({
       requiresExplicitHumanAction: true,

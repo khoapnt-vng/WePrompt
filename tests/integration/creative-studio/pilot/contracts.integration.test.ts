@@ -48,11 +48,13 @@ describe('CS4 Pilot public wire contracts', () => {
       words: 'Moonlight on calm water.',
       settings,
       suggestedHandle: 'light_on_water',
+      referencePieceIds: ['piece_reference'],
     };
     const parsedPrepare = parseStudioPreparePhotoRequestV3(prepare);
     expect(parsedPrepare).toEqual(prepare);
     expect(parsedPrepare).not.toBe(prepare);
     expect(parsedPrepare.settings).not.toBe(settings);
+    expect(parsedPrepare.referencePieceIds).not.toBe(prepare.referencePieceIds);
     expect(parseStudioPreparePhotoIntentV3(prepare)).toEqual(prepare);
 
     const retry = {
@@ -189,6 +191,7 @@ describe('CS4 Pilot public wire contracts', () => {
         words: 'A photograph',
         settings: { aspectRatio: '16:9', resolution: '1080p' },
         suggestedHandle: null,
+        referencePieceIds: [],
         routeId: 'renderer_route',
       })
     );
@@ -306,9 +309,59 @@ describe('CS4 Pilot public wire contracts', () => {
         words: 'A photograph',
         settings: { aspectRatio: '2:1', resolution: '4k' },
         suggestedHandle: null,
+        referencePieceIds: [],
       })
     );
     expectInvalid(() => parseStudioCreateProjectRequestV3(Object.create({ name: 'Pilot', brief: '' })));
+
+    const validPrepare = {
+      mode: 'create',
+      projectId: 'project_1',
+      expectedAuthoringRevision: 1,
+      words: 'A photograph',
+      settings: { aspectRatio: '16:9', resolution: '1080p' },
+      suggestedHandle: null,
+    } as const;
+    expectInvalid(() =>
+      parseStudioPreparePhotoRequestV3({
+        ...validPrepare,
+        referencePieceIds: ['piece_1', 'piece_1'],
+      })
+    );
+    expectInvalid(() =>
+      parseStudioPreparePhotoRequestV3({
+        ...validPrepare,
+        referencePieceIds: ['piece_1', 'piece_2', 'piece_3'],
+      })
+    );
+
+    const sparseReferencePieceIds: unknown[] = ['piece_1', 'piece_2'];
+    delete sparseReferencePieceIds[0];
+    expectInvalid(() =>
+      parseStudioPreparePhotoRequestV3({ ...validPrepare, referencePieceIds: sparseReferencePieceIds })
+    );
+
+    let referenceGetterReads = 0;
+    const accessorReferencePieceIds: unknown[] = [];
+    Object.defineProperty(accessorReferencePieceIds, '0', {
+      enumerable: true,
+      get: () => {
+        referenceGetterReads += 1;
+        return 'piece_1';
+      },
+    });
+    accessorReferencePieceIds.length = 1;
+    expectInvalid(() =>
+      parseStudioPreparePhotoRequestV3({ ...validPrepare, referencePieceIds: accessorReferencePieceIds })
+    );
+    expect(referenceGetterReads).toBe(0);
+
+    expectInvalid(() =>
+      parseStudioPreparePhotoRequestV3({
+        ...validPrepare,
+        referencePieceIds: new Proxy(['piece_1'], {}),
+      })
+    );
 
     let getterReads = 0;
     const accessor = Object.create(null) as Record<string, unknown>;

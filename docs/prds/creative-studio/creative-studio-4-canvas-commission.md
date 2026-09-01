@@ -123,13 +123,19 @@ left-to-right. Immutable ids, never handles, cross process boundaries.
 
 ## Photo settings and provenance
 
+> **2026-09-01 photo-depth amendment:** the initial text-only Pilot has shipped. Create photo may now
+> select zero, one, or two current photograph Pieces as bounded visual conditioning. This is not the
+> semantic Reference workflow: Main resolves and freezes exact current assets, revalidates before
+> spend, and persists ordered Piece ids in provenance. Generation composition is schema 3 and the
+> current profile is `weprompt-image-v1.piece-image.v2`; project schema remains 6.
+
 Photo aspect ratio and resolution are chosen for the invocation. They do not come from hidden film
 settings. The quote and generation composition freeze the request-scoped settings, exact prompt,
 route/model revision, rate, quote revision, authorization, producer linkage, and receipt facts.
-Create photo is text-to-image only; Import photo creates a Piece but does not condition generation in
-Pilot 1.
+The initial Pilot was text-to-image only. Import photo itself still does not generate or spend; an
+imported current Piece may now be selected to condition a later Create photo request.
 
-Create photo uses generation-composition schema 2 with purpose `piece_image` and matching Piece
+Create photo uses generation-composition schema 3 with purpose `piece_image` and matching Piece
 source/target. It must not masquerade as a Shot seed or character/background Reference.
 
 ## Layout and components
@@ -147,7 +153,7 @@ Do not copy these wireframe elements into Pilot 1:
 
 - script or sound offers;
 - two competing composers;
-- reference-conditioned or photo-to-photo generation;
+- semantic Reference approval/planning or an unbounded photo-to-photo workflow;
 - film, Shot, Reference, video, or audio blocks;
 - credit or remaining-budget readouts;
 - `dir="ltr"` handles;

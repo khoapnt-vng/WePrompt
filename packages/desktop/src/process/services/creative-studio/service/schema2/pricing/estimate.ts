@@ -7,6 +7,7 @@
 import { types as nodeTypes } from 'node:util';
 
 import {
+  STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_PROJECT_REFERENCES,
@@ -1749,7 +1750,7 @@ export type StudioPieceSubmissionQuoteInputV3 = {
   projectId: string;
   projectRevisionAtPreparation: number;
   authoringRevision: number;
-  authoringFingerprintVersion: 1;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V3;
   authoringFingerprint: string;
   rateCardDigest: string;
   currency: string;
@@ -1784,7 +1785,7 @@ export const createStudioPieceSubmissionQuoteV3 = (
     snapshot.projectRevisionAtPreparation < 1 ||
     !Number.isSafeInteger(snapshot.authoringRevision) ||
     snapshot.authoringRevision < 1 ||
-    snapshot.authoringFingerprintVersion !== 1 ||
+    snapshot.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
     typeof snapshot.authoringFingerprint !== 'string' ||
     !/^[a-f0-9]{64}$/.test(snapshot.authoringFingerprint) ||
     typeof snapshot.rateCardDigest !== 'string' ||
@@ -1838,7 +1839,7 @@ export const createStudioPieceSubmissionQuoteV3 = (
     projectId: snapshot.projectId,
     projectRevisionAtPreparation: snapshot.projectRevisionAtPreparation,
     authoringRevision: snapshot.authoringRevision,
-    authoringFingerprintVersion: 1,
+    authoringFingerprintVersion: STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
     authoringFingerprint: snapshot.authoringFingerprint,
     rateCardDigest: snapshot.rateCardDigest,
     currency: snapshot.currency,
@@ -1866,7 +1867,7 @@ export const validateStudioPieceSubmissionQuoteV3 = (
       (quote.projectRevisionAtPreparation as number) < 1 ||
       !Number.isSafeInteger(quote.authoringRevision) ||
       (quote.authoringRevision as number) < 1 ||
-      quote.authoringFingerprintVersion !== 1 ||
+      quote.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
       typeof quote.authoringFingerprint !== 'string' ||
       !/^[a-f0-9]{64}$/.test(quote.authoringFingerprint) ||
       typeof quote.rateCardDigest !== 'string' ||

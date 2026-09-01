@@ -443,7 +443,7 @@ describe('inactive schema-2 Piece generation composition', () => {
     composeStudioPieceGenerationV3({
       projectRevisionAtPreparation: 11,
       authoringRevision: 4,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'c'.repeat(64),
       brief: 'A quiet, human-scale photographic study.',
       rules: [],
@@ -466,7 +466,7 @@ describe('inactive schema-2 Piece generation composition', () => {
       schemaVersion: STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
       projectRevisionAtPreparation: 11,
       authoringRevision: 4,
-      authoringFingerprintVersion: 1,
+      authoringFingerprintVersion: 2,
       authoringFingerprint: 'c'.repeat(64),
       brief: 'A quiet, human-scale photographic study.',
       rules: [],
@@ -479,7 +479,7 @@ describe('inactive schema-2 Piece generation composition', () => {
       purpose: 'piece_image',
       conditioningInputs: [],
       route: pieceRoute,
-      instructionProfile: 'weprompt-image-v1.piece-image.v1',
+      instructionProfile: 'weprompt-image-v1.piece-image.v2',
     });
     expect(composition.prompt).toContain('PHOTO REQUEST\nBình minh trên cánh đồng muối');
     expect(composition.prompt).toContain('Create exactly one standalone photograph.');
@@ -495,13 +495,52 @@ describe('inactive schema-2 Piece generation composition', () => {
     ).toBe(true);
   });
 
+  it('freezes zero, one, or two ordered Piece references and rejects ambiguous conditioning authority', () => {
+    const { schemaVersion: ignoredSchemaVersion, ...input } = composePiece().inputs;
+    void ignoredSchemaVersion;
+    const first = {
+      pieceId: 'piece_red_coat',
+      assetId: 'asset_red_coat',
+      sha256: '1'.repeat(64),
+      mimeType: 'image/png' as const,
+      byteSize: 128,
+    };
+    const second = {
+      pieceId: 'piece_rainy_street',
+      assetId: 'asset_rainy_street',
+      sha256: '2'.repeat(64),
+      mimeType: 'image/webp' as const,
+      byteSize: 256,
+    };
+    const conditioned = composeStudioPieceGenerationV3({ ...input, conditioningInputs: [first, second] });
+    expect(conditioned.inputs.conditioningInputs).toEqual([first, second]);
+    expect(conditioned.inputs.conditioningInputs).not.toBe(input.conditioningInputs);
+    expect(conditioned.prompt).toContain('VISUAL REFERENCES');
+    expect(validateStudioPieceGenerationCompositionV3(conditioned)).toBe(true);
+    expect(composeStudioPieceGenerationV3({ ...input, conditioningInputs: [first] }).prompt).toContain(
+      'VISUAL REFERENCES'
+    );
+    expect(composePiece().prompt).not.toContain('VISUAL REFERENCES');
+
+    for (const conditioningInputs of [
+      [first, second, { ...second, pieceId: 'piece_third', assetId: 'asset_third' }],
+      [first, { ...second, pieceId: first.pieceId }],
+      [first, { ...second, assetId: first.assetId }],
+      [{ ...first, sha256: 'A'.repeat(64) }],
+      [{ ...first, byteSize: 0 }],
+      [{ ...first, extra: true }],
+    ]) {
+      expect(() => composeStudioPieceGenerationV3({ ...input, conditioningInputs } as never)).toThrow(TypeError);
+    }
+  });
+
   it('validates historical prompt bytes without recomposition', () => {
     const historical = composePiece();
     historical.prompt = 'A historical provider prompt whose former template no longer exists.';
     expect(validateStudioPieceGenerationCompositionV3(historical)).toBe(true);
     expect(composePiece().prompt).not.toBe(historical.prompt);
 
-    historical.inputs.instructionProfile = 'weprompt-image-v1.piece-image.v2';
+    historical.inputs.instructionProfile = 'weprompt-image-v1.piece-image.v1';
     expect(validateStudioPieceGenerationCompositionV3(historical)).toBe(true);
 
     const { schemaVersion: ignoredSchemaVersion, ...currentInput } = composePiece().inputs;
@@ -509,7 +548,7 @@ describe('inactive schema-2 Piece generation composition', () => {
     expect(() =>
       composeStudioPieceGenerationV3({
         ...currentInput,
-        instructionProfile: 'weprompt-image-v1.piece-image.v2',
+        instructionProfile: 'weprompt-image-v1.piece-image.v1',
       })
     ).toThrow('instructionProfile is not canonical');
 
@@ -663,7 +702,7 @@ describe('inactive schema-2 Piece generation composition', () => {
       { ...input, projectRevisionAtPreparation: 1.5 },
       { ...input, authoringRevision: 0 },
       { ...input, authoringRevision: 12 },
-      { ...input, authoringFingerprintVersion: 2 },
+      { ...input, authoringFingerprintVersion: 1 },
       { ...input, authoringFingerprint: 'A'.repeat(64) },
       { ...input, brief: 7 as never },
       { ...input, brief: 'b'.repeat(16 * 1024 + 1) },
@@ -697,7 +736,7 @@ describe('inactive schema-2 Piece generation composition', () => {
       { ...base, inputs: { ...base.inputs, projectRevisionAtPreparation: 0 } },
       { ...base, inputs: { ...base.inputs, authoringRevision: 0 } },
       { ...base, inputs: { ...base.inputs, authoringRevision: 12 } },
-      { ...base, inputs: { ...base.inputs, authoringFingerprintVersion: 2 } },
+      { ...base, inputs: { ...base.inputs, authoringFingerprintVersion: 1 } },
       { ...base, inputs: { ...base.inputs, authoringFingerprint: 'A'.repeat(64) } },
       { ...base, inputs: { ...base.inputs, brief: 'b'.repeat(16 * 1024 + 1) } },
       { ...base, inputs: { ...base.inputs, rules: [{ id: 'bad' }] } },

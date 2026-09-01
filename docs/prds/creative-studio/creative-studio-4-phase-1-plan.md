@@ -10,6 +10,8 @@
 
 **Supersedes:** the Phase 1 plan introduced at `00967fcaf`
 
+**Photo-depth amendment:** 2026-09-01 · owner-approved after Phase 5
+
 `f3f9f764b` is a checkpoint for the design discussion, not evidence that any CS4 runtime contract is
 complete. This document replaces the earlier schema-5/defaulting plan. It is the dependency-ordered
 plan for Phases 0–6; it deliberately contains no speculative TypeScript literals or hand-built job
@@ -17,6 +19,13 @@ fixtures.
 
 No push is authorized by this plan. A phase may be committed locally only after its own exit gate is
 green. Pushing or merging still requires separate owner authorization.
+
+The photo-depth amendment is a narrow post-Pilot tranche before Phase 6. It keeps project schema 6
+and adds zero-to-two current-Piece conditioning by independently advancing generation composition
+2 → 3, authoring fingerprint 1 → 2, and Director command 11 → 12. It introduces no migration,
+semantic Reference workflow, proposal card, or Phase-6 Assembly contract. Where the original Pilot
+plan below says conditioning is empty or deferred, that statement describes the initial Pilot
+milestone and is superseded only by this bounded amendment.
 
 ---
 
@@ -275,14 +284,14 @@ actual prompt, settings, policy, or handle change does.
 
 The wire and persisted fields are exact:
 
-| Contract                       | Authoring authority                                                               | Storage/audit authority                                                                                                |
-| ------------------------------ | --------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Schema-6 root                  | `authoringRevision`                                                               | `revision`                                                                                                             |
-| Mutation batch 6               | request `expectedAuthoringRevision`; result `authoringRevision`                   | Main captures current `revision` under the queue and returns committed `revision`; renderer never supplies storage CAS |
-| Main-only prepared reservation | `authoringRevision`, `authoringFingerprintVersion: 1`, and `authoringFingerprint` | `projectRevisionAtPreparation` is audit-only                                                                           |
-| Renderer-safe quote projection | None accepted from renderer; display-only session/quote facts                     | No storage CAS or authoritative fingerprint/revision is exposed                                                        |
-| Composition 2                  | the same authoring fields copied from the prepared request                        | `projectRevisionAtPreparation` is frozen history                                                                       |
-| Authorization and Job          | the same prepared authoring fields after revalidation                             | `projectRevisionAtPreparation` plus `projectRevisionAtAuthorization` from the atomic commit                            |
+| Contract                       | Authoring authority                                                                           | Storage/audit authority                                                                                                |
+| ------------------------------ | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Schema-6 root                  | `authoringRevision`                                                                           | `revision`                                                                                                             |
+| Mutation batch 6               | request `expectedAuthoringRevision`; result `authoringRevision`                               | Main captures current `revision` under the queue and returns committed `revision`; renderer never supplies storage CAS |
+| Main-only prepared reservation | `authoringRevision`, `authoringFingerprintVersion: 2`, and `authoringFingerprint`             | `projectRevisionAtPreparation` is audit-only                                                                           |
+| Renderer-safe quote projection | None accepted from renderer; display-only session/quote facts                                 | No storage CAS or authoritative fingerprint/revision is exposed                                                        |
+| Composition 3                  | the same authoring fields and ordered conditioning snapshots copied from the prepared request | `projectRevisionAtPreparation` is frozen history                                                                       |
+| Authorization and Job          | the same prepared authoring fields after revalidation                                         | `projectRevisionAtPreparation` plus `projectRevisionAtAuthorization` from the atomic commit                            |
 
 Confirmation input carries only the Main-issued `reservationId`, `quoteId`, and `quoteRevision`,
 plus the explicit-human decision when one is required and a typed duplicate-charge acknowledgement
@@ -296,14 +305,15 @@ Job, binding, and receipt ids is still invalid. The authorization also freezes t
 policy selected by Main, and the persisted Job must match it. Neither authority is reconstructed from
 current defaults.
 
-`authoringFingerprintVersion: 1` is SHA-256 over a domain-separated canonical encoding named
-`weprompt:studio-authoring:v1`. Map keys sort lexically and arrays retain semantic order. Its common
+`authoringFingerprintVersion: 2` is SHA-256 over a domain-separated canonical encoding named
+`weprompt:studio-authoring:v2`. Map keys sort lexically and arrays retain semantic order. Its common
 payload contains project id, `authoringRevision`, project name, brief/rules, Director binding, spend
 policy, and the ordered Piece id/kind/handle/prior-handle namespace. Its prepared-request arm is
 mode-discriminated: `create` adds the reserved Piece id, proposed handle and order slot plus the
-normalized words and request-scoped settings; `retry` adds `existingPieceId`, `sourceJobId`, and the
+normalized words, request-scoped settings, and ordered zero-to-two exact Piece/asset conditioning
+snapshots; `retry` adds `existingPieceId`, `sourceJobId`, and the
 target Piece's ordered immutable Job-lineage projection—each `jobId`, `retryOfJobId`, and
-`retryReason`—plus the copied words and settings, and has no proposed handle or new Piece/order
+`retryReason`—plus the copied words, settings, and predecessor conditioning snapshots, and has no proposed handle or new Piece/order
 identity. Main derives that projection from the target Piece's persisted `jobIds` and Job records;
 no renderer, Director, prepared-session caller, or fingerprint caller supplies replacement lineage.
 Retryable status and current terminal state remain separate confirmation gates. The
@@ -379,10 +389,10 @@ Contract versions move only when that contract's exact persisted or wire shape c
 | Contract                     |      Baseline | Pilot value | Landing phase                             | Rule                                                                                         |
 | ---------------------------- | ------------: | ----------: | ----------------------------------------- | -------------------------------------------------------------------------------------------- |
 | Persisted Studio project     |             5 |       **6** | Phase 3 isolated runtime; Phase 5 cutover | Reject schema 5; no migration/defaulting                                                     |
-| Generation composition       |             1 |       **2** | Phase 3 isolated runtime; Phase 5 cutover | Add Piece source and `piece_image`; preserve the frozen prompt as history                    |
+| Generation composition       |             1 |   **2 → 3** | Phase 3/5, then photo-depth tranche       | Add Piece generation, then exact bounded Piece conditioning; preserve frozen history         |
 | Mutation batch               |             5 |       **6** | Phase 3 isolated runtime; Phase 5 cutover | Add `rename_piece` and authoring-revision authority; no create/delete                        |
 | Proposal sidecar             |             6 |           6 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
-| Director command             |            10 |      **11** | Phase 5 cutover                           | Add typed Piece rename/prepare capability and authoring authority                            |
+| Director command             |            10 | **11 → 12** | Phase 5, then photo-depth tranche         | Add Piece commands, then bounded `referencePieceIds` selection                               |
 | Export catalog/sidecar       |             2 |       **3** | Phase 3 isolated runtime; Phase 5 cutover | Add standalone Piece image plus provenance export                                            |
 | Reference request sidecar    |             5 |           5 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
 | Film export facts            |             1 |           1 | Phase 6 or later                          | Unchanged and unused by Pilot 1                                                              |
@@ -413,8 +423,8 @@ target-union edit must not be merged.
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Target              | Exactly `{kind: piece, pieceId}`; `create` reserves an absent id that resolves after atomic confirmation, while `retry` resolves and revalidates its existing owning Piece before prepare and confirm                                                                                   |
 | Purpose             | Exactly `piece_image`; it is never `seed_still`, `reference_image`, `board_still`, or `video_take`                                                                                                                                                                                      |
-| Composition 2       | Source is the reserved text-only Piece request: immutable Piece id, exact authored words, request-scoped settings, empty conditioning inputs, resolved route, instruction profile, and authoring audit facts                                                                            |
-| Request plan        | Resolved image request, no Shot duration, conditioning input, Board style, or film/reference dependency                                                                                                                                                                                 |
+| Composition 3       | Source is the reserved Piece request: immutable Piece id, exact authored words, request-scoped settings, ordered zero-to-two exact Piece/asset conditioning snapshots, resolved route, instruction profile, and authoring audit facts                                                   |
+| Request plan        | Resolved image request with the same exact conditioning snapshots; no Shot duration, Board style, semantic Reference, or film dependency                                                                                                                                                |
 | Quote               | One Piece target/purpose, generation-priced, exact route/rate/request plan, authoring authority, expiry, and deterministic identity                                                                                                                                                     |
 | Prepared cache      | Holds the Main reservation and quote; bounded, expiring, claim/release/consume safe, and non-persistent                                                                                                                                                                                 |
 | Authorization       | Exact deep copy of the revalidated quote plus provider/idempotency authority                                                                                                                                                                                                            |
@@ -427,10 +437,10 @@ target-union edit must not be merged.
 | Canvas inventory    | Returns ordered Pieces, handles/aliases, current asset, provenance summary, and lifecycle state without consulting film readiness                                                                                                                                                       |
 | Export 3            | Copies the exact current bytes and writes deterministic provenance; never initiates generation or spend                                                                                                                                                                                 |
 
-Composition 2 validation checks exact shape, bounds, digest, and internal stored-to-stored consistency.
+Composition 3 validation checks exact shape, bounds, digest, and internal stored-to-stored consistency.
 It does **not** regenerate an old prompt using current code and compare text. Prompt-template changes
 advance the instruction profile for new work; they never mutate or invalidate the recorded prompt of
-an existing Job. The current composer emits `weprompt-image-v1.piece-image.v1`; stored provenance
+an existing Job. The current composer emits `weprompt-image-v1.piece-image.v2`; stored provenance
 accepts canonical positive versions in the `weprompt-image-v1.piece-image.vN` namespace so a future
 current profile can advance while retaining every earlier profile. New composition rejects a caller
 that requests anything except the current profile.
@@ -532,6 +542,12 @@ Work, in order:
    handle helper rather than implementing a second normalizer.
 9. Define export schema 3's exact Piece manifest, but do not bump the export constant or expose the
    exporter until Phase 3.
+
+The post-Pilot photo-depth amendment then advances composition to schema 3, adds the ordered
+zero-to-two conditioning snapshot list to the authoring fingerprint and request plan, and bumps the
+Director command only when both renderer and Director call the same typed preparation operation.
+Main resolves and revalidates every selected current Piece asset; renderer and Director never
+supply asset ids, hashes, paths, prices, routes, or provider inputs.
 
 Focused tests must prove:
 

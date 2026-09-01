@@ -7,6 +7,7 @@
 import { types as nodeTypes } from 'node:util';
 
 import {
+  STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   type StudioJobV2,
@@ -516,7 +517,7 @@ const pieceQuoteIsValidV3 = (quote: StudioPieceSpendAuthorizationV3['quote'], re
       quote.projectRevisionAtPreparation < 1 ||
       !Number.isSafeInteger(quote.authoringRevision) ||
       quote.authoringRevision < 1 ||
-      quote.authoringFingerprintVersion !== 1 ||
+      quote.authoringFingerprintVersion !== STUDIO_AUTHORING_FINGERPRINT_VERSION_V3 ||
       typeof quote.authoringFingerprint !== 'string' ||
       !LOWERCASE_SHA256.test(quote.authoringFingerprint) ||
       typeof quote.rateCardDigest !== 'string' ||

@@ -959,7 +959,8 @@
           "noChange": "No se ha cambiado nada.",
           "undoConflict": "El proyecto cambió, así que no se puede deshacer el último cambio de nombre.",
           "staleAuthoring": "El proyecto cambió. Revisa el estado más reciente e inténtalo de nuevo.",
-          "variationGrid": "Se devolvió una cuadrícula de variaciones en lugar de una foto. Revisa el resultado antes de iniciar otro intento de pago."
+          "variationGrid": "Se devolvió una cuadrícula de variaciones en lugar de una foto. Revisa el resultado antes de iniciar otro intento de pago.",
+          "invalidReference": "Una o más referencias seleccionadas ya no están vigentes. Elige Pieces de foto actuales y revisa el coste de nuevo."
         },
         "variationGrid": {
           "paidRejected": "El proveedor devolvió y cobró un resultado, pero Creative Studio lo rechazó porque es una cuadrícula de variaciones.",
@@ -980,7 +981,8 @@
           "duplicateAcknowledgement": "Entiendo que el envío anterior al proveedor podría haberse cobrado ya.",
           "confirmCreate": "Confirmar y crear foto",
           "confirmRetry": "Confirmar y reintentar",
-          "discard": "Descartar presupuesto"
+          "discard": "Descartar presupuesto",
+          "visualReferences": "Referencias visuales"
         },
         "piece": {
           "eyebrow": "Pieza de foto",
@@ -1042,7 +1044,8 @@
           "created": "Creada",
           "model": "Modelo",
           "instructionProfile": "Perfil de instrucciones",
-          "recordedSpend": "Gasto registrado"
+          "recordedSpend": "Gasto registrado",
+          "visualReferences": "Referencias visuales"
         },
         "history": {
           "accessible": "Historial de intentos de {{handle}}",
@@ -1092,7 +1095,10 @@
         "composer": {
           "description": "Descripción de la foto",
           "aspectRatio": "Relación de aspecto",
-          "resolution": "Resolución"
+          "resolution": "Resolución",
+          "visualReferences": "Referencias visuales",
+          "visualReferencesHint": "Elige hasta {{maximum}} Pieces actuales para guiar esta foto.",
+          "visualReferencesCount": "{{selected}} de {{maximum}} seleccionadas"
         }
       },
       "spending": {

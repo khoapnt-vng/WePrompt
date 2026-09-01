@@ -259,6 +259,7 @@ describe('isolated schema-6 typed entry point', () => {
       words: 'Blue room at dawn',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const reloaded = await harness.entry.loadProjectV3(created.summary.id);
 
@@ -334,6 +335,7 @@ describe('isolated schema-6 typed entry point', () => {
       words: 'A quote the person declines.',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: 'declined_photo',
+      referencePieceIds: [],
     });
 
     await expect(
@@ -380,6 +382,7 @@ describe('isolated schema-6 typed entry point', () => {
         words,
         settings: { aspectRatio: '16:9', resolution: '1080p' },
         suggestedHandle: null,
+        referencePieceIds: [],
       });
     };
     const preparedBeforeMutation = await prepare('Quote before authoring.');
@@ -452,6 +455,7 @@ describe('isolated schema-6 typed entry point', () => {
       words: 'Prepared before the import commit.',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     const importCommitted = deferred<Awaited<ReturnType<typeof harness.store.loadProjectV3>>>();
     const releaseImportResult = deferred<void>();
@@ -486,6 +490,7 @@ describe('isolated schema-6 typed entry point', () => {
       words: 'Prepared after the import commit.',
       settings: { aspectRatio: '16:9', resolution: '1080p' },
       suggestedHandle: null,
+      referencePieceIds: [],
     });
     releaseImportResult.resolve();
     await expect(importing).resolves.toMatchObject({ status: 'imported' });
@@ -582,6 +587,7 @@ describe('isolated schema-6 typed entry point', () => {
         words: 'A reserved second photograph',
         settings: { aspectRatio: '16:9', resolution: '1080p' },
         suggestedHandle: 'existing_2',
+        referencePieceIds: [],
       });
 
       await expect(

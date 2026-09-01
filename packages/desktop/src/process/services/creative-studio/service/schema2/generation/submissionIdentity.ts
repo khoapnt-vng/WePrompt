@@ -9,11 +9,14 @@ import { types as nodeTypes } from 'node:util';
 import { hasRuleToken, STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import {
   STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
+  STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
   STUDIO_MAX_JOBS_PER_PIECE_V3,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_PIECE_PRIOR_HANDLES_V3,
   type StudioGenerationTargetV2,
   type StudioPieceGenerationTargetV3,
+  type StudioPieceConditioningInputSnapshotV3,
   type StudioPieceJobV3,
   type StudioPieceJobRetryReasonV3,
   type StudioPiecePhotoSettingsV3,
@@ -27,7 +30,8 @@ const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v2';
 const AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE = 'creative-studio/automatic-reference-retry-job/v2';
 const PIECE_QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/piece-quoted-generation/v1';
-const AUTHORING_FINGERPRINT_DOMAIN_V3 = 'weprompt:studio-authoring:v1';
+const AUTHORING_FINGERPRINT_DOMAIN_V3 = 'weprompt:studio-authoring:v2';
+const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/u;
 
 export type StudioQuotedGenerationIdentityInput = {
   projectId: string;
@@ -233,6 +237,7 @@ export type StudioPiecePreparedAuthoringArmV3 =
       orderIndex: number;
       words: string;
       settings: StudioPiecePhotoSettingsV3;
+      conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
     }
   | {
       mode: 'retry';
@@ -240,6 +245,7 @@ export type StudioPiecePreparedAuthoringArmV3 =
       sourceJobId: string;
       words: string;
       settings: StudioPiecePhotoSettingsV3;
+      conditioningInputs: StudioPieceConditioningInputSnapshotV3[];
     };
 
 type StudioAuthoringProjectFieldsV3 =
@@ -317,8 +323,16 @@ const CREATE_AUTHORING_ARM_KEYS_V3 = [
   'orderIndex',
   'words',
   'settings',
+  'conditioningInputs',
 ] as const;
-const RETRY_AUTHORING_ARM_KEYS_V3 = ['mode', 'existingPieceId', 'sourceJobId', 'words', 'settings'] as const;
+const RETRY_AUTHORING_ARM_KEYS_V3 = [
+  'mode',
+  'existingPieceId',
+  'sourceJobId',
+  'words',
+  'settings',
+  'conditioningInputs',
+] as const;
 const PIECE_KEYS_V3 = [
   'id',
   'kind',
@@ -394,6 +408,43 @@ const isDensePlainArrayV3 = (value: unknown, maximum: number): value is unknown[
   } catch {
     return false;
   }
+};
+
+const snapshotConditioningInputsV3 = (value: unknown): StudioPieceConditioningInputSnapshotV3[] => {
+  if (!isDensePlainArrayV3(value, STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3)) {
+    throw new TypeError('conditioning inputs exceed the Piece bound');
+  }
+  const pieceIds = new Set<string>();
+  const assetIds = new Set<string>();
+  return value.map((input) => {
+    if (
+      !exactDataRecordV3(input, ['pieceId', 'assetId', 'sha256', 'mimeType', 'byteSize']) ||
+      typeof input.pieceId !== 'string' ||
+      !SAFE_STUDIO_ID.test(input.pieceId) ||
+      typeof input.assetId !== 'string' ||
+      !SAFE_STUDIO_ID.test(input.assetId) ||
+      typeof input.sha256 !== 'string' ||
+      !LOWERCASE_SHA256.test(input.sha256) ||
+      (input.mimeType !== 'image/jpeg' && input.mimeType !== 'image/png' && input.mimeType !== 'image/webp') ||
+      typeof input.byteSize !== 'number' ||
+      !Number.isSafeInteger(input.byteSize) ||
+      input.byteSize < 1 ||
+      input.byteSize > STUDIO_MAX_IMAGE_ASSET_BYTES_V3 ||
+      pieceIds.has(input.pieceId) ||
+      assetIds.has(input.assetId)
+    ) {
+      throw new TypeError('conditioning inputs are invalid');
+    }
+    pieceIds.add(input.pieceId);
+    assetIds.add(input.assetId);
+    return {
+      pieceId: input.pieceId,
+      assetId: input.assetId,
+      sha256: input.sha256,
+      mimeType: input.mimeType,
+      byteSize: input.byteSize,
+    };
+  });
 };
 
 const canonicalTimestampV3 = (value: unknown): value is string => {
@@ -530,6 +581,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
   }
   validatePieceSettingsV3(prepared.settings);
   const words = normalizeStudioPieceWordsV3(prepared.words);
+  const conditioningInputs = snapshotConditioningInputsV3(prepared.conditioningInputs);
   if (words !== prepared.words) throw new TypeError('prepared words must already be normalized');
 
   let preparedPayload: Record<string, unknown>;
@@ -552,6 +604,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
       orderIndex: prepared.orderIndex,
       words,
       settings: { ...prepared.settings },
+      conditioningInputs,
     };
   } else {
     assertSafeIdV3(prepared.existingPieceId, 'existingPieceId');
@@ -617,7 +670,8 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
       sourceJob.composition.inputs.purpose !== 'piece_image' ||
       sourceJob.composition.inputs.source.words !== words ||
       sourceJob.composition.inputs.source.settings.aspectRatio !== prepared.settings.aspectRatio ||
-      sourceJob.composition.inputs.source.settings.resolution !== prepared.settings.resolution
+      sourceJob.composition.inputs.source.settings.resolution !== prepared.settings.resolution ||
+      canonicalJsonV3(sourceJob.composition.inputs.conditioningInputs) !== canonicalJsonV3(conditioningInputs)
     ) {
       throw new TypeError('retry words and settings must exactly match the latest persisted Piece job');
     }
@@ -628,6 +682,7 @@ export const createStudioAuthoringFingerprintV3 = (input: StudioAuthoringFingerp
       lineage,
       words,
       settings: { ...prepared.settings },
+      conditioningInputs,
     };
   }
 
