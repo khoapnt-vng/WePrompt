@@ -9,7 +9,12 @@ import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { syncDurableDirectory } from '../service/durableDirectory';
-import { STUDIO_PROJECT_SCHEMA_VERSION_V3, type StudioProjectV3 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
+  STUDIO_PROJECT_SCHEMA_VERSION_V3,
+  type StudioProjectV3,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   canonicalizeRecordRoot,
   readBoundedRegularBinaryFileWithIdentity,
@@ -43,6 +48,7 @@ const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const SAFE_TEMPORARY_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const LEGACY_PIECE_GENERATION_CONTRACTS_V3 = [{ compositionSchemaVersion: 2, authoringFingerprintVersion: 1 }] as const;
 
 const PROJECT_MANIFEST_KEYS = new Set([
   'schemaVersion',
@@ -340,7 +346,7 @@ const serializeProject = (project: StudioProjectV3): { manifestBytes: string; br
   briefBytes: project.brief,
 });
 
-const parseProjectEnvelope = (manifestBytes: string, briefBytes: string): StudioProjectV3 | null => {
+const parseProjectEnvelopeCandidate = (manifestBytes: string, briefBytes: string): PlainRecord | null => {
   let parsed: unknown;
   try {
     parsed = JSON.parse(manifestBytes) as unknown;
@@ -361,8 +367,93 @@ const parseProjectEnvelope = (manifestBytes: string, briefBytes: string): Studio
   }
   const { briefFile: ignoredBriefFile, ...withoutBrief } = parsed;
   void ignoredBriefFile;
-  const project: unknown = { ...withoutBrief, brief: briefBytes };
+  return { ...withoutBrief, brief: briefBytes };
+};
+
+const parseProjectEnvelope = (manifestBytes: string, briefBytes: string): StudioProjectV3 | null => {
+  const project = parseProjectEnvelopeCandidate(manifestBytes, briefBytes);
   return validateStudioProjectV3(project) ? project : null;
+};
+
+type ObservedPieceGenerationContractV3 = 'current' | 'legacy' | 'inconsistent';
+
+const classifyCompositionContractV3 = (value: unknown): ObservedPieceGenerationContractV3 => {
+  if (!isPlainRecord(value) || !isPlainRecord(value.inputs)) return 'inconsistent';
+  const schemaVersion = value.inputs.schemaVersion;
+  const authoringFingerprintVersion = value.inputs.authoringFingerprintVersion;
+  if (
+    schemaVersion === STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3 &&
+    authoringFingerprintVersion === STUDIO_AUTHORING_FINGERPRINT_VERSION_V3
+  ) {
+    return 'current';
+  }
+  return LEGACY_PIECE_GENERATION_CONTRACTS_V3.some(
+    (contract) =>
+      schemaVersion === contract.compositionSchemaVersion &&
+      authoringFingerprintVersion === contract.authoringFingerprintVersion
+  )
+    ? 'legacy'
+    : 'inconsistent';
+};
+
+const requestPlanCompositionV3 = (value: unknown): unknown => {
+  if (!isPlainRecord(value) || !isPlainRecord(value.snapshot)) return null;
+  return value.snapshot.composition;
+};
+
+const classifyJobGenerationContractV3 = (value: unknown): ObservedPieceGenerationContractV3 => {
+  if (!isPlainRecord(value)) return 'inconsistent';
+  const composition = classifyCompositionContractV3(value.composition);
+  const requestComposition = classifyCompositionContractV3(requestPlanCompositionV3(value.requestPlan));
+  const authoringFingerprintVersion = value.authoringFingerprintVersion;
+  if (
+    composition === 'current' &&
+    requestComposition === 'current' &&
+    authoringFingerprintVersion === STUDIO_AUTHORING_FINGERPRINT_VERSION_V3
+  ) {
+    return 'current';
+  }
+  return LEGACY_PIECE_GENERATION_CONTRACTS_V3.some(
+    (contract) =>
+      composition === 'legacy' &&
+      requestComposition === 'legacy' &&
+      authoringFingerprintVersion === contract.authoringFingerprintVersion
+  )
+    ? 'legacy'
+    : 'inconsistent';
+};
+
+const classifyAuthorizationGenerationContractV3 = (value: unknown): ObservedPieceGenerationContractV3 => {
+  if (!isPlainRecord(value) || !isPlainRecord(value.quote) || !isPlainRecord(value.quote.item)) {
+    return 'inconsistent';
+  }
+  const composition = classifyCompositionContractV3(requestPlanCompositionV3(value.quote.item.requestPlan));
+  const authoringFingerprintVersion = value.quote.authoringFingerprintVersion;
+  if (composition === 'current' && authoringFingerprintVersion === STUDIO_AUTHORING_FINGERPRINT_VERSION_V3) {
+    return 'current';
+  }
+  return LEGACY_PIECE_GENERATION_CONTRACTS_V3.some(
+    (contract) => composition === 'legacy' && authoringFingerprintVersion === contract.authoringFingerprintVersion
+  )
+    ? 'legacy'
+    : 'inconsistent';
+};
+
+/**
+ * Recognizes complete historical generation-version clusters without accepting or rewriting them.
+ * Unknown or internally mixed clusters keep falling through to quarantine as damaged current data.
+ */
+const hasKnownLegacyNestedContractV3 = (project: PlainRecord): boolean => {
+  if (!isPlainRecord(project.jobs) || !Array.isArray(project.spendAuthorizations)) return false;
+  const classifications = [
+    ...Object.values(project.jobs).map(classifyJobGenerationContractV3),
+    ...project.spendAuthorizations.map(classifyAuthorizationGenerationContractV3),
+  ];
+  return (
+    classifications.length > 0 &&
+    classifications.every((classification) => classification !== 'inconsistent') &&
+    classifications.includes('legacy')
+  );
 };
 
 const parseObservedSchemaVersion = (manifestBytes: string): number | null => {
@@ -824,7 +915,21 @@ export const createCreativeStudioPilotStoreV3 = (
         briefBytes = null;
       }
     }
-    const project = briefBytes === null ? null : parseProjectEnvelope(manifestBytes, briefBytes);
+    const candidate = briefBytes === null ? null : parseProjectEnvelopeCandidate(manifestBytes, briefBytes);
+    if (
+      observedVersion === STUDIO_PROJECT_SCHEMA_VERSION_V3 &&
+      candidate !== null &&
+      hasKnownLegacyNestedContractV3(candidate)
+    ) {
+      return {
+        status: 'unsupported',
+        catalogueId: projectId,
+        projectDir,
+        directoryIdentity,
+        manifestFingerprint: fingerprint,
+      };
+    }
+    const project = validateStudioProjectV3(candidate) ? candidate : null;
     if (observedVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V3 || project === null || project.id !== projectId) {
       return {
         status: 'quarantined',

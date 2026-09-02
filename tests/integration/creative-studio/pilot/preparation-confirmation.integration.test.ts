@@ -6,10 +6,13 @@
  * @vitest-environment node
  */
 
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { STUDIO_MAX_PIECES_V3 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
+  STUDIO_MAX_PIECES_V3,
+} from '@/common/types/project/creativeStudioTypes';
 import type { StudioGenerationRouteCatalog } from '@/process/services/creative-studio/providerResolver';
 import {
   createStudioPilotConfirmPhotoServiceV3,
@@ -52,6 +55,46 @@ const writePng = async (file: string): Promise<string> => {
     .png()
     .toFile(file);
   return file;
+};
+
+const record = (value: unknown): Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) throw new TypeError('Expected record');
+  return value as Record<string, unknown>;
+};
+
+const array = (value: unknown): unknown[] => {
+  if (!Array.isArray(value)) throw new TypeError('Expected array');
+  return value;
+};
+
+const compositionInputs = (composition: unknown): Record<string, unknown> => record(record(composition).inputs);
+
+const requestPlanCompositionInputs = (requestPlan: unknown): Record<string, unknown> =>
+  compositionInputs(record(record(requestPlan).snapshot).composition);
+
+const rewritePersistedGenerationContract = (
+  manifest: Record<string, unknown>,
+  compositionSchemaVersion: number,
+  authoringFingerprintVersion: number
+): void => {
+  for (const job of Object.values(record(manifest.jobs))) {
+    const persistedJob = record(job);
+    persistedJob.authoringFingerprintVersion = authoringFingerprintVersion;
+    for (const inputs of [
+      compositionInputs(persistedJob.composition),
+      requestPlanCompositionInputs(persistedJob.requestPlan),
+    ]) {
+      inputs.schemaVersion = compositionSchemaVersion;
+      inputs.authoringFingerprintVersion = authoringFingerprintVersion;
+    }
+  }
+  for (const authorization of array(manifest.spendAuthorizations)) {
+    const quote = record(record(authorization).quote);
+    quote.authoringFingerprintVersion = authoringFingerprintVersion;
+    const inputs = requestPlanCompositionInputs(record(quote.item).requestPlan);
+    inputs.schemaVersion = compositionSchemaVersion;
+    inputs.authoringFingerprintVersion = authoringFingerprintVersion;
+  }
 };
 
 const route = (
@@ -320,6 +363,45 @@ describe('schema-6 photo preparation and confirmation', () => {
     const restartedCache = new StudioPreparedPhotoCacheV3();
     expect(restartedCache.list(harness.project().id)).toEqual([]);
     expect(harness.preparedPhotos.list(harness.project().id)).toHaveLength(1);
+  });
+
+  it('reports a complete pre-bump nested generation contract as unsupported without rewriting it', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    const confirmed = await confirmPrepared(harness, await prepareCreate(harness));
+    const manifestPath = path.join(harness.root, harness.project().id, 'project.json');
+    const manifest = record(JSON.parse(await readFile(manifestPath, 'utf8')) as unknown);
+    rewritePersistedGenerationContract(manifest, 2, 1);
+    const legacyBytes = `${JSON.stringify(manifest, null, 2)}\n`;
+    await writeFile(manifestPath, legacyBytes, 'utf8');
+
+    const restarted = createCreativeStudioPilotStoreV3({ rootDir: harness.root });
+    expect(await restarted.getProjectV3(harness.project().id)).toEqual({
+      status: 'unsupported',
+      catalogueId: harness.project().id,
+    });
+    await expect(restarted.loadProjectV3(harness.project().id)).rejects.toMatchObject({ code: 'unsupported' });
+    expect(await readFile(manifestPath, 'utf8')).toBe(legacyBytes);
+    expect(Object.keys(record(manifest.jobs))).toEqual([confirmed.jobId]);
+  });
+
+  it('quarantines an internally mixed nested contract while a healthy schema-6 sibling remains available', async () => {
+    const harness = await createHarness({ policy: 'within_cap' });
+    const confirmed = await confirmPrepared(harness, await prepareCreate(harness));
+    const healthySibling = await harness.store.createProjectV3({ name: 'Healthy sibling', brief: 'Still opens.' });
+    const manifestPath = path.join(harness.root, harness.project().id, 'project.json');
+    const manifest = record(JSON.parse(await readFile(manifestPath, 'utf8')) as unknown);
+    rewritePersistedGenerationContract(manifest, 2, 1);
+    const job = record(record(manifest.jobs)[confirmed.jobId]);
+    compositionInputs(job.composition).schemaVersion = STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
+
+    const restarted = createCreativeStudioPilotStoreV3({ rootDir: harness.root });
+    expect(await restarted.inspectProjectsV3()).toEqual({
+      healthyProjectIds: [healthySibling.id],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [harness.project().id],
+    });
+    expect((await restarted.loadProjectV3(healthySibling.id)).name).toBe('Healthy sibling');
   });
 
   it('freezes two exact current Piece assets and retains them unchanged across a retry', async () => {
