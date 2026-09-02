@@ -39,6 +39,8 @@ export * from './mutations/deletionClaimsV3';
 export * from './mutations/pieceCatalogV3';
 export * from './mutations/pieceHandles';
 export * from './mutations/presentationV4';
+export * from './mutations/reorderV4';
+export * from './mutations/stalenessV4';
 export {
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,

@@ -53,7 +53,6 @@ import {
   type StudioAssetV2,
   type StudioAssetV3,
   type StudioAssemblyPictureBindingV2,
-  type StudioAssemblySoundBindingV2,
   type StudioAssemblyV2,
   type StudioBeat,
   type StudioBinItem,
@@ -3821,18 +3820,7 @@ const ASSEMBLY_PICTURE_BINDING_KEYS_V4 = new Set([
   'staleness',
 ]);
 const ASSEMBLY_PICTURE_SOURCE_KEYS_V4 = new Set(['pieceId', 'assetId']);
-const ASSEMBLY_SOUND_BINDING_KEYS_V4 = new Set([
-  'id',
-  'pieceId',
-  'assetId',
-  'anchorBeatId',
-  'levelDb',
-  'trimInSeconds',
-  'trimOutSeconds',
-  'staleness',
-]);
 const CHAIN_STALENESS_KEYS_V4 = new Set(['cause', 'upstreamShotId', 'sourceAuthoringRevision', 'keptAt']);
-const WORDS_STALENESS_KEYS_V4 = new Set(['cause', 'sourceAuthoringRevision', 'keptAt']);
 const BIN_ENTRY_KEYS_V4 = new Set(['id', 'subject', 'reason', 'liftedAt']);
 const PIECE_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'pieceId']);
 const BOARD_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'boardId']);
@@ -3928,7 +3916,8 @@ const validateBoardV4 = (
 
 const validateChainStalenessV4 = (
   value: unknown,
-  expectedUpstreamShotId: string,
+  shotId: string,
+  board: StudioBoardV2,
   authoringRevision: number,
   projectCreatedAt: string,
   projectUpdatedAt: string
@@ -3936,20 +3925,10 @@ const validateChainStalenessV4 = (
   isRecord(value) &&
   hasExactKeys(value, CHAIN_STALENESS_KEYS_V4) &&
   value.cause === 'chain' &&
-  value.upstreamShotId === expectedUpstreamShotId &&
-  isIntegerInRange(value.sourceAuthoringRevision, 1, authoringRevision) &&
-  (value.keptAt === null ||
-    (isCanonicalTimestamp(value.keptAt) && value.keptAt >= projectCreatedAt && value.keptAt <= projectUpdatedAt));
-
-const validateWordsStalenessV4 = (
-  value: unknown,
-  authoringRevision: number,
-  projectCreatedAt: string,
-  projectUpdatedAt: string
-): boolean =>
-  isRecord(value) &&
-  hasExactKeys(value, WORDS_STALENESS_KEYS_V4) &&
-  value.cause === 'words' &&
+  (value.upstreamShotId === null ||
+    (isSafeId(value.upstreamShotId) &&
+      value.upstreamShotId !== shotId &&
+      Object.hasOwn(board.shots, value.upstreamShotId))) &&
   isIntegerInRange(value.sourceAuthoringRevision, 1, authoringRevision) &&
   (value.keptAt === null ||
     (isCanonicalTimestamp(value.keptAt) && value.keptAt >= projectCreatedAt && value.keptAt <= projectUpdatedAt));
@@ -3958,6 +3937,7 @@ const validateAssemblyPictureBindingV4 = (
   shotId: string,
   value: unknown,
   upstreamShotId: string | null,
+  board: StudioBoardV2,
   project: StudioProjectV4
 ): value is StudioAssemblyPictureBindingV2 => {
   if (
@@ -3968,14 +3948,14 @@ const validateAssemblyPictureBindingV4 = (
     (value.join !== 'hard_cut' && value.join !== 'match_previous') ||
     (upstreamShotId === null && value.join !== 'hard_cut') ||
     (value.staleness !== null &&
-      (upstreamShotId === null ||
-        !validateChainStalenessV4(
-          value.staleness,
-          upstreamShotId,
-          project.authoringRevision,
-          project.createdAt,
-          project.updatedAt
-        )))
+      !validateChainStalenessV4(
+        value.staleness,
+        shotId,
+        board,
+        project.authoringRevision,
+        project.createdAt,
+        project.updatedAt
+      ))
   ) {
     return false;
   }
@@ -3990,32 +3970,6 @@ const validateAssemblyPictureBindingV4 = (
     asset !== undefined &&
     asset.pieceId === piece.id
   );
-};
-
-const validateAssemblySoundBindingV4 = (
-  id: string,
-  value: unknown,
-  board: StudioBoardV2,
-  project: StudioProjectV4
-): value is StudioAssemblySoundBindingV2 => {
-  if (
-    !isRecord(value) ||
-    !hasExactKeys(value, ASSEMBLY_SOUND_BINDING_KEYS_V4) ||
-    value.id !== id ||
-    !isSafeId(value.pieceId) ||
-    !isSafeId(value.assetId) ||
-    !isSafeId(value.anchorBeatId) ||
-    !Object.hasOwn(board.beats, value.anchorBeatId) ||
-    !isCanonicalNonNegativeNumberV4((value.levelDb as number) + 96, 120) ||
-    !validateTrimV4(value.trimInSeconds, value.trimOutSeconds) ||
-    (value.staleness !== null &&
-      !validateWordsStalenessV4(value.staleness, project.authoringRevision, project.createdAt, project.updatedAt))
-  ) {
-    return false;
-  }
-  const piece = ownValue(project.pieces, value.pieceId);
-  const asset = ownValue(project.assets, value.assetId);
-  return piece !== undefined && asset !== undefined && asset.pieceId === piece.id;
 };
 
 const validateAssemblyV4 = (id: string, value: unknown, project: StudioProjectV4): value is StudioAssemblyV2 => {
@@ -4045,8 +3999,8 @@ const validateAssemblyV4 = (id: string, value: unknown, project: StudioProjectV4
   if (
     pictureIds.length !== orderedShotIds.length ||
     !arrayEvery(orderedShotIds, (shotId) => Object.hasOwn(assembly.pictureBindings, shotId)) ||
-    Object.keys(assembly.soundBindings).length !== assembly.soundBindingOrder.length ||
-    !arrayEvery(assembly.soundBindingOrder, (bindingId) => Object.hasOwn(assembly.soundBindings, bindingId))
+    Object.keys(assembly.soundBindings).length !== 0 ||
+    assembly.soundBindingOrder.length !== 0
   ) {
     return false;
   }
@@ -4059,6 +4013,7 @@ const validateAssemblyV4 = (id: string, value: unknown, project: StudioProjectV4
           shotId,
           assembly.pictureBindings[shotId],
           index === 0 ? null : shotOrder[index - 1]!,
+          board,
           project
         )
       ) {
@@ -4066,9 +4021,7 @@ const validateAssemblyV4 = (id: string, value: unknown, project: StudioProjectV4
       }
     }
   }
-  return arrayEvery(assembly.soundBindingOrder, (bindingId) =>
-    validateAssemblySoundBindingV4(bindingId, assembly.soundBindings[bindingId], board, project)
-  );
+  return true;
 };
 
 const binSubjectKeyV4 = (entry: StudioCanvasBinEntryV4): string => {

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { types as nodeTypes } from 'node:util';
 import {
   STUDIO_MAX_BIN_ENTRIES_V4,
   type StudioCanvasSubjectV4,
@@ -16,8 +15,14 @@ import {
   type StudioRestoreFromBinRequestV4,
 } from '@/common/types/project/creativeStudioTypes';
 import { validateStudioProjectV4 } from '../validation';
+import {
+  hasExactInputKeysV4,
+  isCanonicalInputTimestampV4,
+  isDenseInputArrayV4,
+  isPlainInputRecordV4,
+  isSafeInputIdV4,
+} from './exactInputV4';
 
-const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const LIFT_REQUEST_KEYS = new Set(['projectId', 'expectedRevision', 'subjects']);
 const RESTORE_REQUEST_KEYS = new Set(['projectId', 'expectedRevision', 'entryId']);
 const CONTEXT_KEYS = new Set(['entryIds', 'capturedAt']);
@@ -30,50 +35,19 @@ const refuse = (reason: StudioPresentationMutationFailureV4): StudioPresentation
   reason,
 });
 
-const isPlainRecord = (value: unknown): value is Record<string, unknown> => {
-  if (typeof value !== 'object' || value === null || Array.isArray(value) || nodeTypes.isProxy(value)) return false;
-  const prototype = Object.getPrototypeOf(value);
-  return prototype === Object.prototype || prototype === null;
-};
-
-const hasExactDataKeys = (value: Record<string, unknown>, keys: ReadonlySet<string>): boolean => {
-  const ownKeys = Reflect.ownKeys(value);
-  if (ownKeys.length !== keys.size || ownKeys.some((key) => typeof key !== 'string' || !keys.has(key))) return false;
-  return ownKeys.every((key) => {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    return descriptor !== undefined && descriptor.enumerable && Object.hasOwn(descriptor, 'value');
-  });
-};
-
-const isDenseArray = (value: unknown): value is unknown[] =>
-  Array.isArray(value) &&
-  !nodeTypes.isProxy(value) &&
-  Reflect.ownKeys(value).length === value.length + 1 &&
-  Reflect.ownKeys(value).at(-1) === 'length' &&
-  Reflect.ownKeys(value)
-    .slice(0, -1)
-    .every((key, index) => key === String(index));
-
-const isSafeId = (value: unknown): value is string => typeof value === 'string' && SAFE_ID.test(value);
-
-const isCanonicalTimestamp = (value: unknown): value is string => {
-  if (typeof value !== 'string') return false;
-  try {
-    return new Date(value).toISOString() === value;
-  } catch {
-    return false;
-  }
-};
-
 const snapshotLiftableSubject = (value: unknown): StudioCanvasSubjectV4 | null => {
-  if (!isPlainRecord(value)) return null;
-  if (value.kind === 'piece' && hasExactDataKeys(value, PIECE_SUBJECT_KEYS) && isSafeId(value.pieceId)) {
+  if (!isPlainInputRecordV4(value)) return null;
+  if (value.kind === 'piece' && hasExactInputKeysV4(value, PIECE_SUBJECT_KEYS) && isSafeInputIdV4(value.pieceId)) {
     return { kind: 'piece', pieceId: value.pieceId };
   }
-  if (value.kind === 'board' && hasExactDataKeys(value, BOARD_SUBJECT_KEYS) && isSafeId(value.boardId)) {
+  if (value.kind === 'board' && hasExactInputKeysV4(value, BOARD_SUBJECT_KEYS) && isSafeInputIdV4(value.boardId)) {
     return { kind: 'board', boardId: value.boardId };
   }
-  if (value.kind === 'assembly' && hasExactDataKeys(value, ASSEMBLY_SUBJECT_KEYS) && isSafeId(value.assemblyId)) {
+  if (
+    value.kind === 'assembly' &&
+    hasExactInputKeysV4(value, ASSEMBLY_SUBJECT_KEYS) &&
+    isSafeInputIdV4(value.assemblyId)
+  ) {
     return { kind: 'assembly', assemblyId: value.assemblyId };
   }
   return null;
@@ -115,17 +89,22 @@ const persistentIds = (project: StudioProjectV4): Set<string> =>
   ]);
 
 const snapshotContext = (value: unknown): StudioPresentationMutationContextV4 | null => {
-  if (!isPlainRecord(value) || !hasExactDataKeys(value, CONTEXT_KEYS) || !isDenseArray(value.entryIds)) return null;
-  if (!value.entryIds.every(isSafeId) || new Set(value.entryIds).size !== value.entryIds.length) return null;
-  if (!isCanonicalTimestamp(value.capturedAt)) return null;
+  if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, CONTEXT_KEYS) || !isDenseInputArrayV4(value.entryIds))
+    return null;
+  if (!value.entryIds.every(isSafeInputIdV4) || new Set(value.entryIds).size !== value.entryIds.length) return null;
+  if (!isCanonicalInputTimestampV4(value.capturedAt)) return null;
   return { entryIds: [...value.entryIds], capturedAt: value.capturedAt };
 };
 
 const snapshotLiftRequest = (value: unknown): StudioLiftToBinRequestV4 | null => {
-  if (!isPlainRecord(value) || !hasExactDataKeys(value, LIFT_REQUEST_KEYS) || !isDenseArray(value.subjects))
+  if (
+    !isPlainInputRecordV4(value) ||
+    !hasExactInputKeysV4(value, LIFT_REQUEST_KEYS) ||
+    !isDenseInputArrayV4(value.subjects)
+  )
     return null;
   if (
-    !isSafeId(value.projectId) ||
+    !isSafeInputIdV4(value.projectId) ||
     typeof value.expectedRevision !== 'number' ||
     !Number.isSafeInteger(value.expectedRevision) ||
     value.expectedRevision < 1 ||
@@ -144,13 +123,13 @@ const snapshotLiftRequest = (value: unknown): StudioLiftToBinRequestV4 | null =>
 };
 
 const snapshotRestoreRequest = (value: unknown): StudioRestoreFromBinRequestV4 | null => {
-  if (!isPlainRecord(value) || !hasExactDataKeys(value, RESTORE_REQUEST_KEYS)) return null;
+  if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, RESTORE_REQUEST_KEYS)) return null;
   if (
-    !isSafeId(value.projectId) ||
+    !isSafeInputIdV4(value.projectId) ||
     typeof value.expectedRevision !== 'number' ||
     !Number.isSafeInteger(value.expectedRevision) ||
     value.expectedRevision < 1 ||
-    !isSafeId(value.entryId)
+    !isSafeInputIdV4(value.entryId)
   ) {
     return null;
   }

@@ -3500,7 +3500,8 @@ export type StudioCanvasFailureV4 = {
 
 export type StudioChainStalenessV4 = {
   cause: 'chain';
-  upstreamShotId: string;
+  /** The predecessor whose chain relationship changed; null means the member became chain head. */
+  upstreamShotId: string | null;
   sourceAuthoringRevision: number;
   keptAt: string | null;
 };
@@ -3639,3 +3640,69 @@ export type StudioPresentationMutationFailureV4 =
 export type StudioPresentationMutationResultV4 =
   | { status: 'applied'; project: StudioProjectV4 }
   | { status: 'refused'; reason: StudioPresentationMutationFailureV4 };
+
+export type StudioReorderDirectionV4 = 'earlier' | 'later';
+
+/** Shared Director-primary and Alt+Arrow operation. Canvas blocks themselves are never reorderable. */
+export type StudioReorderBoardMemberRequestV4 =
+  | {
+      kind: 'beat';
+      projectId: string;
+      expectedAuthoringRevision: number;
+      boardId: string;
+      beatId: string;
+      direction: StudioReorderDirectionV4;
+    }
+  | {
+      kind: 'shot';
+      projectId: string;
+      expectedAuthoringRevision: number;
+      boardId: string;
+      shotId: string;
+      direction: StudioReorderDirectionV4;
+    };
+
+export type StudioReorderMutationContextV4 = { capturedAt: string };
+
+export type StudioReorderConsequenceV4 =
+  | { kind: 'free'; crossedBeatBoundary: boolean }
+  | {
+      kind: 'chain_stale';
+      /** Main/UI must resolve and show the exact re-render quote before any paid work starts. */
+      requiresRerenderQuote: true;
+      affectedAssemblyIds: string[];
+      affectedShotIds: string[];
+    };
+
+export type StudioReorderMutationFailureV4 =
+  | 'invalid_project'
+  | 'invalid_request'
+  | 'stale_project'
+  | 'member_not_found'
+  | 'boundary_reached'
+  | 'validation_failed';
+
+export type StudioReorderMutationResultV4 =
+  | { status: 'applied'; project: StudioProjectV4; consequence: StudioReorderConsequenceV4 }
+  | { status: 'refused'; reason: StudioReorderMutationFailureV4 };
+
+export type StudioKeepStalePictureRequestV4 = {
+  kind: 'picture';
+  projectId: string;
+  expectedAuthoringRevision: number;
+  assemblyId: string;
+  shotId: string;
+};
+
+export type StudioStalenessDecisionFailureV4 =
+  | 'invalid_project'
+  | 'invalid_request'
+  | 'stale_project'
+  | 'member_not_found'
+  | 'member_not_stale'
+  | 'already_kept'
+  | 'validation_failed';
+
+export type StudioStalenessDecisionResultV4 =
+  | { status: 'applied'; project: StudioProjectV4 }
+  | { status: 'refused'; reason: StudioStalenessDecisionFailureV4 };

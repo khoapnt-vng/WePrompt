@@ -74,7 +74,8 @@ export const projectStudioCanvasPresentationV4 = (projectValue: unknown): Studio
 
 export const studioCanvasActionsForStalenessV4 = (
   staleness: StudioMemberStalenessV4
-): readonly StudioCanvasStaleActionV4[] => (staleness.cause === 'chain' ? ['re_render_chain', 'keep'] : ['keep']);
+): readonly StudioCanvasStaleActionV4[] =>
+  staleness.keptAt !== null ? [] : staleness.cause === 'chain' ? ['re_render_chain', 'keep'] : ['keep'];
 
 /** A spent failure never offers an unqualified retry; returned silence is the sharpest case. */
 export const studioCanvasActionsForFailureV4 = (

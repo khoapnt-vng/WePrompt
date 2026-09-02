@@ -120,6 +120,14 @@ describe('schema-7 canvas and Assembly projections', () => {
     expect(studioCanvasActionsForStalenessV4({ cause: 'words', sourceAuthoringRevision: 2, keptAt: null })).toEqual([
       'keep',
     ]);
+    expect(
+      studioCanvasActionsForStalenessV4({
+        cause: 'chain',
+        upstreamShotId: null,
+        sourceAuthoringRevision: 2,
+        keptAt: PHASE_6_CURRENT_AT,
+      })
+    ).toEqual([]);
   });
 
   it('never offers Retry for returned silence or another spent failure', () => {
