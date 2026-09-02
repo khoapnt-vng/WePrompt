@@ -1,5 +1,24 @@
 # Ruling 2 (revised) — the canvas status vocabulary
 
+> **STATUS — core accepted as binding 2026-09-02; four clauses not yet separately confirmed.**
+>
+> Accepted explicitly: `PARTIAL` counts missing picture only; the status contract adds
+> `QUEUED`, `READY TO RENDER` and `SLATE`, and the Generating/Rendering distinction.
+>
+> **Not yet separately confirmed, and each has a cost if it lapses:**
+> 1. `FAILED` must carry a reason **and a cost-truth** — a failure that does not say whether
+>    money went is one a person cannot act on.
+> 2. `DRAFTED` is **kind-local to `document`** — unmarked, it ships available to six kinds and
+>    used by one.
+> 3. `STALE` is one word with **two causes and two action sets** — the chain pairing must not
+>    be implemented globally.
+> 4. `text-transform: none` for `:lang(tr)`, `:lang(az)`, `:lang(de)`, `:lang(el)` — machine
+>    uppercasing mangles Turkish dotted i, German ß and Greek accents. This is a defect, not a
+>    preference.
+>
+> All four are cheapest to settle before any key is written, because a repo test requires every
+> referenced key in all twelve locales.
+
 Supersedes the Ruling 2 section of the original two-ruling memo. Revised against the
 designer's Phase 6 grammar-extension delivery, which materially changed what is being
 decided.

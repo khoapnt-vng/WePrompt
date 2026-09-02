@@ -1,7 +1,44 @@
 # Two rulings Phase 6 needs before anything is drawn or built
 
+> **STATUS — Ruling 1 is SIGNED, both halves, 2026-09-02.** Approved terms recorded verbatim
+> below. Ruling 2 has been superseded by
+> [`creative-studio-4-ruling-2-status-vocabulary.md`](./creative-studio-4-ruling-2-status-vocabulary.md);
+> the Ruling 2 section in this document is kept only as the record of the first draft.
+> **Nothing owner-side remains open before the Phase 6 schema freeze.**
+
 Both are owner decisions, not design work. Neither can be settled by the designer, and the
 Phase 6 commission cannot be written against an unanswered Ruling 1.
+
+---
+
+## Signed — Ruling 1, both halves (2026-09-02)
+
+Recorded verbatim as approved.
+
+**Ruling 1a — who reorders, and through what affordance**
+
+> Director-primary typed reorder; human fallback is `Alt+↑/↓` on focused members, announced
+> through `aria-live`; no visible reorder chrome; ordered bodies only.
+
+**Ruling 1b — which reorderings are free**
+
+> Beat reorder is free; intra-Beat Shot reorder is priced and warned; existing media becomes
+> playable stale work with Re-render chain / Keep; no silent spend or substitution.
+
+**Audio exception**
+
+> Audio reorder is always free and never chain-stale. Script edits produce words-stale with
+> Keep only.
+
+Two consequences that follow and are now binding:
+
+- **Canvas block order is nobody's to edit — not a person's, and not the Director's.** A run is
+  derived from adjacency in canvas order, so hand-editable adjacency would collapse the
+  derivation into a group field by another name.
+- **BUG-174's acceptance evidence now has a specified affordance to assert against**: no
+  always-visible move controls on any Beat or Shot block, the typed Director operation
+  preserved as primary with a deterministic result, and the `Alt+↑/↓` path covered by keyboard
+  and screen-reader evidence. BUG-174 can be claimed.
 
 ---
 
