@@ -68,10 +68,10 @@ export const keepStudioStalePictureV4 = (
   if (request.projectId !== project.id) return refuse('member_not_found');
   if (request.expectedAuthoringRevision !== project.authoringRevision) return refuse('stale_project');
   if (contextValue.capturedAt < project.updatedAt) return refuse('invalid_request');
-  const assembly = project.assemblies[request.assemblyId];
-  if (assembly === undefined) return refuse('member_not_found');
-  const binding = assembly.pictureBindings[request.shotId];
-  if (binding === undefined) return refuse('member_not_found');
+  if (!Object.hasOwn(project.assemblies, request.assemblyId)) return refuse('member_not_found');
+  const assembly = project.assemblies[request.assemblyId]!;
+  if (!Object.hasOwn(assembly.pictureBindings, request.shotId)) return refuse('member_not_found');
+  const binding = assembly.pictureBindings[request.shotId]!;
   if (binding.staleness === null) return refuse('member_not_stale');
   if (binding.staleness.keptAt !== null) return refuse('already_kept');
 

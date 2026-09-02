@@ -120,43 +120,55 @@ const locateShot = (board: StudioBoardV2, shotId: string): { beatId: string; ind
 
 const markAssemblyChainStale = (
   assembly: StudioAssemblyV2,
-  affectedShotIds: readonly string[],
+  previousShotOrder: readonly string[],
   nextShotOrder: readonly string[],
   sourceAuthoringRevision: number,
   capturedAt: string
-): { assembly: StudioAssemblyV2; changed: boolean; staled: boolean } => {
-  const affected = new Set(affectedShotIds);
+): { assembly: StudioAssemblyV2; changed: boolean; staled: boolean; affectedShotIds: string[] } => {
   let changed = false;
   let staled = false;
+  let changedChainPredecessor = false;
+  const affectedShotIds: string[] = [];
   const pictureBindings = { ...assembly.pictureBindings };
   for (let index = 0; index < nextShotOrder.length; index += 1) {
     const shotId = nextShotOrder[index]!;
     const binding = pictureBindings[shotId]!;
-    if (!affected.has(shotId)) continue;
-    const join = index === 0 ? 'hard_cut' : binding.join;
-    if (binding.source === null) {
-      if (join !== binding.join) {
-        pictureBindings[shotId] = { ...binding, join };
-        changed = true;
-      }
-      continue;
+    const previousIndex = previousShotOrder.indexOf(shotId);
+    const nextJoin = index === 0 ? 'hard_cut' : binding.join;
+    const previousUpstreamShotId =
+      binding.join === 'hard_cut' || previousIndex <= 0 ? null : previousShotOrder[previousIndex - 1]!;
+    const nextUpstreamShotId = nextJoin === 'hard_cut' ? null : nextShotOrder[index - 1]!;
+    const directChainChange = binding.join !== nextJoin || previousUpstreamShotId !== nextUpstreamShotId;
+    const affected: boolean = directChainChange || (nextJoin === 'match_previous' && changedChainPredecessor);
+    if (affected) affectedShotIds.push(shotId);
+
+    if (binding.source !== null && binding.source.assetId !== null && affected) {
+      pictureBindings[shotId] = {
+        ...binding,
+        join: nextJoin,
+        staleness: {
+          cause: 'chain',
+          upstreamShotId: nextUpstreamShotId,
+          sourceAuthoringRevision,
+          keptAt: null,
+        },
+      };
+      changed = true;
+      staled = true;
+    } else if (binding.join !== nextJoin) {
+      pictureBindings[shotId] = {
+        ...binding,
+        join: nextJoin,
+        staleness: binding.staleness === null ? null : { ...binding.staleness, upstreamShotId: nextUpstreamShotId },
+      };
+      changed = true;
     }
-    pictureBindings[shotId] = {
-      ...binding,
-      join,
-      staleness: {
-        cause: 'chain',
-        upstreamShotId: index === 0 ? null : nextShotOrder[index - 1]!,
-        sourceAuthoringRevision,
-        keptAt: null,
-      },
-    };
-    changed = true;
-    staled = true;
+
+    changedChainPredecessor = nextJoin === 'hard_cut' ? directChainChange : affected;
   }
   return changed
-    ? { assembly: { ...assembly, pictureBindings, updatedAt: capturedAt }, changed, staled }
-    : { assembly, changed, staled };
+    ? { assembly: { ...assembly, pictureBindings, updatedAt: capturedAt }, changed, staled, affectedShotIds }
+    : { assembly, changed, staled, affectedShotIds };
 };
 
 const normalizeAssemblyBeatHeads = (
@@ -171,7 +183,11 @@ const normalizeAssemblyBeatHeads = (
     const firstShotId = board.beats[beatId]!.shotOrder[0]!;
     const binding = pictureBindings[firstShotId]!;
     if (binding.join === 'hard_cut') continue;
-    pictureBindings[firstShotId] = { ...binding, join: 'hard_cut' };
+    pictureBindings[firstShotId] = {
+      ...binding,
+      join: 'hard_cut',
+      staleness: binding.staleness === null ? null : { ...binding.staleness, upstreamShotId: null },
+    };
     changed = true;
   }
   return changed ? { ...assembly, pictureBindings, updatedAt: capturedAt } : assembly;
@@ -187,8 +203,6 @@ const reorderShotWithinBeat = (
 ): StudioReorderMutationResultV4 => {
   const beat = board.beats[beatId]!;
   const nextShotOrder = moveAdjacent(beat.shotOrder, index, request.direction);
-  const earliestChangedIndex = Math.min(index, request.direction === 'earlier' ? index - 1 : index + 1);
-  const affectedShotIds = nextShotOrder.slice(earliestChangedIndex);
   const nextBoard: StudioBoardV2 = {
     ...board,
     beats: { ...board.beats, [beatId]: { ...beat, shotOrder: nextShotOrder } },
@@ -196,19 +210,22 @@ const reorderShotWithinBeat = (
   };
   const assemblies = { ...project.assemblies };
   const affectedAssemblyIds: string[] = [];
+  const affectedShotIdSet = new Set<string>();
   for (const assemblyId of project.assemblyOrder) {
     const assembly = assemblies[assemblyId]!;
     if (assembly.boardId !== board.id) continue;
     const marked = markAssemblyChainStale(
       assembly,
-      affectedShotIds,
+      beat.shotOrder,
       nextShotOrder,
       project.authoringRevision,
       capturedAt
     );
     assemblies[assemblyId] = marked.assembly;
+    marked.affectedShotIds.forEach((shotId) => affectedShotIdSet.add(shotId));
     if (marked.staled) affectedAssemblyIds.push(assemblyId);
   }
+  const affectedShotIds = nextShotOrder.filter((shotId) => affectedShotIdSet.has(shotId));
   const next: StudioProjectV4 = {
     ...withBoard(project, nextBoard, capturedAt),
     assemblies,
@@ -298,8 +315,8 @@ export const applyStudioBoardMemberReorderV4 = (
   if (request.projectId !== project.id) return refuse('member_not_found');
   if (request.expectedAuthoringRevision !== project.authoringRevision) return refuse('stale_project');
   if (context.capturedAt < project.updatedAt) return refuse('invalid_request');
-  const board = project.boards[request.boardId];
-  if (board === undefined) return refuse('member_not_found');
+  if (!Object.hasOwn(project.boards, request.boardId)) return refuse('member_not_found');
+  const board = project.boards[request.boardId]!;
   return request.kind === 'beat'
     ? reorderBeat(project, board, request, context.capturedAt)
     : reorderShot(project, board, request, context.capturedAt);

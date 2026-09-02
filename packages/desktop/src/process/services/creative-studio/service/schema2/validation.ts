@@ -3814,8 +3814,8 @@ const ASSEMBLY_KEYS_V4 = new Set([
 const ASSEMBLY_PICTURE_BINDING_KEYS_V4 = new Set([
   'shotId',
   'source',
-  'trimInSeconds',
-  'trimOutSeconds',
+  'sourceInSeconds',
+  'sourceOutSeconds',
   'join',
   'staleness',
 ]);
@@ -3827,12 +3827,12 @@ const BOARD_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'boardId']);
 const ASSEMBLY_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'assemblyId']);
 
 const isCanonicalNonNegativeNumberV4 = (value: unknown, maximum: number): value is number =>
-  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= maximum;
+  typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0) && value >= 0 && value <= maximum;
 
-const validateTrimV4 = (trimInSeconds: unknown, trimOutSeconds: unknown): boolean =>
-  isCanonicalNonNegativeNumberV4(trimInSeconds, 86_400) &&
-  (trimOutSeconds === null ||
-    (isCanonicalNonNegativeNumberV4(trimOutSeconds, 86_400) && trimOutSeconds > trimInSeconds));
+const validateSourceRangeV4 = (sourceInSeconds: unknown, sourceOutSeconds: unknown): boolean =>
+  isCanonicalNonNegativeNumberV4(sourceInSeconds, 86_400) &&
+  (sourceOutSeconds === null ||
+    (isCanonicalNonNegativeNumberV4(sourceOutSeconds, 86_400) && sourceOutSeconds > sourceInSeconds));
 
 const validatePriorHandlesV4 = (value: unknown, currentHandle: string): value is string[] =>
   isDenseArray(value, STUDIO_MAX_PIECE_PRIOR_HANDLES_V3) &&
@@ -3917,6 +3917,7 @@ const validateBoardV4 = (
 const validateChainStalenessV4 = (
   value: unknown,
   shotId: string,
+  expectedUpstreamShotId: string | null,
   board: StudioBoardV2,
   authoringRevision: number,
   projectCreatedAt: string,
@@ -3925,6 +3926,7 @@ const validateChainStalenessV4 = (
   isRecord(value) &&
   hasExactKeys(value, CHAIN_STALENESS_KEYS_V4) &&
   value.cause === 'chain' &&
+  value.upstreamShotId === expectedUpstreamShotId &&
   (value.upstreamShotId === null ||
     (isSafeId(value.upstreamShotId) &&
       value.upstreamShotId !== shotId &&
@@ -3944,13 +3946,14 @@ const validateAssemblyPictureBindingV4 = (
     !isRecord(value) ||
     !hasExactKeys(value, ASSEMBLY_PICTURE_BINDING_KEYS_V4) ||
     value.shotId !== shotId ||
-    !validateTrimV4(value.trimInSeconds, value.trimOutSeconds) ||
+    !validateSourceRangeV4(value.sourceInSeconds, value.sourceOutSeconds) ||
     (value.join !== 'hard_cut' && value.join !== 'match_previous') ||
     (upstreamShotId === null && value.join !== 'hard_cut') ||
     (value.staleness !== null &&
       !validateChainStalenessV4(
         value.staleness,
         shotId,
+        value.join === 'hard_cut' ? null : upstreamShotId,
         board,
         project.authoringRevision,
         project.createdAt,
@@ -3959,16 +3962,29 @@ const validateAssemblyPictureBindingV4 = (
   ) {
     return false;
   }
-  if (value.source === null) return value.trimInSeconds === 0 && value.trimOutSeconds === null;
+  if (value.source === null) {
+    return value.sourceInSeconds === 0 && value.sourceOutSeconds === null && value.staleness === null;
+  }
   if (!isRecord(value.source) || !hasExactKeys(value.source, ASSEMBLY_PICTURE_SOURCE_KEYS_V4)) return false;
   const piece = ownValue(project.pieces, value.source.pieceId as string);
+  if (!isSafeId(value.source.pieceId) || piece === undefined) return false;
+  if (value.source.assetId === null) {
+    return (
+      piece.currentAssetId === null &&
+      value.sourceInSeconds === 0 &&
+      value.sourceOutSeconds === null &&
+      value.staleness === null
+    );
+  }
   const asset = ownValue(project.assets, value.source.assetId as string);
   return (
-    isSafeId(value.source.pieceId) &&
     isSafeId(value.source.assetId) &&
-    piece !== undefined &&
     asset !== undefined &&
-    asset.pieceId === piece.id
+    asset.pieceId === piece.id &&
+    piece.currentAssetId === asset.id &&
+    asset.mediaKind === 'image' &&
+    value.sourceInSeconds === 0 &&
+    value.sourceOutSeconds === null
   );
 };
 

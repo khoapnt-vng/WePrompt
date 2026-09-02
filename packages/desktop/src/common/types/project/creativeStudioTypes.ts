@@ -3500,7 +3500,7 @@ export type StudioCanvasFailureV4 = {
 
 export type StudioChainStalenessV4 = {
   cause: 'chain';
-  /** The predecessor whose chain relationship changed; null means the member became chain head. */
+  /** Current expected predecessor after the chain changed; null means this member is a chain head. */
   upstreamShotId: string | null;
   sourceAuthoringRevision: number;
   keptAt: string | null;
@@ -3542,26 +3542,32 @@ export type StudioBoardV2 = {
   updatedAt: string;
 };
 
-/** Exact persisted source used by one Assembly binding; null is an honest timed slate. */
-export type StudioAssemblyPictureSourceV2 = { pieceId: string; assetId: string } | null;
+/**
+ * Exact persisted source selected for one Assembly use. `null` means no Piece is planned; a null
+ * asset records an intended Piece whose usable media does not exist yet. Neither state permits a
+ * renderer to substitute another asset.
+ */
+export type StudioAssemblyMediaSourceV4 = { pieceId: string; assetId: string | null } | null;
+
+export type StudioAssemblyPictureSourceV2 = StudioAssemblyMediaSourceV4;
 
 export type StudioAssemblyPictureBindingV2 = {
   shotId: string;
   source: StudioAssemblyPictureSourceV2;
-  trimInSeconds: number;
-  trimOutSeconds: number | null;
+  sourceInSeconds: number;
+  sourceOutSeconds: number | null;
   join: 'hard_cut' | 'match_previous';
   staleness: StudioChainStalenessV4 | null;
 };
 
 export type StudioAssemblySoundBindingV2 = {
   id: string;
-  pieceId: string;
-  assetId: string;
+  /** Reserved until schema 7 gains its native retained sound-media ledger. */
+  source: StudioAssemblyMediaSourceV4;
   anchorBeatId: string;
   levelDb: number;
-  trimInSeconds: number;
-  trimOutSeconds: number | null;
+  sourceInSeconds: number;
+  sourceOutSeconds: number | null;
   staleness: StudioWordsStalenessV4 | null;
 };
 
@@ -3752,3 +3758,30 @@ export type StudioCreateBoardMutationResultV4 =
       createdShotIds: string[];
     }
   | { status: 'refused'; reason: StudioCreateBoardMutationFailureV4 };
+
+/** Creates one cut over an existing Board; picture order remains exclusively Board-owned. */
+export type StudioCreateAssemblyRequestV4 = {
+  projectId: string;
+  expectedAuthoringRevision: number;
+  boardId: string;
+  handle: string;
+};
+
+export type StudioCreateAssemblyMutationContextV4 = {
+  assemblyId: string;
+  capturedAt: string;
+};
+
+export type StudioCreateAssemblyMutationFailureV4 =
+  | 'invalid_project'
+  | 'invalid_request'
+  | 'stale_project'
+  | 'board_not_found'
+  | 'handle_taken'
+  | 'identity_collision'
+  | 'capacity_reached'
+  | 'validation_failed';
+
+export type StudioCreateAssemblyMutationResultV4 =
+  | { status: 'applied'; project: StudioProjectV4; assemblyId: string }
+  | { status: 'refused'; reason: StudioCreateAssemblyMutationFailureV4 };

@@ -42,8 +42,8 @@ export const deriveStudioAssemblyPictureTimelineV4 = (
   assemblyId: string
 ): StudioAssemblyPictureTimelineEntryV4[] => {
   const project = requireProject(projectValue);
-  const assembly = project.assemblies[assemblyId];
-  if (assembly === undefined) throw new TypeError('assembly_not_found');
+  if (!Object.hasOwn(project.assemblies, assemblyId)) throw new TypeError('assembly_not_found');
+  const assembly = project.assemblies[assemblyId]!;
   const board = project.boards[assembly.boardId]!;
   return board.beatOrder.flatMap((beatId, beatPosition) =>
     board.beats[beatId]!.shotOrder.map((shotId, shotPosition) => ({

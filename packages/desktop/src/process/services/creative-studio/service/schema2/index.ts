@@ -36,12 +36,15 @@ export {
   type StudioMutationReasonV2,
 } from './mutations';
 export * from './mutations/deletionClaimsV3';
+export * from './mutations/assemblyV4';
 export * from './mutations/boardV4';
 export * from './mutations/pieceCatalogV3';
 export * from './mutations/pieceHandles';
 export * from './mutations/presentationV4';
+export * from './mutations/projectAuthorityV4';
 export * from './mutations/reorderV4';
 export * from './mutations/stalenessV4';
+export * from './proposals/proposalContractsV4';
 export {
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,

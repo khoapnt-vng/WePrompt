@@ -3719,8 +3719,133 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     expect(validateStudioProjectV4(orderedAssembly)).toBe(false);
   });
 
+  it('requires the exact asset to belong to the Piece named by an Assembly binding', () => {
+    const project = makePhase6Project();
+    const firstPiece = project.pieces.piece_photo_1!;
+    const firstAsset = project.assets.asset_photo_1!;
+    project.pieceOrder.push('piece_photo_2');
+    project.pieces.piece_photo_2 = {
+      ...structuredClone(firstPiece),
+      id: 'piece_photo_2',
+      handle: 'harbour_evening',
+      currentAssetId: 'asset_photo_2',
+    };
+    project.assets.asset_photo_2 = {
+      ...structuredClone(firstAsset),
+      id: 'asset_photo_2',
+      pieceId: 'piece_photo_2',
+      managedAsset: { collection: 'imports', fileName: 'asset_photo_2.png' },
+      sha256: 'b'.repeat(64),
+    };
+    expect(validateStudioProjectV4(project)).toBe(true);
+
+    project.assemblies.assembly_1!.pictureBindings.shot_1!.source = {
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_photo_2',
+    };
+    expect(validateStudioProjectV4(project)).toBe(false);
+  });
+
+  it('distinguishes an unplanned slate from a planned Piece whose media is not ready', () => {
+    const currentPiece = makePhase6Project();
+    currentPiece.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
+      pieceId: 'piece_photo_1',
+      assetId: null,
+    };
+    expect(validateStudioProjectV4(currentPiece)).toBe(false);
+
+    const pendingV3 = makeGeneratedProjectWithJobStatusV3('queued_local');
+    const scaffold = makePhase6Project();
+    const planned: StudioProjectV4 = {
+      ...pendingV3,
+      schemaVersion: 7,
+      boardOrder: [...scaffold.boardOrder],
+      boards: structuredClone(scaffold.boards),
+      assemblyOrder: [...scaffold.assemblyOrder],
+      assemblies: structuredClone(scaffold.assemblies),
+      bin: [],
+      updatedAt: PHASE_6_CURRENT_AT,
+    };
+    planned.assemblies.assembly_1!.pictureBindings.shot_1!.source = null;
+    planned.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
+      pieceId: 'piece_1',
+      assetId: null,
+    };
+    expect(validateStudioProjectV4(planned)).toBe(true);
+
+    const inventedPiece = structuredClone(planned);
+    inventedPiece.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
+      pieceId: 'piece_missing',
+      assetId: null,
+    };
+    expect(validateStudioProjectV4(inventedPiece)).toBe(false);
+
+    const trimmedMissingMedia = structuredClone(planned);
+    trimmedMissingMedia.assemblies.assembly_1!.pictureBindings.shot_2!.sourceInSeconds = 1;
+    expect(validateStudioProjectV4(trimmedMissingMedia)).toBe(false);
+
+    const staleSlate = makePhase6Project();
+    staleSlate.assemblies.assembly_1!.pictureBindings.shot_2!.staleness = {
+      cause: 'chain',
+      upstreamShotId: 'shot_1',
+      sourceAuthoringRevision: 2,
+      keptAt: null,
+    };
+    expect(validateStudioProjectV4(staleSlate)).toBe(false);
+
+    const stalePlanned = structuredClone(planned);
+    stalePlanned.assemblies.assembly_1!.pictureBindings.shot_2!.staleness = {
+      cause: 'chain',
+      upstreamShotId: 'shot_1',
+      sourceAuthoringRevision: 2,
+      keptAt: null,
+    };
+    expect(validateStudioProjectV4(stalePlanned)).toBe(false);
+  });
+
+  it('reserves absolute source bounds for timed media and rejects image trimming plus schema-5 vocabulary', () => {
+    const bounded = makePhase6Project();
+    bounded.assemblies.assembly_1!.pictureBindings.shot_1!.sourceOutSeconds = 5;
+    expect(validateStudioProjectV4(bounded)).toBe(false);
+
+    const nonzeroStart = makePhase6Project();
+    nonzeroStart.assemblies.assembly_1!.pictureBindings.shot_1!.sourceInSeconds = 5;
+    expect(validateStudioProjectV4(nonzeroStart)).toBe(false);
+
+    for (const invalid of [-0, Number.NaN, Number.POSITIVE_INFINITY, 86_401]) {
+      const invalidBound = makePhase6Project();
+      invalidBound.assemblies.assembly_1!.pictureBindings.shot_1!.sourceInSeconds = invalid;
+      expect(validateStudioProjectV4(invalidBound)).toBe(false);
+    }
+
+    const legacy = makePhase6Project() as StudioProjectV4 & {
+      assemblies: Record<
+        string,
+        StudioProjectV4['assemblies'][string] & {
+          pictureBindings: Record<
+            string,
+            StudioProjectV4['assemblies'][string]['pictureBindings'][string] & {
+              trimInSeconds?: number;
+              trimOutSeconds?: number | null;
+            }
+          >;
+        }
+      >;
+    };
+    const binding = legacy.assemblies.assembly_1!.pictureBindings.shot_1!;
+    binding.trimInSeconds = binding.sourceInSeconds;
+    binding.trimOutSeconds = binding.sourceOutSeconds;
+    delete (binding as Partial<typeof binding>).sourceInSeconds;
+    delete (binding as Partial<typeof binding>).sourceOutSeconds;
+    expect(validateStudioProjectV4(legacy)).toBe(false);
+  });
+
   it('enforces chain-only picture staleness against the actual predecessor', () => {
     const project = makePhase6Project();
+    project.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_photo_1',
+    };
     project.assemblies.assembly_1!.pictureBindings.shot_2!.staleness = {
       cause: 'chain',
       upstreamShotId: 'shot_1',
@@ -3730,6 +3855,55 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     expect(validateStudioProjectV4(project)).toBe(true);
 
     project.assemblies.assembly_1!.pictureBindings.shot_2!.staleness!.upstreamShotId = 'shot_missing';
+    expect(validateStudioProjectV4(project)).toBe(false);
+
+    const wrongExistingPredecessor = makePhase6Project();
+    const board = wrongExistingPredecessor.boards.board_1!;
+    board.beats.beat_1!.shotOrder.push('shot_3');
+    board.shots.shot_3 = {
+      id: 'shot_3',
+      shootingScript: 'The wake fills the frame.',
+      durationSeconds: 5,
+      createdAt: PHASE_6_CURRENT_AT,
+      updatedAt: PHASE_6_CURRENT_AT,
+    };
+    wrongExistingPredecessor.assemblies.assembly_1!.pictureBindings.shot_3 = {
+      shotId: 'shot_3',
+      source: { pieceId: 'piece_photo_1', assetId: 'asset_photo_1' },
+      sourceInSeconds: 0,
+      sourceOutSeconds: null,
+      join: 'match_previous',
+      staleness: {
+        cause: 'chain',
+        upstreamShotId: 'shot_1',
+        sourceAuthoringRevision: 2,
+        keptAt: null,
+      },
+    };
+    expect(validateStudioProjectV4(wrongExistingPredecessor)).toBe(false);
+
+    const hardCut = makePhase6Project();
+    hardCut.assemblies.assembly_1!.pictureBindings.shot_1!.staleness = {
+      cause: 'chain',
+      upstreamShotId: 'shot_2',
+      sourceAuthoringRevision: 2,
+      keptAt: null,
+    };
+    expect(validateStudioProjectV4(hardCut)).toBe(false);
+  });
+
+  it('rejects sound bindings until the native schema-7 sound ledger is active', () => {
+    const project = makePhase6Project();
+    project.assemblies.assembly_1!.soundBindingOrder = ['sound_binding_1'];
+    project.assemblies.assembly_1!.soundBindings.sound_binding_1 = {
+      id: 'sound_binding_1',
+      source: null,
+      anchorBeatId: 'beat_1',
+      levelDb: -6,
+      sourceInSeconds: 0,
+      sourceOutSeconds: null,
+      staleness: null,
+    };
     expect(validateStudioProjectV4(project)).toBe(false);
   });
 

@@ -41,7 +41,7 @@ describe('schema-7 stale picture decisions', () => {
   it('records Keep while preserving the stale media, provenance, and Assembly binding', () => {
     const project = makeStaleProject();
     const before = {
-      source: structuredClone(project.assemblies.assembly_1!.pictureBindings.shot_1!.source),
+      source: structuredClone(project.assemblies.assembly_1!.pictureBindings.shot_2!.source),
       assets: structuredClone(project.assets),
       jobs: structuredClone(project.jobs),
       authorizations: structuredClone(project.spendAuthorizations),
@@ -54,18 +54,18 @@ describe('schema-7 stale picture decisions', () => {
         projectId: project.id,
         expectedAuthoringRevision: project.authoringRevision,
         assemblyId: 'assembly_1',
-        shotId: 'shot_1',
+        shotId: 'shot_2',
       },
       { capturedAt: keptAt }
     );
 
     expect(result.status).toBe('applied');
     if (result.status !== 'applied') return;
-    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_1).toMatchObject({
+    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_2).toMatchObject({
       source: before.source,
       staleness: {
         cause: 'chain',
-        upstreamShotId: 'shot_2',
+        upstreamShotId: null,
         keptAt,
       },
     });
@@ -92,7 +92,7 @@ describe('schema-7 stale picture decisions', () => {
     });
 
     const stale = makeStaleProject();
-    const staleRequest = { ...request, expectedAuthoringRevision: stale.authoringRevision };
+    const staleRequest = { ...request, expectedAuthoringRevision: stale.authoringRevision, shotId: 'shot_2' };
     const applied = keepStudioStalePictureV4(stale, staleRequest, { capturedAt: keptAt });
     if (applied.status !== 'applied') throw new Error('Keep fixture failed');
     expect(
@@ -112,6 +112,15 @@ describe('schema-7 stale picture decisions', () => {
     expect(
       keepStudioStalePictureV4(stale, { ...staleRequest, shotId: 'shot_missing' }, { capturedAt: keptAt })
     ).toEqual({ status: 'refused', reason: 'member_not_found' });
+    for (const assemblyId of ['constructor', 'toString', '__proto__']) {
+      expect(() =>
+        keepStudioStalePictureV4(stale, { ...staleRequest, assemblyId }, { capturedAt: keptAt })
+      ).not.toThrow();
+      expect(keepStudioStalePictureV4(stale, { ...staleRequest, assemblyId }, { capturedAt: keptAt })).toEqual({
+        status: 'refused',
+        reason: 'member_not_found',
+      });
+    }
     expect(keepStudioStalePictureV4(stale, { ...staleRequest, extra: true }, { capturedAt: keptAt })).toEqual({
       status: 'refused',
       reason: 'invalid_request',

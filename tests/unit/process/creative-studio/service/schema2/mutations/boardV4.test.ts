@@ -108,12 +108,30 @@ describe('schema-7 Board proposal application', () => {
     ).toEqual({ status: 'refused', reason: 'identity_collision' });
   });
 
+  it('stores safe prototype-looking Main ids as own data records', () => {
+    const project = makePhase6Project();
+    const result = applyStudioCreateBoardV4(project, request(project), {
+      ...context(),
+      beatIds: ['__proto__'],
+      shotIds: ['constructor', 'toString'],
+    });
+
+    expect(result.status).toBe('applied');
+    if (result.status !== 'applied') return;
+    expect(Object.hasOwn(result.project.boards.board_2!.beats, '__proto__')).toBe(true);
+    expect(Object.hasOwn(result.project.boards.board_2!.shots, 'constructor')).toBe(true);
+    expect(Object.hasOwn(result.project.boards.board_2!.shots, 'toString')).toBe(true);
+    expect(validateStudioProjectV4(result.project)).toBe(true);
+  });
+
   it('rejects malformed authored facts and mismatched Main-issued identity counts', () => {
     const project = makePhase6Project();
     const extraKey = { ...request(project), boardId: 'caller_owned' };
     const emptyBeat = { ...request(project), beats: [] };
     const emptyShots = structuredClone(request(project));
     emptyShots.beats[0]!.shots = [];
+    const emptyTitle = structuredClone(request(project));
+    emptyTitle.beats[0]!.title = '';
     const tooLong = structuredClone(request(project));
     tooLong.beats[0]!.shots[0]!.shootingScript = 'x'.repeat(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH + 1);
 
@@ -126,6 +144,10 @@ describe('schema-7 Board proposal application', () => {
       reason: 'invalid_request',
     });
     expect(applyStudioCreateBoardV4(project, emptyShots, context())).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+    expect(applyStudioCreateBoardV4(project, emptyTitle, context())).toEqual({
       status: 'refused',
       reason: 'invalid_request',
     });
@@ -156,10 +178,44 @@ describe('schema-7 Board proposal application', () => {
       reason: 'invalid_request',
     });
     expect(getterCalls).toBe(0);
+
+    const nestedUnsafe = request(project);
+    Object.defineProperty(nestedUnsafe.beats, '0', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return request(project).beats[0];
+      },
+    });
+    expect(applyStudioCreateBoardV4(project, nestedUnsafe, context())).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+    expect(getterCalls).toBe(0);
     expect(applyStudioCreateBoardV4(project, new Proxy(request(project), {}), context())).toEqual({
       status: 'refused',
       reason: 'invalid_request',
     });
+    const revokedRequest = Proxy.revocable(request(project), {});
+    revokedRequest.revoke();
+    expect(() => applyStudioCreateBoardV4(project, revokedRequest.proxy, context())).not.toThrow();
+    expect(applyStudioCreateBoardV4(project, revokedRequest.proxy, context())).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+
+    const prototypeLessBeats = request(project).beats;
+    Object.setPrototypeOf(prototypeLessBeats, null);
+    expect(applyStudioCreateBoardV4(project, { ...request(project), beats: prototypeLessBeats }, context())).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+    expect(
+      applyStudioCreateBoardV4(project, request(project), {
+        ...context(),
+        capturedAt: '+012345-01-01T00:00:00.000Z',
+      })
+    ).toEqual({ status: 'refused', reason: 'invalid_request' });
     expect(applyStudioCreateBoardV4({ ...project, schemaVersion: 6 }, request(project), context())).toEqual({
       status: 'refused',
       reason: 'invalid_project',

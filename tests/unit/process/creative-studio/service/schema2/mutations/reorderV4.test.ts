@@ -39,8 +39,8 @@ const addSecondBeat = (project: StudioProjectV4): void => {
   project.assemblies.assembly_1!.pictureBindings.shot_3 = {
     shotId: 'shot_3',
     source: null,
-    trimInSeconds: 0,
-    trimOutSeconds: null,
+    sourceInSeconds: 0,
+    sourceOutSeconds: null,
     join: 'hard_cut',
     staleness: null,
   };
@@ -102,7 +102,7 @@ describe('schema-7 typed Board reorder authority', () => {
     expect(validateStudioProjectV4(result.project)).toBe(true);
   });
 
-  it('marks the playable affected chain stale for an intra-Beat Shot move without spending', () => {
+  it('marks the moved chain head stale but stops at an independent hard-cut reset', () => {
     const project = makePhase6Project();
     project.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
       pieceId: 'piece_photo_1',
@@ -126,7 +126,7 @@ describe('schema-7 typed Board reorder authority', () => {
       kind: 'chain_stale',
       requiresRerenderQuote: true,
       affectedAssemblyIds: ['assembly_1'],
-      affectedShotIds: ['shot_2', 'shot_1'],
+      affectedShotIds: ['shot_2'],
     });
     expect(result.project.assemblies.assembly_1!.pictureBindings.shot_2).toMatchObject({
       source: { pieceId: 'piece_photo_1', assetId: 'asset_photo_1' },
@@ -138,18 +138,56 @@ describe('schema-7 typed Board reorder authority', () => {
         keptAt: null,
       },
     });
-    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_1!.staleness).toEqual({
-      cause: 'chain',
-      upstreamShotId: 'shot_2',
-      sourceAuthoringRevision: project.authoringRevision,
-      keptAt: null,
-    });
+    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_1!.staleness).toBeNull();
     expect({
       assets: result.project.assets,
       jobs: result.project.jobs,
       authorizations: result.project.spendAuthorizations,
     }).toEqual(before);
     expect(validateStudioProjectV4(result.project)).toBe(true);
+  });
+
+  it('propagates staleness through the changed match-previous segment', () => {
+    const project = makePhase6Project();
+    const board = project.boards.board_1!;
+    board.beats.beat_1!.shotOrder.push('shot_3');
+    board.shots.shot_3 = {
+      id: 'shot_3',
+      shootingScript: 'The rope clears the final bollard.',
+      durationSeconds: 5,
+      createdAt: PHASE_6_AUTHORED_AT,
+      updatedAt: PHASE_6_CURRENT_AT,
+    };
+    project.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_photo_1',
+    };
+    project.assemblies.assembly_1!.pictureBindings.shot_3 = {
+      shotId: 'shot_3',
+      source: { pieceId: 'piece_photo_1', assetId: 'asset_photo_1' },
+      sourceInSeconds: 0,
+      sourceOutSeconds: null,
+      join: 'match_previous',
+      staleness: null,
+    };
+    expect(validateStudioProjectV4(project)).toBe(true);
+
+    const result = applyStudioBoardMemberReorderV4(
+      project,
+      { ...requestBase(project), kind: 'shot', shotId: 'shot_2', direction: 'later' },
+      { capturedAt: movedAt }
+    );
+
+    expect(result.status).toBe('applied');
+    if (result.status !== 'applied') return;
+    expect(result.consequence).toEqual({
+      kind: 'chain_stale',
+      requiresRerenderQuote: true,
+      affectedAssemblyIds: ['assembly_1'],
+      affectedShotIds: ['shot_3', 'shot_2'],
+    });
+    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_3!.staleness?.upstreamShotId).toBe('shot_1');
+    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_2!.staleness?.upstreamShotId).toBe('shot_3');
   });
 
   it('reports a priced chain consequence even when no rendered binding needs marking yet', () => {
@@ -168,8 +206,9 @@ describe('schema-7 typed Board reorder authority', () => {
       kind: 'chain_stale',
       requiresRerenderQuote: true,
       affectedAssemblyIds: [],
-      affectedShotIds: ['shot_2', 'shot_1'],
+      affectedShotIds: ['shot_2'],
     });
+    expect(result.project.assemblies.assembly_1!.pictureBindings.shot_1!.staleness).toBeNull();
   });
 
   it('refuses outer boundaries and a cross-Beat move that would leave an empty Beat', () => {
@@ -215,6 +254,15 @@ describe('schema-7 typed Board reorder authority', () => {
     expect(
       applyStudioBoardMemberReorderV4(project, { ...exact, boardId: 'board_missing' }, { capturedAt: movedAt })
     ).toEqual({ status: 'refused', reason: 'member_not_found' });
+    for (const boardId of ['constructor', 'toString', '__proto__']) {
+      expect(() =>
+        applyStudioBoardMemberReorderV4(project, { ...exact, boardId }, { capturedAt: movedAt })
+      ).not.toThrow();
+      expect(applyStudioBoardMemberReorderV4(project, { ...exact, boardId }, { capturedAt: movedAt })).toEqual({
+        status: 'refused',
+        reason: 'member_not_found',
+      });
+    }
     expect(
       applyStudioBoardMemberReorderV4(project, { ...exact, projectId: 'project_missing' }, { capturedAt: movedAt })
     ).toEqual({ status: 'refused', reason: 'member_not_found' });
@@ -222,6 +270,10 @@ describe('schema-7 typed Board reorder authority', () => {
       applyStudioBoardMemberReorderV4(project, { ...exact, canvasBlockId: 'piece_photo_1' }, { capturedAt: movedAt })
     ).toEqual({ status: 'refused', reason: 'invalid_request' });
     expect(applyStudioBoardMemberReorderV4(project, exact, { capturedAt: 'not-a-date' })).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+    expect(applyStudioBoardMemberReorderV4(project, exact, { capturedAt: '+012345-01-01T00:00:00.000Z' })).toEqual({
       status: 'refused',
       reason: 'invalid_request',
     });
@@ -234,6 +286,13 @@ describe('schema-7 typed Board reorder authority', () => {
       reason: 'invalid_project',
     });
     expect(applyStudioBoardMemberReorderV4(project, new Proxy(exact, {}), { capturedAt: movedAt })).toEqual({
+      status: 'refused',
+      reason: 'invalid_request',
+    });
+    const revoked = Proxy.revocable(exact, {});
+    revoked.revoke();
+    expect(() => applyStudioBoardMemberReorderV4(project, revoked.proxy, { capturedAt: movedAt })).not.toThrow();
+    expect(applyStudioBoardMemberReorderV4(project, revoked.proxy, { capturedAt: movedAt })).toEqual({
       status: 'refused',
       reason: 'invalid_request',
     });

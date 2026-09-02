@@ -28,6 +28,7 @@ import {
   isPlainInputRecordV4,
   isSafeInputIdV4,
 } from './exactInputV4';
+import { studioCanvasHandleIsTakenV4, studioPersistentIdentitiesV4 } from './projectAuthorityV4';
 
 const REQUEST_KEYS = new Set(['projectId', 'expectedAuthoringRevision', 'handle', 'beats']);
 const BEAT_KEYS = new Set(['title', 'story', 'targetSeconds', 'shots']);
@@ -49,7 +50,7 @@ const snapshotBeat = (value: unknown): StudioBoardDraftBeatV4 | null => {
   if (
     !isPlainInputRecordV4(value) ||
     !hasExactInputKeysV4(value, BEAT_KEYS) ||
-    !isStringWithin(value.title, 256, true) ||
+    !isStringWithin(value.title, 256, false) ||
     !isStringWithin(value.story, STUDIO_MAX_STORY_LENGTH, true) ||
     (value.targetSeconds !== null && !isIntegerInRange(value.targetSeconds, 1, 1_440)) ||
     !isDenseInputArrayV4(value.shots) ||
@@ -72,28 +73,33 @@ const snapshotBeat = (value: unknown): StudioBoardDraftBeatV4 | null => {
   return { title: value.title, story: value.story, targetSeconds: value.targetSeconds as number | null, shots };
 };
 
-const snapshotRequest = (value: unknown): StudioCreateBoardRequestV4 | null => {
-  if (
-    !isPlainInputRecordV4(value) ||
-    !hasExactInputKeysV4(value, REQUEST_KEYS) ||
-    !isSafeInputIdV4(value.projectId) ||
-    !isIntegerInRange(value.expectedAuthoringRevision, 1, Number.MAX_SAFE_INTEGER) ||
-    !isCanonicalStudioPieceHandleV3(value.handle) ||
-    !isDenseInputArrayV4(value.beats) ||
-    value.beats.length === 0 ||
-    value.beats.length > STUDIO_MAX_BEATS_PER_BOARD_V4
-  ) {
-    return null;
-  }
+/** One exact parser shared by direct Board application and immutable proposal records. */
+export const snapshotStudioBoardDraftBeatsV4 = (value: unknown): StudioBoardDraftBeatV4[] | null => {
+  if (!isDenseInputArrayV4(value) || value.length === 0 || value.length > STUDIO_MAX_BEATS_PER_BOARD_V4) return null;
   const beats: StudioBoardDraftBeatV4[] = [];
   let shotCount = 0;
-  for (const candidate of value.beats) {
+  for (const candidate of value) {
     const beat = snapshotBeat(candidate);
     if (beat === null) return null;
     shotCount += beat.shots.length;
     if (shotCount > STUDIO_MAX_SHOTS_PER_BOARD_V4) return null;
     beats.push(beat);
   }
+  return beats;
+};
+
+const snapshotRequest = (value: unknown): StudioCreateBoardRequestV4 | null => {
+  if (
+    !isPlainInputRecordV4(value) ||
+    !hasExactInputKeysV4(value, REQUEST_KEYS) ||
+    !isSafeInputIdV4(value.projectId) ||
+    !isIntegerInRange(value.expectedAuthoringRevision, 1, Number.MAX_SAFE_INTEGER) ||
+    !isCanonicalStudioPieceHandleV3(value.handle)
+  ) {
+    return null;
+  }
+  const beats = snapshotStudioBoardDraftBeatsV4(value.beats);
+  if (beats === null) return null;
   return {
     projectId: value.projectId,
     expectedAuthoringRevision: value.expectedAuthoringRevision,
@@ -128,39 +134,6 @@ const snapshotContext = (value: unknown): StudioCreateBoardMutationContextV4 | n
     : { boardId: value.boardId, beatIds, shotIds, capturedAt: value.capturedAt };
 };
 
-const persistentIdentities = (project: StudioProjectV4): Set<string> => {
-  const identities = new Set<string>([
-    project.id,
-    ...Object.keys(project.pieces),
-    ...Object.keys(project.assets),
-    ...Object.keys(project.jobs),
-    ...project.undoHistory.map((entry) => entry.id),
-    ...project.bin.map((entry) => entry.id),
-  ]);
-  for (const authorization of project.spendAuthorizations) {
-    identities.add(authorization.id);
-    identities.add(authorization.quote.id);
-    identities.add(authorization.quote.reservationId);
-    identities.add(authorization.quote.item.id);
-    identities.add(authorization.idempotencyKey.key);
-  }
-  for (const board of Object.values(project.boards)) {
-    identities.add(board.id);
-    Object.keys(board.beats).forEach((id) => identities.add(id));
-    Object.keys(board.shots).forEach((id) => identities.add(id));
-  }
-  for (const assembly of Object.values(project.assemblies)) {
-    identities.add(assembly.id);
-    Object.keys(assembly.soundBindings).forEach((id) => identities.add(id));
-  }
-  return identities;
-};
-
-const handleIsTaken = (project: StudioProjectV4, handle: string): boolean =>
-  [...Object.values(project.pieces), ...Object.values(project.boards), ...Object.values(project.assemblies)].some(
-    (subject) => subject.handle === handle || subject.priorHandles.includes(handle)
-  );
-
 /**
  * Applies the authored contents of one accepted Board proposal. The request contains no durable
  * identities; Main supplies those separately and the mutation performs no generation or spend.
@@ -179,20 +152,20 @@ export const applyStudioCreateBoardV4 = (
   if (request.expectedAuthoringRevision !== project.authoringRevision) return refuse('stale_project');
   if (context.capturedAt < project.updatedAt) return refuse('invalid_request');
   if (project.boardOrder.length >= STUDIO_MAX_BOARDS_V4) return refuse('capacity_reached');
-  if (handleIsTaken(project, request.handle)) return refuse('handle_taken');
+  if (studioCanvasHandleIsTakenV4(project, request.handle)) return refuse('handle_taken');
   const shotCount = request.beats.reduce((total, beat) => total + beat.shots.length, 0);
   if (context.beatIds.length !== request.beats.length || context.shotIds.length !== shotCount) {
     return refuse('invalid_request');
   }
   const issuedIds = [context.boardId, ...context.beatIds, ...context.shotIds];
-  const existingIds = persistentIdentities(project);
+  const existingIds = studioPersistentIdentitiesV4(project);
   if (new Set(issuedIds).size !== issuedIds.length || issuedIds.some((id) => existingIds.has(id))) {
     return refuse('identity_collision');
   }
 
   let shotCursor = 0;
-  const beats: StudioProjectV4['boards'][string]['beats'] = {};
-  const shots: StudioProjectV4['boards'][string]['shots'] = {};
+  const beats = Object.create(null) as StudioProjectV4['boards'][string]['beats'];
+  const shots = Object.create(null) as StudioProjectV4['boards'][string]['shots'];
   for (let beatIndex = 0; beatIndex < request.beats.length; beatIndex += 1) {
     const draft = request.beats[beatIndex]!;
     const beatId = context.beatIds[beatIndex]!;
