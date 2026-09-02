@@ -30,6 +30,7 @@ import {
   type StudioProjectDirectoryIdentityV3 as StudioProjectDirectoryIdentityV4,
   type StudioUnreadableProjectDeletionObservationV3 as StudioUnreadableProjectDeletionObservationV4,
 } from '../../service/schema2/mutations/deletionClaimsV3';
+import { studioProjectAuthoringEqualsV4 } from '../../service/schema2/generation/submission/v4';
 import { validateStudioProjectV4 } from '../../service/schema2/validation';
 
 const PROJECT_MANIFEST = 'project.json';
@@ -149,6 +150,8 @@ export type StudioPilotProjectAuthoritySnapshotV4 = {
   project: StudioProjectV4;
   projectDir: string;
   assertCurrent(): Promise<void>;
+  /** Revalidates schema, project-directory identity, and authored state while tolerating runtime-only commits. */
+  assertAuthoringCurrent(): Promise<void>;
   commit(
     update: (project: StudioProjectV4) => StudioProjectV4,
     options: StudioPilotProjectUpdateOptionsV4
@@ -937,6 +940,18 @@ export const createCreativeStudioPilotStoreV4 = (
     }
   };
 
+  const assertInspectionAuthoringCurrent = async (root: RootState, captured: HealthyInspection): Promise<void> => {
+    const current = await inspectProject(root, captured.catalogueId);
+    if (
+      current.status !== 'healthy' ||
+      current.project.authoringRevision !== captured.project.authoringRevision ||
+      !studioProjectAuthoringEqualsV4(current.project, captured.project) ||
+      !sameIdentity(current.directoryIdentity, captured.directoryIdentity)
+    ) {
+      throw new CreativeStudioPilotStoreErrorV4('stale_project');
+    }
+  };
+
   const writeProjectUpdate = async (
     root: RootState,
     captured: HealthyInspection,
@@ -1058,6 +1073,9 @@ export const createCreativeStudioPilotStoreV4 = (
       updatedAt: committedAt,
     };
     if (!validateStudioProjectV4(next)) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+    if (optionsInput.kind === 'runtime' && !studioProjectAuthoringEqualsV4(captured.project, next)) {
+      throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+    }
     await writeProjectUpdate(root, captured, next, optionsInput.authorizeBeforeReplace);
     emit({
       projectId: next.id,
@@ -1452,6 +1470,10 @@ export const createCreativeStudioPilotStoreV4 = (
               assertCurrent: () => {
                 if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
                 return assertInspectionCurrent(root, inspection);
+              },
+              assertAuthoringCurrent: () => {
+                if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
+                return assertInspectionAuthoringCurrent(root, inspection);
               },
               commit: (update, updateOptions) => {
                 if (!active || mutationUsed)

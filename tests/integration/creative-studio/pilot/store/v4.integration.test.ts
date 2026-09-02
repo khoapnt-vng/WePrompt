@@ -645,6 +645,18 @@ describe('inactive schema-7 pilot project store', () => {
     });
     expect(runtime).toMatchObject({ revision: 3, authoringRevision: 2 });
     expect(observations.at(-1)).toEqual({ event: 'updated', lastStep: 'update:complete' });
+    await expectStoreError(
+      store.updateProjectV4(runtime.id, (project) => ({ ...project, name: 'Disguised authored edit' }), {
+        expectedRevision: runtime.revision,
+        kind: 'runtime',
+      }),
+      'invalid_payload'
+    );
+    await expect(store.loadProjectV4(runtime.id)).resolves.toMatchObject({
+      revision: 3,
+      authoringRevision: 2,
+      name: 'Authority renamed',
+    });
   });
 
   it('propagates intentional authority callback refusals without rewriting them as storage failures', async () => {

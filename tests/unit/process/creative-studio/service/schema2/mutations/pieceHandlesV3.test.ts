@@ -8,6 +8,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  STUDIO_MAX_ASSEMBLIES_V4,
+  STUDIO_MAX_BOARDS_V4,
+  STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_PIECE_HANDLE_SCALARS_V3,
   STUDIO_MAX_PIECE_PRIOR_HANDLES_V3,
   type StudioProjectV3,
@@ -19,6 +22,7 @@ import {
   isCanonicalStudioPieceHandleV3,
   normalizeStudioPieceHandleV3,
   resolveStudioPieceRenameV3,
+  studioCanvasHandleNamespaceV4,
   studioPieceHandleNamespaceV3,
 } from '@/process/services/creative-studio/service/schema2/mutations/pieceHandles';
 
@@ -240,6 +244,97 @@ describe('schema-6 Unicode Piece handles', () => {
 });
 
 describe('schema-7 immutable run stems', () => {
+  it('uses one namespace across Piece, Board, Assembly, aliases, and reservations', () => {
+    const namespace = studioCanvasHandleNamespaceV4(
+      {
+        pieceOrder: ['piece_1'],
+        pieces: {
+          piece_1: { handle: 'photo', priorHandles: ['portrait'] },
+        },
+        boardOrder: ['board_1'],
+        boards: {
+          board_1: { handle: 'storyboard', priorHandles: ['board_alias'] },
+        },
+        assemblyOrder: ['assembly_1'],
+        assemblies: {
+          assembly_1: { handle: 'the_cut', priorHandles: ['cut_alias'] },
+        },
+      } as never,
+      ['reserved']
+    );
+
+    expect([...namespace]).toEqual([
+      'photo',
+      'portrait',
+      'storyboard',
+      'board_alias',
+      'the_cut',
+      'cut_alias',
+      'reserved',
+    ]);
+    expect(deriveStudioPieceCreateIdentityV4(null, 'Storyboard', namespace)).toEqual({
+      proposedHandle: 'storyboard_2',
+      runStem: null,
+    });
+    expect(deriveStudioPieceCreateIdentityV4('The cut', 'ignored', namespace)).toEqual({
+      proposedHandle: 'the_cut_2',
+      runStem: 'the_cut',
+    });
+  });
+
+  it('admits the complete schema-7 namespace bound and refuses one entry beyond it', () => {
+    const maximum =
+      (STUDIO_MAX_PIECES_V3 + STUDIO_MAX_BOARDS_V4 + STUDIO_MAX_ASSEMBLIES_V4) *
+        (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 1) +
+      STUDIO_MAX_PIECES_V3;
+    const fullNamespace = Array.from({ length: maximum }, (_, index) => `subject_${index}`);
+
+    expect(deriveStudioPieceCreateIdentityV4(null, 'fresh', fullNamespace)).toEqual({
+      proposedHandle: 'fresh',
+      runStem: null,
+    });
+    expect(() => deriveStudioPieceCreateIdentityV4(null, 'fresh', [...fullNamespace, 'overflow'])).toThrow(
+      expect.objectContaining({ code: 'invalid_namespace' })
+    );
+  });
+
+  it('stops consuming active reservations at the schema bound and contains hostile iterables', () => {
+    const emptyCanvas = {
+      pieceOrder: [],
+      pieces: {},
+      boardOrder: [],
+      boards: {},
+      assemblyOrder: [],
+      assemblies: {},
+    } as never;
+    const maximum =
+      (STUDIO_MAX_PIECES_V3 + STUDIO_MAX_BOARDS_V4 + STUDIO_MAX_ASSEMBLIES_V4) *
+        (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 1) +
+      STUDIO_MAX_PIECES_V3;
+    let yielded = 0;
+    function* endlessReservations(): Generator<string> {
+      while (true) {
+        const ordinal = yielded;
+        yielded += 1;
+        yield `reservation_${ordinal}`;
+      }
+    }
+
+    expect(() => studioCanvasHandleNamespaceV4(emptyCanvas, endlessReservations())).toThrow(
+      expect.objectContaining({ code: 'invalid_namespace' })
+    );
+    expect(yielded).toBe(maximum + 1);
+
+    const hostile = {
+      [Symbol.iterator]: () => {
+        throw new Error('must be contained');
+      },
+    };
+    expect(() => studioCanvasHandleNamespaceV4(emptyCanvas, hostile)).toThrow(
+      expect.objectContaining({ code: 'invalid_namespace' })
+    );
+  });
+
   it('keeps one long explicit suggestion stable while collision suffixes truncate each visible handle', () => {
     const suggestion = 'A salt flat at dawn, one figure walking away from camera';
     const first = deriveStudioPieceCreateIdentityV4(suggestion, 'first words');

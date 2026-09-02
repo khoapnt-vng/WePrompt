@@ -3477,50 +3477,115 @@ export const STUDIO_MAX_BIN_LIFT_SUBJECTS_V4 =
 export const STUDIO_MAX_BIN_ENTRIES_V4 =
   STUDIO_MAX_PIECES_V3 + STUDIO_MAX_ASSEMBLIES_V4 + STUDIO_MAX_BOARDS_V4 * (STUDIO_MAX_SHOTS_PER_BOARD_V4 - 1);
 
-export type StudioCanvasMemberStatusV4 =
-  | 'slate'
-  | 'queued'
-  | 'ready_to_render'
-  | 'generating'
-  | 'rendered'
-  | 'stale'
-  | 'failed';
+export const STUDIO_CANVAS_MEMBER_STATUSES_V4 = [
+  'slate',
+  'queued',
+  'ready_to_render',
+  'generating',
+  'rendered',
+  'stale',
+  'failed',
+] as const;
+export type StudioCanvasMemberStatusV4 = (typeof STUDIO_CANVAS_MEMBER_STATUSES_V4)[number];
 
-export type StudioStillsBlockStatusV4 =
-  | 'imported'
-  | 'needs_budget'
-  | 'proposed'
-  | 'queued'
-  | 'generating'
-  | 'rendered'
-  | 'partial'
-  | 'failed'
-  | 'stale';
-export type StudioMotionBlockStatusV4 = StudioStillsBlockStatusV4;
-export type StudioDocumentBlockStatusV4 = 'drafted' | 'current' | 'proposed';
-export type StudioBoardBlockStatusV4 = 'needs_budget' | 'proposed' | 'queued' | 'generating' | 'partial' | 'stale';
-export type StudioImportedSoundBlockStatusV4 = 'imported';
-export type StudioGeneratedSoundBlockStatusV4 =
-  | 'needs_budget'
-  | 'proposed'
-  | 'queued'
-  | 'generating'
-  | 'rendered'
-  | 'stale'
-  | 'failed';
-export type StudioCutBlockStatusV4 =
-  | 'needs_budget'
-  | 'proposed'
-  | 'rendering'
-  | 'rendered'
-  | 'partial'
-  | 'stale'
-  | 'failed';
+/** The six block kinds from grammar revision 2. A proposal is a status, never a kind. */
+export const STUDIO_CANVAS_BLOCK_KINDS_V4 = ['stills', 'motion', 'document', 'board', 'sound', 'cut'] as const;
+export type StudioCanvasBlockKindV4 = (typeof STUDIO_CANVAS_BLOCK_KINDS_V4)[number];
+
+export const STUDIO_STILLS_BLOCK_STATUSES_V4 = [
+  'imported',
+  'needs_budget',
+  'proposed',
+  'queued',
+  'generating',
+  'rendered',
+  'partial',
+  'failed',
+  'stale',
+] as const;
+export type StudioStillsBlockStatusV4 = (typeof STUDIO_STILLS_BLOCK_STATUSES_V4)[number];
+
+export const STUDIO_MOTION_BLOCK_STATUSES_V4 = STUDIO_STILLS_BLOCK_STATUSES_V4;
+export type StudioMotionBlockStatusV4 = (typeof STUDIO_MOTION_BLOCK_STATUSES_V4)[number];
+
+export const STUDIO_DOCUMENT_BLOCK_STATUSES_V4 = ['drafted', 'current', 'proposed'] as const;
+export type StudioDocumentBlockStatusV4 = (typeof STUDIO_DOCUMENT_BLOCK_STATUSES_V4)[number];
+
+export const STUDIO_BOARD_BLOCK_STATUSES_V4 = ['needs_budget', 'proposed', 'generating', 'partial'] as const;
+export type StudioBoardBlockStatusV4 = (typeof STUDIO_BOARD_BLOCK_STATUSES_V4)[number];
+
+export const STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4 = ['imported'] as const;
+export type StudioImportedSoundBlockStatusV4 = (typeof STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4)[number];
+
+export const STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4 = [
+  'needs_budget',
+  'proposed',
+  'queued',
+  'generating',
+  'rendered',
+  'stale',
+  'failed',
+] as const;
+export type StudioGeneratedSoundBlockStatusV4 = (typeof STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4)[number];
+export type StudioSoundBlockStatusV4 = StudioImportedSoundBlockStatusV4 | StudioGeneratedSoundBlockStatusV4;
+
+export const STUDIO_CUT_BLOCK_STATUSES_V4 = [
+  'needs_budget',
+  'proposed',
+  'rendering',
+  'rendered',
+  'partial',
+  'stale',
+  'failed',
+] as const;
+export type StudioCutBlockStatusV4 = (typeof STUDIO_CUT_BLOCK_STATUSES_V4)[number];
+
+export type StudioCanvasBlockStatusV4 =
+  | StudioStillsBlockStatusV4
+  | StudioMotionBlockStatusV4
+  | StudioDocumentBlockStatusV4
+  | StudioBoardBlockStatusV4
+  | StudioSoundBlockStatusV4
+  | StudioCutBlockStatusV4;
+
+/** Runtime legality matrix shared by Main projection and renderer presentation; no UI may widen it. */
+export const STUDIO_CANVAS_BLOCK_STATUS_MATRIX_V4 = {
+  stills: STUDIO_STILLS_BLOCK_STATUSES_V4,
+  motion: STUDIO_MOTION_BLOCK_STATUSES_V4,
+  document: STUDIO_DOCUMENT_BLOCK_STATUSES_V4,
+  board: STUDIO_BOARD_BLOCK_STATUSES_V4,
+  sound: {
+    imported: STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4,
+    generated: STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4,
+  },
+  cut: STUDIO_CUT_BLOCK_STATUSES_V4,
+} as const satisfies Readonly<{
+  stills: readonly StudioStillsBlockStatusV4[];
+  motion: readonly StudioMotionBlockStatusV4[];
+  document: readonly StudioDocumentBlockStatusV4[];
+  board: readonly StudioBoardBlockStatusV4[];
+  sound: Readonly<{
+    imported: readonly StudioImportedSoundBlockStatusV4[];
+    generated: readonly StudioGeneratedSoundBlockStatusV4[];
+  }>;
+  cut: readonly StudioCutBlockStatusV4[];
+}>;
+
+/** Main derives these actions; the renderer only presents the projected tokens. */
+export type StudioCanvasStaleActionV4 = 're_render_chain' | 'keep';
+export type StudioCanvasFailureActionV4 = 'retry';
+export type StudioCanvasRecoveryActionV4 = StudioCanvasStaleActionV4 | StudioCanvasFailureActionV4;
 
 export type StudioCanvasFailureCostTruthV4 = 'spent' | 'not_spent';
+export type StudioCanvasFailureReasonV4 =
+  | 'rule_breach'
+  | 'returned_silence'
+  | 'provider_failure'
+  | 'local_render_failure'
+  | 'download_failure';
 
 export type StudioCanvasFailureV4 = {
-  reason: 'rule_breach' | 'returned_silence' | 'provider_failure' | 'local_render_failure' | 'download_failure';
+  reason: StudioCanvasFailureReasonV4;
   costTruth: StudioCanvasFailureCostTruthV4;
 };
 

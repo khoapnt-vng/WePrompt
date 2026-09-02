@@ -8,6 +8,9 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  STUDIO_CANVAS_BLOCK_KINDS_V4,
+  STUDIO_CANVAS_BLOCK_STATUS_MATRIX_V4,
+  STUDIO_CANVAS_MEMBER_STATUSES_V4,
   STUDIO_FILM_EXPORT_FRAME_RATE,
   STUDIO_MAX_PIECES_V3,
   STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
@@ -114,6 +117,50 @@ const appendImportedPiece = (
 };
 
 describe('schema-7 canvas and Assembly projections', () => {
+  it('publishes the exact grammar-v2 kind and status matrix for renderer presentation', () => {
+    expect(STUDIO_CANVAS_BLOCK_KINDS_V4).toEqual(['stills', 'motion', 'document', 'board', 'sound', 'cut']);
+    expect(STUDIO_CANVAS_MEMBER_STATUSES_V4).toEqual([
+      'slate',
+      'queued',
+      'ready_to_render',
+      'generating',
+      'rendered',
+      'stale',
+      'failed',
+    ]);
+    expect(STUDIO_CANVAS_BLOCK_STATUS_MATRIX_V4).toEqual({
+      stills: [
+        'imported',
+        'needs_budget',
+        'proposed',
+        'queued',
+        'generating',
+        'rendered',
+        'partial',
+        'failed',
+        'stale',
+      ],
+      motion: [
+        'imported',
+        'needs_budget',
+        'proposed',
+        'queued',
+        'generating',
+        'rendered',
+        'partial',
+        'failed',
+        'stale',
+      ],
+      document: ['drafted', 'current', 'proposed'],
+      board: ['needs_budget', 'proposed', 'generating', 'partial'],
+      sound: {
+        imported: ['imported'],
+        generated: ['needs_budget', 'proposed', 'queued', 'generating', 'rendered', 'stale', 'failed'],
+      },
+      cut: ['needs_budget', 'proposed', 'rendering', 'rendered', 'partial', 'stale', 'failed'],
+    });
+  });
+
   it('derives picture sequence from board reading order without an Assembly order field', () => {
     const value = makePhase6Project();
 

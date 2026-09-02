@@ -23,8 +23,8 @@ import {
   type StudioProjectV3,
   type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
-import { isCanonicalStudioPieceHandleV3 } from '../mutations/pieceHandles';
-import { normalizeStudioPieceWordsV3, validateStudioPieceGenerationCompositionV3 } from './composition';
+import { isCanonicalStudioPieceHandleV3 } from '../../mutations/pieceHandles';
+import { normalizeStudioPieceWordsV3, validateStudioPieceGenerationCompositionV3 } from '../composition';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v2';

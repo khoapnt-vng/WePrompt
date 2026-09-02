@@ -9,7 +9,7 @@ export * from './boardRequest';
 export * from './boardPanel';
 export * from './generationRequest';
 export * from './spendMath';
-export * from './submissionIdentity';
+export * from './submission';
 export * from './composition';
 export * from './referenceBinding';
 export * from './referenceRequest';

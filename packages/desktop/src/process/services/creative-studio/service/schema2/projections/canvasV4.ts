@@ -9,7 +9,9 @@ import {
   type StudioAssemblyPictureBindingV2,
   type StudioCanvasBlockSubjectV4,
   type StudioCanvasBinEntryV4,
+  type StudioCanvasFailureActionV4 as StudioCanvasFailureActionContractV4,
   type StudioCanvasFailureV4,
+  type StudioCanvasStaleActionV4 as StudioCanvasStaleActionContractV4,
   type StudioMemberStalenessV4,
   type StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
@@ -38,8 +40,8 @@ export type StudioCanvasPresentationV4 = {
 };
 
 export type StudioCanvasDensityV4 = 'generous' | 'default' | 'quiet';
-export type StudioCanvasStaleActionV4 = 're_render_chain' | 'keep';
-export type StudioCanvasFailureActionV4 = 'retry';
+export type StudioCanvasStaleActionV4 = StudioCanvasStaleActionContractV4;
+export type StudioCanvasFailureActionV4 = StudioCanvasFailureActionContractV4;
 
 const requireProject = (value: unknown): StudioProjectV4 => {
   if (!validateStudioProjectV4(value)) throw new TypeError('invalid_schema_7_projection_input');

@@ -16,7 +16,7 @@ import {
   createStudioQuotedGenerationId,
   studioGenerationTargetKey,
   studioPieceGenerationTargetKeyV3,
-} from '@/process/services/creative-studio/service/schema2/generation/submissionIdentity';
+} from '@/process/services/creative-studio/service/schema2/generation/submission/v3';
 
 const makePersistedPieceJob = (
   jobId: string,

@@ -5,12 +5,15 @@
  */
 
 import {
+  STUDIO_MAX_ASSEMBLIES_V4,
+  STUDIO_MAX_BOARDS_V4,
   STUDIO_MAX_PIECES_V3,
   STUDIO_MAX_PIECE_HANDLE_SCALARS_V3,
   STUDIO_MAX_PIECE_HANDLE_UTF8_BYTES_V3,
   STUDIO_MAX_PIECE_PRIOR_HANDLES_V3,
   type StudioPieceV2,
   type StudioProjectV3,
+  type StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
 
 export type StudioPieceHandleModeV3 = 'derive' | 'rename';
@@ -53,7 +56,10 @@ const PERSIAN_ZWNJ = '\u200C';
 // beside the joiner, ZWJ, bidi controls, and every other default-ignorable stay unsafe.
 const PERSIAN_DUAL_JOINING = new Set('بپتثجچحخسشصضطظعغفقکگلمنهی');
 const PERSIAN_RIGHT_JOINING = new Set('ادذرزژو');
-const MAX_NAMESPACE_ENTRIES = STUDIO_MAX_PIECES_V3 * (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 2);
+const MAX_NAMESPACE_ENTRIES_V3 = STUDIO_MAX_PIECES_V3 * (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 2);
+const MAX_CANVAS_HANDLE_NAMESPACE_ENTRIES_V4 =
+  (STUDIO_MAX_PIECES_V3 + STUDIO_MAX_BOARDS_V4 + STUDIO_MAX_ASSEMBLIES_V4) * (STUDIO_MAX_PIECE_PRIOR_HANDLES_V3 + 1) +
+  STUDIO_MAX_PIECES_V3;
 
 const utf8Length = (value: string): number => Buffer.byteLength(value, 'utf8');
 
@@ -200,14 +206,14 @@ export const truncateStudioPieceHandleV3 = (value: string, suffix = ''): string 
   return result;
 };
 
-const boundedNamespace = (values: Iterable<string>): Set<string> => {
+const boundedNamespace = (values: Iterable<string>, maximum = MAX_NAMESPACE_ENTRIES_V3): Set<string> => {
   const namespace = new Set<string>();
   try {
     for (const value of values) {
       if (!isCanonicalStudioPieceHandleV3(value)) return fail('invalid_namespace');
       if (namespace.has(value)) return fail('invalid_namespace');
       namespace.add(value);
-      if (namespace.size > MAX_NAMESPACE_ENTRIES) return fail('invalid_namespace');
+      if (namespace.size > maximum) return fail('invalid_namespace');
     }
   } catch (error) {
     if (error instanceof StudioPieceHandleErrorV3) throw error;
@@ -248,7 +254,7 @@ export const deriveStudioPieceCreateIdentityV4 = (
   fallbackWords: unknown,
   unavailable: Iterable<string> = []
 ): StudioPieceCreateIdentityV4 => {
-  const namespace = boundedNamespace(unavailable);
+  const namespace = boundedNamespace(unavailable, MAX_CANVAS_HANDLE_NAMESPACE_ENTRIES_V4);
   if (suggestedHandle === null) {
     const base = normalizeStudioPieceHandleV3(fallbackWords, 'derive');
     return { proposedHandle: allocateStudioPieceHandleV3(base, namespace), runStem: null };
@@ -256,6 +262,54 @@ export const deriveStudioPieceCreateIdentityV4 = (
   if (typeof suggestedHandle !== 'string') return fail('invalid_input');
   const runStem = normalizeStudioPieceHandleV3(suggestedHandle, 'derive');
   return { proposedHandle: allocateStudioPieceHandleV3(runStem, namespace), runStem };
+};
+
+type StudioCanvasHandleProjectV4 = Pick<
+  StudioProjectV4,
+  'pieceOrder' | 'pieces' | 'boardOrder' | 'boards' | 'assemblyOrder' | 'assemblies'
+>;
+
+/** Collects every schema-7 current handle and retained alias into one collision namespace. */
+export const studioCanvasHandleNamespaceV4 = (
+  project: StudioCanvasHandleProjectV4,
+  reservations: Iterable<string> = []
+): Set<string> => {
+  const persistedValues: string[] = [];
+  const collect = (
+    order: readonly string[],
+    subjects: Readonly<Record<string, { handle: string; priorHandles: string[] }>>
+  ): void => {
+    if (
+      !Array.isArray(order) ||
+      typeof subjects !== 'object' ||
+      subjects === null ||
+      Object.keys(subjects).length !== order.length
+    ) {
+      return fail('invalid_namespace');
+    }
+    const ids = new Set<string>();
+    for (const id of order) {
+      if (typeof id !== 'string' || ids.has(id) || !Object.hasOwn(subjects, id)) return fail('invalid_namespace');
+      const subject = subjects[id];
+      if (subject === undefined || !Array.isArray(subject.priorHandles)) return fail('invalid_namespace');
+      ids.add(id);
+      persistedValues.push(subject.handle, ...subject.priorHandles);
+    }
+  };
+
+  try {
+    collect(project.pieceOrder, project.pieces);
+    collect(project.boardOrder, project.boards);
+    collect(project.assemblyOrder, project.assemblies);
+  } catch (error) {
+    if (error instanceof StudioPieceHandleErrorV3) throw error;
+    return fail('invalid_namespace');
+  }
+  function* combinedValues(): Generator<string> {
+    yield* persistedValues;
+    yield* reservations;
+  }
+  return boundedNamespace(combinedValues(), MAX_CANVAS_HANDLE_NAMESPACE_ENTRIES_V4);
 };
 
 /** Derives from a native-picker basename after removing only its final extension. */

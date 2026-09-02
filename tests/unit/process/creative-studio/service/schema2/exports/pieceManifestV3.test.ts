@@ -28,7 +28,7 @@ import {
   validateStudioPieceExportConsistencyV4,
 } from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV3';
 import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
-import { createStudioPieceQuotedGenerationIdV3 } from '@/process/services/creative-studio/service/schema2/generation/submissionIdentity';
+import { createStudioPieceQuotedGenerationIdV3 } from '@/process/services/creative-studio/service/schema2/generation/submission/v3';
 import {
   validateStudioProjectV3,
   validateStudioProjectV4,
