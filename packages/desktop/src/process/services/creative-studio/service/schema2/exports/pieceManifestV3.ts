@@ -8,9 +8,10 @@ import {
   STUDIO_EXPORT_SCHEMA_VERSION_V3,
   type StudioPieceExportManifestV3,
   type StudioProjectV3,
+  type StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
 import { types as nodeTypes } from 'node:util';
-import { validateStudioPieceExportManifestV3, validateStudioProjectV3 } from '../validation';
+import { validateStudioPieceExportManifestV3, validateStudioProjectV3, validateStudioProjectV4 } from '../validation';
 
 export type StudioPieceExportManifestErrorCodeV3 = 'invalid_manifest' | 'inconsistent_manifest';
 
@@ -88,11 +89,10 @@ export const parseStudioPieceExportManifestV3 = (bytes: Uint8Array): StudioPiece
  * Proves that the sidecar describes the exact current Piece asset and its persisted provenance.
  * This function performs no IO and never initiates generation or spend.
  */
-export const validateStudioPieceExportConsistencyV3 = (
-  project: StudioProjectV3,
+const validateStudioPieceExportConsistency = (
+  project: StudioProjectV3 | StudioProjectV4,
   manifest: StudioPieceExportManifestV3
 ): boolean => {
-  if (!validateStudioProjectV3(project) || !validateStudioPieceExportManifestV3(manifest)) return false;
   if (
     manifest.projectId !== project.id ||
     manifest.sourceRevision !== project.revision ||
@@ -148,6 +148,23 @@ export const validateStudioPieceExportConsistencyV3 = (
   );
 };
 
+export const validateStudioPieceExportConsistencyV3 = (
+  project: StudioProjectV3,
+  manifest: StudioPieceExportManifestV3
+): boolean =>
+  validateStudioProjectV3(project) &&
+  validateStudioPieceExportManifestV3(manifest) &&
+  validateStudioPieceExportConsistency(project, manifest);
+
+/** Schema-7 project entry point; the emitted and parsed export protocol remains version 3. */
+export const validateStudioPieceExportConsistencyV4 = (
+  project: StudioProjectV4,
+  manifest: StudioPieceExportManifestV3
+): boolean =>
+  validateStudioProjectV4(project) &&
+  validateStudioPieceExportManifestV3(manifest) &&
+  validateStudioPieceExportConsistency(project, manifest);
+
 export type StudioPieceExportManifestBuildInputV3 = {
   exportId: string;
   pieceId: string;
@@ -192,11 +209,10 @@ const snapshotBuildInputV3 = (input: unknown): StudioPieceExportManifestBuildInp
 };
 
 /** Builds and self-validates exact provenance for the current asset of one Piece. */
-export const buildStudioPieceExportManifestV3 = (
-  project: StudioProjectV3,
+const buildStudioPieceExportManifest = (
+  project: StudioProjectV3 | StudioProjectV4,
   input: StudioPieceExportManifestBuildInputV3
 ): StudioPieceExportManifestV3 => {
-  if (!validateStudioProjectV3(project)) return fail('inconsistent_manifest');
   const snapshot = snapshotBuildInputV3(input);
   const piece = Object.hasOwn(project.pieces, snapshot.pieceId) ? project.pieces[snapshot.pieceId] : undefined;
   const asset =
@@ -252,6 +268,25 @@ export const buildStudioPieceExportManifestV3 = (
     provenance,
     exportedAt: snapshot.exportedAt,
   };
-  if (!validateStudioPieceExportConsistencyV3(project, manifest)) return fail('inconsistent_manifest');
+  if (!validateStudioPieceExportManifestV3(manifest) || !validateStudioPieceExportConsistency(project, manifest)) {
+    return fail('inconsistent_manifest');
+  }
   return manifest;
+};
+
+export const buildStudioPieceExportManifestV3 = (
+  project: StudioProjectV3,
+  input: StudioPieceExportManifestBuildInputV3
+): StudioPieceExportManifestV3 => {
+  if (!validateStudioProjectV3(project)) return fail('inconsistent_manifest');
+  return buildStudioPieceExportManifest(project, input);
+};
+
+/** Builds export-protocol-3 bytes from a schema-7 project without changing either discriminator. */
+export const buildStudioPieceExportManifestV4 = (
+  project: StudioProjectV4,
+  input: StudioPieceExportManifestBuildInputV3
+): StudioPieceExportManifestV3 => {
+  if (!validateStudioProjectV4(project)) return fail('inconsistent_manifest');
+  return buildStudioPieceExportManifest(project, input);
 };
