@@ -54,6 +54,21 @@ const renameCommand = (): StudioPilotDirectorCommand => ({
   handle: 'شب_بارانی',
 });
 
+const proposeBoardCommand = (): StudioPilotDirectorCommand => ({
+  ...common('propose_board'),
+  policy: 'propose_board',
+  expectedAuthoringRevision: 7,
+  handle: 'first_board',
+  beats: [
+    {
+      title: 'Arrival',
+      story: 'A traveller reaches the station.',
+      targetSeconds: 10,
+      shots: [{ shootingScript: 'Wide shot of the platform.', durationSeconds: 5 }],
+    },
+  ],
+});
+
 const supportedLoad = {
   status: 'supported',
   summary: {},
@@ -179,6 +194,21 @@ describe('Pilot Director command processor', () => {
     });
   });
 
+  it('refuses an unwired Board proposal without falling through to rename or any other mutation', async () => {
+    const { mailbox, entryPoint, processor } = harness();
+    const command = proposeBoardCommand();
+    await mailbox.submit(command);
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      policy: 'propose_board',
+      status: 'rejected',
+      reasonCode: 'operation_not_available',
+    });
+    expect(entryPoint.loadProjectV3).not.toHaveBeenCalled();
+    expect(entryPoint.preparePhotoV3).not.toHaveBeenCalled();
+    expect(entryPoint.applyMutationBatchV3).not.toHaveBeenCalled();
+  });
+
   it('lets the entrypoint reject stale authoring authority', async () => {
     const { mailbox, entryPoint, processor } = harness();
     const command = renameCommand();
@@ -233,6 +263,7 @@ describe('Pilot Director command processor', () => {
   it.each([
     ['prepare_photo', prepareCommand()],
     ['rename_piece', renameCommand()],
+    ['propose_board', proposeBoardCommand()],
   ] as const)('terminalizes an ambiguous pre-restart %s without replay', async (_policy, command) => {
     const { mailbox, entryPoint, processor } = harness();
     await mailbox.submit(command);

@@ -4,26 +4,37 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { types as nodeTypes } from 'node:util';
+import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import {
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,
   type CreativeStudioPilotErrorCodeV3,
   type StudioApplyMutationBatchResultV3,
+  type StudioBoardDraftBeatV4,
   type StudioPiecePhotoSettingsV3,
   type StudioPreparePhotoResultV3,
   type StudioProjectLoadResultV3,
 } from '@/common/types/project/creativeStudioTypes';
+import { snapshotStudioBoardDraftBeatsV4 } from '../../schema2/mutations/boardV4';
+import { isCanonicalStudioPieceHandleV3 } from '../../schema2/mutations/pieceHandles';
+import {
+  deriveStudioProposalIdV4,
+  parseStudioProposalRecordV4,
+  STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4,
+  type StudioProposalRecordV4,
+} from '../../schema2/proposals/proposalContractsV4';
 import { parseStudioApplyMutationBatchRequestV3, parseStudioPreparePhotoRequestV3 } from '../contracts';
 
-export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 12 as const;
+export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 13 as const;
 export const STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES = 64 * 1024;
+export const STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES = STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4;
+export const STUDIO_PILOT_DIRECTOR_COMMAND_PHYSICAL_MAX_BYTES = STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES;
 export const STUDIO_PILOT_DIRECTOR_RECEIPT_MAX_BYTES = 1024 * 1024;
 export const STUDIO_PILOT_DIRECTOR_MAX_DEADLINE_MS = 5 * 60 * 1000;
 export const STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS = 30 * 1000;
 export const STUDIO_PILOT_DIRECTOR_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const STUDIO_PILOT_DIRECTOR_MAX_RECEIPTS = 128;
 
-export type StudioPilotDirectorPolicy = 'get_project_status' | 'prepare_photo' | 'rename_piece';
+export type StudioPilotDirectorPolicy = 'get_project_status' | 'prepare_photo' | 'rename_piece' | 'propose_board';
 
 type StudioPilotDirectorCommandBase = {
   schemaVersion: typeof STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION;
@@ -53,10 +64,18 @@ export type StudioPilotDirectorRenamePieceCommand = StudioPilotDirectorCommandBa
   handle: string;
 };
 
+export type StudioPilotDirectorProposeBoardCommand = StudioPilotDirectorCommandBase & {
+  policy: 'propose_board';
+  expectedAuthoringRevision: number;
+  handle: string;
+  beats: StudioBoardDraftBeatV4[];
+};
+
 export type StudioPilotDirectorCommand =
   | StudioPilotDirectorGetProjectStatusCommand
   | StudioPilotDirectorPreparePhotoCommand
-  | StudioPilotDirectorRenamePieceCommand;
+  | StudioPilotDirectorRenamePieceCommand
+  | StudioPilotDirectorProposeBoardCommand;
 
 export type StudioPilotDirectorCommandParseResult =
   | { status: 'valid'; command: StudioPilotDirectorCommand }
@@ -88,9 +107,21 @@ export type StudioPilotDirectorSucceededReceipt =
       expectedAuthoringRevision: number;
       status: 'succeeded';
       result: StudioApplyMutationBatchResultV3;
+    })
+  | (StudioPilotDirectorReceiptBase & {
+      policy: 'propose_board';
+      expectedAuthoringRevision: number;
+      status: 'succeeded';
+      result: { status: 'recorded'; proposal: StudioProposalRecordV4 };
     });
 
-export type StudioPilotDirectorRejectedReason = CreativeStudioPilotErrorCodeV3 | 'result_mismatch';
+export type StudioPilotDirectorRejectedReason =
+  | CreativeStudioPilotErrorCodeV3
+  | 'result_mismatch'
+  | 'operation_not_available'
+  | 'proposal_pending'
+  | 'proposal_too_large'
+  | 'board_capacity_reached';
 
 export type StudioPilotDirectorRejectedReceipt = StudioPilotDirectorReceiptBase & {
   policy: StudioPilotDirectorPolicy;
@@ -144,6 +175,7 @@ const PREPARE_PHOTO_KEYS = new Set([
   'referencePieceIds',
 ]);
 const RENAME_PIECE_KEYS = new Set([...COMMON_KEYS, 'expectedAuthoringRevision', 'pieceId', 'handle']);
+const PROPOSE_BOARD_KEYS = new Set([...COMMON_KEYS, 'expectedAuthoringRevision', 'handle', 'beats']);
 const SUCCEEDED_RECEIPT_KEYS = new Set([
   'schemaVersion',
   'commandId',
@@ -204,6 +236,10 @@ const REJECTED_REASONS = new Set<StudioPilotDirectorRejectedReason>([
   'storage_error',
   'runtime_inactive',
   'result_mismatch',
+  'operation_not_available',
+  'proposal_pending',
+  'proposal_too_large',
+  'board_capacity_reached',
 ]);
 
 type PlainRecord = Record<string, unknown>;
@@ -219,13 +255,26 @@ export const studioPilotDirectorTimestampMs = (value: unknown): number | null =>
   return Number.isFinite(parsed) && new Date(parsed).toISOString() === value ? parsed : null;
 };
 
-const byteLengthWithin = (value: unknown, maximum: number): boolean => {
+export const serializeStudioPilotDirectorRecord = (value: unknown): string | null => {
   try {
-    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= maximum;
+    const serialized = JSON.stringify(value);
+    return typeof serialized === 'string' ? serialized : null;
   } catch {
-    return false;
+    return null;
   }
 };
+
+const byteLengthWithin = (value: unknown, maximum: number): boolean => {
+  const bytes = serializeStudioPilotDirectorRecord(value);
+  return bytes !== null && Buffer.byteLength(bytes, 'utf8') <= maximum;
+};
+
+export const studioPilotDirectorCommandMaxBytes = (
+  policy: StudioPilotDirectorPolicy
+): typeof STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES | typeof STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES =>
+  policy === 'propose_board'
+    ? STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES
+    : STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES;
 
 const isOwnJsonData = (value: unknown, seen = new Set<object>()): boolean => {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return true;
@@ -305,7 +354,7 @@ const validCommandBase = (snapshot: PlainRecord): boolean => {
   );
 };
 
-/** Parses the exact three-policy schema-11 Director surface; command status is deliberately absent. */
+/** Parses the exact schema-13 Director surface; command status and proposal decisions are deliberately absent. */
 export const parseStudioPilotDirectorCommand = (value: unknown): StudioPilotDirectorCommandParseResult => {
   const envelope = commandEnvelope(value);
   if (envelope.schemaVersion !== STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION) {
@@ -326,12 +375,14 @@ export const parseStudioPilotDirectorCommand = (value: unknown): StudioPilotDire
         ? PREPARE_PHOTO_KEYS
         : policy === 'rename_piece'
           ? RENAME_PIECE_KEYS
-          : null;
+          : policy === 'propose_board'
+            ? PROPOSE_BOARD_KEYS
+            : null;
   const snapshot = keys === null ? null : snapshotExactRecord(value, keys);
   if (
     snapshot === null ||
     !validCommandBase(snapshot) ||
-    !byteLengthWithin(snapshot, STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES)
+    !byteLengthWithin(snapshot, studioPilotDirectorCommandMaxBytes(snapshot.policy as StudioPilotDirectorPolicy))
   ) {
     return { status: 'invalid', commandId: envelope.commandId, projectId: envelope.projectId };
   }
@@ -351,13 +402,23 @@ export const parseStudioPilotDirectorCommand = (value: unknown): StudioPilotDire
       });
       return { status: 'valid', command: snapshot as StudioPilotDirectorPreparePhotoCommand };
     }
-    parseStudioApplyMutationBatchRequestV3({
-      schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,
-      projectId: snapshot.projectId,
-      expectedAuthoringRevision: snapshot.expectedAuthoringRevision,
-      operations: [{ kind: 'rename_piece', pieceId: snapshot.pieceId, handle: snapshot.handle }],
-    });
-    return { status: 'valid', command: snapshot as StudioPilotDirectorRenamePieceCommand };
+    if (snapshot.policy === 'rename_piece') {
+      parseStudioApplyMutationBatchRequestV3({
+        schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,
+        projectId: snapshot.projectId,
+        expectedAuthoringRevision: snapshot.expectedAuthoringRevision,
+        operations: [{ kind: 'rename_piece', pieceId: snapshot.pieceId, handle: snapshot.handle }],
+      });
+      return { status: 'valid', command: snapshot as StudioPilotDirectorRenamePieceCommand };
+    }
+    if (
+      !isPositiveRevision(snapshot.expectedAuthoringRevision) ||
+      !isCanonicalStudioPieceHandleV3(snapshot.handle) ||
+      snapshotStudioBoardDraftBeatsV4(snapshot.beats) === null
+    ) {
+      throw new Error('Invalid Board proposal');
+    }
+    return { status: 'valid', command: snapshot as StudioPilotDirectorProposeBoardCommand };
   } catch {
     return { status: 'invalid', commandId: envelope.commandId, projectId: envelope.projectId };
   }
@@ -394,6 +455,45 @@ const isMutationResult = (value: unknown, projectId: string): value is StudioApp
   );
 };
 
+const isProposalResult = (
+  value: unknown,
+  projectId: string,
+  expectedAuthoringRevision: number,
+  decidedAt: string,
+  command?: StudioPilotDirectorProposeBoardCommand
+): value is { status: 'recorded'; proposal: StudioProposalRecordV4 } => {
+  const snapshot = snapshotExactRecord(value, new Set(['status', 'proposal']));
+  if (snapshot === null || snapshot.status !== 'recorded') return false;
+  const proposal = snapshot.proposal;
+  if (typeof proposal !== 'object' || proposal === null) return false;
+  const proposalId = Reflect.get(proposal, 'id');
+  if (!isSafeId(proposalId)) return false;
+  const parsed = parseStudioProposalRecordV4({ projectId, proposalId, value: proposal });
+  if (parsed.status !== 'valid') return false;
+  const proposalCreatedAt = studioPilotDirectorTimestampMs(parsed.record.createdAt);
+  const receiptDecidedAt = studioPilotDirectorTimestampMs(decidedAt);
+  const commandCreatedAt = command === undefined ? null : studioPilotDirectorTimestampMs(command.createdAt);
+  const commandBeats = command === undefined ? null : snapshotStudioBoardDraftBeatsV4(command.beats);
+  const proposalBeats = snapshotStudioBoardDraftBeatsV4(parsed.record.payload.beats);
+  const commandProposalId =
+    command === undefined ? null : deriveStudioProposalIdV4(command.projectId, command.commandId);
+  return (
+    parsed.record.baseAuthoringRevision === expectedAuthoringRevision &&
+    proposalCreatedAt !== null &&
+    receiptDecidedAt !== null &&
+    proposalCreatedAt <= receiptDecidedAt &&
+    (command === undefined ||
+      (commandCreatedAt !== null &&
+        commandBeats !== null &&
+        proposalBeats !== null &&
+        parsed.record.id === commandProposalId &&
+        parsed.record.source.commandId === command.commandId &&
+        proposalCreatedAt >= commandCreatedAt &&
+        parsed.record.payload.handle === command.handle &&
+        isDeepStrictEqual(proposalBeats, commandBeats)))
+  );
+};
+
 /** Validates a terminal record against the immutable command it answers. */
 export const parseStudioPilotDirectorReceipt = (
   value: unknown,
@@ -409,7 +509,9 @@ export const parseStudioPilotDirectorReceipt = (
       ? { status: 'unsupported_version' }
       : { status: 'invalid' };
   }
-  const status = Reflect.get(value, 'status');
+  const statusDescriptor = Object.getOwnPropertyDescriptor(value, 'status');
+  const status =
+    statusDescriptor !== undefined && Object.hasOwn(statusDescriptor, 'value') ? statusDescriptor.value : null;
   const keys = status === 'succeeded' ? SUCCEEDED_RECEIPT_KEYS : FAILED_RECEIPT_KEYS;
   const snapshot = snapshotExactRecord(value, keys);
   if (
@@ -419,7 +521,8 @@ export const parseStudioPilotDirectorReceipt = (
     !isSafeId(snapshot.projectId) ||
     (snapshot.policy !== 'get_project_status' &&
       snapshot.policy !== 'prepare_photo' &&
-      snapshot.policy !== 'rename_piece') ||
+      snapshot.policy !== 'rename_piece' &&
+      snapshot.policy !== 'propose_board') ||
     studioPilotDirectorTimestampMs(snapshot.decidedAt) === null ||
     (snapshot.policy === 'get_project_status'
       ? snapshot.expectedAuthoringRevision !== null
@@ -442,7 +545,15 @@ export const parseStudioPilotDirectorReceipt = (
         ? isLoadResult(snapshot.result)
         : snapshot.policy === 'prepare_photo'
           ? isPrepareResult(snapshot.result)
-          : isMutationResult(snapshot.result, snapshot.projectId as string);
+          : snapshot.policy === 'rename_piece'
+            ? isMutationResult(snapshot.result, snapshot.projectId as string)
+            : isProposalResult(
+                snapshot.result,
+                snapshot.projectId as string,
+                snapshot.expectedAuthoringRevision as number,
+                snapshot.decidedAt as string,
+                command?.policy === 'propose_board' ? command : undefined
+              );
     return resultValid
       ? { status: 'valid', receipt: snapshot as StudioPilotDirectorSucceededReceipt }
       : { status: 'invalid' };

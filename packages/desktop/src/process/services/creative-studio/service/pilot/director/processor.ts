@@ -45,7 +45,7 @@ const rejectedReason = (error: unknown): StudioPilotDirectorRejectedReason => {
   return 'storage_error';
 };
 
-/** Executes schema-11 records through exactly one injected schema-6 Pilot facade. */
+/** Executes wired schema-13 records through exactly one injected schema-6 Pilot facade. */
 export const createStudioPilotDirectorProcessor = (
   deps: StudioPilotDirectorProcessorDeps
 ): StudioPilotDirectorProcessor => {
@@ -111,6 +111,9 @@ export const createStudioPilotDirectorProcessor = (
           status: 'succeeded',
           result,
         };
+      }
+      if (command.policy === 'propose_board') {
+        return { ...base(command), status: 'rejected', reasonCode: 'operation_not_available' };
       }
       const result = await deps.entryPoint.applyMutationBatchV3({
         schemaVersion: STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,

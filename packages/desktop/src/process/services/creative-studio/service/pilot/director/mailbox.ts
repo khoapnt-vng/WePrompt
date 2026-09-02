@@ -23,11 +23,13 @@ import {
   parseStudioPilotDirectorCommand,
   parseStudioPilotDirectorReceipt,
   STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS,
-  STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES,
+  STUDIO_PILOT_DIRECTOR_COMMAND_PHYSICAL_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_PILOT_DIRECTOR_MAX_RECEIPTS,
   STUDIO_PILOT_DIRECTOR_RECEIPT_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_RECEIPT_RETENTION_MS,
+  serializeStudioPilotDirectorRecord,
+  studioPilotDirectorCommandMaxBytes,
   studioPilotDirectorTimestampMs,
   type StudioPilotDirectorClaim,
   type StudioPilotDirectorCommand,
@@ -139,17 +141,14 @@ const parseJson = (bytes: string): unknown => {
 };
 
 const serializeBounded = (value: unknown, maximum: number): string => {
-  try {
-    const bytes = `${JSON.stringify(value)}\n`;
-    if (Buffer.byteLength(bytes, 'utf8') > maximum) throw new StudioPilotDirectorMailboxError('invalid_payload');
-    return bytes;
-  } catch (error) {
-    if (error instanceof StudioPilotDirectorMailboxError) throw error;
+  const bytes = serializeStudioPilotDirectorRecord(value);
+  if (bytes === null || Buffer.byteLength(bytes, 'utf8') > maximum) {
     throw new StudioPilotDirectorMailboxError('invalid_payload');
   }
+  return bytes;
 };
 
-/** Creates the schema-11 one-slot mailbox without importing any schema-10 Director machinery. */
+/** Creates the schema-13 one-slot mailbox while retaining the established durable family path. */
 export const createStudioPilotDirectorMailbox = (deps: StudioPilotDirectorMailboxDeps): StudioPilotDirectorMailbox => {
   const fs = deps.fs ?? nodeFs;
   const now = deps.now ?? Date.now;
@@ -231,7 +230,7 @@ export const createStudioPilotDirectorMailbox = (deps: StudioPilotDirectorMailbo
         fs,
         canonicalRoot: current.directories.root,
         file: pendingPath(current.directories),
-        maxBytes: STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES,
+        maxBytes: STUDIO_PILOT_DIRECTOR_COMMAND_PHYSICAL_MAX_BYTES,
       });
       await assertAuthority(current.authority);
     } catch (error) {
@@ -394,7 +393,7 @@ export const createStudioPilotDirectorMailbox = (deps: StudioPilotDirectorMailbo
           fs,
           canonicalRoot: current.directories.root,
           file: pendingPath(current.directories),
-          bytes: serializeBounded(command, STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES),
+          bytes: serializeBounded(command, studioPilotDirectorCommandMaxBytes(command.policy)),
           temporaryId: createTemporaryId(),
         });
         await assertAuthority(current.authority);

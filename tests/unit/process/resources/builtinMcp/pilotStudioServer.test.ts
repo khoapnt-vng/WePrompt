@@ -10,7 +10,7 @@ import { STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION } from '@process/services/
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
-describe('schema-12 Pilot Studio MCP server', () => {
+describe('schema-13 Pilot Studio MCP server', () => {
   it('accepts only one safe project identity and absolute directory', () => {
     const projectDir = path.resolve('/tmp/studio-project');
     expect(
@@ -45,7 +45,7 @@ describe('schema-12 Pilot Studio MCP server', () => {
     ).toThrow('Invalid Creative Studio Pilot environment');
   });
 
-  it('registers exactly the two reads and two bounded direct operations', () => {
+  it('registers exactly two reads, two direct operations, and Director-only Board proposal creation', () => {
     const registered: Array<{ name: string; annotations: unknown }> = [];
     const server = {
       registerTool: vi.fn((name: string, definition: { annotations: unknown }) => {
@@ -65,6 +65,10 @@ describe('schema-12 Pilot Studio MCP server', () => {
         annotations: expect.objectContaining({ readOnlyHint: false, destructiveHint: true }),
       },
       {
+        name: 'studio_propose_board',
+        annotations: expect.objectContaining({ readOnlyHint: false, destructiveHint: true, idempotentHint: false }),
+      },
+      {
         name: 'studio_rename_piece',
         annotations: expect.objectContaining({ readOnlyHint: false, destructiveHint: true }),
       },
@@ -75,7 +79,7 @@ describe('schema-12 Pilot Studio MCP server', () => {
     ]);
   });
 
-  it('routes all four tools through the same typed mailbox without spend authority', async () => {
+  it('routes all five tools through the same typed mailbox without identity, decision, or spend authority', async () => {
     const handlers = new Map<string, (input: never) => Promise<unknown>>();
     const submitted: unknown[] = [];
     const readStatus = vi.fn(async (_projectId: string, commandId: string) => ({
@@ -118,6 +122,18 @@ describe('schema-12 Pilot Studio MCP server', () => {
       suggested_handle: null,
       reference_piece_ids: ['piece_reference'],
     } as never);
+    await handlers.get('studio_propose_board')?.({
+      expected_authoring_revision: 4,
+      handle: 'arrival_board',
+      beats: [
+        {
+          title: 'Arrival',
+          story: 'A traveller reaches the platform.',
+          target_seconds: 10,
+          shots: [{ shooting_script: 'Wide shot of the platform.', duration_seconds: 5 }],
+        },
+      ],
+    } as never);
     await handlers.get('studio_rename_piece')?.({
       expected_authoring_revision: 4,
       piece_id: 'piece_1',
@@ -134,14 +150,29 @@ describe('schema-12 Pilot Studio MCP server', () => {
         referencePieceIds: ['piece_reference'],
       }),
       expect.objectContaining({
+        policy: 'propose_board',
+        expectedAuthoringRevision: 4,
+        handle: 'arrival_board',
+        beats: [
+          {
+            title: 'Arrival',
+            story: 'A traveller reaches the platform.',
+            targetSeconds: 10,
+            shots: [{ shootingScript: 'Wide shot of the platform.', durationSeconds: 5 }],
+          },
+        ],
+      }),
+      expect.objectContaining({
         policy: 'rename_piece',
         expectedAuthoringRevision: 4,
         pieceId: 'piece_1',
         handle: 'lantern-window',
       }),
     ]);
-    expect(readStatus).toHaveBeenCalledTimes(4);
+    expect(readStatus).toHaveBeenCalledTimes(5);
     expect(JSON.stringify(submitted)).not.toContain('authorization');
+    expect(JSON.stringify(submitted)).not.toContain('boardId');
+    expect(JSON.stringify(submitted)).not.toContain('proposalId');
   });
 
   it('returns bounded pending and rejected receipts', async () => {
@@ -181,6 +212,38 @@ describe('schema-12 Pilot Studio MCP server', () => {
     } as never);
     const rejected = await handlers.get('studio_get_command_status')?.({ command_id: 'command_rejected' } as never);
     expect(rejected?.isError).toBe(true);
+  });
+
+  it('rejects Board proposals outside the exact handle and aggregate Shot bounds', () => {
+    const schemas = new Map<string, { safeParse(value: unknown): { success: boolean } }>();
+    const server = {
+      registerTool: vi.fn(
+        (name: string, definition: { inputSchema: { safeParse(value: unknown): { success: boolean } } }) => {
+          schemas.set(name, definition.inputSchema);
+        }
+      ),
+    };
+    registerPilotStudioTools(server as never, { projectId: 'project_1', projectDir: '/tmp/project_1' });
+    const schema = schemas.get('studio_propose_board')!;
+    const shot = { shooting_script: 'A visible action.', duration_seconds: 5 };
+    const input = {
+      expected_authoring_revision: 1,
+      handle: 'valid_board',
+      beats: [{ title: 'Beat', story: '', target_seconds: null, shots: [shot] }],
+    };
+
+    expect(schema.safeParse(input).success).toBe(true);
+    expect(schema.safeParse({ ...input, handle: '\u202Eunsafe' }).success).toBe(false);
+    expect(
+      schema.safeParse({
+        ...input,
+        beats: [
+          { ...input.beats[0], shots: Array.from({ length: 96 }, () => shot) },
+          { ...input.beats[0], shots: [shot] },
+        ],
+      }).success
+    ).toBe(false);
+    expect(schema.safeParse({ ...input, board_id: 'caller_owned' }).success).toBe(false);
   });
 
   it('resolves only the configured real project directory for mailbox publication', async () => {

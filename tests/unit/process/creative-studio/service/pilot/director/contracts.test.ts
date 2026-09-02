@@ -8,11 +8,18 @@ import { describe, expect, it } from 'vitest';
 import {
   parseStudioPilotDirectorCommand,
   parseStudioPilotDirectorReceipt,
+  serializeStudioPilotDirectorRecord,
   STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES,
+  STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_PILOT_DIRECTOR_MAX_DEADLINE_MS,
   type StudioPilotDirectorCommand,
 } from '@process/services/creative-studio/service/pilot/director/contracts';
+import {
+  deriveStudioProposalExpiresAtV4,
+  deriveStudioProposalIdV4,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+} from '@process/services/creative-studio/service/schema2/proposals/proposalContractsV4';
 
 const createdAt = '2026-09-01T00:00:00.000Z';
 const deadlineAt = '2026-09-01T00:01:00.000Z';
@@ -35,10 +42,71 @@ const prepareCommand = (): StudioPilotDirectorCommand => ({
   referencePieceIds: ['piece_reference'],
 });
 
-describe('Pilot Director schema-12 contracts', () => {
+const boardCommand = (shotCount = 1): Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }> => ({
+  ...commandBase,
+  policy: 'propose_board',
+  expectedAuthoringRevision: 4,
+  handle: '雨の_board',
+  beats: [
+    {
+      title: 'Arrival',
+      story: 'Rain gathers on the platform.',
+      targetSeconds: null,
+      shots: Array.from({ length: shotCount }, (_, index) => ({
+        shootingScript: `Shot ${index + 1}`,
+        durationSeconds: 5,
+      })),
+    },
+  ],
+});
+
+const boardCommandAtBytes = (targetBytes: number): StudioPilotDirectorCommand => {
+  const candidate = boardCommand(12);
+  let remaining = targetBytes - Buffer.byteLength(JSON.stringify(candidate), 'utf8');
+  for (const shot of candidate.beats[0]!.shots) {
+    const addition = Math.min(remaining, 24 * 1024 - shot.shootingScript.length);
+    shot.shootingScript += 'x'.repeat(addition);
+    remaining -= addition;
+  }
+  if (remaining !== 0) throw new Error('Target command size is outside the semantic Board envelope');
+  return candidate;
+};
+
+const recordedBoardReceipt = (
+  command: ReturnType<typeof boardCommand>,
+  proposalCreatedAt = '2026-09-01T00:00:30.000Z'
+) => ({
+  schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  commandId: command.commandId,
+  projectId: command.projectId,
+  policy: command.policy,
+  expectedAuthoringRevision: command.expectedAuthoringRevision,
+  decidedAt: deadlineAt,
+  status: 'succeeded' as const,
+  result: {
+    status: 'recorded' as const,
+    proposal: {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+      id: deriveStudioProposalIdV4(command.projectId, command.commandId),
+      projectId: command.projectId,
+      status: 'pending' as const,
+      baseAuthoringRevision: command.expectedAuthoringRevision,
+      source: { kind: 'director_command' as const, commandId: command.commandId },
+      target: { kind: 'board' as const, boardId: 'board_1' },
+      issuedMemberIds: { beatIds: ['beat_1'], shotIds: ['shot_1'] },
+      payload: { kind: 'create_board' as const, handle: command.handle, beats: command.beats },
+      createdAt: proposalCreatedAt,
+      expiresAt: deriveStudioProposalExpiresAtV4(proposalCreatedAt),
+      decidedAt: null,
+    },
+  },
+});
+
+describe('Pilot Director schema-13 contracts', () => {
   it.each<StudioPilotDirectorCommand>([
     { ...commandBase, policy: 'get_project_status' },
     prepareCommand(),
+    boardCommand(),
     {
       ...commandBase,
       policy: 'rename_piece',
@@ -50,8 +118,8 @@ describe('Pilot Director schema-12 contracts', () => {
     expect(parseStudioPilotDirectorCommand(command)).toEqual({ status: 'valid', command });
   });
 
-  it('rejects schema 11 without interpreting it as schema 12', () => {
-    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 11 })).toEqual({
+  it('rejects schema 12 without interpreting it as schema 13', () => {
+    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 12 })).toEqual({
       status: 'unsupported_version',
       commandId: 'command_1',
       projectId: 'project_1',
@@ -92,6 +160,97 @@ describe('Pilot Director schema-12 contracts', () => {
     expect(parseStudioPilotDirectorCommand(command).status).toBe('invalid');
   });
 
+  it('admits Board proposals above the ordinary envelope through the exact 262144-byte edge', () => {
+    const aboveOrdinary = boardCommandAtBytes(STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES + 1);
+    const atBoundary = boardCommandAtBytes(STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES);
+
+    expect(parseStudioPilotDirectorCommand(aboveOrdinary).status).toBe('valid');
+    expect(parseStudioPilotDirectorCommand(atBoundary).status).toBe('valid');
+  });
+
+  it('refuses a semantically valid Board proposal one byte above its dedicated envelope', () => {
+    const overBoundary = boardCommandAtBytes(STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES + 1);
+    expect(parseStudioPilotDirectorCommand(overBoundary).status).toBe('invalid');
+  });
+
+  it('rejects hostile or out-of-bounds Board proposal shapes without accepting caller identities', () => {
+    const sparse = boardCommand();
+    sparse.beats.length = 2;
+    const tooManyShots = boardCommand(96);
+    tooManyShots.beats.push({ ...tooManyShots.beats[0]!, shots: [tooManyShots.beats[0]!.shots[0]!] });
+
+    expect(parseStudioPilotDirectorCommand(sparse).status).toBe('invalid');
+    expect(parseStudioPilotDirectorCommand(tooManyShots).status).toBe('invalid');
+    expect(parseStudioPilotDirectorCommand({ ...boardCommand(), boardId: 'caller_owned' }).status).toBe('invalid');
+    expect(parseStudioPilotDirectorCommand({ ...boardCommand(), handle: '\u202Eunsafe' }).status).toBe('invalid');
+    expect(parseStudioPilotDirectorCommand(new Proxy(boardCommand(), {})).status).toBe('invalid');
+  });
+
+  it('accepts an explicit fail-closed receipt while Board proposal persistence is unwired', () => {
+    const command = boardCommand();
+    const receipt = {
+      schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      policy: command.policy,
+      expectedAuthoringRevision: command.expectedAuthoringRevision,
+      decidedAt: deadlineAt,
+      status: 'rejected',
+      reasonCode: 'operation_not_available',
+    };
+    expect(parseStudioPilotDirectorReceipt(receipt, command).status).toBe('valid');
+  });
+
+  it('binds a recorded Board receipt to the command words and causal timestamps', () => {
+    const command = boardCommand();
+    const receipt = recordedBoardReceipt(command);
+
+    expect(parseStudioPilotDirectorReceipt(receipt, command).status).toBe('valid');
+    expect(parseStudioPilotDirectorReceipt(receipt).status).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt(
+        {
+          ...receipt,
+          result: {
+            ...receipt.result,
+            proposal: {
+              ...receipt.result.proposal,
+              payload: { ...receipt.result.proposal.payload, handle: 'different_board' },
+            },
+          },
+        },
+        command
+      ).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-09-01T00:01:00.001Z'), command).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-08-31T23:59:59.999Z'), command).status
+    ).toBe('invalid');
+  });
+
+  it('correlates canonical Board words independently of object insertion order', () => {
+    const command = boardCommand();
+    const reordered = {
+      ...command,
+      beats: command.beats.map((beat) => ({
+        shots: beat.shots.map((shot) => ({
+          durationSeconds: shot.durationSeconds,
+          shootingScript: shot.shootingScript,
+        })),
+        targetSeconds: beat.targetSeconds,
+        story: beat.story,
+        title: beat.title,
+      })),
+    };
+    const parsed = parseStudioPilotDirectorCommand(reordered);
+    expect(parsed.status).toBe('valid');
+    if (parsed.status !== 'valid' || parsed.command.policy !== 'propose_board') return;
+
+    expect(parseStudioPilotDirectorReceipt(recordedBoardReceipt(command), parsed.command).status).toBe('valid');
+  });
+
   it('accepts only a receipt that answers the same command authority', () => {
     const command = prepareCommand();
     const receipt = {
@@ -128,6 +287,20 @@ describe('Pilot Director schema-12 contracts', () => {
     const accessor = { ...oldReceipt, schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION };
     Object.defineProperty(accessor, 'reasonCode', { enumerable: true, get: () => 'stale_authoring' });
     expect(parseStudioPilotDirectorReceipt(accessor, command).status).toBe('invalid');
+
+    const statusAccessor = { ...oldReceipt, schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION };
+    Object.defineProperty(statusAccessor, 'status', {
+      enumerable: true,
+      get: () => {
+        throw new Error('must not run');
+      },
+    });
+    expect(() => parseStudioPilotDirectorReceipt(statusAccessor, command)).not.toThrow();
+    expect(parseStudioPilotDirectorReceipt(statusAccessor, command).status).toBe('invalid');
+  });
+
+  it('normalizes JSON values without a record representation to a failed serialization', () => {
+    expect(serializeStudioPilotDirectorRecord(undefined)).toBeNull();
   });
 
   it('bounds terminal records even when their nested result is otherwise JSON-safe', () => {

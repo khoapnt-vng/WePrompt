@@ -12,7 +12,16 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import type { ToolAnnotations } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod/v4';
 import { STUDIO_PILOT_ENV } from '@/common/types/project/creativeStudioPilotMcpEnv';
+import {
+  STUDIO_MAX_BEATS_PER_BOARD_V4,
+  STUDIO_MAX_SHOTS_PER_BOARD_V4,
+  STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MAX_STORY_LENGTH,
+  STUDIO_MIN_SHOT_SECONDS,
+} from '@/common/types/project/creativeStudioTypes';
 import { BUILTIN_STUDIO_NAME } from './constants';
+import { isCanonicalStudioPieceHandleV3 } from '@process/services/creative-studio/service/schema2/mutations/pieceHandles';
 import {
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_PILOT_DIRECTOR_MAX_DEADLINE_MS,
@@ -36,6 +45,32 @@ export type PilotStudioServerDependencies = {
 
 const READ_ONLY: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true };
 const MUTATING: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: false };
+
+const BOARD_SHOT_SCHEMA = z
+  .object({
+    shooting_script: z.string().min(1).max(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH),
+    duration_seconds: z.number().int().min(STUDIO_MIN_SHOT_SECONDS).max(STUDIO_MAX_SHOT_SECONDS),
+  })
+  .strict();
+const BOARD_BEAT_SCHEMA = z
+  .object({
+    title: z.string().min(1).max(256),
+    story: z.string().max(STUDIO_MAX_STORY_LENGTH),
+    target_seconds: z.number().int().min(1).max(1_440).nullable(),
+    shots: z.array(BOARD_SHOT_SCHEMA).min(1).max(STUDIO_MAX_SHOTS_PER_BOARD_V4),
+  })
+  .strict();
+const PROPOSE_BOARD_SCHEMA = z
+  .object({
+    expected_authoring_revision: z.number().int().min(1).max(Number.MAX_SAFE_INTEGER),
+    handle: z.string().refine(isCanonicalStudioPieceHandleV3),
+    beats: z.array(BOARD_BEAT_SCHEMA).min(1).max(STUDIO_MAX_BEATS_PER_BOARD_V4),
+  })
+  .strict()
+  .refine(
+    (input) => input.beats.reduce((count, beat) => count + beat.shots.length, 0) <= STUDIO_MAX_SHOTS_PER_BOARD_V4,
+    { message: 'A Board cannot contain more than the supported Shot limit', path: ['beats'] }
+  );
 
 const result = (value: unknown, isError = false): PilotStudioToolResult => ({
   content: [{ type: 'text', text: JSON.stringify(value) }],
@@ -160,6 +195,35 @@ export const registerPilotStudioTools = (
       )
   );
   server.registerTool(
+    'studio_propose_board',
+    {
+      description:
+        'Record one Board draft for human review. This creates no Board, authorization, generation, or spend; only the renderer can accept or reject it.',
+      inputSchema: PROPOSE_BOARD_SCHEMA,
+      annotations: MUTATING,
+    },
+    (input) =>
+      waitForReceipt(
+        config,
+        {
+          ...commandBase(config, 'propose_board', dependencies),
+          policy: 'propose_board',
+          expectedAuthoringRevision: input.expected_authoring_revision,
+          handle: input.handle,
+          beats: input.beats.map((beat) => ({
+            title: beat.title,
+            story: beat.story,
+            targetSeconds: beat.target_seconds,
+            shots: beat.shots.map((shot) => ({
+              shootingScript: shot.shooting_script,
+              durationSeconds: shot.duration_seconds,
+            })),
+          })),
+        },
+        dependencies
+      )
+  );
+  server.registerTool(
     'studio_rename_piece',
     {
       description: 'Rename one existing Piece at an exact authoring revision. This is free and cannot spend.',
@@ -188,7 +252,7 @@ export const registerPilotStudioTools = (
   server.registerTool(
     'studio_get_command_status',
     {
-      description: 'Read one exact schema-11 command status. This never changes project state.',
+      description: 'Read one exact schema-13 command status. This never changes project state.',
       inputSchema: z.object({ command_id: z.string().regex(SAFE_ID) }).strict(),
       annotations: READ_ONLY,
     },

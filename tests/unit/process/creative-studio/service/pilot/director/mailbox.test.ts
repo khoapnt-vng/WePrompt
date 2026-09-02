@@ -9,6 +9,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
+  STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
   STUDIO_PILOT_DIRECTOR_RECEIPT_RETENTION_MS,
   type StudioPilotDirectorCommand,
@@ -25,6 +26,28 @@ const command = (commandId = 'command_1'): StudioPilotDirectorCommand => ({
   createdAt: new Date(BASE_TIME).toISOString(),
   deadlineAt: new Date(BASE_TIME + 60_000).toISOString(),
   policy: 'get_project_status',
+});
+
+const boardCommand = (commandId = 'command_board'): StudioPilotDirectorCommand => ({
+  schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  commandId,
+  projectId: 'project_1',
+  createdAt: new Date(BASE_TIME).toISOString(),
+  deadlineAt: new Date(BASE_TIME + 60_000).toISOString(),
+  policy: 'propose_board',
+  expectedAuthoringRevision: 3,
+  handle: 'large_board',
+  beats: [
+    {
+      title: 'Large Board',
+      story: '',
+      targetSeconds: null,
+      shots: Array.from({ length: 10 }, (_, index) => ({
+        shootingScript: `${index}`.padEnd(22_000, 'x'),
+        durationSeconds: 5,
+      })),
+    },
+  ],
 });
 
 const receipt = (input: StudioPilotDirectorCommand, decidedAt = BASE_TIME + 1_000): StudioPilotDirectorReceipt => ({
@@ -79,6 +102,31 @@ describe('Pilot Director durable mailbox', () => {
     await expect(mailbox.readStatus('project_1', 'not_submitted')).resolves.toEqual({ status: 'missing' });
   });
 
+  it('round-trips a 200–250 KiB Board command without widening the one-slot authority', async () => {
+    const mailbox = createMailbox();
+    const large = boardCommand();
+    const byteLength = Buffer.byteLength(JSON.stringify(large), 'utf8');
+    expect(byteLength).toBeGreaterThan(200 * 1024);
+    expect(byteLength).toBeLessThan(250 * 1024);
+
+    await expect(mailbox.submit(large)).resolves.toEqual(large);
+    await expect(mailbox.readPending(large.projectId)).resolves.toMatchObject({ status: 'valid', command: large });
+    await expect(mailbox.submit(boardCommand('command_second'))).rejects.toMatchObject({ code: 'busy' });
+  });
+
+  it('physically contains an oversized ordinary command without admitting it', async () => {
+    const mailbox = createMailbox();
+    const largeBoard = boardCommand();
+    await mailbox.submit(largeBoard);
+    const pendingFile = path.join(projectDirectory, '.director-v11', 'pending', 'command.json');
+    await fs.rm(pendingFile);
+    const oversizedOrdinary = { ...command(), padding: 'x'.repeat(STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES) };
+    await fs.writeFile(pendingFile, JSON.stringify(oversizedOrdinary));
+
+    await expect(mailbox.readPending('project_1')).resolves.toMatchObject({ status: 'invalid' });
+    await expect(mailbox.readStatus('project_1', 'command_1')).rejects.toMatchObject({ code: 'storage_error' });
+  });
+
   it('reads an absent mailbox family without creating records', async () => {
     const mailbox = createMailbox();
 
@@ -93,7 +141,7 @@ describe('Pilot Director durable mailbox', () => {
   it('rejects malformed, future-authored, and unsafe status inputs before publication', async () => {
     const mailbox = createMailbox();
 
-    await expect(mailbox.submit({ ...command(), schemaVersion: 10 })).rejects.toMatchObject({
+    await expect(mailbox.submit({ ...command(), schemaVersion: 12 })).rejects.toMatchObject({
       code: 'invalid_payload',
     });
     await expect(
