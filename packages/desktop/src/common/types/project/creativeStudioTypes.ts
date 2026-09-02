@@ -3706,3 +3706,49 @@ export type StudioStalenessDecisionFailureV4 =
 export type StudioStalenessDecisionResultV4 =
   | { status: 'applied'; project: StudioProjectV4 }
   | { status: 'refused'; reason: StudioStalenessDecisionFailureV4 };
+
+export type StudioBoardDraftShotV4 = {
+  shootingScript: string;
+  durationSeconds: number;
+};
+
+export type StudioBoardDraftBeatV4 = {
+  title: string;
+  story: string;
+  targetSeconds: number | null;
+  shots: StudioBoardDraftShotV4[];
+};
+
+/** Proposal payload contains authored facts only; Main owns every durable identity. */
+export type StudioCreateBoardRequestV4 = {
+  projectId: string;
+  expectedAuthoringRevision: number;
+  handle: string;
+  beats: StudioBoardDraftBeatV4[];
+};
+
+export type StudioCreateBoardMutationContextV4 = {
+  boardId: string;
+  beatIds: string[];
+  shotIds: string[];
+  capturedAt: string;
+};
+
+export type StudioCreateBoardMutationFailureV4 =
+  | 'invalid_project'
+  | 'invalid_request'
+  | 'stale_project'
+  | 'handle_taken'
+  | 'identity_collision'
+  | 'capacity_reached'
+  | 'validation_failed';
+
+export type StudioCreateBoardMutationResultV4 =
+  | {
+      status: 'applied';
+      project: StudioProjectV4;
+      boardId: string;
+      createdBeatIds: string[];
+      createdShotIds: string[];
+    }
+  | { status: 'refused'; reason: StudioCreateBoardMutationFailureV4 };

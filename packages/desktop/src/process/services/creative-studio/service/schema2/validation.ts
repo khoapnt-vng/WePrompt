@@ -4131,7 +4131,19 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
     ...Object.keys(project.pieces),
     ...Object.keys(project.assets),
     ...Object.keys(project.jobs),
+    ...project.undoHistory.map((entry) => entry.id),
   ]);
+  for (const authorization of project.spendAuthorizations) {
+    for (const identity of [
+      authorization.id,
+      authorization.quote.id,
+      authorization.quote.reservationId,
+      authorization.quote.item.id,
+      authorization.idempotencyKey.key,
+    ]) {
+      persistentIdentities.add(identity);
+    }
+  }
   const handles = new Set(Object.values(project.pieces).flatMap((piece) => [piece.handle, ...piece.priorHandles]));
   for (const board of Object.values(project.boards)) {
     const boardIdentities = [board.id, ...Object.keys(board.beats), ...Object.keys(board.shots)];

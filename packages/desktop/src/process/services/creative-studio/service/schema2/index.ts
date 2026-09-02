@@ -36,6 +36,7 @@ export {
   type StudioMutationReasonV2,
 } from './mutations';
 export * from './mutations/deletionClaimsV3';
+export * from './mutations/boardV4';
 export * from './mutations/pieceCatalogV3';
 export * from './mutations/pieceHandles';
 export * from './mutations/presentationV4';

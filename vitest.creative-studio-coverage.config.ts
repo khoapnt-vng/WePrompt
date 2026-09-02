@@ -73,6 +73,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/lifecycle.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/mutations/deletionClaimsV3.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/mutations/boardV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/mutations/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/mutations/pieceCatalogV3.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/mutations/pieceHandles.ts',
