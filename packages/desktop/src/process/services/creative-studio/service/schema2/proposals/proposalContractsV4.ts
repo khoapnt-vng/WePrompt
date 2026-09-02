@@ -19,7 +19,7 @@ import { isCanonicalStudioPieceHandleV3 } from '../mutations/pieceHandles';
 /** Proposal sidecars advance independently from the schema-7 project discriminator. */
 export const STUDIO_PROPOSAL_SCHEMA_VERSION_V4 = 7 as const;
 export const STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT_V4 = 1 as const;
-export const STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4 = 256 * 1024;
+export const STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4 = 262_144 as const;
 
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const RECORD_KEYS = new Set([
@@ -132,6 +132,26 @@ export type StudioProposalSidecarParseResultV4<RecordType> =
   | { status: 'unsupported_prototype_schema' }
   | { status: 'invalid' };
 
+/**
+ * Pre-persistence admission is deliberately distinct from persisted-record parsing. A semantically
+ * exact proposal that exceeds the sidecar envelope is actionable at creation time, but the same
+ * bytes found on disk are an invalid persisted record rather than a recoverable request refusal.
+ */
+export type StudioProposalRecordAdmissionResultV4 =
+  | {
+      status: 'valid';
+      record: StudioProposalRecordV4;
+      proposalBytes: string;
+      byteLength: number;
+    }
+  | {
+      status: 'proposal_too_large';
+      byteLength: number;
+      maxBytes: typeof STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4;
+    }
+  | { status: 'unsupported_prototype_schema' }
+  | { status: 'invalid' };
+
 type SidecarSchemaV4 = 'legacy' | 'current' | 'other';
 
 const valid = <RecordType>(record: RecordType): StudioProposalSidecarParseResultV4<RecordType> => ({
@@ -209,22 +229,14 @@ const snapshotPayload = (value: unknown): StudioCreateBoardProposalPayloadV4 | n
   return beats === null ? null : { kind: 'create_board', handle: value.handle, beats };
 };
 
-const fitsRecord = (value: StudioProposalRecordV4): boolean => {
-  try {
-    return Buffer.byteLength(JSON.stringify(value), 'utf8') <= STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4;
-  } catch {
-    return false;
-  }
-};
-
 const arraysEqual = (left: readonly string[], right: readonly string[]): boolean =>
   left.length === right.length && left.every((value, index) => value === right[index]);
 
-export function parseStudioProposalRecordV4(input: {
+const snapshotStudioProposalRecordV4 = (input: {
   projectId: string;
   proposalId: string;
   value: unknown;
-}): StudioProposalSidecarParseResultV4<StudioProposalRecordV4> {
+}): StudioProposalSidecarParseResultV4<StudioProposalRecordV4> => {
   const schema = classifySidecarSchema(input.value);
   if (schema === 'legacy') return unsupported();
   if (schema !== 'current' || !isPlainInputRecordV4(input.value) || !hasExactInputKeysV4(input.value, RECORD_KEYS)) {
@@ -278,7 +290,44 @@ export function parseStudioProposalRecordV4(input: {
     createdAt: value.createdAt,
     decidedAt: null,
   };
-  return fitsRecord(record) ? valid(record) : invalid();
+  return valid(record);
+};
+
+/**
+ * Admits one new immutable proposal before any sidecar I/O. Exact shape and Board semantics are
+ * validated first; the byte envelope is classified only after a canonical plain snapshot has been
+ * serialized once, so the caller can persist exactly the bytes that were admitted.
+ */
+export function admitStudioProposalRecordV4(input: {
+  projectId: string;
+  proposalId: string;
+  value: unknown;
+}): StudioProposalRecordAdmissionResultV4 {
+  const snapshot = snapshotStudioProposalRecordV4(input);
+  if (snapshot.status !== 'valid') return snapshot;
+
+  // The semantic snapshot contains only newly allocated plain records, dense arrays, and primitives.
+  const proposalBytes = JSON.stringify(snapshot.record);
+  const byteLength = Buffer.byteLength(proposalBytes, 'utf8');
+  if (byteLength > STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4) {
+    return {
+      status: 'proposal_too_large',
+      byteLength,
+      maxBytes: STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4,
+    };
+  }
+  return { status: 'valid', record: snapshot.record, proposalBytes, byteLength };
+}
+
+export function parseStudioProposalRecordV4(input: {
+  projectId: string;
+  proposalId: string;
+  value: unknown;
+}): StudioProposalSidecarParseResultV4<StudioProposalRecordV4> {
+  const admitted = admitStudioProposalRecordV4(input);
+  if (admitted.status === 'valid') return valid(admitted.record);
+  if (admitted.status === 'unsupported_prototype_schema') return unsupported();
+  return invalid();
 }
 
 export function parseStudioProposalDecisionV4(input: {

@@ -10,8 +10,10 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { STUDIO_MAX_SHOOTING_SCRIPT_LENGTH } from '@/common/types/project/creativeStudioTypes';
 import {
+  STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4,
   STUDIO_PROPOSAL_MAX_PENDING_PER_PROJECT_V4,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+  admitStudioProposalRecordV4,
   parseStudioProposalCommitAttributionV4,
   parseStudioProposalDecisionV4,
   parseStudioProposalRecordV4,
@@ -100,6 +102,9 @@ const proposalAttribution = (bytes = proposalBytes()): StudioProposalCommitAttri
 const parseRecord = (value: unknown) =>
   parseStudioProposalRecordV4({ projectId: 'project_1', proposalId: 'proposal_1', value });
 
+const admitRecord = (value: unknown) =>
+  admitStudioProposalRecordV4({ projectId: 'project_1', proposalId: 'proposal_1', value });
+
 const parseDecision = (value: unknown) =>
   parseStudioProposalDecisionV4({ projectId: 'project_1', proposalId: 'proposal_1', value });
 
@@ -116,7 +121,118 @@ const parseAttribution = (value: unknown, bytes = proposalBytes()) =>
 
 const expectInvalid = (result: { status: string }): void => expect(result).toEqual({ status: 'invalid' });
 
+const proposalRecordWithSerializedByteLength = (targetByteLength: number): StudioProposalRecordV4 => {
+  const record = proposalRecord();
+  record.payload.beats = [
+    {
+      title: 'Boundary record',
+      story: '',
+      targetSeconds: null,
+      shots: Array.from({ length: 11 }, (_, index) => ({
+        shootingScript: index < 10 ? 'x'.repeat(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) : 'x',
+        durationSeconds: 4,
+      })),
+    },
+  ];
+  record.issuedMemberIds = {
+    beatIds: ['beat_1'],
+    shotIds: Array.from({ length: 11 }, (_, index) => `shot_${index + 1}`),
+  };
+  const initialByteLength = Buffer.byteLength(JSON.stringify(record), 'utf8');
+  const finalScriptLength = 1 + targetByteLength - initialByteLength;
+  expect(finalScriptLength).toBeGreaterThan(0);
+  expect(finalScriptLength).toBeLessThanOrEqual(STUDIO_MAX_SHOOTING_SCRIPT_LENGTH);
+  record.payload.beats[0]!.shots[10]!.shootingScript = 'x'.repeat(finalScriptLength);
+  expect(Buffer.byteLength(JSON.stringify(record), 'utf8')).toBe(targetByteLength);
+  return record;
+};
+
 describe('schema-7 Director proposal sidecar contracts', () => {
+  it('pins the proposal envelope to exactly 262144 UTF-8 bytes', () => {
+    expect(STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4).toBe(262_144);
+  });
+
+  it('admits an exact-boundary canonical proposal and returns the exact bytes to persist', () => {
+    const input = proposalRecordWithSerializedByteLength(STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4);
+    const admitted = admitRecord(input);
+
+    expect(admitted.status).toBe('valid');
+    if (admitted.status !== 'valid') return;
+    expect(admitted.byteLength).toBe(262_144);
+    expect(admitted.proposalBytes === JSON.stringify(input)).toBe(true);
+    expect(admitted.record).not.toBe(input);
+    expect(Object.getPrototypeOf(admitted.record)).toBe(Object.prototype);
+    expect(Object.getPrototypeOf(admitted.record.payload)).toBe(Object.prototype);
+  });
+
+  it('classifies a semantically valid proposal one byte over the envelope before sidecar I/O', () => {
+    const input = proposalRecordWithSerializedByteLength(STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4 + 1);
+
+    expect(admitRecord(input)).toEqual({
+      status: 'proposal_too_large',
+      byteLength: 262_145,
+      maxBytes: 262_144,
+    });
+    // Persisted bytes do not become a recoverable admission refusal.
+    expectInvalid(parseRecord(input));
+  });
+
+  it('measures canonical serialized proposals in UTF-8 bytes rather than JavaScript code units', () => {
+    const input = proposalRecord();
+    input.payload.beats[0]!.story = '水面'.repeat(17);
+    const admitted = admitRecord(input);
+
+    expect(admitted.status).toBe('valid');
+    if (admitted.status !== 'valid') return;
+    expect(admitted.byteLength).toBe(Buffer.byteLength(admitted.proposalBytes, 'utf8'));
+    expect(admitted.byteLength).toBeGreaterThan(admitted.proposalBytes.length);
+    expect(admitted.proposalBytes).toBe(JSON.stringify(admitted.record));
+  });
+
+  it('fails closed on malformed, accessor, proxy, revoked-proxy, and cyclic admission inputs', () => {
+    const semanticallyInvalidOversize = proposalRecordWithSerializedByteLength(STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4 + 1);
+    semanticallyInvalidOversize.payload.beats[0]!.shots[0]!.durationSeconds = 0;
+    expectInvalid(admitRecord(semanticallyInvalidOversize));
+
+    let getterCalls = 0;
+    const accessor = proposalRecord() as unknown as Record<string, unknown>;
+    Object.defineProperty(accessor, 'payload', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return proposalRecord().payload;
+      },
+    });
+    expectInvalid(admitRecord(accessor));
+
+    let proxyTrapCalls = 0;
+    const proxy = new Proxy(proposalRecord(), {
+      ownKeys: () => {
+        proxyTrapCalls += 1;
+        return [];
+      },
+    });
+    expectInvalid(admitRecord(proxy));
+
+    const revocable = Proxy.revocable(proposalRecord(), {});
+    revocable.revoke();
+    expect(() => admitRecord(revocable.proxy)).not.toThrow();
+    expectInvalid(admitRecord(revocable.proxy));
+
+    const cyclic = proposalRecord();
+    cyclic.payload.beats[0]!.shots[0]!.shootingScript = cyclic as unknown as string;
+    expect(() => admitRecord(cyclic)).not.toThrow();
+    expectInvalid(admitRecord(cyclic));
+    expect(getterCalls).toBe(0);
+    expect(proxyTrapCalls).toBe(0);
+  });
+
+  it('preserves unsupported prototype classification at admission', () => {
+    expect(admitRecord({ ...proposalRecord(), schemaVersion: 6 })).toEqual({
+      status: 'unsupported_prototype_schema',
+    });
+  });
+
   it('accepts and snapshots one exact create-board proposal with Main-issued target and member ids', () => {
     const input = proposalRecord();
     const parsed = parseRecord(input);
