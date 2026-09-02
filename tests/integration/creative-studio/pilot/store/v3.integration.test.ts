@@ -16,7 +16,7 @@ import {
   type CreativeStudioPilotStoreOptionsV3,
   type CreativeStudioPilotStoreV3,
   type StudioPilotStorageStepV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const roots: string[] = [];

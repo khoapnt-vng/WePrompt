@@ -15,7 +15,7 @@ import {
   createStudioPilotMediaStoreV3,
   type StudioPilotNativePhotoSelectionV3,
 } from '@/process/services/creative-studio/service/pilot/runtime/media';
-import { createCreativeStudioPilotStoreV3 } from '@/process/services/creative-studio/store/pilotStore';
+import { createCreativeStudioPilotStoreV3 } from '@/process/services/creative-studio/store/pilot';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it } from 'vitest';
 

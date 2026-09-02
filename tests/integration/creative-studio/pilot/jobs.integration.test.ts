@@ -31,7 +31,7 @@ import {
 import {
   createCreativeStudioPilotStoreV3,
   type StudioPilotProjectAuthoritySnapshotV3,
-} from '@/process/services/creative-studio/store/pilotStore';
+} from '@/process/services/creative-studio/store/pilot';
 import { afterEach, describe, expect, it } from 'vitest';
 
 const roots: string[] = [];

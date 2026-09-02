@@ -28,7 +28,7 @@ import type { StudioProviderResolver } from '@process/services/creative-studio/p
 import type {
   CreativeStudioPilotStoreV3,
   StudioPilotProjectAuthoritySnapshotV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import { createStudioPieceSpendReceiptV3 } from '../../schema2/pricing';
 import {
   parseStudioCancelPieceJobRequestV3,

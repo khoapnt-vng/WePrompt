@@ -8,7 +8,7 @@ import type { CreativeStudioPilotErrorCodeV3 } from '@/common/types/project/crea
 import {
   CreativeStudioPilotStoreErrorV3,
   type CreativeStudioPilotStoreErrorCodeV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import { StudioDeletionClaimErrorV3 } from '../schema2/mutations/deletionClaimsV3';
 import { StudioPreparedPhotoCacheErrorV3 } from '../schema2/pricing/preparedSubmissionCache';
 import { CreativeStudioPilotContractErrorV3 } from './contracts';

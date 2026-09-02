@@ -24,7 +24,7 @@ import { StudioPreparedPhotoCacheErrorV3 } from '@/process/services/creative-stu
 import {
   createCreativeStudioPilotStoreV3,
   CreativeStudioPilotStoreErrorV3,
-} from '@/process/services/creative-studio/store/pilotStore';
+} from '@/process/services/creative-studio/store/pilot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createPilotPhotoFixtureV3, type PilotPhotoFixtureV3 } from './presentation/realFixture';
 

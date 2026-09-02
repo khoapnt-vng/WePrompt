@@ -26,7 +26,7 @@ import type { ProviderOutput } from '@process/services/creative-studio/adapters/
 import type {
   CreativeStudioPilotStoreV3,
   StudioPilotProjectAuthoritySnapshotV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import { studioPieceGenerationCompositionDigestV3 } from '../../schema2/generation/composition';
 import { createStudioPieceSpendReceiptV3 } from '../../schema2/pricing';
 import {

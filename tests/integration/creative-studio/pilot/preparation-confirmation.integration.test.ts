@@ -32,7 +32,7 @@ import {
 import {
   createCreativeStudioPilotStoreV3,
   type StudioPilotStorageStepV3,
-} from '@/process/services/creative-studio/store/pilotStore';
+} from '@/process/services/creative-studio/store/pilot';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

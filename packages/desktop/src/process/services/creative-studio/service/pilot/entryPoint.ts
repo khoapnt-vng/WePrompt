@@ -28,7 +28,7 @@ import {
   CreativeStudioPilotStoreErrorV3,
   type CreativeStudioPilotStoreV3,
   type StudioPilotProjectCommitFactsV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import { applyStudioMutationBatchV3, StudioMutationErrorV3 } from '../schema2/mutations/pieceCatalogV3';
 import { normalizeStudioPieceHandleV3 } from '../schema2/mutations/pieceHandles';
 import { StudioPreparedPhotoCacheV3 } from '../schema2/pricing';

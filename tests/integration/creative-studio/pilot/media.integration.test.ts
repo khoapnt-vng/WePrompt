@@ -27,7 +27,7 @@ import {
 import type { StudioPilotGeneratedUrlResolutionV3 } from '@/process/services/creative-studio/service/pilot/runtime/generatedUrlResolver';
 import { createStudioPieceSpendReceiptV3 } from '@/process/services/creative-studio/service/schema2/pricing';
 import { StudioPreparedPhotoCacheV3 } from '@/process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
-import { createCreativeStudioPilotStoreV3 } from '@/process/services/creative-studio/store/pilotStore';
+import { createCreativeStudioPilotStoreV3 } from '@/process/services/creative-studio/store/pilot';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 

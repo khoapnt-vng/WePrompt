@@ -10,7 +10,7 @@ import type { StudioProviderResolver } from '@process/services/creative-studio/p
 import {
   createCreativeStudioPilotStoreV3,
   type CreativeStudioPilotStoreV3,
-} from '@process/services/creative-studio/store/pilotStore';
+} from '@process/services/creative-studio/store/pilot';
 import {
   createStudioPieceExportRuntimeV3,
   createStudioPilotJobManagerV3,

@@ -26,7 +26,7 @@ import {
   type StudioProjectV4,
   type StudioRendererPieceExportCatalogV3,
 } from '@/common/types/project/creativeStudioTypes';
-import type { CreativeStudioPilotStoreV3 } from '@process/services/creative-studio/store/pilotStore';
+import type { CreativeStudioPilotStoreV3 } from '@process/services/creative-studio/store/pilot';
 import {
   buildStudioPieceExportManifestV3,
   buildStudioPieceExportManifestV4,
