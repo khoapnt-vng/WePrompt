@@ -1,5 +1,21 @@
 # Retention ruling — nothing current is lost, and removal is deliberate
 
+> **SIGNED 2026-09-02.** The rule below is binding. All six clauses are approved as drafted,
+> including the three flagged for argument: bytes over count, the promise narrowed in copy,
+> and project deletion as the single place the promise breaks.
+>
+> **Deliberately still open, and not part of this signature:** the byte figure itself. It is
+> configuration, the honest input for video does not exist yet, and it should be set from the
+> first real clips rather than guessed now. The freeze needs the shape, not the value.
+>
+> **One clause touches the schema freeze** — clause 6, addressability. Every asset must remain
+> reachable from the Piece that owns it so a later removal request can be complete. That is a
+> property of how assets hang off a Piece, not a new contract.
+>
+> **This closes the owner-side items for Phase 6.** It also unblocks the open decision on
+> Piece replacement and history: bounded retention no longer contradicts "nothing is lost",
+> because the promise is now explicitly about current work.
+
 The last owner decision before the Phase 6 schema freeze. It exists because two commitments
 that both look obvious contradict each other once anything accumulates.
 
