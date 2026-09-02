@@ -8,6 +8,7 @@ import { createHash } from 'node:crypto';
 import { types as nodeTypes } from 'node:util';
 import {
   isValidProviderJobId,
+  STUDIO_BIN_BLOCKING_JOB_STATUSES_V4,
   STUDIO_AUTHORING_FINGERPRINT_VERSION_V3,
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION,
   STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V3,
@@ -60,6 +61,7 @@ import {
   type StudioBoardShotV4,
   type StudioBoardV2,
   type StudioCanvasBinEntryV4,
+  type StudioCanvasBinSubjectV4,
   type StudioGenerationCompositionInputSnapshotV2,
   type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
@@ -437,7 +439,10 @@ const captureDataNode = (source: object): DataNodeSnapshot | undefined => {
     return undefined;
   }
 
-  if (!isArray && prototype !== Object.prototype && prototype !== null) {
+  if (
+    (isArray && prototype !== Array.prototype) ||
+    (!isArray && prototype !== Object.prototype && prototype !== null)
+  ) {
     return undefined;
   }
   if (!prototypeChainHasNoSerializationHook(prototype)) return undefined;
@@ -3788,6 +3793,7 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
 };
 
 const PROJECT_KEYS_V4 = new Set([...PROJECT_KEYS_V3, 'boardOrder', 'boards', 'assemblyOrder', 'assemblies', 'bin']);
+const PIECE_KEYS_V4 = new Set([...PIECE_KEYS_V3, 'runStem']);
 const BOARD_KEYS_V4 = new Set([
   'id',
   'handle',
@@ -3824,7 +3830,33 @@ const CHAIN_STALENESS_KEYS_V4 = new Set(['cause', 'upstreamShotId', 'sourceAutho
 const BIN_ENTRY_KEYS_V4 = new Set(['id', 'subject', 'reason', 'liftedAt']);
 const PIECE_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'pieceId']);
 const BOARD_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'boardId']);
+const BOARD_SHOT_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'boardId', 'shotId']);
 const ASSEMBLY_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'assemblyId']);
+const BIN_BLOCKING_JOB_STATUSES_V4 = new Set<string>(STUDIO_BIN_BLOCKING_JOB_STATUSES_V4);
+
+/**
+ * Schema 7 deliberately adds immutable run lineage to a Piece without teaching the schema-6
+ * validator to accept or default it. The stripped copy is validation-only; the stored record keeps
+ * the exact schema-7 field and is used by every Phase-6 projection and mutation.
+ */
+const schemaSixPieceSnapshotFromV4 = (value: unknown): Record<string, StudioPieceV2> | null => {
+  if (!isRecord(value)) return null;
+  const snapshot = Object.create(null) as Record<string, StudioPieceV2>;
+  for (const pieceId of Object.keys(value)) {
+    const piece = ownValue(value, pieceId);
+    if (
+      !isRecord(piece) ||
+      !hasExactKeys(piece, PIECE_KEYS_V4) ||
+      (piece.runStem !== null && !isCanonicalStudioPieceHandleV3(piece.runStem))
+    ) {
+      return null;
+    }
+    const { runStem: _runStem, ...schemaSixPiece } = piece;
+    if (!validatePieceRecordV3(pieceId, schemaSixPiece)) return null;
+    snapshot[pieceId] = schemaSixPiece;
+  }
+  return snapshot;
+};
 
 const isCanonicalNonNegativeNumberV4 = (value: unknown, maximum: number): value is number =>
   typeof value === 'number' && Number.isFinite(value) && !Object.is(value, -0) && value >= 0 && value <= maximum;
@@ -4046,9 +4078,38 @@ const binSubjectKeyV4 = (entry: StudioCanvasBinEntryV4): string => {
       return `piece:${entry.subject.pieceId}`;
     case 'board':
       return `board:${entry.subject.boardId}`;
+    case 'board_shot':
+      return `board_shot:${entry.subject.boardId}:${entry.subject.shotId}`;
     case 'assembly':
       return `assembly:${entry.subject.assemblyId}`;
   }
+};
+
+const binSubjectIsUsedByRetainedAssemblyV4 = (subject: StudioCanvasBinSubjectV4, project: StudioProjectV4): boolean => {
+  if (subject.kind === 'assembly') return false;
+  for (const assemblyId of project.assemblyOrder) {
+    const assembly = ownValue(project.assemblies, assemblyId);
+    if (assembly === undefined) return true;
+    if (subject.kind === 'board') {
+      if (assembly.boardId === subject.boardId) return true;
+      continue;
+    }
+    if (subject.kind === 'board_shot') {
+      if (assembly.boardId === subject.boardId && ownValue(assembly.pictureBindings, subject.shotId) !== undefined) {
+        return true;
+      }
+      continue;
+    }
+    for (const shotId of Object.keys(assembly.pictureBindings)) {
+      const binding = ownValue(assembly.pictureBindings, shotId);
+      if (binding?.source !== null && binding?.source.pieceId === subject.pieceId) return true;
+    }
+    for (const soundBindingId of Object.keys(assembly.soundBindings)) {
+      const binding = ownValue(assembly.soundBindings, soundBindingId);
+      if (binding?.source !== null && binding?.source.pieceId === subject.pieceId) return true;
+    }
+  }
+  return false;
 };
 
 const validateBinEntryV4 = (
@@ -4073,21 +4134,42 @@ const validateBinEntryV4 = (
     hasExactKeys(value.subject, PIECE_BIN_SUBJECT_KEYS_V4) &&
     isSafeId(value.subject.pieceId)
   ) {
-    return value.reason === 'lifted' && Object.hasOwn(project.pieces, value.subject.pieceId);
+    const piece = ownValue(project.pieces, value.subject.pieceId);
+    return (
+      value.reason === 'lifted' &&
+      piece !== undefined &&
+      value.liftedAt >= piece.createdAt &&
+      !piece.jobIds.some((jobId) => {
+        const job = ownValue(project.jobs, jobId);
+        return job !== undefined && BIN_BLOCKING_JOB_STATUSES_V4.has(job.status);
+      })
+    );
   }
   if (
     value.subject.kind === 'board' &&
     hasExactKeys(value.subject, BOARD_BIN_SUBJECT_KEYS_V4) &&
     isSafeId(value.subject.boardId)
   ) {
-    return value.reason === 'lifted' && Object.hasOwn(project.boards, value.subject.boardId);
+    const board = ownValue(project.boards, value.subject.boardId);
+    return value.reason === 'lifted' && board !== undefined && value.liftedAt >= board.createdAt;
+  }
+  if (
+    value.subject.kind === 'board_shot' &&
+    hasExactKeys(value.subject, BOARD_SHOT_BIN_SUBJECT_KEYS_V4) &&
+    isSafeId(value.subject.boardId) &&
+    isSafeId(value.subject.shotId)
+  ) {
+    const board = ownValue(project.boards, value.subject.boardId);
+    const shot = board === undefined ? undefined : ownValue(board.shots, value.subject.shotId);
+    return value.reason === 'lifted' && board !== undefined && shot !== undefined && value.liftedAt >= shot.createdAt;
   }
   if (
     value.subject.kind === 'assembly' &&
     hasExactKeys(value.subject, ASSEMBLY_BIN_SUBJECT_KEYS_V4) &&
     isSafeId(value.subject.assemblyId)
   ) {
-    return value.reason === 'lifted' && Object.hasOwn(project.assemblies, value.subject.assemblyId);
+    const assembly = ownValue(project.assemblies, value.subject.assemblyId);
+    return value.reason === 'lifted' && assembly !== undefined && value.liftedAt >= assembly.createdAt;
   }
   return false;
 };
@@ -4108,6 +4190,7 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
   const projectSnapshot = dataSnapshot;
   if (projectSnapshot.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V4) return false;
   const {
+    pieces: piecesValue,
     boardOrder: boardOrderValue,
     boards: boardsValue,
     assemblyOrder: assemblyOrderValue,
@@ -4115,7 +4198,13 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
     bin: binValue,
     ...schemaSixFields
   } = projectSnapshot;
-  const schemaSixSnapshot = { ...schemaSixFields, schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V3 };
+  const schemaSixPieces = schemaSixPieceSnapshotFromV4(piecesValue);
+  if (schemaSixPieces === null) return false;
+  const schemaSixSnapshot = {
+    ...schemaSixFields,
+    pieces: schemaSixPieces,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V3,
+  };
   if (!validateStudioProjectV3(schemaSixSnapshot)) return false;
   if (
     !isUniqueSafeIdArray(boardOrderValue, STUDIO_MAX_BOARDS_V4) ||
@@ -4142,29 +4231,45 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
     return false;
   }
 
-  const persistentIdentities = new Set<string>([
-    project.id,
-    ...Object.keys(project.pieces),
-    ...Object.keys(project.assets),
-    ...Object.keys(project.jobs),
-    ...project.undoHistory.map((entry) => entry.id),
-  ]);
-  for (const authorization of project.spendAuthorizations) {
-    for (const identity of [
-      authorization.id,
-      authorization.quote.id,
-      authorization.quote.reservationId,
-      authorization.quote.item.id,
-      authorization.idempotencyKey.key,
-    ]) {
-      persistentIdentities.add(identity);
+  const persistentIdentities = new Set<string>();
+  const addUniqueIdentities = (identities: readonly string[]): boolean => {
+    if (
+      new Set(identities).size !== identities.length ||
+      identities.some((identity) => persistentIdentities.has(identity))
+    ) {
+      return false;
     }
+    identities.forEach((identity) => persistentIdentities.add(identity));
+    return true;
+  };
+  if (
+    !addUniqueIdentities([
+      project.id,
+      ...project.rules.map((rule) => rule.id),
+      ...Object.keys(project.pieces),
+      ...Object.keys(project.assets),
+      ...Object.keys(project.jobs),
+      ...project.undoHistory.map((entry) => entry.id),
+    ])
+  ) {
+    return false;
+  }
+  for (const authorization of project.spendAuthorizations) {
+    if (
+      !addUniqueIdentities([
+        authorization.id,
+        authorization.quote.id,
+        authorization.quote.reservationId,
+        authorization.quote.item.id,
+        authorization.idempotencyKey.key,
+      ])
+    )
+      return false;
   }
   const handles = new Set(Object.values(project.pieces).flatMap((piece) => [piece.handle, ...piece.priorHandles]));
   for (const board of Object.values(project.boards)) {
     const boardIdentities = [board.id, ...Object.keys(board.beats), ...Object.keys(board.shots)];
-    if (boardIdentities.some((id) => persistentIdentities.has(id))) return false;
-    boardIdentities.forEach((id) => persistentIdentities.add(id));
+    if (!addUniqueIdentities(boardIdentities)) return false;
     for (const handle of [board.handle, ...board.priorHandles]) {
       if (handles.has(handle)) return false;
       handles.add(handle);
@@ -4172,8 +4277,7 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
   }
   for (const assembly of Object.values(project.assemblies)) {
     const assemblyIdentities = [assembly.id, ...Object.keys(assembly.soundBindings)];
-    if (assemblyIdentities.some((id) => persistentIdentities.has(id))) return false;
-    assemblyIdentities.forEach((id) => persistentIdentities.add(id));
+    if (!addUniqueIdentities(assemblyIdentities)) return false;
     for (const handle of [assembly.handle, ...assembly.priorHandles]) {
       if (handles.has(handle)) return false;
       handles.add(handle);
@@ -4181,12 +4285,25 @@ export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV
   }
 
   const binnedSubjects = new Set<string>();
+  const binnedBoardIds = new Set<string>();
+  const binnedShotCountsByBoard = new Map<string, number>();
   for (const entry of project.bin) {
     if (!validateBinEntryV4(entry, project, persistentIdentities)) return false;
     const subjectKey = binSubjectKeyV4(entry);
     if (binnedSubjects.has(subjectKey)) return false;
+    if (binSubjectIsUsedByRetainedAssemblyV4(entry.subject, project)) return false;
+    if (entry.subject.kind === 'board') binnedBoardIds.add(entry.subject.boardId);
+    if (entry.subject.kind === 'board_shot') {
+      binnedShotCountsByBoard.set(entry.subject.boardId, (binnedShotCountsByBoard.get(entry.subject.boardId) ?? 0) + 1);
+    }
     binnedSubjects.add(subjectKey);
     persistentIdentities.add(entry.id);
+  }
+  for (const [boardId, binnedShotCount] of binnedShotCountsByBoard) {
+    const board = ownValue(project.boards, boardId);
+    if (binnedBoardIds.has(boardId) || board === undefined || binnedShotCount >= Object.keys(board.shots).length) {
+      return false;
+    }
   }
   return true;
 };

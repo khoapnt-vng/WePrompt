@@ -15,6 +15,7 @@ import {
 import {
   deriveStudioPieceHandleFromImportFileNameV3,
   deriveStudioPieceHandleV3,
+  deriveStudioPieceCreateIdentityV4,
   isCanonicalStudioPieceHandleV3,
   normalizeStudioPieceHandleV3,
   resolveStudioPieceRenameV3,
@@ -234,6 +235,43 @@ describe('schema-6 Unicode Piece handles', () => {
     }
     expect(() => resolveStudioPieceRenameV3(project, 'piece_1', 'reserved', ['reserved'])).toThrow(
       expect.objectContaining({ code: 'handle_collision' })
+    );
+  });
+});
+
+describe('schema-7 immutable run stems', () => {
+  it('keeps one long explicit suggestion stable while collision suffixes truncate each visible handle', () => {
+    const suggestion = 'A salt flat at dawn, one figure walking away from camera';
+    const first = deriveStudioPieceCreateIdentityV4(suggestion, 'first words');
+    const second = deriveStudioPieceCreateIdentityV4(suggestion, 'different words', [first.proposedHandle]);
+    const unavailable = [first.proposedHandle, second.proposedHandle];
+    for (let ordinal = 3; ordinal < 10; ordinal += 1) {
+      unavailable.push(deriveStudioPieceCreateIdentityV4(suggestion, `attempt ${ordinal}`, unavailable).proposedHandle);
+    }
+    const tenth = deriveStudioPieceCreateIdentityV4(suggestion, 'tenth words', unavailable);
+
+    expect(first).toEqual({
+      proposedHandle: 'a_salt_flat_at_dawn_one_figure_walking_away_from',
+      runStem: 'a_salt_flat_at_dawn_one_figure_walking_away_from',
+    });
+    expect(second).toEqual({
+      proposedHandle: 'a_salt_flat_at_dawn_one_figure_walking_away_fr_2',
+      runStem: first.runStem,
+    });
+    expect(tenth).toEqual({
+      proposedHandle: 'a_salt_flat_at_dawn_one_figure_walking_away_f_10',
+      runStem: first.runStem,
+    });
+  });
+
+  it('does not imply sibling grouping when creation falls back to request words', () => {
+    const first = deriveStudioPieceCreateIdentityV4(null, 'same words');
+    const second = deriveStudioPieceCreateIdentityV4(null, 'same words', [first.proposedHandle]);
+
+    expect(first).toEqual({ proposedHandle: 'same_words', runStem: null });
+    expect(second).toEqual({ proposedHandle: 'same_words_2', runStem: null });
+    expect(() => deriveStudioPieceCreateIdentityV4(undefined, 'words')).toThrow(
+      expect.objectContaining({ code: 'invalid_input' })
     );
   });
 });

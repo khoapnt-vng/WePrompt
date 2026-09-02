@@ -9,6 +9,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   STUDIO_FILM_EXPORT_FRAME_RATE,
+  STUDIO_MAX_PIECES_V3,
   STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
   type StudioAssetV2,
   type StudioFrameExtraction,
@@ -28,12 +29,15 @@ import {
 import {
   createEmptyStudioProjectV2,
   deriveStudioAssemblyPictureTimelineV4,
+  deriveStudioVisiblePieceGroupsV4,
+  deriveStudioVisiblePieceOrderV4,
   projectStudioCanvasPresentationV4,
   projectStudioStatusV2,
   studioCanvasActionsForFailureV4,
   studioCanvasActionsForStalenessV4,
   studioCanvasStatusNeedsAttentionV4,
   studioCanvasStatusUsesConditionsRegionV4,
+  studioCanvasDensityV4,
 } from '@/process/services/creative-studio/service/schema2';
 import { createStudioFrameExtractionId } from '@/process/services/creative-studio/service/schema2/generation';
 import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../../fixtures/creative-studio/phase6Project';
@@ -64,6 +68,51 @@ const route = (
   },
 });
 
+const withoutAssembly = () => {
+  const project = makePhase6Project();
+  project.assemblyOrder = [];
+  project.assemblies = {};
+  return project;
+};
+
+const appendImportedPiece = (
+  project: ReturnType<typeof makePhase6Project>,
+  suffix: string,
+  runStem: string | null = null
+): string => {
+  const pieceId = `piece_${suffix}`;
+  const assetId = `asset_${suffix}`;
+  project.pieceOrder.push(pieceId);
+  project.pieces[pieceId] = {
+    id: pieceId,
+    kind: 'photograph',
+    handle: `photo_${suffix}`,
+    runStem,
+    priorHandles: [],
+    currentAssetId: assetId,
+    jobIds: [],
+    createdAt: PHASE_6_CURRENT_AT,
+    updatedAt: PHASE_6_CURRENT_AT,
+  };
+  project.assets[assetId] = {
+    id: assetId,
+    projectId: project.id,
+    pieceId,
+    mediaKind: 'image',
+    mimeType: 'image/png',
+    managedAsset: { collection: 'imports', fileName: `${assetId}.png` },
+    byteSize: 8,
+    sha256: 'b'.repeat(64),
+    width: 1_376,
+    height: 768,
+    createdAt: PHASE_6_CURRENT_AT,
+    origin: 'imported',
+    producerJobId: null,
+    compositionDigest: null,
+  };
+  return pieceId;
+};
+
 describe('schema-7 canvas and Assembly projections', () => {
   it('derives picture sequence from board reading order without an Assembly order field', () => {
     const value = makePhase6Project();
@@ -86,12 +135,12 @@ describe('schema-7 canvas and Assembly projections', () => {
     ]);
   });
 
-  it('projects dependency order and removes only lifted presentation subjects', () => {
+  it('projects dependency order, exact counts, and a whole lifted block', () => {
     const value = makePhase6Project();
     value.bin = [
       {
-        id: 'bin_board',
-        subject: { kind: 'board', boardId: 'board_1' },
+        id: 'bin_cut',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
         reason: 'lifted',
         liftedAt: PHASE_6_CURRENT_AT,
       },
@@ -100,12 +149,172 @@ describe('schema-7 canvas and Assembly projections', () => {
     expect(projectStudioCanvasPresentationV4(value)).toEqual({
       activeSubjects: [
         { kind: 'piece', pieceId: 'piece_photo_1' },
-        { kind: 'assembly', assemblyId: 'assembly_1' },
+        { kind: 'board', boardId: 'board_1' },
       ],
+      visiblePieceGroups: [['piece_photo_1']],
+      visibleShotIdsByBoard: { board_1: ['shot_1', 'shot_2'] },
       bin: value.bin,
+      pieceCapacityUsed: 1,
+      pieceCapacityLimit: STUDIO_MAX_PIECES_V3,
+      binItemCount: 1,
+      visibleBlockCount: 2,
+      density: 'generous',
     });
     expect(value.boards.board_1).toBeDefined();
     expect(value.assemblies.assembly_1!.boardId).toBe('board_1');
+  });
+
+  it('removes one lifted Board member while retaining the non-empty Board', () => {
+    const value = withoutAssembly();
+    value.bin = [
+      {
+        id: 'bin_shot_1',
+        subject: { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    const partial = projectStudioCanvasPresentationV4(value);
+    expect(partial.activeSubjects).toEqual([
+      { kind: 'piece', pieceId: 'piece_photo_1' },
+      { kind: 'board', boardId: 'board_1' },
+    ]);
+    expect(partial.visibleShotIdsByBoard).toEqual({ board_1: ['shot_2'] });
+    expect(partial.visibleBlockCount).toBe(2);
+  });
+
+  it('orders Bin items newest first while preserving selection order for equal timestamps', () => {
+    const value = withoutAssembly();
+    appendImportedPiece(value, 'second');
+    const storedOrder = ['bin_old', 'bin_new_first', 'bin_new_second'];
+    value.bin = [
+      {
+        id: 'bin_old',
+        subject: { kind: 'board', boardId: 'board_1' },
+        reason: 'lifted',
+        liftedAt: '2026-09-02T00:00:01.000Z',
+      },
+      {
+        id: 'bin_new_first',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_new_second',
+        subject: { kind: 'piece', pieceId: 'piece_second' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(projectStudioCanvasPresentationV4(value).bin.map((entry) => entry.id)).toEqual([
+      'bin_new_first',
+      'bin_new_second',
+      'bin_old',
+    ]);
+    expect(value.bin.map((entry) => entry.id)).toEqual(storedOrder);
+  });
+
+  it('excludes Bin items from density without releasing lifetime Piece capacity', () => {
+    const value = withoutAssembly();
+    for (let index = 2; index <= 8; index += 1) appendImportedPiece(value, String(index));
+
+    expect(projectStudioCanvasPresentationV4(value)).toMatchObject({
+      pieceCapacityUsed: 8,
+      pieceCapacityLimit: STUDIO_MAX_PIECES_V3,
+      binItemCount: 0,
+      visibleBlockCount: 9,
+      density: 'quiet',
+    });
+
+    value.bin = [
+      {
+        id: 'bin_piece_8',
+        subject: { kind: 'piece', pieceId: 'piece_8' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(projectStudioCanvasPresentationV4(value)).toMatchObject({
+      pieceCapacityUsed: 8,
+      binItemCount: 1,
+      visibleBlockCount: 8,
+      density: 'default',
+    });
+  });
+
+  it('heals Piece adjacency while lifted and restores the exact persisted order', () => {
+    const value = withoutAssembly();
+    appendImportedPiece(value, 'middle');
+    appendImportedPiece(value, 'last');
+    const persistedOrder = [...value.pieceOrder];
+    value.bin = [
+      {
+        id: 'bin_middle',
+        subject: { kind: 'piece', pieceId: 'piece_middle' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(deriveStudioVisiblePieceOrderV4(value)).toEqual(['piece_photo_1', 'piece_last']);
+    expect(value.pieceOrder).toEqual(persistedOrder);
+
+    value.bin = [];
+    expect(deriveStudioVisiblePieceOrderV4(value)).toEqual(['piece_photo_1', 'piece_middle', 'piece_last']);
+    expect(value.pieceOrder).toEqual(persistedOrder);
+  });
+
+  it('derives runs from adjacent immutable stems and counts each run as one density block', () => {
+    const value = withoutAssembly();
+    const runStem = 'a_salt_flat_at_dawn_one_figure_walking_away_from';
+    value.pieces.piece_photo_1!.runStem = runStem;
+    for (let index = 2; index <= 10; index += 1) appendImportedPiece(value, `run_${index}`, runStem);
+
+    expect(deriveStudioVisiblePieceGroupsV4(value)).toEqual([value.pieceOrder]);
+    expect(projectStudioCanvasPresentationV4(value)).toMatchObject({
+      visiblePieceGroups: [value.pieceOrder],
+      visibleBlockCount: 2,
+      density: 'generous',
+    });
+  });
+
+  it('never infers a run from null stems or handle suffixes, and Bin removal heals real adjacency', () => {
+    const value = withoutAssembly();
+    const runStem = 'harbour_sequence';
+    value.pieces.piece_photo_1!.runStem = runStem;
+    const middleId = appendImportedPiece(value, 'middle');
+    const lastId = appendImportedPiece(value, 'last', runStem);
+    value.pieces[middleId]!.handle = 'harbour_sequence_2';
+    value.pieces[lastId]!.handle = 'harbour_sequence_3';
+
+    expect(deriveStudioVisiblePieceGroupsV4(value)).toEqual([['piece_photo_1'], [middleId], [lastId]]);
+
+    value.bin = [
+      {
+        id: 'bin_middle_run',
+        subject: { kind: 'piece', pieceId: middleId },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(deriveStudioVisiblePieceGroupsV4(value)).toEqual([['piece_photo_1', lastId]]);
+
+    value.bin = [];
+    value.pieces.piece_photo_1!.priorHandles.push(value.pieces.piece_photo_1!.handle);
+    value.pieces.piece_photo_1!.handle = 'renamed_first_attempt';
+    expect(deriveStudioVisiblePieceGroupsV4(value)).toEqual([['piece_photo_1'], [middleId], [lastId]]);
+    expect(value.pieces.piece_photo_1!.runStem).toBe(runStem);
+  });
+
+  it('maps exact visible-block thresholds to the three density bands', () => {
+    expect([0, 1, 3].map(studioCanvasDensityV4)).toEqual(['generous', 'generous', 'generous']);
+    expect([4, 8].map(studioCanvasDensityV4)).toEqual(['default', 'default']);
+    expect(studioCanvasDensityV4(9)).toBe('quiet');
+    expect(() => studioCanvasDensityV4(-1)).toThrow('invalid_visible_block_count');
+    expect(() => studioCanvasDensityV4(1.5)).toThrow('invalid_visible_block_count');
   });
 
   it('maps stale cause to the two signed action sets', () => {

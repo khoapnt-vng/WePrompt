@@ -44,6 +44,7 @@ export * from './mutations/presentationV4';
 export * from './mutations/projectAuthorityV4';
 export * from './mutations/reorderV4';
 export * from './mutations/stalenessV4';
+export * from './proposals/binEligibilityAuthorityV4';
 export * from './proposals/proposalContractsV4';
 export {
   validateStudioFixedShotReviewV2,

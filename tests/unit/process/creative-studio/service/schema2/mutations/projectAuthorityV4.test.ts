@@ -16,6 +16,7 @@ import {
 const authorityFixture = (): StudioProjectV4 =>
   ({
     id: 'project_7',
+    rules: [{ id: 'rule_1' }],
     pieces: { piece_1: { handle: 'piece_now', priorHandles: ['piece_before'] } },
     assets: { asset_1: {} },
     jobs: { job_1: {} },
@@ -56,6 +57,7 @@ describe('schema-7 shared project authority', () => {
     expect([...studioPersistentIdentitiesV4(authorityFixture())].toSorted()).toEqual(
       [
         'project_7',
+        'rule_1',
         'piece_1',
         'asset_1',
         'job_1',

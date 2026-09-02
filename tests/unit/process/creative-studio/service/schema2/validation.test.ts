@@ -69,6 +69,7 @@ import {
   studioPieceRetryReasonForPredecessorV3,
 } from '@/process/services/creative-studio/service/schema2/validation';
 import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
+import { liftStudioCanvasSubjectsToBinV4 } from '@/process/services/creative-studio/service/schema2/mutations/presentationV4';
 import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
 import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../../fixtures/creative-studio/phase6Project';
 
@@ -564,6 +565,24 @@ const makeGeneratedProjectWithJobStatusV3 = (status: StudioPieceJobV3['status'])
   delete project.assets.asset_1;
   project.pieces.piece_1!.currentAssetId = null;
   return project;
+};
+
+const makePhase6GeneratedProjectWithJobStatus = (status: StudioPieceJobV3['status']): StudioProjectV4 => {
+  const project = makeGeneratedProjectWithJobStatusV3(status);
+  const scaffold = makePhase6Project();
+  return {
+    ...project,
+    schemaVersion: 7,
+    pieces: Object.fromEntries(
+      Object.entries(project.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+    ),
+    boardOrder: [...scaffold.boardOrder],
+    boards: structuredClone(scaffold.boards),
+    assemblyOrder: [],
+    assemblies: {},
+    bin: [],
+    updatedAt: PHASE_6_CURRENT_AT,
+  };
 };
 
 const makeShot = (id: string, overrides: Partial<StudioShot> = {}): StudioShot => ({
@@ -3672,6 +3691,79 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     expect(Object.hasOwn(project.assemblies.assembly_1!, 'pictureOrder')).toBe(false);
   });
 
+  it('requires exact schema-7 run lineage while leaving the schema-6 Piece contract unchanged', () => {
+    const sharedStem = 'harbour_attempt';
+    const duplicateStems = makePhase6Project();
+    duplicateStems.pieces.piece_photo_1!.runStem = sharedStem;
+    duplicateStems.pieceOrder.push('piece_photo_2');
+    duplicateStems.pieces.piece_photo_2 = {
+      ...structuredClone(duplicateStems.pieces.piece_photo_1!),
+      id: 'piece_photo_2',
+      handle: 'harbour_attempt_2',
+      currentAssetId: 'asset_photo_2',
+    };
+    duplicateStems.assets.asset_photo_2 = {
+      ...structuredClone(duplicateStems.assets.asset_photo_1!),
+      id: 'asset_photo_2',
+      pieceId: 'piece_photo_2',
+      managedAsset: { collection: 'imports', fileName: 'asset_photo_2.png' },
+      sha256: 'b'.repeat(64),
+    };
+    expect(validateStudioProjectV4(duplicateStems)).toBe(true);
+
+    const missing = makePhase6Project() as StudioProjectV4 & {
+      pieces: Record<string, Omit<StudioProjectV4['pieces'][string], 'runStem'> & { runStem?: string | null }>;
+    };
+    delete missing.pieces.piece_photo_1!.runStem;
+    expect(validateStudioProjectV4(missing)).toBe(false);
+
+    const invalid = makePhase6Project();
+    invalid.pieces.piece_photo_1!.runStem = '../not_canonical';
+    expect(validateStudioProjectV4(invalid)).toBe(false);
+
+    const schemaSix = makeGeneratedProjectV3() as StudioProjectV3 & {
+      pieces: Record<string, StudioProjectV3['pieces'][string] & { runStem?: string | null }>;
+    };
+    schemaSix.pieces.piece_1!.runStem = null;
+    expect(validateStudioProjectV3(schemaSix)).toBe(false);
+  });
+
+  it('keeps rule identities inside the schema-7 durable identity namespace', () => {
+    const project = makePhase6Project();
+    project.rules = [
+      {
+        id: 'rule_1',
+        scope: 'project',
+        text: 'No visible logos',
+        predicate: null,
+        createdAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    project.bin = [
+      {
+        id: 'rule_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(validateStudioProjectV4(project)).toBe(false);
+
+    const projectCollision = makePhase6Project();
+    projectCollision.rules = [{ ...project.rules[0]!, id: projectCollision.id }];
+    expect(validateStudioProjectV4(projectCollision)).toBe(false);
+  });
+
+  it('rejects identity collisions inside one Board as well as across owners', () => {
+    const project = makePhase6Project();
+    const beat = project.boards.board_1!.beats.beat_1!;
+    project.boards.board_1!.beatOrder = ['board_1'];
+    project.boards.board_1!.beats = { board_1: { ...beat, id: 'board_1' } };
+
+    expect(validateStudioProjectV4(project)).toBe(false);
+  });
+
   it('rejects schema 6 and missing or invented schema-7 collections instead of defaulting them', () => {
     const schemaSix = createEmptyStudioProjectV3({ name: 'Pilot', brief: '' }, 'project_6', timestampV3);
     const missingBin = makePhase6Project() as StudioProjectV4 & { bin?: StudioProjectV4['bin'] };
@@ -3759,6 +3851,9 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     const planned: StudioProjectV4 = {
       ...pendingV3,
       schemaVersion: 7,
+      pieces: Object.fromEntries(
+        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+      ),
       boardOrder: [...scaffold.boardOrder],
       boards: structuredClone(scaffold.boards),
       assemblyOrder: [...scaffold.assemblyOrder],
@@ -3907,12 +4002,12 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     expect(validateStudioProjectV4(project)).toBe(false);
   });
 
-  it('admits recoverable presentation entries while retaining every owning record and binding', () => {
+  it('admits a recoverable Assembly entry while retaining its owning record and bindings', () => {
     const project = makePhase6Project();
     project.bin = [
       {
         id: 'bin_1',
-        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
         reason: 'lifted',
         liftedAt: PHASE_6_CURRENT_AT,
       },
@@ -3928,13 +4023,13 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     duplicate.bin = [
       {
         id: 'bin_1',
-        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
         reason: 'lifted',
         liftedAt: PHASE_6_CURRENT_AT,
       },
       {
         id: 'bin_2',
-        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
         reason: 'lifted',
         liftedAt: PHASE_6_CURRENT_AT,
       },
@@ -3961,6 +4056,191 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     expect(validateStudioProjectV4(duplicate)).toBe(false);
     expect(validateStudioProjectV4(missing)).toBe(false);
     expect(validateStudioProjectV4(colliding)).toBe(false);
+  });
+
+  it('resolves a binned Board Shot through its owning Board with own-property lookups', () => {
+    const project = makePhase6Project();
+    project.assemblyOrder = [];
+    project.assemblies = {};
+    project.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(project)).toBe(true);
+
+    const inheritedBoard = structuredClone(project);
+    inheritedBoard.bin[0]!.subject = { kind: 'board_shot', boardId: 'toString', shotId: 'shot_1' };
+    expect(validateStudioProjectV4(inheritedBoard)).toBe(false);
+
+    const inheritedShot = structuredClone(project);
+    inheritedShot.bin[0]!.subject = { kind: 'board_shot', boardId: 'board_1', shotId: 'constructor' };
+    expect(validateStudioProjectV4(inheritedShot)).toBe(false);
+  });
+
+  it('rejects Bin history that predates the exact subject owner', () => {
+    const beforeSubjectCreation = '2026-09-02T00:00:00.500Z';
+    const subjects = [
+      { kind: 'piece' as const, pieceId: 'piece_photo_1' },
+      { kind: 'board' as const, boardId: 'board_1' },
+      { kind: 'board_shot' as const, boardId: 'board_1', shotId: 'shot_1' },
+      { kind: 'assembly' as const, assemblyId: 'assembly_1' },
+    ];
+
+    for (const subject of subjects) {
+      const project = makePhase6Project();
+      if (subject.kind !== 'assembly') {
+        project.assemblyOrder = [];
+        project.assemblies = {};
+      }
+      project.bin = [{ id: `bin_${subject.kind}`, subject, reason: 'lifted', liftedAt: beforeSubjectCreation }];
+      expect(validateStudioProjectV4(project), subject.kind).toBe(false);
+    }
+  });
+
+  it('rejects duplicate Board Shot subjects and parent-child overlap in either order', () => {
+    const duplicate = makePhase6Project();
+    duplicate.assemblyOrder = [];
+    duplicate.assemblies = {};
+    duplicate.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_2',
+        subject: { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(duplicate)).toBe(false);
+
+    const allMembers = structuredClone(duplicate);
+    allMembers.bin[1]!.subject = { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_2' };
+    expect(validateStudioProjectV4(allMembers)).toBe(false);
+
+    const boardFirst = structuredClone(allMembers);
+    boardFirst.bin[0]!.subject = { kind: 'board', boardId: 'board_1' };
+    expect(validateStudioProjectV4(boardFirst)).toBe(false);
+
+    const shotFirst = structuredClone(boardFirst);
+    shotFirst.bin.reverse();
+    expect(validateStudioProjectV4(shotFirst)).toBe(false);
+  });
+
+  it('keeps every Board Shot in the film while a retained Assembly references its Board', () => {
+    const project = makePhase6Project();
+    project.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_2',
+        subject: { kind: 'board_shot', boardId: 'board_1', shotId: 'shot_2' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(project.assemblies.assembly_1!.pictureBindings.shot_2!.source).toBeNull();
+    expect(validateStudioProjectV4(project)).toBe(false);
+
+    project.bin[1]!.subject = { kind: 'board', boardId: 'board_1' };
+    expect(validateStudioProjectV4(project)).toBe(false);
+  });
+
+  it('keeps concrete and planned Pieces in the film while any retained Assembly references them', () => {
+    const concrete = makePhase6Project();
+    concrete.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_2',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(concrete)).toBe(false);
+
+    const pendingV3 = makeGeneratedProjectWithJobStatusV3('queued_local');
+    const scaffold = makePhase6Project();
+    const planned: StudioProjectV4 = {
+      ...pendingV3,
+      schemaVersion: 7,
+      pieces: Object.fromEntries(
+        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+      ),
+      boardOrder: [...scaffold.boardOrder],
+      boards: structuredClone(scaffold.boards),
+      assemblyOrder: [...scaffold.assemblyOrder],
+      assemblies: structuredClone(scaffold.assemblies),
+      bin: [],
+      updatedAt: PHASE_6_CURRENT_AT,
+    };
+    planned.assemblies.assembly_1!.pictureBindings.shot_1!.source = null;
+    planned.assemblies.assembly_1!.pictureBindings.shot_2!.source = { pieceId: 'piece_1', assetId: null };
+    planned.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_2',
+        subject: { kind: 'piece', pieceId: 'piece_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(planned)).toBe(false);
+  });
+
+  it('rejects persisted Bin entries for active Piece work and refuses the valid mutation atomically', () => {
+    const blockingStatuses = ['queued_local', 'submitting', 'queued_remote', 'running', 'needs_attention'] as const;
+    for (const status of blockingStatuses) {
+      const project = makePhase6GeneratedProjectWithJobStatus(status);
+      expect(validateStudioProjectV4(project), status).toBe(true);
+      project.bin = [
+        {
+          id: `bin_${status}`,
+          subject: { kind: 'piece', pieceId: 'piece_1' },
+          reason: 'lifted',
+          liftedAt: PHASE_6_CURRENT_AT,
+        },
+      ];
+      expect(validateStudioProjectV4(project), status).toBe(false);
+    }
+
+    const project = makePhase6GeneratedProjectWithJobStatus('queued_local');
+    const subject = { kind: 'piece' as const, pieceId: 'piece_1' };
+    const result = liftStudioCanvasSubjectsToBinV4(
+      project,
+      { projectId: project.id, expectedRevision: project.revision, subjects: [subject] },
+      {
+        projectId: project.id,
+        projectRevision: project.revision,
+        entryIds: ['bin_active_piece'],
+        decisions: [{ subject, state: 'clear' }],
+        capturedAt: '2026-09-02T00:00:03.000Z',
+      }
+    );
+    expect(result).toEqual({ status: 'refused', reason: 'work_in_progress' });
+    expect(project.bin).toEqual([]);
   });
 
   it('rejects accessors and proxies without invoking project code', () => {

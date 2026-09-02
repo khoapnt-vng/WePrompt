@@ -149,6 +149,7 @@ export const createEmptyStudioProjectV4 = (
   const project: StudioProjectV4 = {
     ...pilot,
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V4,
+    pieces: {},
     boardOrder: [],
     boards: {},
     assemblyOrder: [],

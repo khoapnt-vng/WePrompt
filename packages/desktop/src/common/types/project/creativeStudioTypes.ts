@@ -1927,6 +1927,15 @@ export type StudioPieceV2 = {
   updatedAt: string;
 };
 
+/**
+ * Schema-7 Piece presentation lineage. A non-null stem is frozen only from an explicit Director
+ * handle suggestion and groups adjacent sibling attempts without parsing their collision suffixes.
+ * Imports and prompt-fallback creates store null, so visual handle similarity never invents a run.
+ */
+export type StudioPieceV4 = StudioPieceV2 & {
+  runStem: string | null;
+};
+
 export type StudioPieceCatalogUndoPatchV3 = {
   kind: 'piece_catalog';
   pieceId: string;
@@ -3449,7 +3458,24 @@ export const STUDIO_MAX_ASSEMBLIES_V4 = 24;
 export const STUDIO_MAX_BEATS_PER_BOARD_V4 = 24;
 export const STUDIO_MAX_SHOTS_PER_BOARD_V4 = 96;
 export const STUDIO_MAX_SOUND_BINDINGS_PER_ASSEMBLY_V4 = 96;
-export const STUDIO_MAX_BIN_ENTRIES_V4 = STUDIO_MAX_PIECES_V3 + STUDIO_MAX_BOARDS_V4 + STUDIO_MAX_ASSEMBLIES_V4;
+/** A Bin may quiet terminal history, never paid or unresolved work that still needs attention. */
+export const STUDIO_BIN_BLOCKING_JOB_STATUSES_V4 = [
+  'queued_local',
+  'submitting',
+  'queued_remote',
+  'running',
+  'needs_attention',
+] as const satisfies readonly StudioJobStatus[];
+/** The widest lift request selects every Piece, Assembly, and individual Board Shot. */
+export const STUDIO_MAX_BIN_LIFT_SUBJECTS_V4 =
+  STUDIO_MAX_PIECES_V3 + STUDIO_MAX_ASSEMBLIES_V4 + STUDIO_MAX_BOARDS_V4 * STUDIO_MAX_SHOTS_PER_BOARD_V4;
+/**
+ * A Board and one of its Shots may never coexist in the Bin, and the last lifted Shot becomes its
+ * whole Board. The widest stored state therefore holds all Pieces, all Assemblies, and all but one
+ * Shot from every maximally populated Board.
+ */
+export const STUDIO_MAX_BIN_ENTRIES_V4 =
+  STUDIO_MAX_PIECES_V3 + STUDIO_MAX_ASSEMBLIES_V4 + STUDIO_MAX_BOARDS_V4 * (STUDIO_MAX_SHOTS_PER_BOARD_V4 - 1);
 
 export type StudioCanvasMemberStatusV4 =
   | 'slate'
@@ -3587,25 +3613,33 @@ export type StudioAssemblyV2 = {
   updatedAt: string;
 };
 
-export type StudioCanvasSubjectV4 =
+export type StudioCanvasBlockSubjectV4 =
   | { kind: 'piece'; pieceId: string }
   | { kind: 'board'; boardId: string }
   | { kind: 'assembly'; assemblyId: string };
 
+/** Backwards-compatible name for a top-level canvas block; Bin-only Shot subjects are excluded. */
+export type StudioCanvasSubjectV4 = StudioCanvasBlockSubjectV4;
+
+export type StudioCanvasBinSubjectV4 =
+  | StudioCanvasBlockSubjectV4
+  | { kind: 'board_shot'; boardId: string; shotId: string };
+
 /** The Bin changes presentation only; every referenced project record remains in its owning map. */
 export type StudioCanvasBinEntryV4 = {
   id: string;
-  subject: StudioCanvasSubjectV4;
+  subject: StudioCanvasBinSubjectV4;
   reason: 'lifted';
   liftedAt: string;
 };
 
 /**
- * Wave-1 schema-7 envelope. The photo/job/media contracts remain byte-for-byte schema-6 shapes
- * while the Assembly, ordering and recoverable presentation contracts are made explicit.
+ * Wave-1 schema-7 envelope. Job/media contracts remain schema-6 shapes while Piece run lineage,
+ * Assembly, ordering, and recoverable presentation contracts are made explicit.
  */
-export type StudioProjectV4 = Omit<StudioProjectV3, 'schemaVersion'> & {
+export type StudioProjectV4 = Omit<StudioProjectV3, 'schemaVersion' | 'pieces'> & {
   schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION_V4;
+  pieces: Record<string, StudioPieceV4>;
   boardOrder: string[];
   boards: Record<string, StudioBoardV2>;
   assemblyOrder: string[];
@@ -3618,7 +3652,7 @@ export type CreateStudioProjectInputV4 = CreateStudioProjectInputV3;
 export type StudioLiftToBinRequestV4 = {
   projectId: string;
   expectedRevision: number;
-  subjects: StudioCanvasSubjectV4[];
+  subjects: StudioCanvasBinSubjectV4[];
 };
 
 export type StudioRestoreFromBinRequestV4 = {
@@ -3627,8 +3661,23 @@ export type StudioRestoreFromBinRequestV4 = {
   entryId: string;
 };
 
+export type StudioBinDecisionStateV4 = 'clear' | 'proposed' | 'needs_budget';
+
+export type StudioBinEligibilityDecisionV4 = {
+  subject: StudioCanvasBinSubjectV4;
+  state: StudioBinDecisionStateV4;
+};
+
+/**
+ * Main-only evidence captured from the authoritative project, proposal slot, and prepared quotes.
+ * This object is never accepted from renderer IPC. Exact project/revision and subject matching make
+ * replayed, partial, duplicated, or caller-invented eligibility evidence fail closed.
+ */
 export type StudioPresentationMutationContextV4 = {
+  projectId: string;
+  projectRevision: number;
   entryIds: string[];
+  decisions: StudioBinEligibilityDecisionV4[];
   capturedAt: string;
 };
 
@@ -3637,8 +3686,14 @@ export type StudioPresentationMutationFailureV4 =
   | 'invalid_request'
   | 'stale_project'
   | 'subject_not_found'
+  | 'subject_in_film'
+  | 'proposal_pending'
+  | 'quote_pending'
+  | 'work_in_progress'
+  | 'overlapping_subject'
   | 'already_binned'
   | 'bin_entry_not_found'
+  | 'invalid_authority'
   | 'identity_collision'
   | 'capacity_reached'
   | 'validation_failed';

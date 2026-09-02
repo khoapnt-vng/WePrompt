@@ -40,6 +40,7 @@ export const makePhase6Project = (): StudioProjectV4 => {
     id: 'piece_photo_1',
     kind: 'photograph',
     handle: 'harbour_morning',
+    runStem: null,
     priorHandles: [],
     currentAssetId: asset.id,
     jobIds: [],

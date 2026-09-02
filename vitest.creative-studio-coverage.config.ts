@@ -89,6 +89,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/estimate.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/rateCard.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/proposals/binEligibilityAuthorityV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/proposals/proposalContractsV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/confirmation.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/contracts.ts',

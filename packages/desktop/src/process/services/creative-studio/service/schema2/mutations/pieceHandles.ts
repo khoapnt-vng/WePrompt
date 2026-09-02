@@ -216,10 +216,7 @@ const boundedNamespace = (values: Iterable<string>): Set<string> => {
   return namespace;
 };
 
-/** Derives a unique handle, including collision checks against aliases and active reservations. */
-export const deriveStudioPieceHandleV3 = (input: unknown, unavailable: Iterable<string> = []): string => {
-  const namespace = boundedNamespace(unavailable);
-  const base = normalizeStudioPieceHandleV3(input, 'derive');
+const allocateStudioPieceHandleV3 = (base: string, namespace: ReadonlySet<string>): string => {
   if (!namespace.has(base)) return base;
   for (let ordinal = 2; ordinal <= namespace.size + 2; ordinal += 1) {
     const suffix = `_${ordinal}`;
@@ -227,6 +224,38 @@ export const deriveStudioPieceHandleV3 = (input: unknown, unavailable: Iterable<
     if (!namespace.has(candidate)) return candidate;
   }
   return fail('invalid_namespace');
+};
+
+/** Derives a unique handle, including collision checks against aliases and active reservations. */
+export const deriveStudioPieceHandleV3 = (input: unknown, unavailable: Iterable<string> = []): string => {
+  const namespace = boundedNamespace(unavailable);
+  const base = normalizeStudioPieceHandleV3(input, 'derive');
+  return allocateStudioPieceHandleV3(base, namespace);
+};
+
+export type StudioPieceCreateIdentityV4 = {
+  proposedHandle: string;
+  runStem: string | null;
+};
+
+/**
+ * Freezes schema-7 sibling grouping at creation without parsing collision suffixes later.
+ * Only an explicit Director suggestion grants a stable run stem. Prompt fallbacks may receive the
+ * same visible handle family, but remain independent Pieces by storing a null stem.
+ */
+export const deriveStudioPieceCreateIdentityV4 = (
+  suggestedHandle: unknown,
+  fallbackWords: unknown,
+  unavailable: Iterable<string> = []
+): StudioPieceCreateIdentityV4 => {
+  const namespace = boundedNamespace(unavailable);
+  if (suggestedHandle === null) {
+    const base = normalizeStudioPieceHandleV3(fallbackWords, 'derive');
+    return { proposedHandle: allocateStudioPieceHandleV3(base, namespace), runStem: null };
+  }
+  if (typeof suggestedHandle !== 'string') return fail('invalid_input');
+  const runStem = normalizeStudioPieceHandleV3(suggestedHandle, 'derive');
+  return { proposedHandle: allocateStudioPieceHandleV3(runStem, namespace), runStem };
 };
 
 /** Derives from a native-picker basename after removing only its final extension. */

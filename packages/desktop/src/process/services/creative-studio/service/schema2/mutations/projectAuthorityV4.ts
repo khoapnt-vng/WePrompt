@@ -10,6 +10,7 @@ import type { StudioProjectV4 } from '@/common/types/project/creativeStudioTypes
 export const studioPersistentIdentitiesV4 = (project: StudioProjectV4): Set<string> => {
   const identities = new Set<string>([
     project.id,
+    ...project.rules.map((rule) => rule.id),
     ...Object.keys(project.pieces),
     ...Object.keys(project.assets),
     ...Object.keys(project.jobs),
