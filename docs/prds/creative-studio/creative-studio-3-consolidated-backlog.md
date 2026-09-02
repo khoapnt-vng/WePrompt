@@ -1,3 +1,25 @@
+> **SUPERSEDED — a snapshot taken 2026-08-28, two days before the CS4 triage rewrote every
+> open disposition.** Do not plan from it.
+>
+> Where its content now lives:
+> - Sections 1–2 → the CS4 triage contract in
+>   [`creative-studio-3-bug-list.md`](./creative-studio-3-bug-list.md), which routes every
+>   entry to a CS4 phase with a named acceptance oracle, and
+>   [`creative-studio-4-phase-1-plan.md`](./creative-studio-4-phase-1-plan.md) §"Phase 0".
+> - Section 3, Pieces 1–2 →
+>   [`creative-studio-3-sound-and-progressive-workspace.md`](./creative-studio-3-sound-and-progressive-workspace.md).
+> - Section 3, Piece 3 →
+>   [`creative-studio-3-beat-timeline-commission.md`](./creative-studio-3-beat-timeline-commission.md).
+>
+> **Retained deliberately** for two methodological lessons that are recorded nowhere else in
+> this form: compare content, not ancestry (section 1), and a commit message describing the
+> right fix is not evidence that the fix landed (section 5) — both BUG-166 and BUG-167 were
+> found inside the commit that claimed to add Board monitoring.
+>
+> **Stale within it:** the counts, the P1 framing around BUG-144 and BUG-165, and the "9 commits
+> held unpushed" note are all as of 2026-08-30. Section 2's `aspect-ratio: 16/9` prescription is
+> contradicted by BUG-172's own fix direction and should not be followed.
+
 # Creative Studio 3 — consolidated backlog
 
 Everything open as of 2026-08-28, in one place: the bug list, the planned work, and what is waiting on

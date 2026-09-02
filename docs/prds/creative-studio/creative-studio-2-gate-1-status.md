@@ -1,3 +1,20 @@
+> **ARCHIVED — historical record, 2026-09-02.** A completion record for Gate 1 of the CS2
+> tranche, measured against a code head on a branch that no longer matters, listing six fixes
+> by commit SHA that are all long since in the tree.
+>
+> Kept in place rather than moved: it is the verdict rendered against the frozen schema-2
+> contract in
+> [`creative-studio-2-table-board-implementation-plan.md`](./creative-studio-2-table-board-implementation-plan.md),
+> and its findings G1-01…G1-06 are unreadable without it. Moving either file strands the other.
+>
+> Its one durable artefact — the frozen fixture's size and SHA-256 — is duplicated in
+> [`creative-studio-2-table-board-design.md`](./creative-studio-2-table-board-design.md), so
+> nothing here is load-bearing on its own.
+>
+> Note for readers of the sibling plan: **that plan is not archived.** It still holds the only
+> written specification of validator invariants that govern live code — `validateStudioProjectV2`
+> is at HEAD with those exact totality, own-property and duration-bound rules.
+
 # Creative Studio 2 — Gate 1 Status
 
 - **Recorded:** 2026-08-18
