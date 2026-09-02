@@ -8,10 +8,12 @@
 > including the status-vocabulary problem that became Ruling 2. Do not build from
 > revision 1.
 >
-> Two defects to be aware of in revision 2 itself: it retires `RUNNING` and then still
-> uses the word in three places (the region diagram, the §2.4 conditions-strip text, and
-> the density chip rule), and it states the region-4 gate two ways — the diagram omits
-> `NEEDS BUDGET`, the §2.4 text includes it. The §2.4 text is correct.
+> Two defects were found in the first cut of revision 2 — it retired `RUNNING` and then
+> still used the word in three places, and it stated the region-4 gate two ways, with the
+> diagram omitting `NEEDS BUDGET`. **Both are fixed in the corrected re-delivery now
+> committed.** The diagram reads "present only while GENERATING, PROPOSED or NEEDS BUDGET",
+> the chip rule lists `QUEUED`, `GENERATING` and `RENDERING`, and the only surviving mention
+> of `RUNNING` is the sentence recording its retirement.
 
 # CS4 block grammar — engineering notes on the delivered spec
 

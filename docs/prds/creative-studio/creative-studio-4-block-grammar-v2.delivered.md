@@ -1,8 +1,8 @@
 # CS4 — the block grammar · revision 2
 
 > Designer delivery, extracted from the standalone HTML bundle for readability.
-> Source: `CS4 Block Grammar v2 - standalone.html`. The bundle is the authoritative
-> artefact; this is a text rendering for search, review and quoting.
+> Source: `CS4 Block Grammar v2 - standalone.html` (corrected re-delivery).
+> The bundle is the authoritative artefact.
 >
 > **This supersedes `creative-studio-4-block-grammar.html.txt` (revision 1).**
 
@@ -77,7 +77,7 @@ Beat 2 · 5 shots · 0:30
 PARTIAL
 
 4
-conditions strip — present only while RUNNING or PROPOSED
+conditions strip — present only while GENERATING, PROPOSED or NEEDS BUDGET
 
 5
 
@@ -102,7 +102,7 @@ One chip, or a plain count summary when members disagree ("4 rendered · 1 stale
 
 4 · Conditions strip — the only visible provenance
 
-Thumbnails of what conditioned the work plus handles. Present only while RUNNING, PROPOSED or NEEDS BUDGET. It disappears on completion — provenance then lives only behind the stale popover. In NEEDS BUDGET this region is the quote: what would condition the work, what it would produce, what it would cost. A quote is not a block and never a row; it is this region arriving before the body does, and it is exempt from every density and shedding step. Absent during local RENDERING, which has no conditions to show.
+Thumbnails of what conditioned the work plus handles. Present only while GENERATING, PROPOSED or NEEDS BUDGET — never while RENDERING, which has no conditions to show. It disappears on completion — provenance then lives only behind the stale popover. In NEEDS BUDGET this region is the quote: what would condition the work, what it would produce, what it would cost. A quote is not a block and never a row; it is this region arriving before the body does, and it is exempt from every density and shedding step. Absent during local RENDERING, which has no conditions to show.
 
 5 · Body — the only per-kind region
 
@@ -382,7 +382,7 @@ Everything as drawn in the wireframe's Plate 03: full canvas width, 20px gap, al
 
 9+ blocks · quiet
 
-Chips appear only for states that need a person (PROPOSED, NEEDS BUDGET, FAILED, STALE, RUNNING); RENDERED and IMPORTED go silent. Footers become hover-only except where a decision is pending. Stills sets cap at two rows with a "+12 more" member. Gap tightens to 16px.
+Chips appear only for states that need a person (PROPOSED, NEEDS BUDGET, FAILED, STALE, QUEUED, GENERATING, RENDERING); RENDERED and IMPORTED go silent. Footers become hover-only except where a decision is pending. Stills sets cap at two rows with a "+12 more" member. Gap tightens to 16px.
 
 The invariant across all three
 
