@@ -41,6 +41,7 @@ import {
   type StudioPieceSubmissionQuoteV3,
   type StudioProjectV2,
   type StudioProjectV3,
+  type StudioProjectV4,
   type StudioQuotedGeneration,
   type StudioShot,
   type StudioSpendAuthorization,
@@ -63,11 +64,13 @@ import {
   validateStudioPieceExportManifestV3,
   validateStudioProjectV2,
   validateStudioProjectV3,
+  validateStudioProjectV4,
   validateStudioProposedShotV2,
   studioPieceRetryReasonForPredecessorV3,
 } from '@/process/services/creative-studio/service/schema2/validation';
 import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
 import { createStudioSpendReceiptV2 } from '@/process/services/creative-studio/service/schema2/pricing';
+import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../../fixtures/creative-studio/phase6Project';
 
 const timestamp = '2026-08-17T00:00:00.000Z';
 const confirmedAt = '2026-08-17T00:00:01.000Z';
@@ -3658,6 +3661,148 @@ describe('validateStudioProjectV3 exact schema-6 Pilot contract', () => {
     expect(validateStudioProjectV3(project)).toBe(false);
     expect(getterCalls).toBe(0);
     expect(validateStudioProjectV3(new Proxy(makeEmptyProjectV3(), {}))).toBe(false);
+  });
+});
+
+describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
+  it('accepts one board and an Assembly whose picture sequence exists only on the board', () => {
+    const project = makePhase6Project();
+
+    expect(validateStudioProjectV4(project)).toBe(true);
+    expect(Object.hasOwn(project.assemblies.assembly_1!, 'pictureOrder')).toBe(false);
+  });
+
+  it('rejects schema 6 and missing or invented schema-7 collections instead of defaulting them', () => {
+    const schemaSix = createEmptyStudioProjectV3({ name: 'Pilot', brief: '' }, 'project_6', timestampV3);
+    const missingBin = makePhase6Project() as StudioProjectV4 & { bin?: StudioProjectV4['bin'] };
+    delete missingBin.bin;
+    const inventedOrder = makePhase6Project() as StudioProjectV4 & { canvasBlockOrder?: string[] };
+    inventedOrder.canvasBlockOrder = [];
+
+    expect(validateStudioProjectV4(schemaSix)).toBe(false);
+    expect(validateStudioProjectV4(missingBin)).toBe(false);
+    expect(validateStudioProjectV4(inventedOrder)).toBe(false);
+  });
+
+  it('allows one project-owned Piece to be bound by several Assemblies without copying its asset', () => {
+    const project = makePhase6Project();
+    project.assemblyOrder.push('assembly_2');
+    project.assemblies.assembly_2 = {
+      ...structuredClone(project.assemblies.assembly_1!),
+      id: 'assembly_2',
+      handle: 'alternate_cut',
+    };
+
+    expect(validateStudioProjectV4(project)).toBe(true);
+    expect(project.assemblies.assembly_1!.pictureBindings.shot_1!.source).toEqual({
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_photo_1',
+    });
+    expect(project.assemblies.assembly_2!.pictureBindings.shot_1!.source).toEqual({
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_photo_1',
+    });
+  });
+
+  it('fails closed when a binding invents an asset or stores a second picture order', () => {
+    const unknownAsset = makePhase6Project();
+    unknownAsset.assemblies.assembly_1!.pictureBindings.shot_1!.source = {
+      pieceId: 'piece_photo_1',
+      assetId: 'asset_missing',
+    };
+    const orderedAssembly = makePhase6Project() as StudioProjectV4 & {
+      assemblies: Record<string, StudioProjectV4['assemblies'][string] & { pictureOrder?: string[] }>;
+    };
+    orderedAssembly.assemblies.assembly_1!.pictureOrder = ['shot_1', 'shot_2'];
+
+    expect(validateStudioProjectV4(unknownAsset)).toBe(false);
+    expect(validateStudioProjectV4(orderedAssembly)).toBe(false);
+  });
+
+  it('enforces chain-only picture staleness against the actual predecessor', () => {
+    const project = makePhase6Project();
+    project.assemblies.assembly_1!.pictureBindings.shot_2!.staleness = {
+      cause: 'chain',
+      upstreamShotId: 'shot_1',
+      sourceAuthoringRevision: 2,
+      keptAt: null,
+    };
+    expect(validateStudioProjectV4(project)).toBe(true);
+
+    project.assemblies.assembly_1!.pictureBindings.shot_2!.staleness!.upstreamShotId = 'shot_missing';
+    expect(validateStudioProjectV4(project)).toBe(false);
+  });
+
+  it('admits recoverable presentation entries while retaining every owning record and binding', () => {
+    const project = makePhase6Project();
+    project.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(validateStudioProjectV4(project)).toBe(true);
+    expect(project.pieces.piece_photo_1!.currentAssetId).toBe('asset_photo_1');
+    expect(project.assemblies.assembly_1!.pictureBindings.shot_1!.source).not.toBeNull();
+  });
+
+  it('rejects duplicate Bin subjects, missing subjects, and Bin identity collisions', () => {
+    const duplicate = makePhase6Project();
+    duplicate.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+      {
+        id: 'bin_2',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    const missing = makePhase6Project();
+    missing.bin = [
+      {
+        id: 'bin_1',
+        subject: { kind: 'board', boardId: 'board_missing' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    const colliding = makePhase6Project();
+    colliding.bin = [
+      {
+        id: 'asset_photo_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(validateStudioProjectV4(duplicate)).toBe(false);
+    expect(validateStudioProjectV4(missing)).toBe(false);
+    expect(validateStudioProjectV4(colliding)).toBe(false);
+  });
+
+  it('rejects accessors and proxies without invoking project code', () => {
+    const project = makePhase6Project();
+    let getterCalls = 0;
+    Object.defineProperty(project, 'boards', {
+      enumerable: true,
+      get: () => {
+        getterCalls += 1;
+        return {};
+      },
+    });
+
+    expect(validateStudioProjectV4(project)).toBe(false);
+    expect(getterCalls).toBe(0);
+    expect(validateStudioProjectV4(new Proxy(makePhase6Project(), {}))).toBe(false);
   });
 });
 

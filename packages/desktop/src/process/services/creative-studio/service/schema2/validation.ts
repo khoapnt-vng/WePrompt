@@ -16,6 +16,10 @@ import {
   STUDIO_MAX_BIN_BEAT_ITEMS,
   STUDIO_MAX_BIN_SHOT_ITEMS,
   STUDIO_MAX_ASSETS_V3,
+  STUDIO_MAX_ASSEMBLIES_V4,
+  STUDIO_MAX_BEATS_PER_BOARD_V4,
+  STUDIO_MAX_BIN_ENTRIES_V4,
+  STUDIO_MAX_BOARDS_V4,
   STUDIO_MAX_EXPORT_DIRECTORY_DEPTH,
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
@@ -31,6 +35,8 @@ import {
   STUDIO_MAX_REFERENCE_PROMPT_LENGTH,
   STUDIO_MAX_SHOTS_PER_BEAT,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  STUDIO_MAX_SHOTS_PER_BOARD_V4,
+  STUDIO_MAX_SOUND_BINDINGS_PER_ASSEMBLY_V4,
   STUDIO_MAX_SPEND_AUTHORIZATIONS_V3,
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MAX_SHOOTING_SCRIPT_LENGTH,
@@ -42,11 +48,19 @@ import {
   STUDIO_MIN_SHOT_SECONDS,
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION_V3,
+  STUDIO_PROJECT_SCHEMA_VERSION_V4,
   STUDIO_EXPORT_SCHEMA_VERSION_V3,
   type StudioAssetV2,
   type StudioAssetV3,
+  type StudioAssemblyPictureBindingV2,
+  type StudioAssemblySoundBindingV2,
+  type StudioAssemblyV2,
   type StudioBeat,
   type StudioBinItem,
+  type StudioBoardBeatV4,
+  type StudioBoardShotV4,
+  type StudioBoardV2,
+  type StudioCanvasBinEntryV4,
   type StudioGenerationCompositionInputSnapshotV2,
   type StudioGenerationReferenceInputSnapshot,
   type StudioGenerationRequestPlan,
@@ -66,6 +80,7 @@ import {
   type StudioProjectReferenceV2,
   type StudioProjectV2,
   type StudioProjectV3,
+  type StudioProjectV4,
   type StudioProviderAdapterId,
   type StudioProviderRef,
   type StudioQuotedGeneration,
@@ -3770,6 +3785,428 @@ export const validateStudioProjectV3 = (value: unknown): value is StudioProjectV
   }
   if (usedAuthorizationIds.size !== authorizationsById.size || pieceRetryGraphHasCycleV3(project.jobs)) return false;
 
+  return true;
+};
+
+const PROJECT_KEYS_V4 = new Set([...PROJECT_KEYS_V3, 'boardOrder', 'boards', 'assemblyOrder', 'assemblies', 'bin']);
+const BOARD_KEYS_V4 = new Set([
+  'id',
+  'handle',
+  'priorHandles',
+  'beatOrder',
+  'beats',
+  'shots',
+  'createdAt',
+  'updatedAt',
+]);
+const BOARD_BEAT_KEYS_V4 = new Set(['id', 'title', 'story', 'targetSeconds', 'shotOrder']);
+const BOARD_SHOT_KEYS_V4 = new Set(['id', 'shootingScript', 'durationSeconds', 'createdAt', 'updatedAt']);
+const ASSEMBLY_KEYS_V4 = new Set([
+  'id',
+  'handle',
+  'priorHandles',
+  'boardId',
+  'pictureBindings',
+  'soundBindingOrder',
+  'soundBindings',
+  'createdAt',
+  'updatedAt',
+]);
+const ASSEMBLY_PICTURE_BINDING_KEYS_V4 = new Set([
+  'shotId',
+  'source',
+  'trimInSeconds',
+  'trimOutSeconds',
+  'join',
+  'staleness',
+]);
+const ASSEMBLY_PICTURE_SOURCE_KEYS_V4 = new Set(['pieceId', 'assetId']);
+const ASSEMBLY_SOUND_BINDING_KEYS_V4 = new Set([
+  'id',
+  'pieceId',
+  'assetId',
+  'anchorBeatId',
+  'levelDb',
+  'trimInSeconds',
+  'trimOutSeconds',
+  'staleness',
+]);
+const CHAIN_STALENESS_KEYS_V4 = new Set(['cause', 'upstreamShotId', 'sourceAuthoringRevision', 'keptAt']);
+const WORDS_STALENESS_KEYS_V4 = new Set(['cause', 'sourceAuthoringRevision', 'keptAt']);
+const BIN_ENTRY_KEYS_V4 = new Set(['id', 'subject', 'reason', 'liftedAt']);
+const PIECE_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'pieceId']);
+const BOARD_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'boardId']);
+const ASSEMBLY_BIN_SUBJECT_KEYS_V4 = new Set(['kind', 'assemblyId']);
+
+const isCanonicalNonNegativeNumberV4 = (value: unknown, maximum: number): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= maximum;
+
+const validateTrimV4 = (trimInSeconds: unknown, trimOutSeconds: unknown): boolean =>
+  isCanonicalNonNegativeNumberV4(trimInSeconds, 86_400) &&
+  (trimOutSeconds === null ||
+    (isCanonicalNonNegativeNumberV4(trimOutSeconds, 86_400) && trimOutSeconds > trimInSeconds));
+
+const validatePriorHandlesV4 = (value: unknown, currentHandle: string): value is string[] =>
+  isDenseArray(value, STUDIO_MAX_PIECE_PRIOR_HANDLES_V3) &&
+  new Set(value).size === value.length &&
+  arrayEvery(
+    value,
+    (handle) => typeof handle === 'string' && handle !== currentHandle && isCanonicalStudioPieceHandleV3(handle)
+  );
+
+const validateBoardBeatV4 = (id: string, value: unknown): value is StudioBoardBeatV4 =>
+  isRecord(value) &&
+  hasExactKeys(value, BOARD_BEAT_KEYS_V4) &&
+  value.id === id &&
+  isNonEmptyStringWithin(value.title, 256) &&
+  isStringWithin(value.story, STUDIO_MAX_STORY_LENGTH) &&
+  (value.targetSeconds === null || isIntegerInRange(value.targetSeconds, 1, 1_440)) &&
+  isUniqueSafeIdArray(value.shotOrder, STUDIO_MAX_SHOTS_PER_BOARD_V4) &&
+  value.shotOrder.length > 0;
+
+const validateBoardShotV4 = (
+  id: string,
+  value: unknown,
+  projectCreatedAt: string,
+  projectUpdatedAt: string
+): value is StudioBoardShotV4 =>
+  isRecord(value) &&
+  hasExactKeys(value, BOARD_SHOT_KEYS_V4) &&
+  value.id === id &&
+  isNonEmptyStringWithin(value.shootingScript, STUDIO_MAX_SHOOTING_SCRIPT_LENGTH) &&
+  isIntegerInRange(value.durationSeconds, STUDIO_MIN_SHOT_SECONDS, STUDIO_MAX_SHOT_SECONDS) &&
+  isCanonicalTimestamp(value.createdAt) &&
+  isCanonicalTimestamp(value.updatedAt) &&
+  value.createdAt >= projectCreatedAt &&
+  value.createdAt <= value.updatedAt &&
+  value.updatedAt <= projectUpdatedAt;
+
+const validateBoardV4 = (
+  id: string,
+  value: unknown,
+  projectCreatedAt: string,
+  projectUpdatedAt: string
+): value is StudioBoardV2 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, BOARD_KEYS_V4) ||
+    value.id !== id ||
+    !isCanonicalStudioPieceHandleV3(value.handle) ||
+    !validatePriorHandlesV4(value.priorHandles, value.handle as string) ||
+    !isUniqueSafeIdArray(value.beatOrder, STUDIO_MAX_BEATS_PER_BOARD_V4) ||
+    value.beatOrder.length === 0 ||
+    !isRecord(value.beats) ||
+    !isRecord(value.shots) ||
+    !isCanonicalTimestamp(value.createdAt) ||
+    !isCanonicalTimestamp(value.updatedAt) ||
+    value.createdAt < projectCreatedAt ||
+    value.createdAt > value.updatedAt ||
+    value.updatedAt > projectUpdatedAt
+  ) {
+    return false;
+  }
+  const board = value as StudioBoardV2;
+  const beatIds = Object.keys(board.beats);
+  const shotIds = Object.keys(board.shots);
+  if (
+    beatIds.length !== board.beatOrder.length ||
+    shotIds.length === 0 ||
+    shotIds.length > STUDIO_MAX_SHOTS_PER_BOARD_V4 ||
+    !arrayEvery(board.beatOrder, (beatId) => Object.hasOwn(board.beats, beatId)) ||
+    !beatIds.every((beatId) => validateBoardBeatV4(beatId, board.beats[beatId])) ||
+    !shotIds.every((shotId) => validateBoardShotV4(shotId, board.shots[shotId], projectCreatedAt, projectUpdatedAt))
+  ) {
+    return false;
+  }
+  const orderedShots = board.beatOrder.flatMap((beatId) => board.beats[beatId]!.shotOrder);
+  return (
+    orderedShots.length === shotIds.length &&
+    new Set(orderedShots).size === shotIds.length &&
+    arrayEvery(orderedShots, (shotId) => Object.hasOwn(board.shots, shotId))
+  );
+};
+
+const validateChainStalenessV4 = (
+  value: unknown,
+  expectedUpstreamShotId: string,
+  authoringRevision: number,
+  projectCreatedAt: string,
+  projectUpdatedAt: string
+): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, CHAIN_STALENESS_KEYS_V4) &&
+  value.cause === 'chain' &&
+  value.upstreamShotId === expectedUpstreamShotId &&
+  isIntegerInRange(value.sourceAuthoringRevision, 1, authoringRevision) &&
+  (value.keptAt === null ||
+    (isCanonicalTimestamp(value.keptAt) && value.keptAt >= projectCreatedAt && value.keptAt <= projectUpdatedAt));
+
+const validateWordsStalenessV4 = (
+  value: unknown,
+  authoringRevision: number,
+  projectCreatedAt: string,
+  projectUpdatedAt: string
+): boolean =>
+  isRecord(value) &&
+  hasExactKeys(value, WORDS_STALENESS_KEYS_V4) &&
+  value.cause === 'words' &&
+  isIntegerInRange(value.sourceAuthoringRevision, 1, authoringRevision) &&
+  (value.keptAt === null ||
+    (isCanonicalTimestamp(value.keptAt) && value.keptAt >= projectCreatedAt && value.keptAt <= projectUpdatedAt));
+
+const validateAssemblyPictureBindingV4 = (
+  shotId: string,
+  value: unknown,
+  upstreamShotId: string | null,
+  project: StudioProjectV4
+): value is StudioAssemblyPictureBindingV2 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ASSEMBLY_PICTURE_BINDING_KEYS_V4) ||
+    value.shotId !== shotId ||
+    !validateTrimV4(value.trimInSeconds, value.trimOutSeconds) ||
+    (value.join !== 'hard_cut' && value.join !== 'match_previous') ||
+    (upstreamShotId === null && value.join !== 'hard_cut') ||
+    (value.staleness !== null &&
+      (upstreamShotId === null ||
+        !validateChainStalenessV4(
+          value.staleness,
+          upstreamShotId,
+          project.authoringRevision,
+          project.createdAt,
+          project.updatedAt
+        )))
+  ) {
+    return false;
+  }
+  if (value.source === null) return value.trimInSeconds === 0 && value.trimOutSeconds === null;
+  if (!isRecord(value.source) || !hasExactKeys(value.source, ASSEMBLY_PICTURE_SOURCE_KEYS_V4)) return false;
+  const piece = ownValue(project.pieces, value.source.pieceId as string);
+  const asset = ownValue(project.assets, value.source.assetId as string);
+  return (
+    isSafeId(value.source.pieceId) &&
+    isSafeId(value.source.assetId) &&
+    piece !== undefined &&
+    asset !== undefined &&
+    asset.pieceId === piece.id
+  );
+};
+
+const validateAssemblySoundBindingV4 = (
+  id: string,
+  value: unknown,
+  board: StudioBoardV2,
+  project: StudioProjectV4
+): value is StudioAssemblySoundBindingV2 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ASSEMBLY_SOUND_BINDING_KEYS_V4) ||
+    value.id !== id ||
+    !isSafeId(value.pieceId) ||
+    !isSafeId(value.assetId) ||
+    !isSafeId(value.anchorBeatId) ||
+    !Object.hasOwn(board.beats, value.anchorBeatId) ||
+    !isCanonicalNonNegativeNumberV4((value.levelDb as number) + 96, 120) ||
+    !validateTrimV4(value.trimInSeconds, value.trimOutSeconds) ||
+    (value.staleness !== null &&
+      !validateWordsStalenessV4(value.staleness, project.authoringRevision, project.createdAt, project.updatedAt))
+  ) {
+    return false;
+  }
+  const piece = ownValue(project.pieces, value.pieceId);
+  const asset = ownValue(project.assets, value.assetId);
+  return piece !== undefined && asset !== undefined && asset.pieceId === piece.id;
+};
+
+const validateAssemblyV4 = (id: string, value: unknown, project: StudioProjectV4): value is StudioAssemblyV2 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, ASSEMBLY_KEYS_V4) ||
+    value.id !== id ||
+    !isCanonicalStudioPieceHandleV3(value.handle) ||
+    !validatePriorHandlesV4(value.priorHandles, value.handle as string) ||
+    !isSafeId(value.boardId) ||
+    !isRecord(value.pictureBindings) ||
+    !isUniqueSafeIdArray(value.soundBindingOrder, STUDIO_MAX_SOUND_BINDINGS_PER_ASSEMBLY_V4) ||
+    !isRecord(value.soundBindings) ||
+    !isCanonicalTimestamp(value.createdAt) ||
+    !isCanonicalTimestamp(value.updatedAt) ||
+    value.createdAt < project.createdAt ||
+    value.createdAt > value.updatedAt ||
+    value.updatedAt > project.updatedAt
+  ) {
+    return false;
+  }
+  const assembly = value as StudioAssemblyV2;
+  const board = ownValue(project.boards, assembly.boardId);
+  if (board === undefined) return false;
+  const pictureIds = Object.keys(assembly.pictureBindings);
+  const orderedShotIds = board.beatOrder.flatMap((beatId) => board.beats[beatId]!.shotOrder);
+  if (
+    pictureIds.length !== orderedShotIds.length ||
+    !arrayEvery(orderedShotIds, (shotId) => Object.hasOwn(assembly.pictureBindings, shotId)) ||
+    Object.keys(assembly.soundBindings).length !== assembly.soundBindingOrder.length ||
+    !arrayEvery(assembly.soundBindingOrder, (bindingId) => Object.hasOwn(assembly.soundBindings, bindingId))
+  ) {
+    return false;
+  }
+  for (const beatId of board.beatOrder) {
+    const shotOrder = board.beats[beatId]!.shotOrder;
+    for (let index = 0; index < shotOrder.length; index += 1) {
+      const shotId = shotOrder[index]!;
+      if (
+        !validateAssemblyPictureBindingV4(
+          shotId,
+          assembly.pictureBindings[shotId],
+          index === 0 ? null : shotOrder[index - 1]!,
+          project
+        )
+      ) {
+        return false;
+      }
+    }
+  }
+  return arrayEvery(assembly.soundBindingOrder, (bindingId) =>
+    validateAssemblySoundBindingV4(bindingId, assembly.soundBindings[bindingId], board, project)
+  );
+};
+
+const binSubjectKeyV4 = (entry: StudioCanvasBinEntryV4): string => {
+  switch (entry.subject.kind) {
+    case 'piece':
+      return `piece:${entry.subject.pieceId}`;
+    case 'board':
+      return `board:${entry.subject.boardId}`;
+    case 'assembly':
+      return `assembly:${entry.subject.assemblyId}`;
+  }
+};
+
+const validateBinEntryV4 = (
+  value: unknown,
+  project: StudioProjectV4,
+  persistentIdentities: Set<string>
+): value is StudioCanvasBinEntryV4 => {
+  if (
+    !isRecord(value) ||
+    !hasExactKeys(value, BIN_ENTRY_KEYS_V4) ||
+    !isSafeId(value.id) ||
+    persistentIdentities.has(value.id) ||
+    !isCanonicalTimestamp(value.liftedAt) ||
+    value.liftedAt < project.createdAt ||
+    value.liftedAt > project.updatedAt ||
+    !isRecord(value.subject)
+  ) {
+    return false;
+  }
+  if (
+    value.subject.kind === 'piece' &&
+    hasExactKeys(value.subject, PIECE_BIN_SUBJECT_KEYS_V4) &&
+    isSafeId(value.subject.pieceId)
+  ) {
+    return value.reason === 'lifted' && Object.hasOwn(project.pieces, value.subject.pieceId);
+  }
+  if (
+    value.subject.kind === 'board' &&
+    hasExactKeys(value.subject, BOARD_BIN_SUBJECT_KEYS_V4) &&
+    isSafeId(value.subject.boardId)
+  ) {
+    return value.reason === 'lifted' && Object.hasOwn(project.boards, value.subject.boardId);
+  }
+  if (
+    value.subject.kind === 'assembly' &&
+    hasExactKeys(value.subject, ASSEMBLY_BIN_SUBJECT_KEYS_V4) &&
+    isSafeId(value.subject.assemblyId)
+  ) {
+    return value.reason === 'lifted' && Object.hasOwn(project.assemblies, value.subject.assemblyId);
+  }
+  return false;
+};
+
+/**
+ * Validates the exact inactive schema-7 Wave-1 envelope. Schema 6 is intentionally rejected and is
+ * never defaulted into the new board, Assembly, or Bin collections.
+ */
+export const validateStudioProjectV4 = (value: unknown): value is StudioProjectV4 => {
+  const dataSnapshot = snapshotOwnDataGraph(value);
+  if (
+    dataSnapshot === INVALID_DATA_SNAPSHOT ||
+    !isRecord(dataSnapshot) ||
+    !hasExactKeys(dataSnapshot, PROJECT_KEYS_V4)
+  ) {
+    return false;
+  }
+  const projectSnapshot = dataSnapshot;
+  if (projectSnapshot.schemaVersion !== STUDIO_PROJECT_SCHEMA_VERSION_V4) return false;
+  const {
+    boardOrder: boardOrderValue,
+    boards: boardsValue,
+    assemblyOrder: assemblyOrderValue,
+    assemblies: assembliesValue,
+    bin: binValue,
+    ...schemaSixFields
+  } = projectSnapshot;
+  const schemaSixSnapshot = { ...schemaSixFields, schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V3 };
+  if (!validateStudioProjectV3(schemaSixSnapshot)) return false;
+  if (
+    !isUniqueSafeIdArray(boardOrderValue, STUDIO_MAX_BOARDS_V4) ||
+    !isRecord(boardsValue) ||
+    !isUniqueSafeIdArray(assemblyOrderValue, STUDIO_MAX_ASSEMBLIES_V4) ||
+    !isRecord(assembliesValue) ||
+    !isDenseArray(binValue, STUDIO_MAX_BIN_ENTRIES_V4)
+  ) {
+    return false;
+  }
+  const project = projectSnapshot as StudioProjectV4;
+  const boardIds = Object.keys(project.boards);
+  const assemblyIds = Object.keys(project.assemblies);
+  if (
+    boardIds.length !== project.boardOrder.length ||
+    assemblyIds.length !== project.assemblyOrder.length ||
+    !arrayEvery(project.boardOrder, (boardId) => Object.hasOwn(project.boards, boardId)) ||
+    !arrayEvery(project.assemblyOrder, (assemblyId) => Object.hasOwn(project.assemblies, assemblyId)) ||
+    !boardIds.every((boardId) =>
+      validateBoardV4(boardId, project.boards[boardId], project.createdAt, project.updatedAt)
+    ) ||
+    !assemblyIds.every((assemblyId) => validateAssemblyV4(assemblyId, project.assemblies[assemblyId], project))
+  ) {
+    return false;
+  }
+
+  const persistentIdentities = new Set<string>([
+    project.id,
+    ...Object.keys(project.pieces),
+    ...Object.keys(project.assets),
+    ...Object.keys(project.jobs),
+  ]);
+  const handles = new Set(Object.values(project.pieces).flatMap((piece) => [piece.handle, ...piece.priorHandles]));
+  for (const board of Object.values(project.boards)) {
+    const boardIdentities = [board.id, ...Object.keys(board.beats), ...Object.keys(board.shots)];
+    if (boardIdentities.some((id) => persistentIdentities.has(id))) return false;
+    boardIdentities.forEach((id) => persistentIdentities.add(id));
+    for (const handle of [board.handle, ...board.priorHandles]) {
+      if (handles.has(handle)) return false;
+      handles.add(handle);
+    }
+  }
+  for (const assembly of Object.values(project.assemblies)) {
+    const assemblyIdentities = [assembly.id, ...Object.keys(assembly.soundBindings)];
+    if (assemblyIdentities.some((id) => persistentIdentities.has(id))) return false;
+    assemblyIdentities.forEach((id) => persistentIdentities.add(id));
+    for (const handle of [assembly.handle, ...assembly.priorHandles]) {
+      if (handles.has(handle)) return false;
+      handles.add(handle);
+    }
+  }
+
+  const binnedSubjects = new Set<string>();
+  for (const entry of project.bin) {
+    if (!validateBinEntryV4(entry, project, persistentIdentities)) return false;
+    const subjectKey = binSubjectKeyV4(entry);
+    if (binnedSubjects.has(subjectKey)) return false;
+    binnedSubjects.add(subjectKey);
+    persistentIdentities.add(entry.id);
+  }
   return true;
 };
 

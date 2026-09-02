@@ -3434,3 +3434,208 @@ export type StudioValidateConnectionRequest = {
 export type StudioSaveConnectionRequest = StudioValidateConnectionRequest;
 
 export type StudioRemoveConnectionRequest = { bindingId: string };
+
+/**
+ * Inactive Creative Studio 4 Phase 6 contracts.
+ *
+ * Schema 7 is a clean cutover from the photo-only schema 6 contract. These types are not admitted
+ * by a production reader until the Phase 6 cutover is complete; keeping the discriminator separate
+ * prevents an intermediate build from defaulting or migrating a schema-6 project.
+ */
+export const STUDIO_PROJECT_SCHEMA_VERSION_V4 = 7 as const;
+export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V4 = 7 as const;
+export const STUDIO_MAX_BOARDS_V4 = 24;
+export const STUDIO_MAX_ASSEMBLIES_V4 = 24;
+export const STUDIO_MAX_BEATS_PER_BOARD_V4 = 24;
+export const STUDIO_MAX_SHOTS_PER_BOARD_V4 = 96;
+export const STUDIO_MAX_SOUND_BINDINGS_PER_ASSEMBLY_V4 = 96;
+export const STUDIO_MAX_BIN_ENTRIES_V4 = STUDIO_MAX_PIECES_V3 + STUDIO_MAX_BOARDS_V4 + STUDIO_MAX_ASSEMBLIES_V4;
+
+export type StudioCanvasMemberStatusV4 =
+  | 'slate'
+  | 'queued'
+  | 'ready_to_render'
+  | 'generating'
+  | 'rendered'
+  | 'stale'
+  | 'failed';
+
+export type StudioStillsBlockStatusV4 =
+  | 'imported'
+  | 'needs_budget'
+  | 'proposed'
+  | 'queued'
+  | 'generating'
+  | 'rendered'
+  | 'partial'
+  | 'failed'
+  | 'stale';
+export type StudioMotionBlockStatusV4 = StudioStillsBlockStatusV4;
+export type StudioDocumentBlockStatusV4 = 'drafted' | 'current' | 'proposed';
+export type StudioBoardBlockStatusV4 = 'needs_budget' | 'proposed' | 'queued' | 'generating' | 'partial' | 'stale';
+export type StudioImportedSoundBlockStatusV4 = 'imported';
+export type StudioGeneratedSoundBlockStatusV4 =
+  | 'needs_budget'
+  | 'proposed'
+  | 'queued'
+  | 'generating'
+  | 'rendered'
+  | 'stale'
+  | 'failed';
+export type StudioCutBlockStatusV4 =
+  | 'needs_budget'
+  | 'proposed'
+  | 'rendering'
+  | 'rendered'
+  | 'partial'
+  | 'stale'
+  | 'failed';
+
+export type StudioCanvasFailureCostTruthV4 = 'spent' | 'not_spent';
+
+export type StudioCanvasFailureV4 = {
+  reason: 'rule_breach' | 'returned_silence' | 'provider_failure' | 'local_render_failure' | 'download_failure';
+  costTruth: StudioCanvasFailureCostTruthV4;
+};
+
+export type StudioChainStalenessV4 = {
+  cause: 'chain';
+  upstreamShotId: string;
+  sourceAuthoringRevision: number;
+  keptAt: string | null;
+};
+
+export type StudioWordsStalenessV4 = {
+  cause: 'words';
+  sourceAuthoringRevision: number;
+  keptAt: string | null;
+};
+
+export type StudioMemberStalenessV4 = StudioChainStalenessV4 | StudioWordsStalenessV4;
+
+export type StudioBoardShotV4 = {
+  id: string;
+  shootingScript: string;
+  durationSeconds: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioBoardBeatV4 = {
+  id: string;
+  title: string;
+  story: string;
+  targetSeconds: number | null;
+  shotOrder: string[];
+};
+
+/** A board owns film reading order. An Assembly deliberately stores no competing picture order. */
+export type StudioBoardV2 = {
+  id: string;
+  handle: string;
+  priorHandles: string[];
+  beatOrder: string[];
+  beats: Record<string, StudioBoardBeatV4>;
+  shots: Record<string, StudioBoardShotV4>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+/** Exact persisted source used by one Assembly binding; null is an honest timed slate. */
+export type StudioAssemblyPictureSourceV2 = { pieceId: string; assetId: string } | null;
+
+export type StudioAssemblyPictureBindingV2 = {
+  shotId: string;
+  source: StudioAssemblyPictureSourceV2;
+  trimInSeconds: number;
+  trimOutSeconds: number | null;
+  join: 'hard_cut' | 'match_previous';
+  staleness: StudioChainStalenessV4 | null;
+};
+
+export type StudioAssemblySoundBindingV2 = {
+  id: string;
+  pieceId: string;
+  assetId: string;
+  anchorBeatId: string;
+  levelDb: number;
+  trimInSeconds: number;
+  trimOutSeconds: number | null;
+  staleness: StudioWordsStalenessV4 | null;
+};
+
+/**
+ * A cut owns per-use timeline facts and exact references, never artifacts. Picture sequence is
+ * derived from the referenced board's Beat/Shot reading order; only sound bindings need an order.
+ */
+export type StudioAssemblyV2 = {
+  id: string;
+  handle: string;
+  priorHandles: string[];
+  boardId: string;
+  pictureBindings: Record<string, StudioAssemblyPictureBindingV2>;
+  soundBindingOrder: string[];
+  soundBindings: Record<string, StudioAssemblySoundBindingV2>;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioCanvasSubjectV4 =
+  | { kind: 'piece'; pieceId: string }
+  | { kind: 'board'; boardId: string }
+  | { kind: 'assembly'; assemblyId: string };
+
+/** The Bin changes presentation only; every referenced project record remains in its owning map. */
+export type StudioCanvasBinEntryV4 = {
+  id: string;
+  subject: StudioCanvasSubjectV4;
+  reason: 'lifted';
+  liftedAt: string;
+};
+
+/**
+ * Wave-1 schema-7 envelope. The photo/job/media contracts remain byte-for-byte schema-6 shapes
+ * while the Assembly, ordering and recoverable presentation contracts are made explicit.
+ */
+export type StudioProjectV4 = Omit<StudioProjectV3, 'schemaVersion'> & {
+  schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION_V4;
+  boardOrder: string[];
+  boards: Record<string, StudioBoardV2>;
+  assemblyOrder: string[];
+  assemblies: Record<string, StudioAssemblyV2>;
+  bin: StudioCanvasBinEntryV4[];
+};
+
+export type CreateStudioProjectInputV4 = CreateStudioProjectInputV3;
+
+export type StudioLiftToBinRequestV4 = {
+  projectId: string;
+  expectedRevision: number;
+  subjects: StudioCanvasSubjectV4[];
+};
+
+export type StudioRestoreFromBinRequestV4 = {
+  projectId: string;
+  expectedRevision: number;
+  entryId: string;
+};
+
+export type StudioPresentationMutationContextV4 = {
+  entryIds: string[];
+  capturedAt: string;
+};
+
+export type StudioPresentationMutationFailureV4 =
+  | 'invalid_project'
+  | 'invalid_request'
+  | 'stale_project'
+  | 'subject_not_found'
+  | 'already_binned'
+  | 'bin_entry_not_found'
+  | 'identity_collision'
+  | 'capacity_reached'
+  | 'validation_failed';
+
+export type StudioPresentationMutationResultV4 =
+  | { status: 'applied'; project: StudioProjectV4 }
+  | { status: 'refused'; reason: StudioPresentationMutationFailureV4 };

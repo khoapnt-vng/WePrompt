@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-export { createEmptyStudioProjectV2, createEmptyStudioProjectV3 } from './factories';
+export { createEmptyStudioProjectV2, createEmptyStudioProjectV3, createEmptyStudioProjectV4 } from './factories';
 export * from './exports';
 export * from './generation';
 export * from './pricing';
@@ -15,6 +15,7 @@ export {
   type StudioInboundShotReferenceKindV2,
   type StudioInboundShotReferenceV2,
 } from './projections';
+export * from './projections/canvasV4';
 export {
   advanceStudioWaitingBindingsV2,
   terminalizeStudioUnboundDependenciesV2,
@@ -37,11 +38,13 @@ export {
 export * from './mutations/deletionClaimsV3';
 export * from './mutations/pieceCatalogV3';
 export * from './mutations/pieceHandles';
+export * from './mutations/presentationV4';
 export {
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,
   validateStudioProjectV2,
   validateStudioProjectV3,
+  validateStudioProjectV4,
   validateStudioPieceExportManifestV3,
   validateStudioProposedShotV2,
 } from './validation';

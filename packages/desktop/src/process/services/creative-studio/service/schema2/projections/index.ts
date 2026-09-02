@@ -17,3 +17,4 @@ export {
   projectStudioWorkspaceStatusV2,
 } from './workspaceStatus';
 export { projectStudioStatusV2 } from './projectStatus';
+export * from './canvasV4';

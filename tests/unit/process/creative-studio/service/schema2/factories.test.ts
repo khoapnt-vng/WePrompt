@@ -10,8 +10,10 @@ import { describe, expect, it } from 'vitest';
 import {
   createEmptyStudioProjectV2,
   createEmptyStudioProjectV3,
+  createEmptyStudioProjectV4,
   validateStudioProjectV2,
   validateStudioProjectV3,
+  validateStudioProjectV4,
 } from '@/process/services/creative-studio/service/schema2';
 
 describe('createEmptyStudioProjectV2', () => {
@@ -197,5 +199,51 @@ describe('createEmptyStudioProjectV3', () => {
 
     const proxied = new Proxy({ name: 'Project Four', brief: '' }, {});
     expect(() => createEmptyStudioProjectV3(proxied, 'project_4', '2026-08-30T00:00:00.000Z')).toThrow(TypeError);
+  });
+});
+
+describe('createEmptyStudioProjectV4', () => {
+  it('creates the exact empty schema-7 envelope without a film scaffold or migrated Pilot data', () => {
+    const project = createEmptyStudioProjectV4(
+      { name: '  Phase Six  ', brief: 'A film assembled from project-owned work' },
+      'project_7',
+      '2026-09-02T00:00:00.000Z'
+    );
+
+    expect(project).toEqual({
+      schemaVersion: 7,
+      revision: 1,
+      authoringRevision: 1,
+      id: 'project_7',
+      name: 'Phase Six',
+      brief: 'A film assembled from project-owned work',
+      rules: [],
+      forgeProjectId: null,
+      briefConversationId: null,
+      pieceOrder: [],
+      pieces: {},
+      spendPolicy: null,
+      spendAuthorizations: [],
+      undoHistory: [],
+      assets: {},
+      jobs: {},
+      createdAt: '2026-09-02T00:00:00.000Z',
+      updatedAt: '2026-09-02T00:00:00.000Z',
+      boardOrder: [],
+      boards: {},
+      assemblyOrder: [],
+      assemblies: {},
+      bin: [],
+    });
+    expect(validateStudioProjectV4(project)).toBe(true);
+    expect(validateStudioProjectV3(project)).toBe(false);
+  });
+
+  it('does not accept a schema-6 project as schema 7 or default its missing collections', () => {
+    const pilot = createEmptyStudioProjectV3({ name: 'Pilot', brief: '' }, 'project_6', '2026-09-02T00:00:00.000Z');
+
+    expect(validateStudioProjectV4(pilot)).toBe(false);
+    expect(Object.hasOwn(pilot, 'assemblies')).toBe(false);
+    expect(Object.hasOwn(pilot, 'bin')).toBe(false);
   });
 });

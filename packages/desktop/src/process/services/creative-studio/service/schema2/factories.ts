@@ -8,12 +8,15 @@ import { types as nodeTypes } from 'node:util';
 import {
   STUDIO_PROJECT_SCHEMA_VERSION,
   STUDIO_PROJECT_SCHEMA_VERSION_V3,
+  STUDIO_PROJECT_SCHEMA_VERSION_V4,
   type CreateStudioProjectInputV2,
   type CreateStudioProjectInputV3,
+  type CreateStudioProjectInputV4,
   type StudioProjectV2,
   type StudioProjectV3,
+  type StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
-import { validateStudioProjectV2, validateStudioProjectV3 } from './validation';
+import { validateStudioProjectV2, validateStudioProjectV3, validateStudioProjectV4 } from './validation';
 
 const INPUT_KEYS = new Set(['name', 'brief', 'forgeProjectId', 'aspectRatio', 'targetDurationSeconds', 'resolution']);
 const REQUIRED_INPUT_KEYS = ['name', 'brief', 'aspectRatio', 'targetDurationSeconds', 'resolution'] as const;
@@ -133,5 +136,25 @@ export const createEmptyStudioProjectV3 = (
     updatedAt: timestamp,
   };
   if (!validateStudioProjectV3(project)) throw new TypeError('Invalid schema-6 project input');
+  return project;
+};
+
+/** Creates a validated, inactive schema-7 project without migrating a schema-6 record. */
+export const createEmptyStudioProjectV4 = (
+  input: CreateStudioProjectInputV4,
+  id: string,
+  timestamp: string
+): StudioProjectV4 => {
+  const pilot = createEmptyStudioProjectV3(input, id, timestamp);
+  const project: StudioProjectV4 = {
+    ...pilot,
+    schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V4,
+    boardOrder: [],
+    boards: {},
+    assemblyOrder: [],
+    assemblies: {},
+    bin: [],
+  };
+  if (!validateStudioProjectV4(project)) throw new TypeError('Invalid schema-7 project input');
   return project;
 };

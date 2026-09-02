@@ -25,8 +25,18 @@ import {
   type StudioShot,
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { createEmptyStudioProjectV2, projectStudioStatusV2 } from '@/process/services/creative-studio/service/schema2';
+import {
+  createEmptyStudioProjectV2,
+  deriveStudioAssemblyPictureTimelineV4,
+  projectStudioCanvasPresentationV4,
+  projectStudioStatusV2,
+  studioCanvasActionsForFailureV4,
+  studioCanvasActionsForStalenessV4,
+  studioCanvasStatusNeedsAttentionV4,
+  studioCanvasStatusUsesConditionsRegionV4,
+} from '@/process/services/creative-studio/service/schema2';
 import { createStudioFrameExtractionId } from '@/process/services/creative-studio/service/schema2/generation';
+import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../../fixtures/creative-studio/phase6Project';
 
 const timestamp = '2026-08-27T00:00:00.000Z';
 const digest = 'a'.repeat(64);
@@ -52,6 +62,95 @@ const route = (
     silentOutput: true,
     ...overrides,
   },
+});
+
+describe('schema-7 canvas and Assembly projections', () => {
+  it('derives picture sequence from board reading order without an Assembly order field', () => {
+    const value = makePhase6Project();
+
+    expect(deriveStudioAssemblyPictureTimelineV4(value, 'assembly_1')).toEqual([
+      {
+        beatId: 'beat_1',
+        beatPosition: 0,
+        shotId: 'shot_1',
+        shotPosition: 0,
+        binding: value.assemblies.assembly_1!.pictureBindings.shot_1,
+      },
+      {
+        beatId: 'beat_1',
+        beatPosition: 0,
+        shotId: 'shot_2',
+        shotPosition: 1,
+        binding: value.assemblies.assembly_1!.pictureBindings.shot_2,
+      },
+    ]);
+  });
+
+  it('projects dependency order and removes only lifted presentation subjects', () => {
+    const value = makePhase6Project();
+    value.bin = [
+      {
+        id: 'bin_board',
+        subject: { kind: 'board', boardId: 'board_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(projectStudioCanvasPresentationV4(value)).toEqual({
+      activeSubjects: [
+        { kind: 'piece', pieceId: 'piece_photo_1' },
+        { kind: 'assembly', assemblyId: 'assembly_1' },
+      ],
+      bin: value.bin,
+    });
+    expect(value.boards.board_1).toBeDefined();
+    expect(value.assemblies.assembly_1!.boardId).toBe('board_1');
+  });
+
+  it('maps stale cause to the two signed action sets', () => {
+    expect(
+      studioCanvasActionsForStalenessV4({
+        cause: 'chain',
+        upstreamShotId: 'shot_1',
+        sourceAuthoringRevision: 2,
+        keptAt: null,
+      })
+    ).toEqual(['re_render_chain', 'keep']);
+    expect(studioCanvasActionsForStalenessV4({ cause: 'words', sourceAuthoringRevision: 2, keptAt: null })).toEqual([
+      'keep',
+    ]);
+  });
+
+  it('never offers Retry for returned silence or another spent failure', () => {
+    expect(studioCanvasActionsForFailureV4({ reason: 'returned_silence', costTruth: 'spent' })).toEqual([]);
+    expect(studioCanvasActionsForFailureV4({ reason: 'provider_failure', costTruth: 'spent' })).toEqual([]);
+    expect(studioCanvasActionsForFailureV4({ reason: 'provider_failure', costTruth: 'not_spent' })).toEqual(['retry']);
+  });
+
+  it('uses region 4 for the exact corrected status set and keeps all quiet-density decisions visible', () => {
+    expect(['generating', 'proposed', 'needs_budget'].filter(studioCanvasStatusUsesConditionsRegionV4)).toEqual([
+      'generating',
+      'proposed',
+      'needs_budget',
+    ]);
+    expect(studioCanvasStatusUsesConditionsRegionV4('rendering')).toBe(false);
+    expect(
+      ['proposed', 'needs_budget', 'failed', 'stale', 'queued', 'generating', 'rendering'].every(
+        studioCanvasStatusNeedsAttentionV4
+      )
+    ).toBe(true);
+    expect(studioCanvasStatusNeedsAttentionV4('rendered')).toBe(false);
+  });
+
+  it('fails closed for an unknown Assembly or malformed project', () => {
+    const value = makePhase6Project();
+
+    expect(() => deriveStudioAssemblyPictureTimelineV4(value, 'assembly_missing')).toThrow('assembly_not_found');
+    expect(() => projectStudioCanvasPresentationV4({ ...value, schemaVersion: 6 })).toThrow(
+      'invalid_schema_7_projection_input'
+    );
+  });
 });
 
 const readyRoutes = (image = route('image'), video = route('video')): StudioProjectStatusRouteCatalogV2 => ({
