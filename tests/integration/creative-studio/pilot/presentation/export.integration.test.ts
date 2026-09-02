@@ -7,28 +7,43 @@
  * @vitest-environment node
  */
 
-import { mkdir, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import sharp from 'sharp';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { type StudioPieceExportArtifactV3, type StudioProjectV3 } from '@/common/types/project/creativeStudioTypes';
+import {
+  type StudioPieceExportArtifactV3,
+  type StudioProjectV3,
+  type StudioProjectV4,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   buildStudioPieceExportManifestV3,
   parseStudioPieceExportManifestV3,
 } from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV3';
 import {
   createStudioPieceExportRuntimeV3,
+  createStudioPieceExportRuntimeV4,
   retainStudioPieceExportArtifactsV3,
+  type StudioPieceExportProjectStoreV4,
   type StudioPieceExportRuntimeDepsV3,
   type StudioPieceExportRuntimeStepV3,
 } from '@/process/services/creative-studio/service/pilot/runtime/export';
+import { validateStudioProjectV4 } from '@/process/services/creative-studio/service/schema2/validation';
+import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../fixtures/creative-studio/phase6Project';
 import { createPilotPhotoFixtureV3, type PilotPhotoFixtureV3, type PilotPhotoFixtureOptionsV3 } from './realFixture';
 
 const fixtures: PilotPhotoFixtureV3[] = [];
+const temporaryRoots: string[] = [];
 const EXPORT_TIME = '2026-08-31T00:10:00.000Z';
+const PHASE_6_EXPORT_TIME = '2026-09-02T00:10:00.000Z';
 
 afterEach(async () => {
-  await Promise.all(fixtures.splice(0).map((fixture) => fixture.cleanup()));
+  await Promise.all([
+    ...fixtures.splice(0).map((fixture) => fixture.cleanup()),
+    ...temporaryRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })),
+  ]);
 });
 
 const projectDirectory = (root: string, projectId: string): string => path.join(root, projectId);
@@ -726,5 +741,87 @@ describe('schema-6 standalone Piece export runtime', () => {
     const recovered = await restarted.recover(harness.project.id);
     expect(recovered.artifacts).toHaveLength(expectedArtifacts);
     expect(await restarted.list(harness.project.id)).toEqual(recovered);
+  });
+});
+
+describe('schema-7 standalone Piece export runtime seam', () => {
+  it('uses the exact schema-7 reader and rejects every occupied canvas identity before publishing', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'weprompt-schema-7-export-'));
+    temporaryRoots.push(root);
+    const projectDirPath = path.join(root, 'project');
+    await mkdir(projectDirPath);
+    const projectDir = await realpath(projectDirPath);
+    const sourceBytes = await makePng(70);
+    const sourcePath = path.join(root, 'source.png');
+    await writeFile(sourcePath, sourceBytes);
+
+    const project: StudioProjectV4 = makePhase6Project();
+    const asset = project.assets.asset_photo_1!;
+    asset.sha256 = createHash('sha256').update(sourceBytes).digest('hex');
+    asset.byteSize = sourceBytes.byteLength;
+    asset.width = 32;
+    asset.height = 24;
+    project.bin = [
+      {
+        id: 'bin_entry_1',
+        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(project)).toBe(true);
+
+    const store: StudioPieceExportProjectStoreV4 = {
+      async loadProjectV4(projectId) {
+        if (projectId !== project.id) throw new Error('not found');
+        return structuredClone(project);
+      },
+      async withProjectAuthorityV4(projectId, operation) {
+        if (projectId !== project.id) throw new Error('not found');
+        return operation({
+          project: structuredClone(project),
+          projectDir,
+          assertCurrent: async () => undefined,
+        });
+      },
+    };
+    const candidates = [project.id, 'board_1', 'beat_1', 'shot_1', 'assembly_1', 'bin_entry_1', 'export_schema_7'];
+    const createExportId = vi.fn(() => candidates.shift() ?? 'export_fallback');
+    const media = {
+      verifyManagedAssetV3: vi.fn(async () => ({ asset: structuredClone(asset), absolutePath: sourcePath })),
+    };
+    const runtime = createStudioPieceExportRuntimeV4({
+      store,
+      media,
+      now: () => PHASE_6_EXPORT_TIME,
+      createExportId,
+      createNonce: () => 'schema7_nonce',
+    });
+
+    const result = await runtime.create({
+      projectId: project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+    });
+    expect(result).toMatchObject({
+      status: 'exported',
+      catalog: { revision: 2, artifacts: [{ id: 'export_schema_7', pieceId: 'piece_photo_1' }] },
+    });
+    expect(createExportId).toHaveBeenCalledTimes(7);
+    expect(media.verifyManagedAssetV3).toHaveBeenCalledOnce();
+
+    const manifest = parseStudioPieceExportManifestV3(
+      await readFile(path.join(projectDir, 'exports', 'piece-export_schema_7', 'manifest.json'))
+    );
+    expect(manifest).toMatchObject({
+      schemaVersion: 3,
+      projectId: project.id,
+      sourceRevision: project.revision,
+      piece: { id: 'piece_photo_1', handleAtExport: 'harbour_morning' },
+      provenance: { origin: 'imported' },
+    });
+    expect(project.spendAuthorizations).toEqual([]);
+    expect(project.jobs).toEqual({});
   });
 });

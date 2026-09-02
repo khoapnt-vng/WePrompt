@@ -23,18 +23,18 @@ import {
   type StudioPieceExportArtifactV3,
   type StudioPieceExportCatalogV3,
   type StudioProjectV3,
+  type StudioProjectV4,
   type StudioRendererPieceExportCatalogV3,
 } from '@/common/types/project/creativeStudioTypes';
-import type {
-  CreativeStudioPilotStoreV3,
-  StudioPilotProjectAuthoritySnapshotV3,
-} from '@process/services/creative-studio/store/pilotStore';
+import type { CreativeStudioPilotStoreV3 } from '@process/services/creative-studio/store/pilotStore';
 import {
   buildStudioPieceExportManifestV3,
+  buildStudioPieceExportManifestV4,
   parseStudioPieceExportManifestV3,
   serializeStudioPieceExportManifestV3,
 } from '../../schema2/exports/pieceManifestV3';
 import { isCanonicalStudioPieceHandleV3 } from '../../schema2/mutations/pieceHandles';
+import { studioPersistentIdentitiesV4 } from '../../schema2/mutations/projectAuthorityV4';
 import {
   parseStudioDeliverPieceExportRequestV3,
   parseStudioExportPieceRequestV3,
@@ -112,6 +112,27 @@ export type StudioPieceExportRuntimeDepsV3 = {
   onStep?: (step: StudioPieceExportRuntimeStepV3, projectId: string) => void | Promise<void>;
 };
 
+type StudioPieceExportProjectV3OrV4 = StudioProjectV3 | StudioProjectV4;
+
+export type StudioPieceExportProjectAuthorityV4 = {
+  project: StudioProjectV4;
+  projectDir: string;
+  assertCurrent(): Promise<void>;
+};
+
+/** Exact schema-7 store seam; no schema-6 project is admitted by either operation. */
+export type StudioPieceExportProjectStoreV4 = {
+  loadProjectV4(projectId: string): Promise<StudioProjectV4>;
+  withProjectAuthorityV4<T>(
+    projectId: string,
+    operation: (snapshot: StudioPieceExportProjectAuthorityV4) => Promise<T>
+  ): Promise<T>;
+};
+
+export type StudioPieceExportRuntimeDepsV4 = Omit<StudioPieceExportRuntimeDepsV3, 'store'> & {
+  store: StudioPieceExportProjectStoreV4;
+};
+
 export type StudioPieceExportRuntimeV3 = {
   describe(input: unknown): Promise<{ suggestedName: string }>;
   create(input: unknown): Promise<StudioExportPieceResultV3>;
@@ -119,6 +140,35 @@ export type StudioPieceExportRuntimeV3 = {
   resolveRevealPath(request: unknown): Promise<string>;
   list(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
   recover(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
+};
+
+/** Project schema 7 continues to emit and manage the independent export-3 protocol. */
+export type StudioPieceExportRuntimeV4 = StudioPieceExportRuntimeV3;
+
+type StudioPieceExportProjectAuthority<Project extends StudioPieceExportProjectV3OrV4> = {
+  project: Project;
+  projectDir: string;
+  assertCurrent(): Promise<void>;
+};
+
+type StudioPieceExportProjectStore<Project extends StudioPieceExportProjectV3OrV4> = {
+  loadProject(projectId: string): Promise<Project>;
+  withProjectAuthority<T>(
+    projectId: string,
+    operation: (snapshot: StudioPieceExportProjectAuthority<Project>) => Promise<T>
+  ): Promise<T>;
+};
+
+type StudioPieceExportRuntimeCoreDeps<Project extends StudioPieceExportProjectV3OrV4> = Omit<
+  StudioPieceExportRuntimeDepsV3,
+  'store'
+> & {
+  store: StudioPieceExportProjectStore<Project>;
+  buildManifest(
+    project: Project,
+    input: Parameters<typeof buildStudioPieceExportManifestV3>[1]
+  ): ReturnType<typeof buildStudioPieceExportManifestV3>;
+  projectIdentities(project: Project): Iterable<string>;
 };
 
 type PendingMarkerV3 = {
@@ -1010,7 +1060,11 @@ const removeEvictedDirectory = async (
   await syncDirectory(quarantineRoot);
 };
 
-const nextTimestamp = (requested: string, project: StudioProjectV3, catalog: StudioPieceExportCatalogV3): string => {
+const nextTimestamp = (
+  requested: string,
+  project: StudioPieceExportProjectV3OrV4,
+  catalog: StudioPieceExportCatalogV3
+): string => {
   if (!isCanonicalTimestamp(requested)) return serviceFailure('storage_error');
   const floor = Math.max(
     Date.parse(project.updatedAt),
@@ -1019,8 +1073,8 @@ const nextTimestamp = (requested: string, project: StudioProjectV3, catalog: Stu
   return new Date(Math.max(Date.parse(requested), floor)).toISOString();
 };
 
-const recoverInsideAuthority = async (
-  authority: StudioPilotProjectAuthoritySnapshotV3,
+const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3OrV4>(
+  authority: StudioPieceExportProjectAuthority<Project>,
   createNonce: () => string,
   onStep: (step: StudioPieceExportRuntimeStepV3, projectId: string) => Promise<void>
 ): Promise<StudioPieceExportCatalogV3> => {
@@ -1184,7 +1238,7 @@ const recoverInsideAuthority = async (
   return nextCatalog;
 };
 
-const findCurrentAsset = (project: StudioProjectV3, pieceId: string): StudioAssetV3 => {
+const findCurrentAsset = (project: StudioPieceExportProjectV3OrV4, pieceId: string): StudioAssetV3 => {
   const piece = project.pieces[pieceId];
   if (piece === undefined || piece.currentAssetId === null) return serviceFailure('export_unavailable');
   const asset = project.assets[piece.currentAssetId];
@@ -1194,13 +1248,12 @@ const findCurrentAsset = (project: StudioProjectV3, pieceId: string): StudioAsse
   return asset;
 };
 
-const uniqueExportId = (mint: () => string, catalog: StudioPieceExportCatalogV3, project: StudioProjectV3): string => {
-  const unavailable = new Set([
-    ...catalog.artifacts.map((artifact) => artifact.id),
-    ...Object.keys(project.pieces),
-    ...Object.keys(project.assets),
-    ...Object.keys(project.jobs),
-  ]);
+const uniqueExportId = (
+  mint: () => string,
+  catalog: StudioPieceExportCatalogV3,
+  projectIdentities: Iterable<string>
+): string => {
+  const unavailable = new Set([...catalog.artifacts.map((artifact) => artifact.id), ...projectIdentities]);
   for (let attempt = 0; attempt < 32; attempt += 1) {
     const candidate = mint();
     if (typeof candidate === 'string' && SAFE_EXPORT_ID.test(candidate) && !unavailable.has(candidate))
@@ -1209,8 +1262,9 @@ const uniqueExportId = (mint: () => string, catalog: StudioPieceExportCatalogV3,
   return serviceFailure('storage_error');
 };
 
-/** Creates the isolated export-3 runtime; it has no generation, quote, provider, or spend dependency. */
-export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeDepsV3): StudioPieceExportRuntimeV3 => {
+const createStudioPieceExportRuntime = <Project extends StudioPieceExportProjectV3OrV4>(
+  deps: StudioPieceExportRuntimeCoreDeps<Project>
+): StudioPieceExportRuntimeV3 => {
   const now = deps.now ?? (() => new Date().toISOString());
   const createExportId = deps.createExportId ?? (() => `export_${randomUUID().replaceAll('-', '')}`);
   const mintNonce = deps.createNonce ?? (() => randomUUID().replaceAll('-', '').slice(0, 16));
@@ -1226,7 +1280,7 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
   const recover = async (projectId: string): Promise<StudioRendererPieceExportCatalogV3> => {
     if (typeof projectId !== 'string' || !SAFE_PERSISTED_ID.test(projectId)) return serviceFailure('invalid_payload');
     try {
-      return await deps.store.withProjectAuthorityV3(projectId, async (authority) =>
+      return await deps.store.withProjectAuthority(projectId, async (authority) =>
         projectRendererCatalog(await recoverInsideAuthority(authority, createNonce, onStep))
       );
     } catch (error) {
@@ -1237,10 +1291,10 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
   const describe = async (input: unknown): Promise<{ suggestedName: string }> => {
     try {
       const request: StudioDeliverPieceExportRequestV3 = parseStudioDeliverPieceExportRequestV3(input);
-      const project = await deps.store.loadProjectV3(request.projectId);
+      const project = await deps.store.loadProject(request.projectId);
       if (project.revision !== request.expectedRevision) return serviceFailure('stale_project');
       findCurrentAsset(project, request.pieceId);
-      // The exact schema-6 decoder guarantees a canonical handle; findCurrentAsset proved ownership.
+      // The selected exact project decoder guarantees a canonical handle; findCurrentAsset proved ownership.
       const piece = project.pieces[request.pieceId]!;
       return { suggestedName: `piece-${piece.handle}-export` };
     } catch (error) {
@@ -1253,14 +1307,14 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
     async create(input) {
       try {
         const request = parseStudioExportPieceRequestV3(input);
-        const preliminaryProject = await deps.store.loadProjectV3(request.projectId);
+        const preliminaryProject = await deps.store.loadProject(request.projectId);
         if (preliminaryProject.revision !== request.expectedRevision) return serviceFailure('stale_project');
         const preliminaryAsset = findCurrentAsset(preliminaryProject, request.pieceId);
         const mediaProof = await deps.media.verifyManagedAssetV3({
           projectId: request.projectId,
           assetId: preliminaryAsset.id,
         });
-        return await deps.store.withProjectAuthorityV3(request.projectId, async (authority) => {
+        return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
           const project = authority.project;
           if (project.revision !== request.expectedRevision) return serviceFailure('stale_project');
           const asset = findCurrentAsset(project, request.pieceId);
@@ -1276,7 +1330,7 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
             await authority.assertCurrent();
             const exportsRoot = await ensureDirectory(await fs.realpath(authority.projectDir), EXPORTS_DIRECTORY_NAME);
             const quarantineRoot = await ensureDirectory(exportsRoot, QUARANTINE_DIRECTORY_NAME);
-            const exportId = uniqueExportId(createExportId, catalog, project);
+            const exportId = uniqueExportId(createExportId, catalog, deps.projectIdentities(project));
             const nonce = createNonce();
             const finalName = folderNameForExport(exportId);
             const stageName = stageNameForExport(exportId, nonce);
@@ -1285,7 +1339,7 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
             const markerPath = path.join(exportsRoot, markerNameForExport(exportId));
             const exportedAt = nextTimestamp(now(), project, catalog);
             const relativePhotoPath = `photo.${imageExtension(asset.mimeType)}`;
-            const manifest = buildStudioPieceExportManifestV3(project, {
+            const manifest = deps.buildManifest(project, {
               exportId,
               pieceId: request.pieceId,
               relativePath: relativePhotoPath,
@@ -1366,7 +1420,7 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
     async copy(rawRequest, destinationPath) {
       try {
         const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
-        return await deps.store.withProjectAuthorityV3(request.projectId, async (authority) => {
+        return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
           const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
           const artifact = exactCatalogArtifact(request, catalog);
           const projectDir = await fs.realpath(authority.projectDir);
@@ -1450,7 +1504,7 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
     async resolveRevealPath(rawRequest) {
       try {
         const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
-        return await deps.store.withProjectAuthorityV3(request.projectId, async (authority) => {
+        return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
           const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
           const artifact = exactCatalogArtifact(request, catalog);
           const projectDir = await fs.realpath(authority.projectDir);
@@ -1470,3 +1524,35 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
     recover,
   };
 };
+
+const studioPieceExportPersistentIdentitiesV3 = (project: StudioProjectV3): Set<string> =>
+  new Set([...Object.keys(project.pieces), ...Object.keys(project.assets), ...Object.keys(project.jobs)]);
+
+/** Creates the isolated schema-6/export-3 runtime; it has no generation, quote, provider, or spend dependency. */
+export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeDepsV3): StudioPieceExportRuntimeV3 =>
+  createStudioPieceExportRuntime({
+    ...deps,
+    store: {
+      loadProject: (projectId) => deps.store.loadProjectV3(projectId),
+      withProjectAuthority: (projectId, operation) =>
+        deps.store.withProjectAuthorityV3(projectId, (authority) => operation(authority)),
+    },
+    buildManifest: buildStudioPieceExportManifestV3,
+    projectIdentities: studioPieceExportPersistentIdentitiesV3,
+  });
+
+/**
+ * Creates the exact schema-7/export-3 runtime without admitting schema 6. The independent export
+ * protocol stays at version 3; only its authoritative project reader and identity namespace move.
+ */
+export const createStudioPieceExportRuntimeV4 = (deps: StudioPieceExportRuntimeDepsV4): StudioPieceExportRuntimeV4 =>
+  createStudioPieceExportRuntime({
+    ...deps,
+    store: {
+      loadProject: (projectId) => deps.store.loadProjectV4(projectId),
+      withProjectAuthority: (projectId, operation) =>
+        deps.store.withProjectAuthorityV4(projectId, (authority) => operation(authority)),
+    },
+    buildManifest: buildStudioPieceExportManifestV4,
+    projectIdentities: studioPersistentIdentitiesV4,
+  });
