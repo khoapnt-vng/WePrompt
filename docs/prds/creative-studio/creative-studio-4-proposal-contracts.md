@@ -1,277 +1,282 @@
-# Two proposal contracts — recommendations
+# Two proposal contracts (rev 2) — the schema-7 Pilot-native family
 
-Read-only research against `ghk/codex/creative-studio-4-pilot`. Nothing implemented.
+Re-issued after D1 and D2. Read-only research; nothing implemented.
 
----
+**The two answers together make the hard part easy.** D1 moves the target to a family that
+does not exist yet, so the replay contract becomes a *specification* rather than a repair of
+three disagreeing V2 predicates. D2 caps unanswered proposals at one, which makes
+exact-path/no-leaf-enumeration achievable **by construction** — retiring what had been the
+most expensive open question.
 
-## Read this first: three premises in the brief are not in the code
-
-Each is a verified absence, not a reading of intent. All three change the shape of what
-follows, so I have specified against the live model and marked where the answer moves it.
-
-**1. The Pilot does not consume the proposal ledger.** `git grep -li proposal` across
-`service/pilot/**` and `store/pilotStore.ts` returns **zero files**. The V2 ledger is
-schema-5 only, and on this revision the production Director path uses the *receipt mailbox*
-instead. So "terminal-proposal retention" currently describes a subsystem Phase 6 does not
-touch.
-
-**2. The pending cap is 50, not one.** `STUDIO_PROPOSAL_V2_MAX_PENDING_PER_PROJECT = 50`
-(`creativeStudioTypes.ts:156`), and the slot index space, the writer cap and the renderer's
-list handling are all built for many. Nothing in the code expresses the value 1.
-
-**3. There is no block concept in the ledger.** `grep -c block proposalSidecars.ts` returns
-**0**, so "a proposal spanning several existing blocks is refused" has nothing to attach to.
-
-**Consequence:** both contracts below are written for the V2 ledger as it exists. If the real
-target is a new Pilot-native proposal family, the retention contract survives almost intact
-(it is storage-shaped) but the replay contract must be re-specified against the receipt
-mailbox, whose identity and residue model differ.
+Rev 1 was written against the schema-5 V2 ledger. Everything storage-shaped survives;
+everything that was a correction of existing defects is now simply absent from the design.
 
 ---
 
 # Contract 1 — bounded terminal-proposal retention
 
-## What grows, and why it costs more than disk
+## Layout: three exact paths, no directory ever listed
 
-`decisions/<proposalId>.json` and its paired `pending/<proposalId>.json` are never pruned.
-`proposalSidecars.ts:573` states the intent: *"Terminal proposal sources and decisions are
-immutable audit history."* Nothing in the repo enforces a bound on them.
+```
+<studioRoot>/<projectId>/proposal/
+  current.json                  the one unanswered proposal — absent means none
+  history.json                  permanent append-only tombstones
+  decided/<proposalId>.json     retained payloads, bounded
+```
 
-The cost is not primarily storage. **There is no exact-path single-proposal reader.** Every
-read of proposal state goes through `readProposalLedgerV2`, which enumerates all four
-families and JSON-parses every record found — and even the Director's single-proposal lookup
-does `listProposalsV2()` then a linear `.find` (`director/processor.ts:374-375`). So each
-retained rejection makes **every** subsequent proposal read slower, permanently. A project
-that rejects steadily degrades its own read path with no ceiling.
+The V2 ledger needed four families and an index-named slot space because it admitted fifty.
+At a cap of one, **presence of `current.json` *is* the slot** — no slot family, no index
+grammar, no dense-index probe.
 
-## Recommended model: bounded payloads, permanent tombstones
+**Nothing enumerates, including the sweep.** That is the part worth stating plainly, because
+it is what rev 1 could not achieve: `history.json` is the index. Pruning reads the oldest
+tombstones, computes `decided/<id>.json` for each, and unlinks by exact path. There is never
+a reason to call `readdir` on `decided/`.
 
-Split what must survive from what must not accumulate.
+## What is retained, and what is dropped
 
-- **Drop the payload.** `pending/<id>.json` carries the proposal source and is the large
-  record (`STUDIO_PROPOSAL_V2_MAX_RECORD_BYTES` each). It is what bounds.
-- **Keep the fact, permanently, at ~120 bytes.** A decision is
-  `{schemaVersion, proposalId, status, decidedAt}`. Retaining *only that* forever costs
-  almost nothing and preserves everything downstream actually reads.
+| Record | Lifetime | Size |
+|---|---|---|
+| `current.json` | until decided | one proposal payload |
+| `decided/<id>.json` | bounded window, then pruned | one proposal payload each |
+| tombstone in `history.json` | **permanent** | ~120 bytes |
 
-This resolves four consequences at once that a plain count-cap would each break:
+The tombstone is what makes pruning safe. Retaining only `{proposalId, status, decidedAt,
+appliedRevision}` forever preserves four things that a plain count-cap would each break:
 
-| Consequence of pruning | Resolved by the tombstone |
-|---|---|
-| Terminal records are today's durable **id-reuse guard** — the writer refuses any id already present in a terminal directory | the tombstone is the guard, and it never expires |
-| A Director turn recap degrades to `unknown` for a forgotten id (`turnRecap.ts:324`) | status + decidedAt retained, so labels never degrade |
-| `studio_get_proposal` would answer `not_found` for something the user genuinely accepted | it can still answer `no_longer_pending` |
-| Accepted-proposal provenance must survive | status, decidedAt and appliedRevision survive |
-
-**Prune pending and decision as a pair.** The pending↔decision pairing is enforced in three
-places; one-sided pruning is already impossible and relaxing that invariant is the more
-expensive change.
-
-### Why the tombstone is not a fifth directory
-
-Three storage facts block the obvious placements: the family root admits **exactly four**
-children (`PROPOSAL_V2_DIRECTORY_NAMES`), each leaf rejects foreign filenames, and four
-derived name shapes already coexist inside the leaves (`.publish`, `.tmp`, `.ready`,
-`.cleanup`).
-
-So: **one append-only file at a computable path in the project directory**, beside
-`project.json` — `proposal-history.json`. One exact path, no enumeration, no new leaf
-grammar, and it does not widen any accepted-name regex.
-
-### No migration
-
-Absent file is a valid empty history. Existing retained records stay readable and are simply
-never pruned until a sweep first runs, at which point their tombstones are written from the
-decisions they already contain. Nothing is rewritten, no version gate is added, and a reader
-on an older build sees a file it does not know and ignores it.
+- **the id-reuse guard** — an id in `history.json` is never re-admitted, whether or not its
+  payload survives;
+- **recap fidelity** — a Director turn recap resolves a label instead of degrading to
+  `unknown`;
+- **the `no_longer_pending` answer** — `studio_get_proposal` never has to claim a proposal
+  the user genuinely accepted never existed;
+- **accepted-proposal provenance** — status, `decidedAt` and `appliedRevision` survive
+  indefinitely.
 
 ## Type shapes
 
 ```ts
-/** Permanent, id-only terminal record. Written when a decision is made, never removed. */
-export type StudioProposalTombstoneV4 = {
+/** The single unanswered proposal. Absent file means none pending. */
+export type StudioProposalCurrentV7 = {
+  schemaVersion: 7;
+  proposalId: string;
+  /** sha256 over the canonical JSON of the payload, lowercase hex. */
+  payloadSha256: string;
+  admittedAt: string;
+  payload: StudioProposalPayloadV7;
+};
+
+/** Permanent, id-only terminal record. Written on decide, never removed. */
+export type StudioProposalTombstoneV7 = {
   proposalId: string;
   status: 'accepted' | 'rejected' | 'expired';
   decidedAt: string;
-  /** Present only for accepted proposals that applied a revision. */
+  /** Retained so identity stays decidable after the payload is pruned. */
+  payloadSha256: string;
+  /** Present only where an accepted proposal applied a revision. */
   appliedRevision: number | null;
+  /** False once decided/<id>.json has been pruned. */
+  payloadRetained: boolean;
 };
 
-/** The whole file. Absent file === { schemaVersion, entries: [] }. */
-export type StudioProposalHistoryV4 = {
-  schemaVersion: 1;
-  /** Ordered oldest-first by decidedAt. Append-only. */
-  entries: StudioProposalTombstoneV4[];
+/** Absent file === { schemaVersion: 7, entries: [] }. */
+export type StudioProposalHistoryV7 = {
+  schemaVersion: 7;
+  /** Oldest-first by decidedAt. Append-only; entries are never rewritten except
+      payloadRetained flipping true -> false on prune. */
+  entries: StudioProposalTombstoneV7[];
 };
 ```
+
+Carrying `payloadSha256` in the tombstone is the single most load-bearing field here: it is
+what lets Contract 2 answer `identity_collision` for an id whose payload has been pruned.
+**Without it the two contracts cannot both hold.**
 
 ## Limits
 
 | Limit | Recommended | Rationale |
 |---|---|---|
-| Retained payload-bearing terminal records per project | **32** | Matches `STUDIO_MAX_JOBS_PER_PIECE_V3`; enough to review recent history, small enough to keep reads flat |
-| Payload retention window | **7 days by `decidedAt`** | Reuses the existing `STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS` precedent rather than inventing a duration |
-| Tombstone entries | **unbounded** | ~120 bytes each; bounding these is what reintroduces every problem above |
-| Tombstone file bytes | **hard ceiling, refuse above it** | A ceiling that can be hit needs a named error, not silent loss — see D4 |
+| Retained payloads per project | **32** | Mirrors `STUDIO_MAX_JOBS_PER_PIECE_V3`; enough to review recent history |
+| Payload retention window | **7 days by `decidedAt`** | Reuses the `STUDIO_DIRECTOR_COMMAND_RECEIPT_RETENTION_MS` precedent rather than inventing a duration |
+| Tombstone entries | **unbounded** | ~120 bytes each; bounding them reintroduces all four consequences above |
+| `history.json` bytes | **hard ceiling, refuse above it** — see D4 | A ceiling that can be hit needs a named error, not silent loss |
 
-Whichever of count or window is hit first evicts. Both are eviction triggers, not expiry.
+Count and window are both eviction triggers; whichever is reached first prunes. Neither
+expires anything, because a tombstone never expires.
+
+## No migration
+
+An absent `proposal/` directory and an absent `history.json` are both valid empty state.
+Since the family is new at schema 7, there is no prior data to read and therefore nothing to
+migrate — this is the cheapest moment in the product's life to fix the shape.
 
 ## Recovery invariants
 
-- **R1.** A decision is never observable without its tombstone. Write the tombstone in the
-  same commit that writes the decision, or the tombstone first — never the decision first.
-- **R2.** Pruning is idempotent and crash-safe: a partially pruned pair is completed on next
-  sweep, and a pair whose tombstone is missing is never pruned.
-- **R3.** An id present in the tombstone file is never re-admitted, regardless of whether its
-  payload survives. This is the invariant that makes pruning safe.
-- **R4.** Pruning never changes an answer to a decided/undecided question — only the
-  availability of the payload.
-- **R5.** A sweep is bounded per call and resumable; it never enumerates unboundedly.
+- **R1.** A decision is never observable without its tombstone. Append the tombstone before
+  or in the same commit as removing `current.json`; never the reverse.
+- **R2.** Pruning is idempotent and crash-safe. A tombstone with `payloadRetained: true`
+  whose payload file is already gone is repaired by flipping the flag, not by an error.
+- **R3.** An id present in `history.json` is never re-admitted, regardless of payload
+  retention. This is the invariant that makes pruning safe at all.
+- **R4.** Pruning never changes the answer to a decided/undecided question — only payload
+  availability.
+- **R5.** The sweep is bounded per call, resumable, and never enumerates.
+- **R6.** At most one `current.json` exists. Its presence is the admission gate; no counting.
 
 ## Focused acceptance tests
 
-1. **A rejected proposal's payload is dropped and its fact survives.** Decide 33 rejections;
-   assert 32 payloads remain, the 33rd's `pending`/`decisions` files are gone, and its
-   tombstone is present with the right status and `decidedAt`.
-2. **The id-reuse guard survives pruning.** Prune a proposal, then re-admit its id; assert
-   refusal, and assert the refusal cites the tombstone rather than a missing record.
-3. **Recap fidelity does not degrade.** Prune an accepted proposal, then resolve a turn recap
+1. **A 33rd decision prunes the oldest payload and keeps its fact.** Assert 32 payload files,
+   33 tombstones, and the oldest tombstone at `payloadRetained: false`.
+2. **The id-reuse guard survives pruning.** Prune, then re-admit the id; assert refusal citing
+   the tombstone.
+3. **Recap fidelity does not degrade.** Prune an accepted proposal, resolve a recap
    referencing it; assert the label is still `committed`, not `unknown`.
-4. **Absent history file is empty history, not an error.** Delete `proposal-history.json`,
-   read the ledger; assert success with zero entries and no migration path taken.
-5. **Pruning is pair-atomic under interruption.** Fail between the two unlinks; assert the
-   next sweep completes it and the invariant checks still pass.
-6. **Read cost is flat in retained history.** Assert `listProposalsV2` parses at most
-   `32 + pending + slots + commits` records regardless of tombstone count. This is the test
-   that would have caught the original defect.
+4. **Nothing enumerates.** Spy on `readdir`/`opendir` for the whole family and assert **zero
+   calls** across admit, decide, read, prune and repair. This is the test that keeps the
+   exact-path property true as the code grows, and rev 1 could not offer it.
+5. **Absent files are empty state, not errors.** Delete both; assert a successful read of
+   zero entries and no pending proposal.
+6. **Prune is crash-safe mid-pair.** Fail between unlink and flag write; assert the next
+   sweep repairs rather than throws.
+7. **Read cost is flat in history length.** Assert the number of files opened by a proposal
+   read is independent of tombstone count.
 
 ---
 
 # Contract 2 — idempotent mailbox replay
 
-## The failure window, precisely
+## The window
 
 A proposal is persisted, then receipt publication fails — crash, IPC loss, process exit. On
-replay the Director re-issues the same command. Today the code contains **contradictory
-answers for the same identity, with neither marked as intended**:
+replay the Director re-issues the same command. In a new family there are exactly three
+durable states to resolve against: **no record**, **`current.json`**, and **a tombstone in
+`history.json`**.
 
-- `service/director/processor.ts:391-407` reports an already-decided proposal as freshly
-  `recorded`, with a **synthesised `status: 'pending', decidedAt: null`**. It reports a lie
-  about a decided proposal.
-- The store compares the whole payload with `sameJson` and raises
-  `Studio proposal identity collision` (`proposalSidecars.ts:1864-1869`), while the service
-  and processor compare only **partial fields**. Three predicates, three behaviours.
+## The exact result matrix
 
-## The exact replay result matrix
-
-`replayProposal(commandId, proposalId, payload)` → exactly one of:
+`replayProposal(proposalId, payload)` → exactly one of:
 
 | Prior durable state | Result | Side effects |
 |---|---|---|
-| No record for this id | `admitted` | Persist, then publish receipt |
-| `pending`, same id, **same bytes** | `already_pending` | **Publish the missing receipt.** No write to the proposal |
-| `pending`, same id, **different bytes** | `identity_collision` | **Nothing written.** Not a no-op — a hard refusal |
-| `accepted` | `already_decided` + `accepted` + `appliedRevision` | Publish a terminal receipt. Never re-apply |
-| `rejected` | `already_decided` + `rejected` | Publish a terminal receipt |
-| `expired` | `already_decided` + `expired` | Publish a terminal receipt |
-| A **different** pending proposal exists | `busy` if the cap is 1; `admitted` if 50 | Depends on D2 |
+| No `current`, id not in history | `admitted` | Persist `current.json`, then publish receipt |
+| `current`, same id, **same digest** | `already_pending` | **Publish the missing receipt.** No write to the proposal |
+| `current`, same id, **different digest** | `identity_collision` | **Nothing written** |
+| `current`, **different** id | `busy` | Nothing written. Recoverable by deciding the other |
+| Tombstone: `accepted` | `already_decided` + `accepted` + `appliedRevision` | Publish terminal receipt. Never re-apply |
+| Tombstone: `rejected` | `already_decided` + `rejected` | Publish terminal receipt |
+| Tombstone: `expired` | `already_decided` + `expired` | Publish terminal receipt |
+| Tombstone for this id **and** a different `current` exists | `already_decided` | **History wins.** This id's fate is settled; the other proposal's pendency is irrelevant to it |
+| Tombstone digest ≠ replayed digest | `identity_collision` | Holds even when the payload has been pruned |
 
-Three properties this fixes:
+Four properties this pins down:
 
-- **`already_pending` is the whole point of the contract.** The proposal is already durable;
-  what failed was the receipt. Replay publishes the receipt and returns the original — it
-  does not re-persist, and it does not report `recorded` as if it were new.
-- **A decided proposal never reports `pending`.** The synthesised
-  `status: 'pending', decidedAt: null` is removed. A replay against a decision returns the
-  real decision.
+- **`already_pending` is the whole point.** The proposal is already durable; the *receipt* is
+  what failed. Replay publishes it and returns the original — it does not re-persist, and it
+  never reports the proposal as new.
+- **A decided proposal always reports its real decision.** With a cap of one, `busy` and
+  `already_decided` cannot be confused: `busy` is about *another* id occupying admission,
+  `already_decided` is about *this* id being finished.
 - **`identity_collision` is a refusal, not a first-result return.** Returning the first
-  result for different bytes would silently discard the Director's actual request.
+  result for different bytes silently discards what the Director actually asked for.
+- **Identity outlives the payload**, via the tombstone digest. This is the join between the
+  two contracts.
 
-### Distinguishing a different pending proposal from same-id corruption
+## Distinguishing the two failures that must never share a code
 
-These are different failures and must not share a code:
+- **`busy`** — a *different* proposalId holds `current.json`. Detected by id comparison.
+  **Recoverable:** decide the other proposal and retry.
+- **`identity_collision`** — the *same* proposalId, different digest. **Not recoverable by
+  retry**, because retrying reproduces it. It means a Director bug or a mutated record, and
+  it must be surfaced as such rather than swallowed.
 
-- **Different pending proposal** — a *different* `proposalId` occupying admission. Detected by
-  id comparison alone. Result `busy` (or `admitted` under a 50 cap). Recoverable by deciding
-  the other proposal.
-- **Same-id/different-bytes corruption** — the *same* `proposalId`, different payload.
-  Detected by digest comparison. Result `identity_collision`. **Not recoverable by retry**,
-  because retrying reproduces it; it means either a Director bug or a mutated record.
+Under D2 these are now cleanly separable, because there is exactly one admission slot and one
+id can occupy it.
 
-The digest is what makes the second decidable, so it must be **stored with the record**:
+## Type shapes
 
 ```ts
-export type StudioProposalIdentityV4 = {
-  proposalId: string;
-  /** sha256 over the canonical JSON of the admitted payload, lowercase hex. */
-  payloadSha256: string;
-  admittedAt: string;
-};
+export type StudioProposalReplayResultV7 =
+  | { outcome: 'admitted'; proposalId: string }
+  | { outcome: 'already_pending'; proposalId: string; admittedAt: string }
+  | { outcome: 'busy'; holdingProposalId: string }
+  | {
+      outcome: 'already_decided';
+      proposalId: string;
+      status: 'accepted' | 'rejected' | 'expired';
+      decidedAt: string;
+      appliedRevision: number | null;
+    }
+  | { outcome: 'identity_collision'; proposalId: string; expectedSha256: string };
 ```
 
-Storing the digest — rather than comparing whole payloads at replay time — is what lets the
-payload be pruned by Contract 1 while identity remains decidable. **The two contracts depend
-on each other here:** without the digest, pruning a payload would make
-`identity_collision` undetectable, and every replay against a pruned id would have to be
-admitted blind.
+Five outcomes, total over the state space, each carrying exactly what its caller needs to
+act. `identity_collision` carries the expected digest so the mismatch is diagnosable without
+reading the payload — which may no longer exist.
 
 ## Recovery invariants
 
 - **I1.** Every persisted proposal eventually has a published receipt. Replay is the
-  mechanism, so replay must be safe to call unboundedly.
-- **I2.** Replay never mutates a persisted proposal, and never re-applies a decision.
-- **I3.** Identity is decidable from retained data alone, for the whole life of the id —
-  including after the payload is pruned. This is R3 restated from the replay side.
+  mechanism, so it must be safe to call unboundedly.
+- **I2.** Replay never mutates a persisted proposal and never re-applies a decision.
+- **I3.** Identity is decidable from retained data alone for the whole life of the id,
+  including after the payload is pruned. R3 seen from the replay side.
 - **I4.** Every result is total and named. No path returns success for a state it did not
-  verify, and no path synthesises a status it did not read.
-- **I5.** Two replays of the same command produce the same result and the same side effects,
-  except that the receipt is published at most once.
+  read, and **no path synthesises a status** — the defect that made rev 1 a correction.
+- **I5.** Two replays produce the same result and the same side effects, except the receipt
+  is published at most once.
+- **I6.** `busy` and `identity_collision` are never substituted for one another.
 
 ## Focused acceptance tests
 
 1. **Persisted-but-unpublished replays to `already_pending` and publishes once.** Fail
-   receipt publication, replay twice; assert one proposal, one receipt, `already_pending`
-   both times.
-2. **Decided replays report the decision, never `pending`.** For each of accepted, rejected,
-   expired: replay and assert `already_decided` with the true status and `decidedAt`, and
-   assert no re-application. This is the test that fails against today's synthesised
-   `'pending'`.
-3. **Same id, one byte different, is refused with nothing written.** Assert
-   `identity_collision`, assert the stored record is byte-identical to before, assert no
-   receipt is published.
-4. **A different pending proposal is `busy`, not a collision.** Assert the two codes are
-   never interchanged — the test that stops the recoverable and unrecoverable cases merging.
-5. **Identity outlives the payload.** Prune under Contract 1, then replay with different
-   bytes; assert `identity_collision` still. This is the joint test of both contracts.
-6. **Replay is total over prior states.** Table-driven across every state including absent
-   and corrupt-unparseable; assert exactly one named result each and no thrown exception.
+   publication, replay twice; assert one proposal, one receipt, same result both times.
+2. **Each decided state reports itself.** Table-driven over accepted, rejected, expired;
+   assert the real status and `decidedAt`, and assert no re-application.
+3. **Same id, one byte different, refused with nothing written.** Assert
+   `identity_collision`, byte-identical stored record, no receipt.
+4. **A different pending proposal is `busy`, never a collision.** The test that stops the
+   recoverable and unrecoverable cases merging.
+5. **Identity outlives the payload.** Prune under Contract 1, replay with different bytes;
+   assert `identity_collision` still, sourced from the tombstone digest. The joint test.
+6. **History wins over pendency.** Decide id A, admit id B, replay A; assert
+   `already_decided` for A and that B is untouched.
+7. **Total over prior states**, including absent, pruned and corrupt-unparseable: exactly one
+   named outcome each, no thrown exception.
 
 ---
 
-# Owner decisions — flagged, not invented
+# Owner decisions still open
 
-Blocking, in the order they gate the work.
+D1, D2 and D8 are closed. D8 — whether to adopt exact-path reading — is retired by D2 rather
+than answered: at a cap of one there is nothing to dismantle.
 
 | # | Decision | Why it cannot be derived |
 |---|---|---|
-| **D1** | **Which subsystem is the target** — the V2 ledger, or a new Pilot-native family? | The Pilot references proposals zero times; the ledger is off the shipped path. This decides whether Contract 2 applies as written |
-| **D2** | **Pending cap: 1 or 50?** | Code says 50 everywhere; nothing expresses 1. Sets the `busy`/`admitted` row of the matrix, and a cap of 1 would let the slot family collapse to one exact path |
-| **D3** | **Retention rule** — 7-day window, count of 32, both, or never? | Two sibling families chose 7 days + a cap; this one says "immutable audit history" and prunes nothing |
-| **D4** | **At the byte ceiling: refuse, or evict?** | Both are first-class idioms here — drop-oldest-silently for `undoHistory`, refuse-with-a-code for `priorHandles`. Silence loses audit data; refusal blocks a user |
-| **D5** | **Is a proposal id single-use forever?** | My model assumes yes, via permanent tombstones. If reuse is acceptable the tombstone can itself be bounded, and the design simplifies |
-| **D6** | **Money-touching provenance: same window?** | After the commit attribution is deleted, the only join from a spend authorization back to its paid-recovery proposal is `confirmedAt === decidedAt`. Retaining `appliedRevision` in the tombstone preserves it — but whether spend needs a *longer* rule is an owner call |
-| **D7** | **Who schedules the sweep?** | `reapAbandonedProposalsV2` exists on the store contract with **no production caller** — tests only. There is no established trigger to extend |
-| **D8** | **Adopt exact-path reading?** | Three load-bearing invariants — the set-equality fence, the commit-attribution singleton, and pending-has-exactly-one-slot — are all defined over complete listings, and slots are index-named so no path is computable from a proposalId. Adopting it dismantles all three |
+| **D3** | Retention rule: 7-day window, count of 32, or both? | Sibling families chose 7 days and a count of 128; neither is a statement about proposals |
+| **D4** | At the `history.json` byte ceiling: refuse, or evict? | Both are first-class idioms here — drop-oldest for `undoHistory`, refuse-with-a-code for `priorHandles`. Silence loses audit data; refusal blocks a user |
+| **D5** | Is a proposal id single-use forever? | The design assumes yes via permanent tombstones. If reuse is acceptable, tombstones can themselves be bounded and this simplifies |
+| **D6** | Money-touching provenance: same window? | `appliedRevision` in the tombstone preserves the join to a spend authorization, but whether spend needs a *longer* rule is an owner call |
+| **D7** | Who runs the sweep? | **Recommendation: prune opportunistically inside the decide path**, bounded per call. A new family has no reaper to wire, and decide is the only moment history grows — so no scheduler is needed at all |
+
+## One adjacent question, raised because it is a schema question
+
+**An Assembly of photographs has no clock.** `StudioPieceV2` carries `kind` and
+`currentAssetId` and **no duration**, but the filmstrip shows per-segment durations and slates
+"hold their time". Wave 1's only Piece kind is `photograph`, and video does not arrive until
+Wave 2.
+
+The fix consistent with what is already agreed — the Assembly owns per-binding state, as it
+owns audio time anchors and the mix level — is that **segment duration is a property of the
+binding, not of the Piece**. A photograph held four seconds in one Assembly and two in
+another is then coherent, and the field costs one number in the binding record.
+
+It is raised here because it must be decided before the schema-7 freeze, not after.
 
 ---
 
 # What I did not invent
 
-- Any duration, count or byte ceiling not already precedented in this subsystem. Every number
-  above cites the sibling constant it mirrors.
-- The one-pending rule, the block-spanning refusal, or a Pilot proposal family. All three are
-  absent from the code and are D1/D2.
-- A resolution to the three disagreeing identity predicates. I specified the contract the
-  matrix requires and flagged that two of the three must be deleted, rather than choosing
-  which on the code's behalf.
-- Placement of a durable index in any location the storage rules currently forbid.
+- Any duration, count or byte ceiling without citing the sibling constant it mirrors.
+- A resolution to D3–D7.
+- The segment-duration answer above — it is a recommendation with its reasoning, offered for
+  the freeze rather than assumed into it.
