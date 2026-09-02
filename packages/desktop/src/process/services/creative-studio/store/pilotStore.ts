@@ -176,6 +176,8 @@ export type StudioPilotStorageStepV3 =
 export type CreativeStudioPilotStoreOptionsV3 = {
   rootDir: string;
   fs?: RecordIoFileSystem;
+  /** Test-only narrowing of the fixed production cap; values above the cap are refused. */
+  maxManifestBytes?: number;
   now?: () => string;
   createProjectId?: () => string;
   createTemporaryId?: () => string;
@@ -681,7 +683,16 @@ const sameObservation = (
 export const createCreativeStudioPilotStoreV3 = (
   options: CreativeStudioPilotStoreOptionsV3
 ): CreativeStudioPilotStoreV3 => {
+  if (
+    options.maxManifestBytes !== undefined &&
+    (!Number.isSafeInteger(options.maxManifestBytes) ||
+      options.maxManifestBytes < 1 ||
+      options.maxManifestBytes > MAX_MANIFEST_BYTES)
+  ) {
+    throw new TypeError('Invalid Creative Studio manifest byte limit');
+  }
   const fs = options.fs ?? nodeFs;
+  const manifestByteLimit = options.maxManifestBytes ?? MAX_MANIFEST_BYTES;
   const readNow = options.now ?? (() => new Date().toISOString());
   const mintProjectId = options.createProjectId ?? (() => `project_${randomBytes(18).toString('base64url')}`);
   const mintTemporaryId = options.createTemporaryId ?? (() => randomBytes(12).toString('base64url'));
@@ -766,7 +777,7 @@ export const createCreativeStudioPilotStoreV3 = (
       fs,
       root.canonicalRoot,
       path.join(projectDir, PROJECT_MANIFEST),
-      MAX_MANIFEST_BYTES
+      manifestByteLimit
     );
     const brief = await readBoundedBytes(fs, root.canonicalRoot, path.join(projectDir, PROJECT_BRIEF), MAX_BRIEF_BYTES);
     if (manifest === null || brief === null) return null;
@@ -824,14 +835,14 @@ export const createCreativeStudioPilotStoreV3 = (
       PROJECT_MANIFEST,
       transaction.previousManifestSha256,
       transaction.nextManifestSha256,
-      MAX_MANIFEST_BYTES
+      manifestByteLimit
     );
     await syncDirectory(fs, projectDir);
     const liveManifest = await readDigest(
       fs,
       root.canonicalRoot,
       path.join(projectDir, PROJECT_MANIFEST),
-      MAX_MANIFEST_BYTES
+      manifestByteLimit
     );
     const liveBrief = await readDigest(fs, root.canonicalRoot, path.join(projectDir, PROJECT_BRIEF), MAX_BRIEF_BYTES);
     if (liveManifest !== transaction.nextManifestSha256 || liveBrief !== transaction.nextBriefSha256) {
@@ -862,7 +873,7 @@ export const createCreativeStudioPilotStoreV3 = (
         fs,
         root.canonicalRoot,
         path.join(projectDir, PROJECT_MANIFEST),
-        MAX_MANIFEST_BYTES
+        manifestByteLimit
       );
     } catch {
       manifest = null;
@@ -969,8 +980,14 @@ export const createCreativeStudioPilotStoreV3 = (
     next: StudioProjectV3,
     authorizeBeforeReplace?: () => void | Promise<void>
   ): Promise<void> => {
-    const transactionId = temporaryId();
     const serialized = serializeProject(next);
+    if (
+      Buffer.byteLength(serialized.manifestBytes, 'utf8') > manifestByteLimit ||
+      Buffer.byteLength(serialized.briefBytes, 'utf8') > MAX_BRIEF_BYTES
+    ) {
+      throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+    }
+    const transactionId = temporaryId();
     const transaction: ProjectWriteTransactionV3 = {
       schemaVersion: PROJECT_TRANSACTION_SCHEMA_VERSION,
       projectId: next.id,
@@ -1017,7 +1034,7 @@ export const createCreativeStudioPilotStoreV3 = (
         PROJECT_MANIFEST,
         transaction.previousManifestSha256,
         transaction.nextManifestSha256,
-        MAX_MANIFEST_BYTES
+        manifestByteLimit
       );
       await storageStep('update:manifest_published', next.id);
       await syncDirectory(fs, captured.projectDir);
@@ -1356,9 +1373,15 @@ export const createCreativeStudioPilotStoreV3 = (
         } catch {
           throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
         }
+        const serialized = serializeProject(project);
+        if (
+          Buffer.byteLength(serialized.manifestBytes, 'utf8') > manifestByteLimit ||
+          Buffer.byteLength(serialized.briefBytes, 'utf8') > MAX_BRIEF_BYTES
+        ) {
+          throw new CreativeStudioPilotStoreErrorV3('invalid_payload');
+        }
         const stageName = `.create-${temporaryId()}`;
         const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, stageName);
-        const serialized = serializeProject(project);
         let published = false;
         try {
           await fs.mkdir(stage);

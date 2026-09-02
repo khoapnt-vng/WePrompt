@@ -17,7 +17,7 @@ import {
   type CreativeStudioPilotStoreV3,
   type StudioPilotStorageStepV3,
 } from '@process/services/creative-studio/store/pilotStore';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const roots: string[] = [];
 
@@ -467,6 +467,50 @@ describe('schema-6 pilot project store', () => {
     expect(await restarted.loadProjectV3(base.projectId)).toEqual(before);
   });
 
+  it('refuses an oversized update before authorization or filesystem mutation', async () => {
+    const root = await temporaryRoot();
+    const storageSteps: StudioPilotStorageStepV3[] = [];
+    const options = deterministicOptions(root, {
+      maxManifestBytes: 2_048,
+      onStorageStep: (step) => {
+        storageSteps.push(step);
+      },
+    });
+    const store = createCreativeStudioPilotStoreV3(options);
+    const created = await store.createProjectV3({ name: 'Bounded manifest', brief: 'Original brief.' });
+    storageSteps.length = 0;
+    const authorizeBeforeReplace = vi.fn();
+
+    await expectStoreError(
+      store.updateProjectV3(
+        created.id,
+        (project) => ({
+          ...project,
+          rules: Array.from({ length: 24 }, (_, index) => ({
+            id: `rule_${index}`,
+            scope: 'project' as const,
+            text: `Rule ${index} ${'x'.repeat(220)}`,
+            predicate: null,
+            createdAt: project.createdAt,
+          })),
+        }),
+        {
+          expectedRevision: created.revision,
+          kind: 'authoring',
+          authorizeBeforeReplace,
+        }
+      ),
+      'invalid_payload'
+    );
+
+    expect(authorizeBeforeReplace).not.toHaveBeenCalled();
+    expect(storageSteps).toEqual([]);
+    expect((await readdir(projectDirectory(root, created.id))).toSorted()).toEqual(['brief.md', 'project.json']);
+
+    const restarted = createCreativeStudioPilotStoreV3(deterministicOptions(root));
+    expect(await restarted.loadProjectV3(created.id)).toEqual(created);
+  });
+
   it('fails closed across invalid public authority requests and isolates unreadable projects', async () => {
     const root = await temporaryRoot();
     const { store, projectId } = await createHealthy(root);
@@ -555,6 +599,12 @@ describe('schema-6 pilot project store', () => {
     );
     await duplicate.createProjectV3({ name: 'First', brief: '' });
     await expectStoreError(duplicate.createProjectV3({ name: 'Second', brief: '' }), 'already_exists');
+
+    for (const maxManifestBytes of [0, 1.5, 1_048_577]) {
+      expect(() =>
+        createCreativeStudioPilotStoreV3(deterministicOptions(defaultRoot, { maxManifestBytes }))
+      ).toThrowError(TypeError);
+    }
   });
 
   it('isolates an invalid durable deletion marker instead of disabling inventory', async () => {
