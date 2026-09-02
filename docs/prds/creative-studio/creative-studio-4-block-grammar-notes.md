@@ -1,3 +1,18 @@
+> **SUPERSEDED — read `creative-studio-4-block-grammar-v2.html.txt` instead.**
+>
+> The designer re-issued the whole table as revision 2, which folds in the eleven
+> corrections these notes prompted, the sound rows, and Ruling 2's fixed vocabulary.
+> Its own changelog reads: *"This supersedes the delivered table. Build from this one."*
+>
+> These notes are kept because they record what was found in revision 1 and why —
+> including the status-vocabulary problem that became Ruling 2. Do not build from
+> revision 1.
+>
+> Two defects to be aware of in revision 2 itself: it retires `RUNNING` and then still
+> uses the word in three places (the region diagram, the §2.4 conditions-strip text, and
+> the density chip rule), and it states the region-4 gate two ways — the diagram omits
+> `NEEDS BUDGET`, the §2.4 text includes it. The §2.4 text is correct.
+
 # CS4 block grammar — engineering notes on the delivered spec
 
 **Date:** 2026-08-30 · **About:**
