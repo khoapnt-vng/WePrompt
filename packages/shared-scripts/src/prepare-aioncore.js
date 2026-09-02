@@ -34,7 +34,11 @@ const {
   verifyAioncoreReleaseBundle,
 } = require('./aioncoreReleaseBundle');
 const aioncoreTrust = require('./aioncore-trust');
-const { assertGitShaResolvesOnRemote, listRemoteRefs } = require('./verify-git-source-commit');
+const {
+  assertAnnotatedTagIdentity,
+  assertGitShaResolvesOnRemote,
+  listRemoteRefs,
+} = require('./verify-git-source-commit');
 
 // Security-patched fork (D-01 loopback token, MCP OAuth discovery/DCR fix).
 // The upstream iOfficeAI/AionCore is unpatched; the desktop app ships the fork.
@@ -45,6 +49,8 @@ const AIONCORE_PUBLISHING_REMOTE = 'https://github.com/khoapnt-vng/aioncore.git'
 // Target of the annotated `v0.1.55` tag. The release workflow binds this exact
 // merged commit into every complete bundle before WePrompt verifies it again.
 const ACCEPTED_AIONCORE_SOURCE_COMMIT = 'ef6e1dd199e884fdf2df95d494b2c51b97006656';
+const ACCEPTED_AIONCORE_TAG = 'v0.1.55';
+const ACCEPTED_AIONCORE_TAG_OBJECT = 'e2aa0db0f1129c6cf5e6b9856ffafaa60c66491b';
 
 // Default Forge mirror that publishes cosign-signed, self-built AionCore
 // artifacts (see aioncore-trust.js). Overridable via env for other mirrors.
@@ -768,6 +774,22 @@ function assertAcceptedActionsRun(
   return { conclusion, headSha, status };
 }
 
+function assertAcceptedAioncoreReleaseTag(tag, resolveRefs = listRemoteRefs) {
+  if (tag !== ACCEPTED_AIONCORE_TAG) return;
+
+  try {
+    assertAnnotatedTagIdentity({
+      tagName: tag,
+      tagObjectSha: ACCEPTED_AIONCORE_TAG_OBJECT,
+      peeledCommitSha: ACCEPTED_AIONCORE_SOURCE_COMMIT,
+      remoteUrl: AIONCORE_PUBLISHING_REMOTE,
+      resolveRefs,
+    });
+  } catch (error) {
+    throw makeIntegrityError(`AionCore release tag identity verification failed: ${error?.message ?? error}`);
+  }
+}
+
 function getAcceptedActionsRun(runId, resolveRefs, expectedSourceCommit) {
   const run = githubApiGetJson(`repos/${GITHUB_OWNER}/${GITHUB_REPO}/actions/runs/${runId}`);
   return assertAcceptedActionsRun(run, runId, resolveRefs, expectedSourceCommit);
@@ -1204,6 +1226,7 @@ function prepareAioncore(options) {
         sourceDetail = { url: result.url, ownerRepo: result.ownerRepo, forgeTag: result.forgeTag };
         console.log(`  Downloaded and cosign-verified from Forge mirror`);
       } else {
+        assertAcceptedAioncoreReleaseTag(tag, resolveAioncoreRefs);
         const result = downloadAndExtract(platform, arch, tag, releaseBundleContract);
         sourcePath = result.binaryPath;
         sourceLineagePath = result.lineagePath;
@@ -1312,6 +1335,9 @@ function prepareAioncore(options) {
 
 module.exports = {
   ACCEPTED_AIONCORE_SOURCE_COMMIT,
+  ACCEPTED_AIONCORE_TAG,
+  ACCEPTED_AIONCORE_TAG_OBJECT,
+  assertAcceptedAioncoreReleaseTag,
   assertAcceptedActionsRun,
   assertHttpsUrl,
   computeSha256,

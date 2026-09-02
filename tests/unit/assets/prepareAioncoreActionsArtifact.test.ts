@@ -5,6 +5,9 @@ import { delimiter, dirname, join } from 'node:path';
 
 const {
   ACCEPTED_AIONCORE_SOURCE_COMMIT,
+  ACCEPTED_AIONCORE_TAG,
+  ACCEPTED_AIONCORE_TAG_OBJECT,
+  assertAcceptedAioncoreReleaseTag,
   assertAcceptedActionsRun,
   getActionsArtifactName,
   getActionsArtifactMissingMessage,
@@ -26,7 +29,9 @@ const posixFakeToolchainIt = process.platform === 'win32' ? it.skip : it;
  * the global default without re-measuring under full-suite load.
  */
 const FAKE_TOOLCHAIN_TIMEOUT_MS = 120_000;
-const publishedAioncoreRefs = 'ef6e1dd199e884fdf2df95d494b2c51b97006656\trefs/tags/v0.1.55\n';
+const publishedAioncoreRefs =
+  'e2aa0db0f1129c6cf5e6b9856ffafaa60c66491b\trefs/tags/v0.1.55\n' +
+  'ef6e1dd199e884fdf2df95d494b2c51b97006656\trefs/tags/v0.1.55^{}\n';
 const resolvePublishedAioncoreRefs = () => publishedAioncoreRefs;
 
 function legacyFixtureContract(allowedRuntimeKeys = ['linux-x64']) {
@@ -157,6 +162,53 @@ afterEach(() => {
 });
 
 describe('prepare-aioncore GitHub Actions artifact resolver', () => {
+  it('accepts the exact published annotated release tag', () => {
+    expect(() => assertAcceptedAioncoreReleaseTag(ACCEPTED_AIONCORE_TAG, resolvePublishedAioncoreRefs)).not.toThrow();
+    expect(ACCEPTED_AIONCORE_TAG_OBJECT).toBe('e2aa0db0f1129c6cf5e6b9856ffafaa60c66491b');
+  });
+
+  it('classifies a recreated release tag as a fail-closed integrity error', () => {
+    let failure: (Error & { isAioncoreIntegrityError?: boolean }) | undefined;
+    try {
+      assertAcceptedAioncoreReleaseTag(
+        ACCEPTED_AIONCORE_TAG,
+        () =>
+          `1111111111111111111111111111111111111111\trefs/tags/${ACCEPTED_AIONCORE_TAG}\n` +
+          `${ACCEPTED_AIONCORE_SOURCE_COMMIT}\trefs/tags/${ACCEPTED_AIONCORE_TAG}^{}\n`
+      );
+    } catch (error) {
+      if (error instanceof Error) failure = error;
+    }
+
+    expect(failure).toMatchObject({ isAioncoreIntegrityError: true });
+    expect(failure?.message).toMatch(/release tag identity verification failed/);
+  });
+
+  it('checks the annotated tag identity before downloading the accepted release', () => {
+    const root = mkdtempSync(join(tmpdir(), 'aioncore-release-tag-identity-'));
+    const previousSource = process.env.AIONUI_AIONCORE_SOURCE;
+    delete process.env.AIONUI_AIONCORE_SOURCE;
+
+    try {
+      expect(() =>
+        prepareAioncore({
+          projectRoot: root,
+          platform: 'darwin',
+          arch: 'arm64',
+          version: ACCEPTED_AIONCORE_TAG,
+          releaseBundleContract: legacyFixtureContract(['darwin-arm64']),
+          resolveAioncoreRefs: () =>
+            `1111111111111111111111111111111111111111\trefs/tags/${ACCEPTED_AIONCORE_TAG}\n` +
+            `${ACCEPTED_AIONCORE_SOURCE_COMMIT}\trefs/tags/${ACCEPTED_AIONCORE_TAG}^{}\n`,
+        })
+      ).toThrow(/release tag identity verification failed/);
+    } finally {
+      if (previousSource === undefined) delete process.env.AIONUI_AIONCORE_SOURCE;
+      else process.env.AIONUI_AIONCORE_SOURCE = previousSource;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   // Scope note (BUG-040): injected ref output verifies gate behavior without
   // claiming that a fixture proves real-world provenance. Production obtains
   // this independent input from git ls-remote on the publishing host.

@@ -13,13 +13,37 @@ BUG-040 in `TASKS.md`, and T0.2 in [sprint3-plan.md](../readme/sprint3-plan.md).
 
 **Date:** 2026-09-02 · **Status:** accepted for the internal macOS ARM64 and Windows x64 pilot
 
-The current pilot source pin is immutable tag `v0.1.55` at
-`ef6e1dd199e884fdf2df95d494b2c51b97006656` on
-`github.com/khoapnt-vng/aioncore`. It supersedes the Sprint 3 `v0.1.51` pin for pilot builds without
-rewriting the historical Sprint 3 decision below. The release workflow accepts that exact tag and
-commit only and publishes exactly `aarch64-apple-darwin` and `x86_64-pc-windows-msvc` complete
-bundles. WePrompt separately pins the tag, full source commit, migration lineage, allowed runtime
-keys, and independently calculated archive digests.
+The current pilot source pin is the annotated tag `v0.1.55`, whose tag object is
+`e2aa0db0f1129c6cf5e6b9856ffafaa60c66491b` and whose peeled source commit is
+`ef6e1dd199e884fdf2df95d494b2c51b97006656` on `github.com/khoapnt-vng/aioncore`. It supersedes the
+Sprint 3 `v0.1.51` pin for pilot builds without rewriting the historical Sprint 3 decision below.
+The release workflow accepts that exact tag and commit only and publishes exactly
+`aarch64-apple-darwin` and `x86_64-pc-windows-msvc` complete bundles. WePrompt separately pins the
+tag object, full source commit, migration lineage, allowed runtime keys, and independently
+calculated archive digests.
+
+The accepted GitHub release identity observed on 2026-09-02 is release `380890038`, produced by
+Actions run `33570043845`. Its relevant asset identities are:
+
+| Asset                                          | GitHub asset id | Accepted SHA-256                                                   |
+| ---------------------------------------------- | --------------- | ------------------------------------------------------------------ |
+| `aioncore-v0.1.55-aarch64-apple-darwin.tar.gz` | `540301179`     | `cde7f6dc21d7f3a6c6a5ee1ef16ffc401976d2b0724f3e07358cdb2f22cead5d` |
+| `aioncore-v0.1.55-x86_64-pc-windows-msvc.zip`  | `540301181`     | `bca6cc3988f9f0cdef2a9f1c74c2a5f9b3091fb9920bae0b299f2a20126ee6ef` |
+| `aioncore-checksums.txt`                       | `540301180`     | `53c0569e76aaeb4ca0d553b1fb64cfad9eabb8d101bc20dfe48c700477ceb229` |
+
+An earlier local diagnostic also used workspace version `0.1.55`. Its deliberately non-release
+archive was named `aioncore-v0.1.55-aarch64-apple-darwin-attempt2.tar.gz`, was built from candidate
+`e2931e953cbdfed146497e25ebf7bc3981b95193`, and hashed to
+`a78bbf7305bc90cb024c6088b3ee4a07cc67b4ba515779b4912329114d915938`. The retained evidence
+explicitly says that archive could not substitute for authorized workflow assets. It is not
+evidence that the accepted GitHub release asset was republished.
+
+GitHub release and tag objects remain administratively deletable unless repository rules protect
+them; no such ruleset existed when this identity was recorded. Therefore "immutable" is an
+acceptance policy enforced by the consumer pins, not a property supplied by the hosting UI.
+`prepare-aioncore` fails closed if the annotated tag object, peeled commit, archive digest, bundle
+manifest, or lineage changes. Any changed binary must use a new tag such as `v0.1.56`; never delete
+and recreate `v0.1.55`.
 
 This is an unsigned internal release. Public distribution remains subject to the signing and
 packaged acceptance requirements in [aioncore-artifact-contract.md](aioncore-artifact-contract.md).

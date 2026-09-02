@@ -37,14 +37,24 @@ Windows signing acceptance. A later public release still requires signer provena
 platform acceptance.
 
 Release evidence: AionCore Actions run
-[`33570043845`](https://github.com/khoapnt-vng/aioncore/actions/runs/33570043845) bound the annotated
-tag, built both targets, extracted and reverified both archives, and created the immutable release.
+[`33570043845`](https://github.com/khoapnt-vng/aioncore/actions/runs/33570043845) bound annotated tag
+object `e2aa0db0f1129c6cf5e6b9856ffafaa60c66491b` to the accepted source commit, built both targets,
+extracted and reverified both archives, and created release `380890038` through a create-only
+publisher. GitHub administrators can still delete and recreate tags or releases when no repository
+ruleset protects them, so WePrompt treats the exact tag object and artifact digests as the
+enforceable identity rather than trusting the mutable tag name or release page.
 An independent post-release download on 2026-09-02 calculated
 `cde7f6dc21d7f3a6c6a5ee1ef16ffc401976d2b0724f3e07358cdb2f22cead5d` for macOS ARM64 and
 `bca6cc3988f9f0cdef2a9f1c74c2a5f9b3091fb9920bae0b299f2a20126ee6ef` for Windows x64; both
 matched the release sidecar. WePrompt's release-bundle verifier then accepted both extracted
 archives against the exact source, target, 29-entry lineage, internal payload checksums, and
 managed-resource contract.
+
+The earlier `a78bbf7305bc90cb024c6088b3ee4a07cc67b4ba515779b4912329114d915938`
+archive was a local diagnostic named with an `-attempt2` suffix and built from superseded candidate
+`e2931e953cbdfed146497e25ebf7bc3981b95193`. Its own evidence barred it from release acceptance;
+it must not be compared as though it were an earlier published instance of the current GitHub
+asset.
 
 ## Reading rule
 
