@@ -1053,7 +1053,7 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
   - **The guard is as much the fix as the map.** A parameterised test asserts each name appears both in the rules and as a string the product ships — the coupling that was missing, so renaming a control now fails a test instead of silently making the Director wrong. It also pins the instruction to describe the action when a name is not known, without which an incomplete map becomes a new source of invented names.
   - **Deliberately not covered:** what sits inside the Project menu. Those strings could not be verified cheaply, and asserting them unchecked is the mistake this entry is about.
 
-- [ ] **[BUG-185][P2][Creative Studio] A project written before a schema bump becomes permanently unopenable, is reported as corrupt, and cannot be repaired by clearing files** — found 2026-08-29, retested 2026-08-30
+- [x] **[BUG-185][P2][Creative Studio] A project written before a schema bump becomes permanently unopenable, is reported as corrupt, and cannot be repaired by clearing files** — found 2026-08-29, retested 2026-08-30
   - **Lane: Workspace.** Only the diagnosability half is actionable — reporting a legacy record as corrupt. The unopenability itself is accepted cost under the owner's test-data ruling and is not work.
   - **Actual.** `Plateau`'s whole proposal family is schema **5** against a current **6** (`STUDIO_PROPOSAL_SCHEMA_VERSION_V2`, bumped by `916e8e51c` with no migration). The project is reported as a **corrupt manifest**, and it is the cause of **BUG-179**.
   - **"Corrupt" is wrong and costly.** `sidecarSchemaV2` already separates a legacy record (`unsupported_prototype_schema`) from a damaged one (`invalid`), but the reconciler reports both as **malformed**, so a routine schema bump is indistinguishable from storage corruption in the log. That misdirection is most of why BUG-179 took a day to find.
@@ -1072,6 +1072,13 @@ CreativeStudioServiceError('provider_error'); }`. A single logged line would hav
       quarantine each with distinct diagnostics while a healthy schema-6 sibling opens and runs. No
       schema-5 record may be rewritten or defaulted.
     - **Claimant:** Unclaimed.
+  - **Fixed by `e1042cb7c`.** The schema-6 Pilot store now recognizes the complete, internally
+    consistent composition-2 / authoring-fingerprint-1 clusters written before reference
+    conditioning and reports them as **Unsupported** without accepting, defaulting, or rewriting
+    them. Unknown or mixed nested versions remain **Quarantined**. The regression starts with a real
+    confirmed generation record, rewrites every persisted version replica to the historical pair,
+    verifies the manifest remains byte-for-byte unchanged, and separately proves that one mixed
+    replica fails closed while a healthy schema-6 sibling still opens.
 
 - [x] **[BUG-186][P3][Creative Studio] The first-frame viewer's counter is painted over by the close button** — found 2026-08-29, measured in the running app
   - **Lane: Workspace.** One rule in `FirstFrames.module.css`.
