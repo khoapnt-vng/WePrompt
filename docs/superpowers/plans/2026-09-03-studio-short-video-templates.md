@@ -4,7 +4,7 @@
 
 **Goal:** Give CS3 a gallery of templates for short videos, where picking one, filling a few inputs and authorizing a price produces a single generated clip the person then watches in the Cut view.
 
-**Architecture:** Port the template half of the entry kit (a renderer-only presentation layer) onto CS3's `Library/`, and replace its CS2-era five-call pipeline with CS3's quote-gated protocol: a free phase that creates the project, pins rules, authors one beat and one shot, probes admission and requests a price; then a paid phase that is a single `confirm-submission` plus a navigation. No multi-clip stitching, no film export, no ffmpeg.
+**Architecture:** Port the template half of the entry kit (a renderer-only presentation layer) onto CS3's `Library/`, and replace its CS2-era five-call pipeline with CS3's quote-gated protocol: a free phase that creates the project, pins rules, authors one beat and one shot, probes admission and requests a price; then a paid phase that is a single `confirm-submission` plus a navigation. No multi-clip stitching and no film export — though ffmpeg does not leave the path, because ffprobe gates persisting any take.
 
 **Tech Stack:** Electron + React 18, TypeScript (strict), Arco Design, UnoCSS + CSS Modules, i18next (12 locales), Vitest (node + jsdom projects), oxlint + oxfmt.
 
@@ -814,7 +814,40 @@ export const prepareLaunch = async (request: PrepareLaunchRequest): Promise<Prep
 };
 ```
 
-- [ ] **Step 4: Confirm no explicit route selection is needed**
+- [ ] **Step 4: Probe for ffmpeg before spending, not after**
+
+No video take can be persisted without a successful ffprobe duration probe — any failure becomes
+`invalid_media` (`mediaStore.ts:4431`). Left unchecked, that lands *after* the charge, which is the
+same failure the source branch hit.
+
+`get-film-export-capability` is the only free signal for it. Its stated scope is film assembly, but
+its refusal reasons are `'ffmpeg_unavailable' | 'ffprobe_unavailable' | 'unsupported_capabilities'`
+(`T:1354-1362`) — the same binaries. So use it as a presence probe in Phase A, before pricing:
+
+```ts
+  const filmCapability = await attempt(() =>
+    ipcBridge.creativeStudio.getFilmExportCapability.invoke({ projectId })
+  );
+  // Scoped to film assembly by name, but its refusal names the binaries that also gate persisting a
+  // take. Checking it here turns "this machine cannot keep the video" into a free answer.
+  if (
+    filmCapability !== null &&
+    filmCapability.ok &&
+    filmCapability.data.status === 'unavailable' &&
+    filmCapability.data.reason !== 'unsupported_capabilities'
+  ) {
+    return { status: 'stopped', step: 'capability', projectId, messageKey: MEDIA_TOOLING_MESSAGE_KEY };
+  }
+```
+
+Add `MEDIA_TOOLING_MESSAGE_KEY = 'conversation.creativeStudio.entry.launch.mediaToolingMissing'` and
+its 12 locale entries, and a test asserting `prepare-submission` is never called when the probe
+reports `ffprobe_unavailable`.
+
+Confirm the exact bridge method name against `ipcBridge.ts` before writing this — the channel is
+`creative-studio.get-film-export-capability`.
+
+- [ ] **Step 5: Confirm no explicit route selection is needed**
 
 The spec left this open. `set_routes` is an authoring operation taking
 `{ imageRouteId, videoRouteId }`, and a fresh project may have neither set. Check whether
@@ -830,12 +863,12 @@ and extend `spine.test.ts` to assert its presence and position. If routes are re
 the `no_engine` capability block suggests, since that block exists precisely to answer "nothing is
 connected" — change nothing and record the finding in the task's commit message.
 
-- [ ] **Step 5: Run the test and confirm it passes**
+- [ ] **Step 6: Run the test and confirm it passes**
 
 Run: `bunx vitest run tests/unit/pages/studio/entry/prepareLaunch.test.ts`
-Expected: PASS, 8 tests.
+Expected: PASS, 11 tests.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/pages/studio/components/EntryKit/lib/prepareLaunch.ts tests/unit/pages/studio/entry/prepareLaunch.test.ts
@@ -1932,8 +1965,15 @@ const confirmLaunch = useCallback(
       return;
     }
     setQuote(null);
-    // Navigate to the project, not to Cut: `studioViewReadiness` gates `cut` on the cut stage having
-    // content, and `StudioPage` replaces the route with a ready view, so a direct jump would bounce.
+    /*
+     * Land on the project, not on Cut, and do not expect the router to advance later.
+     *
+     * `STUDIO_VIEWS` is `['references','table','board','cut']` and `firstReadyStudioView` scans it in
+     * fixed document order, so Table wins the moment a shot exists and Cut — being last — never does.
+     * The queued job is invisible to routing, and when the clip lands the auto-nav effect
+     * early-returns before remembering a view, so it re-resolves to Table again. Cut is reached by an
+     * explicit affordance, added below, never by waiting.
+     */
     onOpenProject(result.projectId);
   },
   [onOpenProject, quote]
@@ -1948,11 +1988,52 @@ Render `<ConfirmPanel>` inside the modal when `quote !== null`, and an alert whe
 Run: `bunx vitest run tests/unit/pages/studio/entry/launchWiring.dom.test.tsx`
 Expected: PASS.
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 5: Give the person an explicit route to Cut**
+
+Nothing advances them there, so the affordance has to exist. Read
+`components/Workspace/WorkspaceShell.tsx` first — the Cut tab renders as a disabled Button until the
+view is ready, and a deep link to `/studio/:id/cut` gets a not-ready pane. Both are the existing,
+correct behaviour; do not weaken either.
+
+What to add: on the Table view, when the shot has a selected take, surface a link to Cut using
+`studioViewPath(projectId, 'cut')`. Gate it on take presence, not on job completion — readiness keys
+on take counts, not active jobs.
+
+Write the failing test first, in `tests/unit/pages/studio/entry/cutAffordance.dom.test.tsx`:
+
+```tsx
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { describe, expect, it } from 'vitest';
+import { studioViewReadiness } from '@renderer/pages/studio/studioPhaseRoute';
+
+describe('reaching Cut after a one-shot launch', () => {
+  it('is not ready while the only job is still queued', () => {
+    const status = { stages: { storyboard: { shotCount: 1 }, cut: { takeCount: 0 } } };
+
+    expect(studioViewReadiness(status as never).cut).toBe(false);
+  });
+
+  it('becomes ready once the shot holds a take', () => {
+    const status = { stages: { storyboard: { shotCount: 1 }, cut: { takeCount: 1 } } };
+
+    expect(studioViewReadiness(status as never).cut).toBe(true);
+  });
+});
+```
+
+Match `StudioProjectStatusV2`'s real field names rather than the shape above, then implement the
+affordance and re-run.
+
+- [ ] **Step 6: Commit**
 
 ```bash
-git add packages/desktop/src/renderer/pages/studio/components/EntryKit tests/unit/pages/studio/entry
-git commit -m "feat(studio): quote, confirm, then open the project"
+git add packages/desktop/src/renderer/pages/studio/components tests/unit/pages/studio/entry
+git commit -m "feat(studio): quote, confirm, open the project, and offer Cut when a take exists"
 ```
 
 ---
@@ -2072,8 +2153,10 @@ bun run dev
 Open Creative Studio, pick a template, accept the default length, click through to the confirm panel.
 Verify the panel names a real engine and a real price, then confirm.
 
-Expected: one job appears; when it succeeds the Cut view becomes reachable and plays a single clip of
-the chosen length. No ffmpeg is required, because nothing is stitched.
+Expected: the quote states both generations (seed still, then take) unless the template supplied a
+first frame; after confirming, jobs appear and the clip plays once Cut becomes reachable. No ffmpeg
+*encode or mux* is needed, because nothing is stitched — but ffmpeg must still be installed, since
+ffprobe gates persisting the take.
 
 - [ ] **Step 3: Verify the free phase really is free**
 
