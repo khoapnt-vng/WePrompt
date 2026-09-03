@@ -49,7 +49,8 @@ clip is generated, watch it in the Cut view.
 
 - No Director conversation and no proposal ledger. The flow never calls `bind-director-conversation`,
   `list-proposals` or `accept-proposal`. Authoring is deterministic via `apply-authoring-batch`.
-- No multi-clip video, no stitching, no film export, no ffmpeg on the happy path.
+- No multi-clip video, no stitching, no film export. Note ffmpeg does **not** leave the path:
+  ffprobe gates persisting any take, so Phase A probes for it before spending (see §3).
 - No CS4. Deferred by the owner; the plan makes no accommodation for the cutover.
 - No Explore gallery and no quick suggestions. Dropped from the source kit (~2,162 lines).
 
