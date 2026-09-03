@@ -3,7 +3,7 @@
 Current as of 2026-09-04. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**127 bugs filed · 124 closed · 3 open** — 1 P1, 2 P2, 0 P3.
+**128 bugs filed · 124 closed · 4 open** — 1 P1, 3 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
@@ -11,6 +11,7 @@ BUG-202 records a live late-CS3 scalability failure and the bounded recovery beh
 closed without importing the absent audio-analysis feature slice. BUG-204, BUG-205, BUG-207 and
 BUG-208 reconcile Claude's follow-up findings against the recovery's actual contracts; proposed
 BUG-206 is the same incident as BUG-207, and non-reproducing BUG-209 remains outside the bug count.
+BUG-210 records the remaining visible-ID seam after restoring plain-language Director replies.
 
 ---
 
@@ -21,6 +22,7 @@ BUG-206 is the same incident as BUG-207, and non-reproducing BUG-209 remains out
 | **BUG-144** | P1       | Owner-deferred | Approve and package distributable LGPL-compatible ffmpeg/ffprobe binaries; finish provenance, signing, notices and legal review; separately give found-but-unsupported builds accurate remediation. |
 | **BUG-163** | P2       | Code fixed     | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                                                                             |
 | **BUG-166** | P2       | Code fixed     | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                                                                         |
+| **BUG-210** | P2       | Partial fix    | Carry the selected proposal through a typed backend-supported per-turn context so the editable draft and transcript no longer need the opaque routing ID.                                           |
 
 There is no actionable open P3 queue.
 
@@ -41,6 +43,16 @@ and Main single-flight behavior, and idempotent duplicate persistence. The four 
 456 tests together. The repository's fake MP4 is uniformly black, so it correctly exercises rejection
 but cannot prove positive poster persistence. These entries stay open until the two Electron scenarios
 above are run with suitable fixtures.
+
+### BUG-210 — the reply is plain; the selected-proposal handoff is not yet hidden
+
+Commit `1accb3527` restores the Director's plain-language contract, removes proposal IDs from cards and
+tool summaries, and keeps exact routing in strict structured MCP output. The remaining **Prepare updated
+proposal** path has only one string shared by the visible editor, persisted queue and model request. The
+current AionCore does not consume a one-shot hidden context field, so simply deleting the ID would make
+multiple pending proposals ambiguous. Closure requires a typed proposal target that survives edits,
+queueing and reload, is validated against the exact Studio project/conversation, and reaches the model
+without entering visible draft or transcript text.
 
 ## 2. Closed in this recovery
 
@@ -93,6 +105,13 @@ formatting, translation validation and lint pass with 1,321 repository warnings 
 independent adversarial review found no remaining authorization, deadlock, exactly-once, reload,
 cancellation-race or special-workflow issue after remote-attempt validation was hardened. No paid
 provider generation was run during this code pass.
+
+Director-language commit `1accb3527` completes the safe reply/card/tool-summary slice of BUG-210. Its
+focused suites pass 428 tests, including the real MCP protocol boundary; the repository and coverage
+runs each pass 672 files and 10,705 tests with 25 skipped. Changed source paths are at least 87.95%
+line-covered. TypeScript, formatting, translation validation and lint pass with 1,321 repository warnings
+and zero errors. The bug remains open only for the backend-supported hidden per-turn target described
+above.
 
 ## 3. Planned product work outside the bug count
 
