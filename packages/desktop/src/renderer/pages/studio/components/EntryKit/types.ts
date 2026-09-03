@@ -4,23 +4,50 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioAspectRatio, StudioResolution } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_MAX_SHOT_SECONDS,
+  STUDIO_MIN_SHOT_SECONDS,
+  type StudioAspectRatio,
+  type StudioResolution,
+} from '@/common/types/project/creativeStudioTypes';
 import type { StudioClipWindow } from '@renderer/pages/studio/studioClipWindow';
 
 /** Two seconds is fine enough to feel like a choice without listing lengths nobody distinguishes. */
 const DURATION_STEP_SECONDS = 2;
 
 /**
+ * The window a length must satisfy to be both renderable and storable.
+ *
+ * The engine and the store disagree *in both directions* — `seedance-1-0-pro-250528` renders from
+ * 2s where the store's floor is 4s, and the store's ceiling of 15s is above what some engines
+ * reach. So neither range alone is safe to offer from: the engine's alone yields lengths the IPC
+ * boundary refuses (`payloadSchemas.ts` zod-rejects the `add_shot`, and the reducer fails it
+ * `invalid_shot_duration`), which the person only discovers after choosing.
+ *
+ * `resolveEngineClipWindow` deliberately keeps reporting the *engine's* limits, because describing
+ * what the engine can do is a different question, asked elsewhere. The intersection belongs here,
+ * where we decide what to offer.
+ *
+ * Null when the two ranges do not overlap at all — the right answer for an engine whose whole
+ * range sits outside what the store accepts, since there is no length that both would honour.
+ */
+const resolveOfferableWindow = (clipWindow: StudioClipWindow | null): StudioClipWindow | null => {
+  if (clipWindow === null) return null;
+  const minDurationSeconds = Math.max(STUDIO_MIN_SHOT_SECONDS, clipWindow.minDurationSeconds);
+  const maxDurationSeconds = Math.min(STUDIO_MAX_SHOT_SECONDS, clipWindow.maxDurationSeconds);
+  if (minDurationSeconds > maxDurationSeconds) return null;
+  return { minDurationSeconds, maxDurationSeconds };
+};
+
+/**
  * The lengths a short may be offered, given what is actually connected.
  *
- * A short is *one* engine clip, so the only honest offers are the lengths a single clip can hold.
- * The window is therefore the engine's, not the store's: the persistence range
- * (`STUDIO_MIN_SHOT_SECONDS` / `STUDIO_MAX_SHOT_SECONDS`) is far wider than any real engine, and
- * clamping to it would offer durations the engine then refuses at generation time — a failure the
- * person only discovers after paying for it.
+ * A short is *one* engine clip, so the only honest offers are the lengths a single clip can hold —
+ * and that the store will then accept, which is why this steps across `resolveOfferableWindow`
+ * rather than the engine window it is handed.
  *
  * The maximum is always the last entry even when the step overshoots it, because the longest clip
- * the engine can render is the one people reach for and it must never be unreachable.
+ * available is the one people reach for and it must never be unreachable.
  *
  * An empty list rather than a fallback ladder for an absent, reversed, or nonsensical window: with
  * no engine connected there is no length we can promise, and a list of guesses is indistinguishable
@@ -28,9 +55,15 @@ const DURATION_STEP_SECONDS = 2;
  */
 export const studioShortDurations = (clipWindow: StudioClipWindow | null): number[] => {
   if (clipWindow === null) return [];
-  const { minDurationSeconds: min, maxDurationSeconds: max } = clipWindow;
-  if (!Number.isInteger(min) || !Number.isInteger(max)) return [];
-  if (min <= 0 || max <= 0 || min > max) return [];
+  const { minDurationSeconds: rawMin, maxDurationSeconds: rawMax } = clipWindow;
+  if (!Number.isInteger(rawMin) || !Number.isInteger(rawMax)) return [];
+  if (rawMin <= 0 || rawMax <= 0 || rawMin > rawMax) return [];
+
+  // Validate what the engine reported *before* intersecting, so a nonsensical window stays
+  // recognisably nonsensical instead of being rescued into the store's range by the clamp.
+  const offerable = resolveOfferableWindow(clipWindow);
+  if (offerable === null) return [];
+  const { minDurationSeconds: min, maxDurationSeconds: max } = offerable;
 
   const durations: number[] = [];
   for (let seconds = min; seconds <= max; seconds += DURATION_STEP_SECONDS) durations.push(seconds);
@@ -46,12 +79,17 @@ export const studioShortDurations = (clipWindow: StudioClipWindow | null): numbe
  * a slightly different length still tells the story — where rejecting it would strand the template
  * behind an engine swap nobody made deliberately.
  *
- * Null when nothing is connected, so callers surface "no engine" rather than silently proceeding
- * with an unvetted number.
+ * Clamps into the offerable window, not the engine's: a length the engine would render but the
+ * store refuses is no more usable than one the engine refuses, and returning it here would push the
+ * rejection out to the IPC boundary where it reads as a bug rather than a limit.
+ *
+ * Null when nothing is connected, or when the engine and store ranges do not overlap, so callers
+ * surface that rather than silently proceeding with an unvetted number.
  */
 export const clampToClipWindow = (seconds: number, clipWindow: StudioClipWindow | null): number | null => {
-  if (clipWindow === null) return null;
-  return Math.min(Math.max(seconds, clipWindow.minDurationSeconds), clipWindow.maxDurationSeconds);
+  const offerable = resolveOfferableWindow(clipWindow);
+  if (offerable === null) return null;
+  return Math.min(Math.max(seconds, offerable.minDurationSeconds), offerable.maxDurationSeconds);
 };
 
 /**
@@ -80,15 +118,16 @@ export type StudioTemplate = {
   resolution: StudioResolution;
   /**
    * One length, not a range: a short is a single clip and a single clip has a single duration.
-   * It is the length the template was authored for, and it is clamped into the live engine window
-   * (`clampToClipWindow`) before anything is generated, because the engine connected today may be
-   * narrower than the one this number was chosen against.
+   * It is the length the template was authored for, and it is clamped (`clampToClipWindow`) into
+   * what the connected engine and the store both accept before anything is generated, because
+   * neither is guaranteed to match the range this number was chosen against.
    */
   defaultDurationSeconds: number;
   /**
-   * Machine-readable rule terms only — the words a generated take is checked against.
-   * The human-readable label for each rule lives with the copy, so that reviewing what a rule
-   * *enforces* never depends on which language the reader has selected.
+   * Machine-readable rule terms only. These reach the engine as prompt text (via `composition.ts`)
+   * — they steer the model, they do not gate it, so nothing rejects a take that ignores them.
+   * The human-readable label for each rule lives with the copy, so that reading what a rule asks
+   * for never depends on which language the reader has selected.
    */
   rules: readonly { id: string; terms: readonly string[] }[];
   /**

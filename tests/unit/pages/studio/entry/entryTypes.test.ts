@@ -32,6 +32,19 @@ describe('studioShortDurations', () => {
     expect(studioShortDurations({ minDurationSeconds: 0, maxDurationSeconds: 8 })).toEqual([]);
     expect(studioShortDurations({ minDurationSeconds: 4.5, maxDurationSeconds: 8 })).toEqual([]);
   });
+
+  /** seedance-1-0-pro accepts 2s, but the store's schema rejects the add_shot that would follow. */
+  it('never offers a length below the store floor even when the engine allows it', () => {
+    expect(studioShortDurations({ minDurationSeconds: 2, maxDurationSeconds: 12 })).toEqual([4, 6, 8, 10, 12]);
+  });
+
+  it('never offers a length above the store ceiling even when the engine allows it', () => {
+    expect(studioShortDurations({ minDurationSeconds: 4, maxDurationSeconds: 20 })).toEqual([4, 6, 8, 10, 12, 14, 15]);
+  });
+
+  it('offers nothing when the engine range sits entirely outside what the store accepts', () => {
+    expect(studioShortDurations({ minDurationSeconds: 1, maxDurationSeconds: 3 })).toEqual([]);
+  });
 });
 
 describe('clampToClipWindow', () => {
@@ -49,5 +62,13 @@ describe('clampToClipWindow', () => {
 
   it('returns null when there is no window to clamp into', () => {
     expect(clampToClipWindow(8, null)).toBeNull();
+  });
+
+  it('raises to the store floor rather than the lower engine minimum', () => {
+    expect(clampToClipWindow(2, { minDurationSeconds: 2, maxDurationSeconds: 12 })).toBe(4);
+  });
+
+  it('lowers to the store ceiling rather than the higher engine maximum', () => {
+    expect(clampToClipWindow(20, { minDurationSeconds: 4, maxDurationSeconds: 20 })).toBe(15);
   });
 });
