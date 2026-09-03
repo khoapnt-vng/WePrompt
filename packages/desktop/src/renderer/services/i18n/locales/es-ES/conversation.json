@@ -941,6 +941,44 @@
         "failed": "No se pudo conectar Dirección de forma segura. Recarga el proyecto."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Requiere autorización",
+            "proposed": "Propuesto",
+            "partial": "Parcial",
+            "drafted": "Borrador",
+            "rendered": "Renderizado",
+            "imported": "Importado",
+            "current": "Actual",
+            "stale": "Obsoleto",
+            "failed": "Error",
+            "queued": "En cola",
+            "generating": "Generando",
+            "rendering": "Renderizando"
+          },
+          "member": {
+            "slate": "Claqueta",
+            "queued": "En cola",
+            "ready_to_render": "Listo para renderizar",
+            "generating": "Generando",
+            "rendered": "Renderizado",
+            "stale": "Obsoleto",
+            "failed": "Error"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "incumplimiento de regla",
+              "returned_silence": "devolvió silencio",
+              "provider_failure": "fallo del proveedor",
+              "local_render_failure": "fallo de renderizado local",
+              "download_failure": "fallo de descarga"
+            },
+            "cost": { "spent": "con gasto", "not_spent": "sin gasto" }
+          },
+          "action": { "re_render_chain": "Volver a renderizar la cadena", "keep": "Conservar", "retry": "Reintentar" },
+          "queuedPosition": "En cola · {{position}}"
+        },
         "projectActions": "Acciones del proyecto",
         "loading": "Cargando proyecto…",
         "refreshing": "Actualizando proyecto…",
@@ -1099,6 +1137,57 @@
           "visualReferences": "Referencias visuales",
           "visualReferencesHint": "Elige hasta {{maximum}} Pieces actuales para guiar esta foto.",
           "visualReferencesCount": "{{selected}} de {{maximum}} seleccionadas"
+        },
+        "cut": {
+          "length": "{{played}} de {{total}}",
+          "playsSummary": "se reproduce {{played}} · se detiene donde acaba lo ya producido",
+          "slatesSummary": "{{count}} planos se mantienen como claquetas · {{unmade}} sin hacer",
+          "slatesSummary_one": "{{count}} plano se mantiene como claqueta · {{unmade}} sin hacer",
+          "slatesSummary_other": "{{count}} planos se mantienen como claquetas · {{unmade}} sin hacer",
+          "slateTally": "{{count}} claquetas · {{duration}}",
+          "slateTally_one": "{{count}} claqueta · {{duration}}",
+          "slateTally_other": "{{count}} claquetas · {{duration}}",
+          "audioBed": "{{handle}} · importado · {{level}} bajo toda la película",
+          "audioSegment": "{{handle}} · {{duration}} · anclado a {{beat}}",
+          "audioNotGenerated": "no generado",
+          "audioMissingDetail": "Narración de {{beat}} — no generada. Ahí la película se reproduce sin sonido, con toda su duración.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Inicio de cadena",
+          "chainAfter": "Después de {{handle}}",
+          "staleOffChain": "Fuera de la cadena desde que {{handle}} se volvió a renderizar. Se reproduce.",
+          "reorderHint": "Alt+Flecha arriba/abajo lo mueve — dentro de {{beat}} eso reescribe la cadena y cuesta {{price}}; entre Beats es gratis.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Recortar",
+          "matchTo": "Reconectar con {{handle}}",
+          "play": "Reproducir",
+          "reCut": "Volver a montar",
+          "level": "Nivel {{level}}",
+          "commissionCost": "Producir los {{count}} planos sin hacer costaría {{price}} — {{duration}} de película a {{rate}} por segundo.",
+          "commissionCost_one": "Producir {{count}} plano sin hacer costaría {{price}} — {{duration}} de película a {{rate}} por segundo.",
+          "commissionCost_other": "Producir los {{count}} planos sin hacer costaría {{price}} — {{duration}} de película a {{rate}} por segundo.",
+          "commission": "Encargar · {{price}}",
+          "notNow": "Ahora no",
+          "conditions": "Condicionado por: {{handles}}",
+          "budgetRemaining": "Quedan {{remaining}} de {{total}}",
+          "quotesOutstanding": "{{count}} presupuestos pendientes · {{sum}} si se ejecutan todos",
+          "quotesOutstanding_one": "{{count}} presupuesto pendiente · {{sum}} si se ejecuta",
+          "quotesOutstanding_other": "{{count}} presupuestos pendientes · {{sum}} si se ejecutan todos",
+          "proposedSummary": "{{beats}} Beats · {{shots}} planos",
+          "proposedFrom": "De {{handle}}. Dibujar los {{count}} costaría {{price}}.",
+          "proposedFrom_one": "De {{handle}}. Dibujarlo costaría {{price}}.",
+          "proposedFrom_other": "De {{handle}}. Dibujar los {{count}} costaría {{price}}."
+        },
+        "accessibility": {
+          "filmstrip": "Tira de película, un segmento por cada Beat",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Pista de audio",
+          "memberInspector": "Detalles de {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} se movió a la posición {{position}}",
+          "reorderAnnouncementWithCost": "{{handle}} se movió a la posición {{position}}; el cambio cuesta {{price}}",
+          "slateMember": "{{handle}}, se mantiene durante {{duration}}, aún sin hacer",
+          "quoteRegion": "Presupuesto de {{handle}}",
+          "judgementFooter": "Hay que tomar una decisión sobre {{handle}}"
         }
       },
       "spending": {

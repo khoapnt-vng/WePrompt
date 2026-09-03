@@ -17,6 +17,7 @@ import {
   STUDIO_MAX_PROJECT_MANIFEST_BYTES_V4,
   type CreativeStudioPilotStoreOptionsV4,
   type CreativeStudioPilotStoreV4,
+  type StudioPilotProjectCommitCandidateEvidenceV4,
   type StudioPilotStorageStepV4,
 } from '@process/services/creative-studio/store/pilot';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -88,7 +89,7 @@ const updateWithRuleText = (
   projectId: string,
   expectedRevision: number,
   text: string,
-  authorizeBeforeReplace?: () => void | Promise<void>
+  authorizeBeforeReplace?: (evidence: StudioPilotProjectCommitCandidateEvidenceV4) => void | Promise<void>
 ) =>
   store.updateProjectV4(
     projectId,
@@ -340,7 +341,7 @@ describe('inactive schema-7 pilot project store', () => {
     });
 
     await expect(
-      store.withProjectAuthorityV4(projectId, async (authority) => {
+      store.withProjectWriterAuthorityV4(projectId, { purpose: 'project_update' }, async (authority) => {
         const manifest = JSON.parse(await readFile(manifestFile(root, projectId), 'utf8')) as Record<string, unknown>;
         manifest.name = 'Raced outside the project queue';
         await writeFile(manifestFile(root, projectId), `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
@@ -364,6 +365,7 @@ describe('inactive schema-7 pilot project store', () => {
       const crashing = createCreativeStudioPilotStoreV4(
         deterministicOptions(root, {
           createProjectId: () => 'unused_project',
+          mainInstanceId: 'main_instance_crashed',
           onStorageStep: (step) => {
             if (step === failureStep) throw new Error('simulated process death');
           },
@@ -375,7 +377,13 @@ describe('inactive schema-7 pilot project store', () => {
         'storage_error'
       );
 
-      const restarted = createCreativeStudioPilotStoreV4(deterministicOptions(root));
+      const restarted = createCreativeStudioPilotStoreV4(
+        deterministicOptions(root, {
+          mainInstanceId: 'main_instance_restarted',
+          hasSingleInstanceRecoveryAuthority: () => true,
+        })
+      );
+      await expect(restarted.recoverProjectWriteV4(base.projectId)).resolves.toBeUndefined();
       expect(await restarted.getProjectV4(base.projectId)).toEqual({
         status: 'not_found',
         catalogueId: base.projectId,
@@ -384,7 +392,7 @@ describe('inactive schema-7 pilot project store', () => {
     }
   );
 
-  it('completes an unchanged schema-6 deletion authorized before the schema-7 cutover', async () => {
+  it('does not mutate an incomplete schema-6 deletion during the schema-7 clean cutover', async () => {
     const root = await temporaryRoot();
     const legacy = createCreativeStudioPilotStoreV3({
       ...deterministicOptions(root),
@@ -398,11 +406,11 @@ describe('inactive schema-7 pilot project store', () => {
     });
 
     const cutover = createCreativeStudioPilotStoreV4(deterministicOptions(root));
-    expect(await cutover.getProjectV4(project.id)).toEqual({ status: 'not_found', catalogueId: project.id });
-    expect((await readdir(root)).filter((entry) => entry.startsWith('.delete-'))).toEqual([]);
+    expect(await cutover.getProjectV4(project.id)).toEqual({ status: 'unsupported', catalogueId: project.id });
+    expect((await readdir(root)).filter((entry) => entry.startsWith('.delete-'))).toHaveLength(1);
   });
 
-  it('completes an unchanged quarantined schema-6 deletion authorized before the schema-7 cutover', async () => {
+  it('does not mutate an incomplete quarantined schema-6 deletion during the schema-7 clean cutover', async () => {
     const root = await temporaryRoot();
     await writeRawProject(root, 'legacy_quarantined', { schemaVersion: 6 }, 'Malformed schema-6 project.');
     const legacy = createCreativeStudioPilotStoreV3({
@@ -418,7 +426,7 @@ describe('inactive schema-7 pilot project store', () => {
 
     const cutover = createCreativeStudioPilotStoreV4(deterministicOptions(root));
     expect(await cutover.getProjectV4('legacy_quarantined')).toEqual({
-      status: 'not_found',
+      status: 'unsupported',
       catalogueId: 'legacy_quarantined',
     });
   });
@@ -447,7 +455,7 @@ describe('inactive schema-7 pilot project store', () => {
 
     const cutover = createCreativeStudioPilotStoreV4(deterministicOptions(root));
     expect(await cutover.getProjectV4(project.id)).toEqual({ status: 'unsupported', catalogueId: project.id });
-    expect((await readdir(root)).filter((entry) => entry.startsWith('.delete-'))).toEqual([]);
+    expect((await readdir(root)).filter((entry) => entry.startsWith('.delete-'))).toHaveLength(1);
     await rm(heldDirectory, { recursive: true });
   });
 
@@ -467,6 +475,12 @@ describe('inactive schema-7 pilot project store', () => {
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
+    expect((await readdir(partialRoot)).some((entry) => entry.startsWith('.create-'))).toBe(true);
+    const partialRecovery = createCreativeStudioPilotStoreV4(
+      deterministicOptions(partialRoot, { hasSingleInstanceRecoveryAuthority: () => true })
+    );
+    await partialRecovery.inspectProjectsV4();
+    expect((await readdir(partialRoot)).some((entry) => entry.startsWith('.create-'))).toBe(false);
 
     const completeRoot = await temporaryRoot();
     const complete = createCreativeStudioPilotStoreV4(
@@ -480,13 +494,94 @@ describe('inactive schema-7 pilot project store', () => {
       complete.createProjectV4({ name: 'Complete stage', brief: 'Both records are durable.' }),
       'storage_error'
     );
-    const completeRestart = createCreativeStudioPilotStoreV4(deterministicOptions(completeRoot));
+    const unprivilegedRestart = createCreativeStudioPilotStoreV4(deterministicOptions(completeRoot));
+    expect(await unprivilegedRestart.inspectProjectsV4()).toEqual({
+      healthyProjectIds: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    expect((await readdir(completeRoot)).some((entry) => entry.startsWith('.create-'))).toBe(true);
+    const completeRestart = createCreativeStudioPilotStoreV4(
+      deterministicOptions(completeRoot, { hasSingleInstanceRecoveryAuthority: () => true })
+    );
     expect(await completeRestart.inspectProjectsV4()).toEqual({
       healthyProjectIds: ['project_v4_1'],
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
     expect((await completeRestart.loadProjectV4('project_v4_1')).brief).toBe('Both records are durable.');
+  });
+
+  it('does not reclaim a live local create stage while another store initializes with recovery authority', async () => {
+    const root = await temporaryRoot();
+    let announceStageDurable!: () => void;
+    let releaseStage!: () => void;
+    const stageDurable = new Promise<void>((resolve) => {
+      announceStageDurable = resolve;
+    });
+    const stageReleased = new Promise<void>((resolve) => {
+      releaseStage = resolve;
+    });
+    const creating = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        onStorageStep: async (step) => {
+          if (step !== 'create:stage_durable') return;
+          announceStageDurable();
+          await stageReleased;
+        },
+      })
+    );
+    const creation = creating.createProjectV4({ name: 'Live stage', brief: 'Do not reclaim this stage.' });
+    await stageDurable;
+
+    const recovering = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        createProjectId: () => 'unused_project',
+        hasSingleInstanceRecoveryAuthority: () => true,
+      })
+    );
+    let inspectionSettled = false;
+    const inspection = recovering.inspectProjectsV4().finally(() => {
+      inspectionSettled = true;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(inspectionSettled).toBe(false);
+    expect((await readdir(root)).some((entry) => entry.startsWith('.create-'))).toBe(true);
+
+    releaseStage();
+    await expect(creation).resolves.toMatchObject({ id: 'project_v4_1' });
+    await expect(inspection).resolves.toEqual({
+      healthyProjectIds: ['project_v4_1'],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    expect((await readdir(root)).some((entry) => entry.startsWith('.create-'))).toBe(false);
+  });
+
+  it('stops create-stage recovery when single-instance authority disappears', async () => {
+    const root = await temporaryRoot();
+    const crashing = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        onStorageStep: (step) => {
+          if (step === 'create:stage_durable') throw new Error('simulated process death');
+        },
+      })
+    );
+    await expectStoreError(
+      crashing.createProjectV4({ name: 'Retained stage', brief: 'Recovery authority is required.' }),
+      'storage_error'
+    );
+    const stageName = (await readdir(root)).find((entry) => entry.startsWith('.create-'));
+    expect(stageName).toBeDefined();
+    let authorityChecks = 0;
+    const recovery = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        hasSingleInstanceRecoveryAuthority: () => ++authorityChecks === 1,
+      })
+    );
+
+    await expectStoreError(recovery.inspectProjectsV4(), 'storage_error');
+    expect(await readdir(root)).toContain(stageName);
   });
 
   it.each<StudioPilotStorageStepV4>(['update:journal_durable', 'update:brief_published'])(
@@ -497,6 +592,7 @@ describe('inactive schema-7 pilot project store', () => {
       const crashing = createCreativeStudioPilotStoreV4(
         deterministicOptions(root, {
           createProjectId: () => 'unused_project',
+          mainInstanceId: 'main_instance_crashed',
           onStorageStep: (step) => {
             if (step === failureStep) throw new Error('simulated process death');
           },
@@ -512,7 +608,13 @@ describe('inactive schema-7 pilot project store', () => {
         'storage_error'
       );
 
-      const restarted = createCreativeStudioPilotStoreV4(deterministicOptions(root));
+      const restarted = createCreativeStudioPilotStoreV4(
+        deterministicOptions(root, {
+          mainInstanceId: 'main_instance_restarted',
+          hasSingleInstanceRecoveryAuthority: () => true,
+        })
+      );
+      await expect(restarted.recoverProjectWriteV4(base.projectId)).resolves.toBeUndefined();
       const recovered = await restarted.loadProjectV4(base.projectId);
       expect(recovered).toMatchObject({
         revision: 2,
@@ -527,7 +629,199 @@ describe('inactive schema-7 pilot project store', () => {
     }
   );
 
-  it('replays an independently versioned schema-6 transaction before classifying the project unsupported', async () => {
+  it('discovers an abandoned project-update owner before inventory and routes its exact recovery', async () => {
+    const root = await temporaryRoot();
+    const base = await createHealthy(root);
+    const crashing = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        mainInstanceId: 'main_instance_crashed',
+        onStorageStep: (step) => {
+          if (step === 'update:journal_durable') throw new Error('simulated process death');
+        },
+      })
+    );
+    await expectStoreError(
+      crashing.updateProjectV4(base.projectId, (project) => ({ ...project, name: 'Recovered from inventory' }), {
+        expectedRevision: 1,
+        kind: 'authoring',
+      }),
+      'storage_error'
+    );
+
+    const restarted = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        mainInstanceId: 'main_instance_restarted',
+        hasSingleInstanceRecoveryAuthority: () => true,
+      })
+    );
+    await expect(restarted.inspectProjectsV4()).resolves.toEqual({
+      healthyProjectIds: [],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(restarted.listAbandonedProjectWritesV4()).resolves.toEqual([
+      { projectId: base.projectId, purpose: 'project_update', proposalId: null },
+    ]);
+    await expect(restarted.recoverProjectWriteV4(base.projectId)).resolves.toBeUndefined();
+    await expect(restarted.listAbandonedProjectWritesV4()).resolves.toEqual([]);
+    await expect(restarted.inspectProjectsV4()).resolves.toEqual({
+      healthyProjectIds: [base.projectId],
+      unsupportedProjectIds: [],
+      quarantinedProjectIds: [],
+    });
+    await expect(restarted.loadProjectV4(base.projectId)).resolves.toMatchObject({
+      revision: 2,
+      name: 'Recovered from inventory',
+    });
+  });
+
+  it('provides exact durable candidate evidence before publishing a project journal', async () => {
+    const root = await temporaryRoot();
+    const steps: StudioPilotStorageStepV4[] = [];
+    const { store, projectId } = await createHealthy(root, {
+      onStorageStep: (step) => {
+        steps.push(step);
+      },
+    });
+    const before = await store.loadProjectV4(projectId);
+    const beforeManifest = await readFile(manifestFile(root, projectId), 'utf8');
+    steps.length = 0;
+    let observed:
+      | {
+          evidence: StudioPilotProjectCommitCandidateEvidenceV4;
+          entries: string[];
+          liveManifest: string;
+          candidateManifest: string;
+          candidateBrief: string;
+          lastStep: StudioPilotStorageStepV4 | undefined;
+        }
+      | undefined;
+
+    const committed = await store.updateProjectV4(
+      projectId,
+      (project) => ({ ...project, name: 'Candidate authority', brief: 'Durable candidate brief.' }),
+      {
+        expectedRevision: before.revision,
+        kind: 'authoring',
+        authorizeBeforeReplace: async (evidence) => {
+          const entries = (await readdir(projectDirectory(root, projectId))).toSorted();
+          const candidateManifestName = entries.find(
+            (entry) => entry.startsWith('.project-') && entry.endsWith('.tmp')
+          );
+          const candidateBriefName = entries.find((entry) => entry.startsWith('.brief-') && entry.endsWith('.tmp'));
+          if (candidateManifestName === undefined || candidateBriefName === undefined) {
+            throw new Error('durable candidates missing at authorization boundary');
+          }
+          observed = {
+            evidence,
+            entries,
+            liveManifest: await readFile(manifestFile(root, projectId), 'utf8'),
+            candidateManifest: await readFile(
+              path.join(projectDirectory(root, projectId), candidateManifestName),
+              'utf8'
+            ),
+            candidateBrief: await readFile(path.join(projectDirectory(root, projectId), candidateBriefName), 'utf8'),
+            lastStep: steps.at(-1),
+          };
+        },
+      }
+    );
+
+    expect(observed?.evidence).toEqual({
+      projectId,
+      beforeRevision: 1,
+      afterRevision: 2,
+      beforeAuthoringRevision: 1,
+      afterAuthoringRevision: 2,
+      beforeManifestSha256: digest(beforeManifest),
+      afterManifestSha256: digest(observed?.candidateManifest ?? ''),
+      committedAt: committed.updatedAt,
+    });
+    expect(observed).toMatchObject({
+      entries: expect.not.arrayContaining(['.project-write-v3.json']),
+      liveManifest: beforeManifest,
+      candidateBrief: 'Durable candidate brief.',
+      lastStep: 'update:candidates_durable',
+    });
+    expect(Object.isFrozen(observed?.evidence)).toBe(true);
+  });
+
+  it('leaves the project unchanged when durable-candidate authorization refuses', async () => {
+    const root = await temporaryRoot();
+    const { store, projectId } = await createHealthy(root);
+    const before = await store.loadProjectV4(projectId);
+    const refusal = new Error('proposal attribution refused');
+
+    await expect(
+      store.withProjectWriterAuthorityV4(projectId, { purpose: 'project_update' }, (authority) =>
+        authority.commit((project) => ({ ...project, brief: 'Must not publish.' }), {
+          expectedRevision: authority.project.revision,
+          kind: 'authoring',
+          authorizeBeforeReplace: () => {
+            throw refusal;
+          },
+        })
+      )
+    ).rejects.toBe(refusal);
+
+    expect(await store.loadProjectV4(projectId)).toEqual(before);
+    expect((await readdir(projectDirectory(root, projectId))).toSorted()).toEqual(['brief.md', 'project.json']);
+  });
+
+  it('recovers the evidenced candidate after a durable-journal crash and refuses a stale retry', async () => {
+    const root = await temporaryRoot();
+    const base = await createHealthy(root);
+    let evidence: StudioPilotProjectCommitCandidateEvidenceV4 | undefined;
+    const retryAuthorization = vi.fn();
+    const crashing = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        createProjectId: () => 'unused_project',
+        mainInstanceId: 'main_instance_crashed',
+        onStorageStep: (step) => {
+          if (step === 'update:journal_durable') throw new Error('simulated process death');
+        },
+      })
+    );
+    const before = await crashing.loadProjectV4(base.projectId);
+
+    await expectStoreError(
+      crashing.updateProjectV4(base.projectId, (project) => ({ ...project, name: 'Recovered evidenced candidate' }), {
+        expectedRevision: before.revision,
+        kind: 'authoring',
+        authorizeBeforeReplace: (candidateEvidence) => {
+          evidence = candidateEvidence;
+        },
+      }),
+      'storage_error'
+    );
+
+    const restarted = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        mainInstanceId: 'main_instance_restarted',
+        hasSingleInstanceRecoveryAuthority: () => true,
+      })
+    );
+    await expect(restarted.recoverProjectWriteV4(base.projectId)).resolves.toBeUndefined();
+    const recovered = await restarted.loadProjectV4(base.projectId);
+    expect(recovered).toMatchObject({
+      revision: evidence?.afterRevision,
+      authoringRevision: evidence?.afterAuthoringRevision,
+      updatedAt: evidence?.committedAt,
+      name: 'Recovered evidenced candidate',
+    });
+    expect(digest(await readFile(manifestFile(root, base.projectId)))).toBe(evidence?.afterManifestSha256);
+    await expectStoreError(
+      restarted.updateProjectV4(base.projectId, (project) => project, {
+        expectedRevision: evidence?.beforeRevision,
+        kind: 'runtime',
+        authorizeBeforeReplace: retryAuthorization,
+      }),
+      'stale_project'
+    );
+    expect(retryAuthorization).not.toHaveBeenCalled();
+  });
+
+  it('does not replay an independently versioned schema-6 transaction during the clean cutover', async () => {
     const root = await temporaryRoot();
     const legacy = createCreativeStudioPilotStoreV3(deterministicOptions(root));
     const created = await legacy.createProjectV3({ name: 'Legacy transaction', brief: 'Before cutover.' });
@@ -546,8 +840,8 @@ describe('inactive schema-7 pilot project store', () => {
     ).rejects.toMatchObject({ code: 'storage_error' });
 
     const cutover = createCreativeStudioPilotStoreV4(deterministicOptions(root));
-    expect(await cutover.getProjectV4(created.id)).toEqual({ status: 'unsupported', catalogueId: created.id });
-    expect(await readFile(briefFile(root, created.id), 'utf8')).toBe('Committed before cutover.');
+    expect(await cutover.getProjectV4(created.id)).toEqual({ status: 'quarantined', catalogueId: created.id });
+    expect(await readFile(briefFile(root, created.id), 'utf8')).toBe('Before cutover.');
     const manifest = JSON.parse(await readFile(manifestFile(root, created.id), 'utf8')) as {
       schemaVersion: number;
       revision: number;
@@ -555,10 +849,10 @@ describe('inactive schema-7 pilot project store', () => {
     };
     expect(manifest).toMatchObject({
       schemaVersion: 6,
-      revision: 2,
-      briefFile: { sha256: digest('Committed before cutover.') },
+      revision: 1,
+      briefFile: { sha256: digest('Before cutover.') },
     });
-    expect((await readdir(projectDirectory(root, created.id))).toSorted()).toEqual(['brief.md', 'project.json']);
+    expect((await readdir(projectDirectory(root, created.id))).toSorted()).toContain('.project-write-v3.json');
   });
 
   it('preflights both transaction candidates before replacing either live file', async () => {
@@ -636,27 +930,126 @@ describe('inactive schema-7 pilot project store', () => {
     );
     expect(observations).toHaveLength(1);
 
-    const runtime = await store.withProjectAuthorityV4(created.id, async (authority) => {
-      await authority.assertCurrent();
-      return authority.commit((project) => project, {
-        expectedRevision: authority.project.revision,
-        kind: 'runtime',
-      });
-    });
-    expect(runtime).toMatchObject({ revision: 3, authoringRevision: 2 });
+    const runtime = await store.withProjectWriterAuthorityV4(
+      created.id,
+      { purpose: 'project_update' },
+      async (authority) => {
+        await authority.assertCurrent();
+        const beforeState = await authority.readCommitState();
+        const committed = await authority.commit((project) => project, {
+          expectedRevision: authority.project.revision,
+          kind: 'runtime',
+        });
+        await authority.assertCurrent();
+        await authority.assertAuthoringCurrent();
+        const afterState = await authority.readCommitState();
+        return { afterState, beforeState, committed };
+      }
+    );
+    expect(runtime.committed).toMatchObject({ revision: 3, authoringRevision: 2 });
+    expect(runtime.beforeState).toMatchObject({ revision: 2, authoringRevision: 2 });
+    expect(runtime.afterState).toMatchObject({ revision: 3, authoringRevision: 2 });
+    expect(runtime.afterState.manifestSha256).not.toBe(runtime.beforeState.manifestSha256);
     expect(observations.at(-1)).toEqual({ event: 'updated', lastStep: 'update:complete' });
     await expectStoreError(
-      store.updateProjectV4(runtime.id, (project) => ({ ...project, name: 'Disguised authored edit' }), {
-        expectedRevision: runtime.revision,
+      store.updateProjectV4(runtime.committed.id, (project) => ({ ...project, name: 'Disguised authored edit' }), {
+        expectedRevision: runtime.committed.revision,
         kind: 'runtime',
       }),
       'invalid_payload'
     );
-    await expect(store.loadProjectV4(runtime.id)).resolves.toMatchObject({
+    await expect(store.loadProjectV4(runtime.committed.id)).resolves.toMatchObject({
       revision: 3,
       authoringRevision: 2,
       name: 'Authority renamed',
     });
+  });
+
+  it('fails a second store writer closed while the first store owns the durable project gate', async () => {
+    const root = await temporaryRoot();
+    const base = await createHealthy(root);
+    let announceJournal!: () => void;
+    let releaseJournal!: () => void;
+    const journalReached = new Promise<void>((resolve) => {
+      announceJournal = resolve;
+    });
+    const journalReleased = new Promise<void>((resolve) => {
+      releaseJournal = resolve;
+    });
+    const first = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        mainInstanceId: 'main_instance_first',
+        onStorageStep: async (step) => {
+          if (step === 'update:journal_durable') {
+            announceJournal();
+            await journalReleased;
+          }
+        },
+      })
+    );
+    let competingCallbackRan = false;
+    const second = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, { mainInstanceId: 'main_instance_second' })
+    );
+
+    const firstWrite = updateWithRuleText(first, base.projectId, 1, 'First writer');
+    await journalReached;
+    await expectStoreError(
+      second.updateProjectV4(
+        base.projectId,
+        (project) => {
+          competingCallbackRan = true;
+          return { ...project, name: 'Must not run' };
+        },
+        { kind: 'authoring', expectedRevision: 1 }
+      ),
+      'busy'
+    );
+    expect(competingCallbackRan).toBe(false);
+
+    releaseJournal();
+    await expect(firstWrite).resolves.toMatchObject({ revision: 2, name: 'Pilot lake' });
+    await expect(second.loadProjectV4(base.projectId)).resolves.toMatchObject({
+      revision: 2,
+      rules: [expect.objectContaining({ text: 'First writer' })],
+    });
+  });
+
+  it('replays a Main-frozen commit timestamp without admitting future or regressive time', async () => {
+    const root = await temporaryRoot();
+    let clock = '2026-09-02T01:00:00.000Z';
+    const store = createCreativeStudioPilotStoreV4(
+      deterministicOptions(root, {
+        now: () => clock,
+        createProjectId: () => 'project_v4_time',
+      })
+    );
+    const created = await store.createProjectV4({ name: 'Replay time', brief: '' });
+    clock = '2026-09-02T01:02:00.000Z';
+
+    const committed = await store.updateProjectV4(created.id, (project) => ({ ...project, name: 'Replayed' }), {
+      expectedRevision: created.revision,
+      kind: 'authoring',
+      committedAt: '2026-09-02T01:01:00.000Z',
+    });
+
+    expect(committed.updatedAt).toBe('2026-09-02T01:01:00.000Z');
+    await expectStoreError(
+      store.updateProjectV4(created.id, (project) => project, {
+        expectedRevision: committed.revision,
+        kind: 'runtime',
+        committedAt: '2026-09-02T01:03:00.000Z',
+      }),
+      'invalid_payload'
+    );
+    await expectStoreError(
+      store.updateProjectV4(created.id, (project) => project, {
+        expectedRevision: committed.revision,
+        kind: 'runtime',
+        committedAt: '2026-09-02T01:00:59.999Z',
+      }),
+      'invalid_payload'
+    );
   });
 
   it('propagates intentional authority callback refusals without rewriting them as storage failures', async () => {
@@ -919,7 +1312,7 @@ describe('inactive schema-7 pilot project store', () => {
     }
   });
 
-  it('isolates an invalid durable deletion marker instead of disabling inventory', async () => {
+  it('leaves an invalid legacy deletion marker untouched while inventory remains readable', async () => {
     const root = await temporaryRoot();
     const projectsRoot = root;
     await mkdir(projectsRoot, { recursive: true });
@@ -931,6 +1324,6 @@ describe('inactive schema-7 pilot project store', () => {
       unsupportedProjectIds: [],
       quarantinedProjectIds: [],
     });
-    expect((await readdir(projectsRoot)).some((entry) => entry.startsWith('.invalid-'))).toBe(true);
+    expect(await readdir(projectsRoot)).toContain('.delete-invalid.json');
   });
 });

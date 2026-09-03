@@ -35,7 +35,9 @@ import {
   type StudioGenerationTargetV2,
   type StudioJobV2,
   type StudioPieceGenerationCompositionV3,
+  type StudioPieceGenerationCompositionV4,
   type StudioPieceGenerationRequestPlanV3,
+  type StudioPieceGenerationRequestPlanV4,
   type StudioPieceJobV3,
   type StudioPieceSpendAuthorizationV3,
   type StudioPieceSubmissionQuoteV3,
@@ -59,6 +61,8 @@ import {
   studioPieceGenerationCompositionsEqualV3,
 } from '@/process/services/creative-studio/service/schema2/generation';
 import {
+  createStudioPieceQuotedGenerationIdV4,
+  studioPieceGenerationCompositionDigestV4,
   validateStudioFixedShotReviewV2,
   validateStudioFixedShotReviewsV2,
   validateStudioPieceExportManifestV3,
@@ -567,14 +571,123 @@ const makeGeneratedProjectWithJobStatusV3 = (status: StudioPieceJobV3['status'])
   return project;
 };
 
+const phase6GenerationAuthorityFromV3 = (
+  project: StudioProjectV3
+): Pick<StudioProjectV4, 'spendAuthorizations' | 'assets' | 'jobs'> => {
+  const compositionByJobId = new Map<string, StudioPieceGenerationCompositionV4>();
+  const requestByJobId = new Map<string, StudioPieceGenerationRequestPlanV4>();
+  for (const [jobId, job] of Object.entries(project.jobs)) {
+    const settings = { kind: 'photograph' as const, ...job.composition.inputs.source.settings };
+    const composition: StudioPieceGenerationCompositionV4 = {
+      ...job.composition,
+      inputs: {
+        ...job.composition.inputs,
+        schemaVersion: 4,
+        authoringFingerprintVersion: 3,
+        source: { ...job.composition.inputs.source, settings },
+      },
+    };
+    compositionByJobId.set(jobId, composition);
+    requestByJobId.set(jobId, {
+      kind: 'resolved',
+      snapshot: { composition, settings, conditioningInputs: [...job.requestPlan.snapshot.conditioningInputs] },
+    });
+  }
+
+  const spendAuthorizations = project.spendAuthorizations.map((authorization) => {
+    const sourceJob = Object.values(project.jobs).find((job) => job.authorizationId === authorization.id)!;
+    const publication = { schemaVersion: 1 as const, kind: 'fill_empty' as const };
+    const attempt =
+      sourceJob.retryOfJobId === null
+        ? ({ kind: 'first' } as const)
+        : ({ kind: 'retry', sourceJobId: sourceJob.retryOfJobId, reason: sourceJob.retryReason! } as const);
+    const itemId = createStudioPieceQuotedGenerationIdV4({
+      projectId: project.id,
+      reservationId: authorization.quote.reservationId,
+      quoteId: authorization.quote.id,
+      quoteRevision: authorization.quote.quoteRevision,
+      target: sourceJob.target,
+      purpose: 'piece_image',
+    });
+    return {
+      ...authorization,
+      quote: {
+        ...authorization.quote,
+        authoringFingerprintVersion: 3 as const,
+        item: {
+          ...authorization.quote.item,
+          id: itemId,
+          requestPlan: requestByJobId.get(sourceJob.id)!,
+          publication,
+          attempt,
+        },
+      },
+      providerBinding: { ...authorization.providerBinding, itemId },
+      idempotencyKey: { ...authorization.idempotencyKey, itemId },
+    };
+  });
+  const jobs = Object.fromEntries(
+    Object.entries(project.jobs).map(([jobId, job]) => {
+      const {
+        outputAssetId,
+        retryOfJobId: _retryOfJobId,
+        retryReason: _retryReason,
+        composition: _composition,
+        requestPlan: _requestPlan,
+        ...base
+      } = job;
+      const authorization = spendAuthorizations.find((candidate) => candidate.id === job.authorizationId)!;
+      const publication = authorization.quote.item.publication;
+      const attempt = authorization.quote.item.attempt;
+      const spendReceipt =
+        job.spendReceipt === null ? null : { ...job.spendReceipt, itemId: authorization.quote.item.id };
+      return [
+        jobId,
+        {
+          ...base,
+          authorizationItemId: authorization.quote.item.id,
+          composition: compositionByJobId.get(jobId)!,
+          requestPlan: requestByJobId.get(jobId)!,
+          outputAssetIdsByRole: { primary: outputAssetId, poster: null },
+          publication,
+          attempt,
+          spendReceipt,
+          authoringFingerprintVersion: 3 as const,
+        },
+      ];
+    })
+  ) as StudioProjectV4['jobs'];
+  const assets = Object.fromEntries(
+    Object.entries(project.assets).map(([assetId, asset]) => {
+      const producer = asset.producerJobId === null ? null : jobs[asset.producerJobId];
+      return [
+        assetId,
+        {
+          ...asset,
+          role: 'primary' as const,
+          compositionDigest:
+            producer === null || producer === undefined
+              ? null
+              : studioPieceGenerationCompositionDigestV4(producer.composition),
+        },
+      ];
+    })
+  ) as StudioProjectV4['assets'];
+  return { spendAuthorizations, assets, jobs };
+};
+
 const makePhase6GeneratedProjectWithJobStatus = (status: StudioPieceJobV3['status']): StudioProjectV4 => {
   const project = makeGeneratedProjectWithJobStatusV3(status);
   const scaffold = makePhase6Project();
+  const authority = phase6GenerationAuthorityFromV3(project);
   return {
     ...project,
+    ...authority,
     schemaVersion: 7,
+    frameExtractions: {},
+    derivedFrames: {},
     pieces: Object.fromEntries(
-      Object.entries(project.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+      Object.entries(project.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null, assetHistory: [] }])
     ),
     boardOrder: [...scaffold.boardOrder],
     boards: structuredClone(scaffold.boards),
@@ -3848,11 +3961,18 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
 
     const pendingV3 = makeGeneratedProjectWithJobStatusV3('queued_local');
     const scaffold = makePhase6Project();
+    const authority = phase6GenerationAuthorityFromV3(pendingV3);
     const planned: StudioProjectV4 = {
       ...pendingV3,
+      ...authority,
       schemaVersion: 7,
+      frameExtractions: {},
+      derivedFrames: {},
       pieces: Object.fromEntries(
-        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [
+          pieceId,
+          { ...piece, runStem: null, assetHistory: [] },
+        ])
       ),
       boardOrder: [...scaffold.boardOrder],
       boards: structuredClone(scaffold.boards),
@@ -4178,11 +4298,16 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
 
     const pendingV3 = makeGeneratedProjectWithJobStatusV3('queued_local');
     const scaffold = makePhase6Project();
+    const authority = phase6GenerationAuthorityFromV3(pendingV3);
     const planned: StudioProjectV4 = {
       ...pendingV3,
+      ...authority,
       schemaVersion: 7,
       pieces: Object.fromEntries(
-        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+        Object.entries(pendingV3.pieces).map(([pieceId, piece]) => [
+          pieceId,
+          { ...piece, runStem: null, assetHistory: [] },
+        ])
       ),
       boardOrder: [...scaffold.boardOrder],
       boards: structuredClone(scaffold.boards),
@@ -4241,6 +4366,59 @@ describe('validateStudioProjectV4 exact schema-7 Wave-1 contract', () => {
     );
     expect(result).toEqual({ status: 'refused', reason: 'work_in_progress' });
     expect(project.bin).toEqual([]);
+  });
+
+  it('admits exact no-output job states and rejects a duplicated non-null role output', () => {
+    for (const status of ['queued_local', 'submitting', 'running', 'failed'] as const) {
+      const project = makePhase6GeneratedProjectWithJobStatus(status);
+      expect(project.jobs.job_1!.outputAssetIdsByRole, status).toEqual({ primary: null, poster: null });
+      expect(validateStudioProjectV4(project), status).toBe(true);
+    }
+
+    const resolvedWaiting = makePhase6GeneratedProjectWithJobStatus('queued_local');
+    resolvedWaiting.jobs.job_1!.status = 'waiting_for_conditioning';
+    expect(validateStudioProjectV4(resolvedWaiting), 'resolved request cannot wait for conditioning').toBe(false);
+
+    const duplicate = makePhase6GeneratedProjectWithJobStatus('succeeded');
+    duplicate.jobs.job_1!.outputAssetIdsByRole.poster = duplicate.jobs.job_1!.outputAssetIdsByRole.primary;
+    expect(validateStudioProjectV4(duplicate)).toBe(false);
+  });
+
+  it('contains every current asset and full Job interval inside its owning Piece', () => {
+    const imported = makePhase6Project();
+    imported.updatedAt = '2026-09-02T00:00:03.000Z';
+    imported.assets.asset_photo_1!.createdAt = imported.updatedAt;
+    expect(validateStudioProjectV4(imported)).toBe(false);
+
+    const generated = makePhase6GeneratedProjectWithJobStatus('succeeded');
+    generated.updatedAt = '2026-09-02T00:00:03.000Z';
+    generated.jobs.job_1!.updatedAt = generated.updatedAt;
+    generated.assets.asset_1!.createdAt = generated.updatedAt;
+    expect(validateStudioProjectV4(generated)).toBe(false);
+  });
+
+  it('uses the writer-lock-safe schema-7 project id bound without tightening schema 6', () => {
+    const boundary = makePhase6Project();
+    boundary.id = 'p'.repeat(235);
+    boundary.assets.asset_photo_1!.projectId = boundary.id;
+    expect(validateStudioProjectV4(boundary)).toBe(true);
+
+    const oversized = structuredClone(boundary);
+    oversized.id += 'p';
+    oversized.assets.asset_photo_1!.projectId = oversized.id;
+    expect(validateStudioProjectV4(oversized)).toBe(false);
+
+    const identityInput = {
+      reservationId: 'reservation_1',
+      quoteId: 'quote_1',
+      quoteRevision: 1,
+      target: { kind: 'piece' as const, pieceId: 'piece_1' },
+      purpose: 'piece_image' as const,
+    };
+    expect(() => createStudioPieceQuotedGenerationIdV4({ ...identityInput, projectId: 'p'.repeat(235) })).not.toThrow();
+    expect(() => createStudioPieceQuotedGenerationIdV4({ ...identityInput, projectId: 'p'.repeat(236) })).toThrow(
+      'quoted generation identity input must be exact'
+    );
   });
 
   it('rejects accessors and proxies without invoking project code', () => {

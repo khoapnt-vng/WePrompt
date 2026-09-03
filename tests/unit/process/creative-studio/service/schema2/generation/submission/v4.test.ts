@@ -8,27 +8,30 @@
 
 import { describe, expect, it } from 'vitest';
 import type {
-  StudioAssetV3,
-  StudioPieceGenerationCompositionV3,
-  StudioPieceGenerationRequestPlanV3,
-  StudioPieceJobV3,
-  StudioPieceSpendAuthorizationV3,
-  StudioPieceSubmissionQuoteV3,
+  StudioAssetV4,
+  StudioPieceCurrentAssetSnapshotV4,
+  StudioPieceGenerationCompositionV4,
+  StudioPieceGenerationRequestPlanV4,
+  StudioPieceJobV4,
+  StudioPieceSpendAuthorizationV4,
+  StudioPieceSubmissionQuoteV4,
   StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
 import {
   createEmptyStudioProjectV3,
   createEmptyStudioProjectV4,
 } from '@/process/services/creative-studio/service/schema2/factories';
-import { studioPieceGenerationCompositionDigestV3 } from '@/process/services/creative-studio/service/schema2/generation/composition';
-import { createStudioPieceQuotedGenerationIdV3 } from '@/process/services/creative-studio/service/schema2/generation/submission/v3';
 import {
   createStudioAuthoringFingerprintV4,
+  createStudioPieceQuotedGenerationIdV4,
   STUDIO_AUTHORING_FINGERPRINT_DOMAIN_V4,
   STUDIO_AUTHORING_FINGERPRINT_VERSION_V4,
   studioProjectAuthoringEqualsV4,
 } from '@/process/services/creative-studio/service/schema2/generation/submission/v4';
-import { validateStudioProjectV4 } from '@/process/services/creative-studio/service/schema2/validation';
+import {
+  studioPieceGenerationCompositionDigestV4,
+  validateStudioProjectV4,
+} from '@/process/services/creative-studio/service/schema2/validation';
 import { makePhase6Project } from '../../../../../../../fixtures/creative-studio/phase6Project';
 
 const CREATED_AT = '2026-09-02T00:00:00.000Z';
@@ -51,9 +54,33 @@ const makeCreateArm = () => ({
   otherActiveHandleReservations: [],
   orderIndex: 1,
   words: 'A fresh photograph.',
-  settings: { aspectRatio: '16:9' as const, resolution: '1080p' as const },
+  settings: { kind: 'photograph' as const, aspectRatio: '16:9' as const, resolution: '1080p' as const },
   conditioningInputs: [],
 });
+
+const currentSnapshotFor = (asset: StudioAssetV4): StudioPieceCurrentAssetSnapshotV4 => {
+  const base = {
+    pieceId: asset.pieceId,
+    assetId: asset.id,
+    mediaKind: asset.mediaKind,
+    role: 'primary' as const,
+    mimeType: asset.mimeType,
+    byteSize: asset.byteSize,
+    sha256: asset.sha256,
+    width: asset.width,
+    height: asset.height,
+    createdAt: asset.createdAt,
+    ...(asset.mediaKind === 'video' ? { durationSeconds: asset.durationSeconds } : {}),
+  };
+  return asset.origin === 'imported'
+    ? { ...base, origin: 'imported', producerJobId: null, compositionDigest: null }
+    : {
+        ...base,
+        origin: 'generated',
+        producerJobId: asset.producerJobId,
+        compositionDigest: asset.compositionDigest,
+      };
+};
 
 const reverseRecord = <T>(value: Record<string, T>): Record<string, T> =>
   Object.fromEntries(Object.entries(value).toReversed());
@@ -61,7 +88,10 @@ const reverseRecord = <T>(value: Record<string, T>): Record<string, T> =>
 const conditioningInputFor = (
   project: StudioProjectV4,
   pieceId: string
-): StudioPieceGenerationCompositionV3['inputs']['conditioningInputs'][number] => {
+): Extract<
+  StudioPieceGenerationCompositionV4,
+  { inputs: { purpose: 'piece_image' } }
+>['inputs']['conditioningInputs'][number] => {
   const piece = project.pieces[pieceId]!;
   const asset = project.assets[piece.currentAssetId!]!;
   return {
@@ -81,6 +111,7 @@ const makeTwoTopologyProject = (): StudioProjectV4 => {
     kind: 'photograph',
     handle: 'second_photo',
     runStem: 'second_photo',
+    assetHistory: [],
     priorHandles: [],
     currentAssetId: 'asset_photo_2',
     jobIds: [],
@@ -157,12 +188,12 @@ const makeGeneratedProject = (): StudioProjectV4 => {
   const pieceId = 'piece_1';
   const jobId = 'job_1';
   const assetId = 'asset_1';
-  const composition: StudioPieceGenerationCompositionV3 = {
+  const composition: StudioPieceGenerationCompositionV4 = {
     inputs: {
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectRevisionAtPreparation: 1,
       authoringRevision: 1,
-      authoringFingerprintVersion: 2,
+      authoringFingerprintVersion: 3,
       authoringFingerprint: DIGEST,
       brief: project.brief,
       rules: [],
@@ -170,7 +201,7 @@ const makeGeneratedProject = (): StudioProjectV4 => {
         kind: 'piece',
         pieceId,
         words: 'A quiet portrait.',
-        settings: { aspectRatio: '4:3', resolution: '1080p' },
+        settings: { kind: 'photograph', aspectRatio: '4:3', resolution: '1080p' },
       },
       purpose: 'piece_image',
       conditioningInputs: [],
@@ -179,16 +210,16 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     },
     prompt: 'PHOTO REQUEST\nA quiet portrait.',
   };
-  const requestPlan: StudioPieceGenerationRequestPlanV3 = {
+  const requestPlan: StudioPieceGenerationRequestPlanV4 = {
     kind: 'resolved',
     snapshot: {
       composition,
-      settings: { aspectRatio: '4:3', resolution: '1080p' },
+      settings: { kind: 'photograph', aspectRatio: '4:3', resolution: '1080p' },
       conditioningInputs: [],
     },
   };
   const target = { kind: 'piece' as const, pieceId };
-  const itemId = createStudioPieceQuotedGenerationIdV3({
+  const itemId = createStudioPieceQuotedGenerationIdV4({
     projectId: project.id,
     reservationId: 'reservation_1',
     quoteId: 'quote_1',
@@ -196,14 +227,16 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     target,
     purpose: 'piece_image',
   });
-  const quote: StudioPieceSubmissionQuoteV3 = {
+  const publication = { schemaVersion: 1 as const, kind: 'fill_empty' as const };
+  const attempt = { kind: 'first' as const };
+  const quote: StudioPieceSubmissionQuoteV4 = {
     id: 'quote_1',
     reservationId: 'reservation_1',
     quoteRevision: 1,
     projectId: project.id,
     projectRevisionAtPreparation: 1,
     authoringRevision: 1,
-    authoringFingerprintVersion: 2,
+    authoringFingerprintVersion: 3,
     authoringFingerprint: DIGEST,
     rateCardDigest: 'b'.repeat(64),
     currency: 'USD',
@@ -216,12 +249,14 @@ const makeGeneratedProject = (): StudioProjectV4 => {
       requestPlan,
       rateUnit: 'generation',
       rateMinorUnits: 125,
+      publication,
+      attempt,
     },
     lowerMinorUnits: 125,
     upperMinorUnits: 125,
     expiresAt: EXPIRES_AT,
   };
-  const authorization: StudioPieceSpendAuthorizationV3 = {
+  const authorization: StudioPieceSpendAuthorizationV4 = {
     id: 'authorization_1',
     quote,
     confirmedAt: AUTHORIZED_AT,
@@ -230,7 +265,7 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     providerBinding: { itemId, provider: PROVIDER },
     idempotencyKey: { itemId, key: 'idempotency_1' },
   };
-  const job: StudioPieceJobV3 = {
+  const job: StudioPieceJobV4 = {
     id: jobId,
     projectId: project.id,
     target,
@@ -242,11 +277,11 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     providerJobId: 'provider_job_1',
     remoteStartedAt: AUTHORIZED_AT,
     cancellationPolicy: 'queued_and_running',
-    outputAssetId: assetId,
+    outputAssetIdsByRole: { primary: assetId, poster: null },
     error: null,
     progress: 100,
-    retryOfJobId: null,
-    retryReason: null,
+    publication,
+    attempt,
     duplicateChargeAcknowledged: false,
     duplicateChargeAcknowledgedAt: null,
     authorizationId: authorization.id,
@@ -269,18 +304,19 @@ const makeGeneratedProject = (): StudioProjectV4 => {
       recordedAt: COMPLETED_AT,
     },
     authoringRevision: 1,
-    authoringFingerprintVersion: 2,
+    authoringFingerprintVersion: 3,
     authoringFingerprint: DIGEST,
     projectRevisionAtPreparation: 1,
     projectRevisionAtAuthorization: 2,
     createdAt: AUTHORIZED_AT,
     updatedAt: COMPLETED_AT,
   };
-  const asset: StudioAssetV3 = {
+  const asset: StudioAssetV4 = {
     id: assetId,
     projectId: project.id,
     pieceId,
     mediaKind: 'image',
+    role: 'primary',
     mimeType: 'image/png',
     managedAsset: { collection: 'assets', fileName: 'asset_1.png' },
     byteSize: 8,
@@ -290,7 +326,7 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     createdAt: COMPLETED_AT,
     origin: 'generated',
     producerJobId: jobId,
-    compositionDigest: studioPieceGenerationCompositionDigestV3(composition),
+    compositionDigest: studioPieceGenerationCompositionDigestV4(composition),
   };
   project.revision = 3;
   project.authoringRevision = 2;
@@ -301,6 +337,7 @@ const makeGeneratedProject = (): StudioProjectV4 => {
     kind: 'photograph',
     handle: 'quiet_portrait',
     runStem: 'quiet_portrait',
+    assetHistory: [],
     priorHandles: [],
     currentAssetId: assetId,
     jobIds: [jobId],
@@ -318,7 +355,7 @@ const makeRetriedProject = (): StudioProjectV4 => {
   const project = makeGeneratedProject();
   const firstJob = project.jobs.job_1!;
   firstJob.status = 'failed';
-  firstJob.outputAssetId = null;
+  firstJob.outputAssetIdsByRole = { primary: null, poster: null };
   firstJob.error = { code: 'timeout', messageKey: 'timeout' };
   firstJob.progress = null;
   firstJob.spendReceipt = null;
@@ -328,7 +365,7 @@ const makeRetriedProject = (): StudioProjectV4 => {
   const composition = structuredClone(firstJob.composition);
   composition.inputs.projectRevisionAtPreparation = 3;
   composition.inputs.authoringRevision = 2;
-  const requestPlan: StudioPieceGenerationRequestPlanV3 = {
+  const requestPlan: StudioPieceGenerationRequestPlanV4 = {
     kind: 'resolved',
     snapshot: {
       composition,
@@ -337,7 +374,7 @@ const makeRetriedProject = (): StudioProjectV4 => {
     },
   };
   const target = { kind: 'piece' as const, pieceId: 'piece_1' };
-  const itemId = createStudioPieceQuotedGenerationIdV3({
+  const itemId = createStudioPieceQuotedGenerationIdV4({
     projectId: project.id,
     reservationId: 'reservation_2',
     quoteId: 'quote_2',
@@ -345,14 +382,16 @@ const makeRetriedProject = (): StudioProjectV4 => {
     target,
     purpose: 'piece_image',
   });
-  const quote: StudioPieceSubmissionQuoteV3 = {
+  const publication = structuredClone(firstJob.publication);
+  const attempt = { kind: 'retry' as const, sourceJobId: 'job_1', reason: 'provider_failure' as const };
+  const quote: StudioPieceSubmissionQuoteV4 = {
     id: 'quote_2',
     reservationId: 'reservation_2',
     quoteRevision: 1,
     projectId: project.id,
     projectRevisionAtPreparation: 3,
     authoringRevision: 2,
-    authoringFingerprintVersion: 2,
+    authoringFingerprintVersion: 3,
     authoringFingerprint: DIGEST,
     rateCardDigest: 'b'.repeat(64),
     currency: 'USD',
@@ -365,12 +404,14 @@ const makeRetriedProject = (): StudioProjectV4 => {
       requestPlan,
       rateUnit: 'generation',
       rateMinorUnits: 125,
+      publication,
+      attempt,
     },
     lowerMinorUnits: 125,
     upperMinorUnits: 125,
     expiresAt: EXPIRES_AT,
   };
-  const authorization: StudioPieceSpendAuthorizationV3 = {
+  const authorization: StudioPieceSpendAuthorizationV4 = {
     id: 'authorization_2',
     quote,
     confirmedAt: RETRIED_AT,
@@ -391,11 +432,11 @@ const makeRetriedProject = (): StudioProjectV4 => {
     providerJobId: null,
     remoteStartedAt: null,
     cancellationPolicy: 'queued_and_running',
-    outputAssetId: null,
+    outputAssetIdsByRole: { primary: null, poster: null },
     error: null,
     progress: null,
-    retryOfJobId: 'job_1',
-    retryReason: 'provider_failure',
+    publication,
+    attempt,
     duplicateChargeAcknowledged: false,
     duplicateChargeAcknowledgedAt: null,
     authorizationId: authorization.id,
@@ -404,7 +445,7 @@ const makeRetriedProject = (): StudioProjectV4 => {
     requestPlan,
     spendReceipt: null,
     authoringRevision: 2,
-    authoringFingerprintVersion: 2,
+    authoringFingerprintVersion: 3,
     authoringFingerprint: DIGEST,
     projectRevisionAtPreparation: 3,
     projectRevisionAtAuthorization: 4,
@@ -442,7 +483,7 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
 
     expect(STUDIO_AUTHORING_FINGERPRINT_VERSION_V4).toBe(3);
     expect(STUDIO_AUTHORING_FINGERPRINT_DOMAIN_V4).toBe('weprompt:studio-authoring:v3');
-    expect(fingerprint).toBe('584441af9242b20f8ebd2813660cf0dcde890b6aab17ff0d80a346a01eee8378');
+    expect(fingerprint).toBe('46dcca842d8766ef63eb7d156fdac1f1e6ef70de4dadf8aaf9bb2ecf8bd5a031');
     expect(fingerprint).toBe(
       createStudioAuthoringFingerprintV4({ project: makePhase6Project(), prepared: makeCreateArm() })
     );
@@ -472,7 +513,10 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
     );
     expect(getterRead).toBe(false);
 
-    const sparseConditioningInputs = Array(1) as StudioPieceGenerationCompositionV3['inputs']['conditioningInputs'];
+    const sparseConditioningInputs = Array(1) as Extract<
+      StudioPieceGenerationCompositionV4,
+      { inputs: { purpose: 'piece_image' } }
+    >['inputs']['conditioningInputs'];
     expect(() =>
       createStudioAuthoringFingerprintV4({
         project,
@@ -537,6 +581,55 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
         prepared: { ...create, proposedHandle: 'harbour_morning_2', runStem: 'harbour_morning' },
       })
     ).not.toThrow();
+  });
+
+  it('freezes the exact current asset for a reviewed replacement without changing prompt composition', () => {
+    const project = makePhase6Project();
+    const current = currentSnapshotFor(project.assets.asset_photo_1!);
+    const replace = {
+      mode: 'replace' as const,
+      existingPieceId: 'piece_photo_1',
+      currentAsset: current,
+      words: 'A changed harbour photograph.',
+      settings: { kind: 'photograph' as const, aspectRatio: '16:9' as const, resolution: '1080p' as const },
+      conditioningInputs: [],
+    };
+    const fingerprint = createStudioAuthoringFingerprintV4({ project, prepared: replace });
+
+    expect(fingerprint).toMatch(/^[a-f0-9]{64}$/u);
+    expect(project.jobs).toEqual({});
+    expect(() =>
+      createStudioAuthoringFingerprintV4({
+        project,
+        prepared: { ...replace, currentAsset: { ...current, sha256: 'f'.repeat(64) } },
+      })
+    ).toThrow('no longer matches project authority');
+    expect(() =>
+      createStudioAuthoringFingerprintV4({
+        project,
+        prepared: { ...replace, currentAsset: { ...current, extra: true } } as never,
+      })
+    ).toThrow('exact current Piece asset');
+
+    const changedCurrent = structuredClone(project);
+    changedCurrent.assets.asset_photo_1!.sha256 = 'e'.repeat(64);
+    expect(validateStudioProjectV4(changedCurrent)).toBe(true);
+    expect(() => createStudioAuthoringFingerprintV4({ project: changedCurrent, prepared: replace })).toThrow(
+      'no longer matches project authority'
+    );
+
+    const binnedTarget = structuredClone(project);
+    binnedTarget.assemblies.assembly_1!.pictureBindings.shot_1!.source = null;
+    binnedTarget.bin = [
+      {
+        id: 'bin_replace_target',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: COMPLETED_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(binnedTarget)).toBe(true);
+    expect(() => createStudioAuthoringFingerprintV4({ project: binnedTarget, prepared: replace })).toThrow(TypeError);
   });
 
   it('rederives concurrent reservations from a bounded canonical frozen snapshot', () => {
@@ -659,6 +752,23 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
         prepared: { ...create, conditioningInputs: [first, first] },
       })
     ).toThrow('conditioning inputs are invalid');
+
+    const binnedReference = structuredClone(project);
+    binnedReference.bin = [
+      {
+        id: 'bin_reference',
+        subject: { kind: 'piece', pieceId: 'piece_photo_2' },
+        reason: 'lifted',
+        liftedAt: COMPLETED_AT,
+      },
+    ];
+    expect(validateStudioProjectV4(binnedReference)).toBe(true);
+    expect(() =>
+      createStudioAuthoringFingerprintV4({
+        project: binnedReference,
+        prepared: { ...create, conditioningInputs: [second] },
+      })
+    ).toThrow('conditioning inputs must match current project assets');
   });
 
   it('binds both prepared and persisted run stems into authoring authority', () => {
@@ -763,7 +873,7 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
         id: 'bin_1',
         subject: { kind: 'piece', pieceId: 'piece_photo_2' },
         reason: 'lifted',
-        liftedAt: AUTHORIZED_AT,
+        liftedAt: COMPLETED_AT,
       },
     ];
     project.assemblies.assembly_1!.pictureBindings.shot_2!.source = {
@@ -781,7 +891,8 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
 
     const otherTimestamps = structuredClone(project);
     otherTimestamps.rules[0]!.createdAt = AUTHORIZED_AT;
-    otherTimestamps.bin[0]!.liftedAt = COMPLETED_AT;
+    otherTimestamps.updatedAt = RETRIED_AT;
+    otherTimestamps.bin[0]!.liftedAt = RETRIED_AT;
     otherTimestamps.assemblies.assembly_1!.pictureBindings.shot_2!.staleness!.keptAt = COMPLETED_AT;
     expect(validateStudioProjectV4(otherTimestamps)).toBe(true);
     expect(createStudioAuthoringFingerprintV4({ project: otherTimestamps, prepared: makeCreateArm() })).toBe(baseline);
@@ -810,7 +921,7 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
       assembly.createdAt = shiftedAuthoredAt;
       assembly.updatedAt = shiftedCurrentAt;
     }
-    shifted.bin[0]!.liftedAt = shiftedAuthoredAt;
+    shifted.bin[0]!.liftedAt = shiftedCurrentAt;
     shifted.assemblies.assembly_1!.pictureBindings.shot_2!.staleness!.keptAt = shiftedAuthoredAt;
     expect(validateStudioProjectV4(shifted)).toBe(true);
     expect(createStudioAuthoringFingerprintV4({ project: shifted, prepared: makeCreateArm() })).toBe(baseline);
@@ -851,14 +962,14 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
       existingPieceId: 'piece_1',
       sourceJobId: 'job_1',
       words: 'A quiet portrait.',
-      settings: { aspectRatio: '4:3' as const, resolution: '1080p' as const },
+      settings: { kind: 'photograph' as const, aspectRatio: '4:3' as const, resolution: '1080p' as const },
       conditioningInputs: [],
     };
     const fingerprint = createStudioAuthoringFingerprintV4({ project, prepared: retry });
     const failedRuntime = structuredClone(project);
     const job = failedRuntime.jobs.job_1!;
     job.status = 'failed';
-    job.outputAssetId = null;
+    job.outputAssetIdsByRole = { primary: null, poster: null };
     job.error = { code: 'timeout', messageKey: 'timeout' };
     job.progress = null;
     job.spendReceipt = null;
@@ -875,6 +986,18 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
     changedAssetFacts.assets.asset_1!.width = 1_600;
     expect(validateStudioProjectV4(changedAssetFacts)).toBe(true);
     expect(createStudioAuthoringFingerprintV4({ project: changedAssetFacts, prepared: retry })).toBe(fingerprint);
+
+    const binnedTarget = structuredClone(project);
+    binnedTarget.bin = [
+      {
+        id: 'bin_retry_target',
+        subject: { kind: 'piece', pieceId: 'piece_1' },
+        reason: 'lifted',
+        liftedAt: binnedTarget.updatedAt,
+      },
+    ];
+    expect(validateStudioProjectV4(binnedTarget)).toBe(true);
+    expect(() => createStudioAuthoringFingerprintV4({ project: binnedTarget, prepared: retry })).toThrow(TypeError);
   });
 
   it('preserves multi-job ordered retry topology and rejects malformed retry payloads', () => {
@@ -884,7 +1007,7 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
       existingPieceId: 'piece_1',
       sourceJobId: 'job_2',
       words: 'A quiet portrait.',
-      settings: { aspectRatio: '4:3' as const, resolution: '1080p' as const },
+      settings: { kind: 'photograph' as const, aspectRatio: '4:3' as const, resolution: '1080p' as const },
       conditioningInputs: [],
     };
 
@@ -909,6 +1032,9 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
       createStudioAuthoringFingerprintV4({ project, prepared: { ...retry, runStem: null } } as never)
     ).toThrow(TypeError);
     expect(() =>
+      createStudioAuthoringFingerprintV4({ project, prepared: { ...retry, mode: 'bogus' } } as never)
+    ).toThrow('prepared authoring arm must be exact');
+    expect(() =>
       createStudioAuthoringFingerprintV4({ project, prepared: { ...retry, sourceJobId: 'job_missing' } })
     ).toThrow('sourceJobId must be the latest persisted Piece job');
     expect(() =>
@@ -928,5 +1054,34 @@ describe('inactive exact schema-7 authoring fingerprint', () => {
         },
       })
     ).toThrow('exactly match');
+  });
+
+  it('keeps same-Job poll recovery final in Piece attempt order', () => {
+    const project = makeRetriedProject();
+    const first = project.jobs.job_1!;
+    first.status = 'needs_attention';
+    first.error = { code: 'poll_deadline', messageKey: 'poll_deadline' };
+    const next = project.jobs.job_2!;
+    next.attempt = { kind: 'first' };
+    project.spendAuthorizations[1]!.quote.item.attempt = structuredClone(next.attempt);
+
+    expect(validateStudioProjectV4(project)).toBe(false);
+  });
+
+  it('allows an acknowledged retry immediately after an uncertain submission', () => {
+    const project = makeRetriedProject();
+    const first = project.jobs.job_1!;
+    first.status = 'needs_attention';
+    first.providerSubmissionKind = null;
+    first.providerJobId = null;
+    first.remoteStartedAt = null;
+    first.error = { code: 'submission_unknown', messageKey: 'submission_unknown' };
+    const retry = project.jobs.job_2!;
+    retry.attempt = { kind: 'retry', sourceJobId: first.id, reason: 'submission_unknown' };
+    retry.duplicateChargeAcknowledged = true;
+    retry.duplicateChargeAcknowledgedAt = retry.createdAt;
+    project.spendAuthorizations[1]!.quote.item.attempt = structuredClone(retry.attempt);
+
+    expect(validateStudioProjectV4(project)).toBe(true);
   });
 });

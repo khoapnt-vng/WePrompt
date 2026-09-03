@@ -940,6 +940,44 @@
         "failed": "ディレクターを安全に接続できませんでした。プロジェクトを再読み込みしてください。"
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "費用の承認が必要",
+            "proposed": "提案",
+            "partial": "一部レンダリング済み",
+            "drafted": "下書き",
+            "rendered": "レンダリング済み",
+            "imported": "読み込み済み",
+            "current": "現在",
+            "stale": "古い",
+            "failed": "失敗",
+            "queued": "待機中",
+            "generating": "生成中",
+            "rendering": "レンダリング中"
+          },
+          "member": {
+            "slate": "スレート",
+            "queued": "待機中",
+            "ready_to_render": "レンダー可能",
+            "generating": "生成中",
+            "rendered": "レンダリング済み",
+            "stale": "古い",
+            "failed": "失敗"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "ルール違反",
+              "returned_silence": "無音が返されました",
+              "provider_failure": "プロバイダーの失敗",
+              "local_render_failure": "ローカルレンダリングの失敗",
+              "download_failure": "ダウンロードの失敗"
+            },
+            "cost": { "spent": "課金あり", "not_spent": "課金なし" }
+          },
+          "action": { "re_render_chain": "チェーンを再レンダリング", "keep": "保持", "retry": "再試行" },
+          "queuedPosition": "待機中 · {{position}}番目"
+        },
         "projectActions": "プロジェクト操作",
         "loading": "プロジェクトを読み込み中…",
         "refreshing": "プロジェクトを更新中…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "ビジュアル参照",
           "visualReferencesHint": "この写真のガイドとして、現在の Piece を最大 {{maximum}} 個選択します。",
           "visualReferencesCount": "{{maximum}} 個中 {{selected}} 個を選択"
+        },
+        "cut": {
+          "length": "{{total}} 中 {{played}}",
+          "playsSummary": "{{played}} を再生 · フィルムの制作済み部分が終わる位置で停止",
+          "slatesSummary": "{{count}} 件のショットがスレートとして尺を保持 · 未作成 {{unmade}}",
+          "slatesSummary_one": "{{count}} 件のショットがスレートとして尺を保持 · 未作成 {{unmade}}",
+          "slatesSummary_other": "{{count}} 件のショットがスレートとして尺を保持 · 未作成 {{unmade}}",
+          "slateTally": "スレート {{count}} 件 · {{duration}}",
+          "slateTally_one": "スレート {{count}} 件 · {{duration}}",
+          "slateTally_other": "スレート {{count}} 件 · {{duration}}",
+          "audioBed": "{{handle}} · 読み込み済み · フィルム全体を通して {{level}}",
+          "audioSegment": "{{handle}} · {{duration}} · {{beat}} を基準に配置",
+          "audioNotGenerated": "未生成",
+          "audioMissingDetail": "{{beat}} のナレーション — 未生成。その部分のフィルムは無音のまま、尺どおりの長さで再生されます。",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "チェーンの先頭",
+          "chainAfter": "{{handle}} の後",
+          "staleOffChain": "{{handle}} が再レンダリングされてから、チェーンから外れています。引き続き再生されます。",
+          "reorderHint": "Alt+↑/↓ で移動します — {{beat}} の内側で動かすとチェーンが組み直され、{{price}} かかります。ビートをまたぐ移動は無料です。",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "トリム",
+          "matchTo": "{{handle}} に合わせる",
+          "play": "再生",
+          "reCut": "再カット",
+          "level": "レベル {{level}}",
+          "commissionCost": "未作成のショット {{count}} 件を制作すると {{price}} かかります — フィルム {{duration}} を秒あたり {{rate}} で計算しています。",
+          "commissionCost_one": "未作成のショット {{count}} 件を制作すると {{price}} かかります — フィルム {{duration}} を秒あたり {{rate}} で計算しています。",
+          "commissionCost_other": "未作成のショット {{count}} 件を制作すると {{price}} かかります — フィルム {{duration}} を秒あたり {{rate}} で計算しています。",
+          "commission": "発注 · {{price}}",
+          "notNow": "今はしない",
+          "conditions": "条件：{{handles}}",
+          "budgetRemaining": "{{total}} のうち残り {{remaining}}",
+          "quotesOutstanding": "未実行の見積もり {{count}} 件 · 実行すると合計 {{sum}}",
+          "quotesOutstanding_one": "未実行の見積もり {{count}} 件 · 実行すると合計 {{sum}}",
+          "quotesOutstanding_other": "未実行の見積もり {{count}} 件 · 実行すると合計 {{sum}}",
+          "proposedSummary": "{{beats}} ビート · {{shots}} ショット",
+          "proposedFrom": "{{handle}} から。{{count}} 件すべてを描画すると {{price}} かかります。",
+          "proposedFrom_one": "{{handle}} から。描画すると {{price}} かかります。",
+          "proposedFrom_other": "{{handle}} から。{{count}} 件すべてを描画すると {{price}} かかります。"
+        },
+        "accessibility": {
+          "filmstrip": "フィルムストリップ。セグメントはビートごとに区切られています",
+          "filmstripSegment": "{{handle}}、{{duration}}、{{status}}",
+          "audioLane": "音声レーン",
+          "memberInspector": "{{handle}} の詳細",
+          "blockStatus": "{{handle}}、{{status}}",
+          "reorderAnnouncement": "{{handle}} を {{position}} 番目に移動しました",
+          "reorderAnnouncementWithCost": "{{handle}} を {{position}} 番目に移動しました。費用は {{price}} です",
+          "slateMember": "{{handle}}、{{duration}} の尺を保持、まだ作成されていません",
+          "quoteRegion": "{{handle}} の見積もり",
+          "judgementFooter": "{{handle}} について判断が必要です"
         }
       },
       "spending": {

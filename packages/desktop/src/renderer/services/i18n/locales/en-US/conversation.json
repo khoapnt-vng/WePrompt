@@ -775,6 +775,44 @@
         "failed": "The Director could not be attached safely. Reload the project to try again."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Needs budget",
+            "proposed": "Proposed",
+            "partial": "Partial",
+            "drafted": "Drafted",
+            "rendered": "Rendered",
+            "imported": "Imported",
+            "current": "Current",
+            "stale": "Stale",
+            "failed": "Failed",
+            "queued": "Queued",
+            "generating": "Generating",
+            "rendering": "Rendering"
+          },
+          "member": {
+            "slate": "Slate",
+            "queued": "Queued",
+            "ready_to_render": "Ready to render",
+            "generating": "Generating",
+            "rendered": "Rendered",
+            "stale": "Stale",
+            "failed": "Failed"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "rule breach",
+              "returned_silence": "returned silence",
+              "provider_failure": "provider failure",
+              "local_render_failure": "local render failure",
+              "download_failure": "download failure"
+            },
+            "cost": { "spent": "spent", "not_spent": "not spent" }
+          },
+          "action": { "re_render_chain": "Re-render chain", "keep": "Keep", "retry": "Retry" },
+          "queuedPosition": "Queued · {{position}}"
+        },
         "projectActions": "Project actions",
         "loading": "Loading project…",
         "refreshing": "Refreshing project…",
@@ -933,6 +971,57 @@
           "visualReferences": "Visual references",
           "visualReferencesHint": "Choose up to {{maximum}} current Pieces to guide this photo.",
           "visualReferencesCount": "{{selected}} of {{maximum}} selected"
+        },
+        "cut": {
+          "length": "{{played}} of {{total}}",
+          "playsSummary": "plays {{played}} · stops where the film stops being made",
+          "slatesSummary": "{{count}} shots hold as slates · {{unmade}} unmade",
+          "slatesSummary_one": "{{count}} shot holds as slates · {{unmade}} unmade",
+          "slatesSummary_other": "{{count}} shots hold as slates · {{unmade}} unmade",
+          "slateTally": "{{count}} slates · {{duration}}",
+          "slateTally_one": "{{count}} slate · {{duration}}",
+          "slateTally_other": "{{count}} slates · {{duration}}",
+          "audioBed": "{{handle}} · imported · {{level}} under the whole film",
+          "audioSegment": "{{handle}} · {{duration}} · anchored to {{beat}}",
+          "audioNotGenerated": "not generated",
+          "audioMissingDetail": "Narration for {{beat}} — not generated. The film plays silent there, at full length.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Chain head",
+          "chainAfter": "After {{handle}}",
+          "staleOffChain": "Off the chain since {{handle}} was re-rendered. It plays.",
+          "reorderHint": "Alt+Up/Down moves it — inside {{beat}} that rewrites the chain and costs {{price}}; across Beats it is free.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Trim",
+          "matchTo": "Match to {{handle}}",
+          "play": "Play",
+          "reCut": "Re-cut",
+          "level": "Level {{level}}",
+          "commissionCost": "Producing the {{count}} unmade shots would cost {{price}} — {{duration}} of film at {{rate}} per second.",
+          "commissionCost_one": "Producing the {{count}} unmade shot would cost {{price}} — {{duration}} of film at {{rate}} per second.",
+          "commissionCost_other": "Producing the {{count}} unmade shots would cost {{price}} — {{duration}} of film at {{rate}} per second.",
+          "commission": "Commission · {{price}}",
+          "notNow": "Not now",
+          "conditions": "Conditions: {{handles}}",
+          "budgetRemaining": "{{remaining}} left of {{total}}",
+          "quotesOutstanding": "{{count}} quotes outstanding · {{sum}} if all run",
+          "quotesOutstanding_one": "{{count}} quote outstanding · {{sum}} if it runs",
+          "quotesOutstanding_other": "{{count}} quotes outstanding · {{sum}} if all run",
+          "proposedSummary": "{{beats}} Beats · {{shots}} shots",
+          "proposedFrom": "From {{handle}}. Drawing all {{count}} would cost {{price}}.",
+          "proposedFrom_one": "From {{handle}}. Drawing it would cost {{price}}.",
+          "proposedFrom_other": "From {{handle}}. Drawing all {{count}} would cost {{price}}."
+        },
+        "accessibility": {
+          "filmstrip": "Filmstrip, one segment per Beat",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Audio lane",
+          "memberInspector": "Details for {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} moved to position {{position}}",
+          "reorderAnnouncementWithCost": "{{handle}} moved to position {{position}}, costs {{price}}",
+          "slateMember": "{{handle}}, holds {{duration}}, not yet made",
+          "quoteRegion": "Quote for {{handle}}",
+          "judgementFooter": "Decision required for {{handle}}"
         }
       },
       "spending": {

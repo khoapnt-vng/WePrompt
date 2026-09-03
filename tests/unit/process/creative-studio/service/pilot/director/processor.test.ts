@@ -10,15 +10,26 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  studioPilotDirectorProposeBoardCommandSha256,
   type StudioPilotDirectorCommand,
 } from '@process/services/creative-studio/service/pilot/director/contracts';
 import {
   createStudioPilotDirectorMailbox,
   StudioPilotDirectorMailboxError,
 } from '@process/services/creative-studio/service/pilot/director/mailbox';
-import { createStudioPilotDirectorProcessor } from '@process/services/creative-studio/service/pilot/director/processor';
+import {
+  createStudioPilotDirectorProcessor,
+  type StudioPilotDirectorProposalIdentityKindV4,
+} from '@process/services/creative-studio/service/pilot/director/processor';
 import { CreativeStudioPilotServiceErrorV3 } from '@process/services/creative-studio/service/pilot/errors';
 import type { CreativeStudioPilotEntryPointV3 } from '@process/services/creative-studio/service/pilot/entryPoint';
+import {
+  deriveStudioProposalExpiresAtV4,
+  deriveStudioProposalIdV4,
+  STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+  type StudioProposalRecordV4,
+} from '@process/services/creative-studio/service/schema2/proposals/proposalContractsV4';
+import type { CreativeStudioProposalSidecarsV4 } from '@process/services/creative-studio/store/pilot/proposalsV4';
 import type {
   StudioApplyMutationBatchResultV3,
   StudioPreparePhotoResultV3,
@@ -69,6 +80,28 @@ const proposeBoardCommand = (): StudioPilotDirectorCommand => ({
   ],
 });
 
+const boardProposal = (
+  command: Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>,
+  createdAt = new Date(BASE_TIME).toISOString()
+): StudioProposalRecordV4 => ({
+  schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+  id: deriveStudioProposalIdV4(command.projectId, command.commandId),
+  projectId: command.projectId,
+  status: 'pending',
+  baseAuthoringRevision: command.expectedAuthoringRevision,
+  source: {
+    kind: 'director_command',
+    commandId: command.commandId,
+    commandSha256: studioPilotDirectorProposeBoardCommandSha256(command),
+  },
+  target: { kind: 'board', boardId: 'board_1' },
+  issuedMemberIds: { beatIds: ['beat_1'], shotIds: ['shot_1'] },
+  payload: { kind: 'create_board', handle: command.handle, beats: structuredClone(command.beats) },
+  createdAt,
+  expiresAt: deriveStudioProposalExpiresAtV4(createdAt),
+  decidedAt: null,
+});
+
 const supportedLoad = {
   status: 'supported',
   summary: {},
@@ -107,7 +140,13 @@ describe('Pilot Director command processor', () => {
     await fs.rm(root, { recursive: true, force: true });
   });
 
-  const harness = () => {
+  const harness = (
+    options: {
+      proposalAuthority?: Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>;
+      mintProposalIdentity?: (kind: StudioPilotDirectorProposalIdentityKindV4) => string;
+      processorNow?: () => number;
+    } = {}
+  ) => {
     let temporary = 0;
     const mailbox = createStudioPilotDirectorMailbox({
       resolveVerifiedProjectDirectory: async (projectId) => (projectId === 'project_1' ? projectDirectory : null),
@@ -125,8 +164,10 @@ describe('Pilot Director command processor', () => {
     const processor = createStudioPilotDirectorProcessor({
       mailbox,
       entryPoint,
+      proposalAuthority: options.proposalAuthority,
+      mintProposalIdentity: options.mintProposalIdentity,
       processorId: 'processor_current',
-      now: () => now,
+      now: options.processorNow ?? (() => now),
     });
     return { mailbox, entryPoint, processor };
   };
@@ -194,7 +235,7 @@ describe('Pilot Director command processor', () => {
     });
   });
 
-  it('refuses an unwired Board proposal without falling through to rename or any other mutation', async () => {
+  it('keeps Board proposals unavailable until the schema-7 authority is injected', async () => {
     const { mailbox, entryPoint, processor } = harness();
     const command = proposeBoardCommand();
     await mailbox.submit(command);
@@ -207,6 +248,192 @@ describe('Pilot Director command processor', () => {
     expect(entryPoint.loadProjectV3).not.toHaveBeenCalled();
     expect(entryPoint.preparePhotoV3).not.toHaveBeenCalled();
     expect(entryPoint.applyMutationBatchV3).not.toHaveBeenCalled();
+  });
+
+  it('mints Board identities once and records one exactly correlated proposal with one Main timestamp', async () => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const replayProposalV4 = vi.fn(async (input: unknown) => {
+      const proposal = structuredClone((input as { proposal: StudioProposalRecordV4 }).proposal);
+      return { outcome: 'admitted' as const, proposalId: proposal.id, proposal };
+    });
+    const getProposalStateV4 = vi.fn(async () => ({ status: 'unknown' as const }));
+    const proposalAuthority = {
+      replayProposalV4,
+      getProposalStateV4,
+    } satisfies Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>;
+    const counts = { board: 0, beat: 0, shot: 0 };
+    const mintProposalIdentity = vi.fn((kind: StudioPilotDirectorProposalIdentityKindV4) => {
+      counts[kind] += 1;
+      return `${kind}_${counts[kind]}`;
+    });
+    const processorNow = vi.fn(() => BASE_TIME);
+    const { mailbox, entryPoint, processor } = harness({
+      proposalAuthority,
+      mintProposalIdentity,
+      processorNow,
+    });
+    await mailbox.submit(command);
+
+    const proposal = boardProposal(command);
+    await expect(processor.processProject(command.projectId)).resolves.toEqual({
+      schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      policy: 'propose_board',
+      expectedAuthoringRevision: command.expectedAuthoringRevision,
+      decidedAt: proposal.createdAt,
+      status: 'succeeded',
+      result: { status: 'recorded', proposal },
+    });
+    expect(replayProposalV4).toHaveBeenCalledWith({
+      projectId: command.projectId,
+      proposalId: proposal.id,
+      proposal,
+    });
+    expect(getProposalStateV4).not.toHaveBeenCalled();
+    expect(mintProposalIdentity.mock.calls.map(([kind]) => kind)).toEqual(['board', 'beat', 'shot']);
+    expect(processorNow).toHaveBeenCalledTimes(1);
+    expect(entryPoint.loadProjectV3).not.toHaveBeenCalled();
+    expect(entryPoint.preparePhotoV3).not.toHaveBeenCalled();
+    expect(entryPoint.applyMutationBatchV3).not.toHaveBeenCalled();
+  });
+
+  it('uses local proposal time while tolerating a bounded future-skew Director clock', async () => {
+    const command = {
+      ...proposeBoardCommand(),
+      createdAt: new Date(BASE_TIME + 30_000).toISOString(),
+    } as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const replayProposalV4 = vi.fn(async (input: unknown) => {
+      const proposal = structuredClone((input as { proposal: StudioProposalRecordV4 }).proposal);
+      return { outcome: 'admitted' as const, proposalId: proposal.id, proposal };
+    });
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4: vi.fn(async () => ({ status: 'unknown' as const })),
+      },
+      mintProposalIdentity: (kind) => `${kind}_future`,
+    });
+    await mailbox.submit(command);
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      decidedAt: new Date(BASE_TIME).toISOString(),
+      status: 'succeeded',
+      result: {
+        status: 'recorded',
+        proposal: { createdAt: new Date(BASE_TIME).toISOString() },
+      },
+    });
+    expect(replayProposalV4).toHaveBeenCalledWith(
+      expect.objectContaining({
+        proposal: expect.objectContaining({ createdAt: new Date(BASE_TIME).toISOString() }),
+      })
+    );
+  });
+
+  it.each([
+    [{ outcome: 'busy' as const, holdingProposalId: 'proposal_other' }, 'proposal_pending'],
+    [
+      {
+        outcome: 'identity_collision' as const,
+        proposalId: deriveStudioProposalIdV4('project_1', 'command_propose_board'),
+        expectedSha256: 'a'.repeat(64),
+      },
+      'identity_collision',
+    ],
+    [{ outcome: 'refused' as const, reason: 'handle_collision' as const }, 'handle_collision'],
+  ])('maps a fresh proposal replay outcome distinctly', async (outcome, reasonCode) => {
+    const command = proposeBoardCommand();
+    const replayProposalV4 = vi.fn(async () => outcome);
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4: vi.fn(async () => ({ status: 'unknown' as const })),
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+    });
+    await mailbox.submit(command);
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      policy: 'propose_board',
+      status: 'rejected',
+      reasonCode,
+    });
+    expect(replayProposalV4).toHaveBeenCalledTimes(1);
+  });
+
+  it('propagates ambiguous proposal storage failures and resumes the durable mailbox without reminting', async () => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    let durableProposal: StudioProposalRecordV4 | null = null;
+    let firstAttempt = true;
+    const replayProposalV4 = vi.fn(async (input: unknown) => {
+      const proposal = structuredClone((input as { proposal: StudioProposalRecordV4 }).proposal);
+      if (firstAttempt) {
+        firstAttempt = false;
+        durableProposal = proposal;
+        throw new Error('ambiguous proposal storage outcome');
+      }
+      return {
+        outcome: 'already_pending' as const,
+        proposalId: proposal.id,
+        proposal,
+        admittedAt: proposal.createdAt,
+      };
+    });
+    const getProposalStateV4 = vi.fn(async () =>
+      durableProposal === null
+        ? { status: 'unknown' as const }
+        : {
+            status: 'pending' as const,
+            proposal: structuredClone(durableProposal),
+            admittedAt: durableProposal.createdAt,
+          }
+    );
+    const counts = { board: 0, beat: 0, shot: 0 };
+    const mintProposalIdentity = vi.fn((kind: StudioPilotDirectorProposalIdentityKindV4) => {
+      counts[kind] += 1;
+      return `${kind}_${counts[kind]}`;
+    });
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4,
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+      mintProposalIdentity,
+    });
+    await mailbox.submit(command);
+
+    await expect(processor.processProject(command.projectId)).rejects.toThrow('ambiguous proposal storage outcome');
+    await expect(mailbox.readPending(command.projectId)).resolves.toMatchObject({
+      status: 'valid',
+      command: { commandId: command.commandId },
+    });
+    await expect(mailbox.readReceipt(command.projectId, command.commandId)).resolves.toBeNull();
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      status: 'succeeded',
+      result: { status: 'recorded', proposal: { id: deriveStudioProposalIdV4(command.projectId, command.commandId) } },
+    });
+    expect(getProposalStateV4).toHaveBeenCalledTimes(1);
+    expect(replayProposalV4).toHaveBeenCalledTimes(2);
+    expect(mintProposalIdentity.mock.calls.map(([kind]) => kind)).toEqual(['board', 'beat', 'shot']);
+  });
+
+  it('keeps an unavailable proposal replay pending instead of publishing a false rejection', async () => {
+    const command = proposeBoardCommand();
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4: vi.fn(async () => ({ outcome: 'unavailable' as const, reason: 'corrupt_storage' as const })),
+        getProposalStateV4: vi.fn(async () => ({ status: 'unknown' as const })),
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+    });
+    await mailbox.submit(command);
+
+    await expect(processor.processProject(command.projectId)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(mailbox.readPending(command.projectId)).resolves.toMatchObject({
+      status: 'valid',
+      command: { commandId: command.commandId },
+    });
+    await expect(mailbox.readReceipt(command.projectId, command.commandId)).resolves.toBeNull();
   });
 
   it('lets the entrypoint reject stale authoring authority', async () => {
@@ -263,7 +490,6 @@ describe('Pilot Director command processor', () => {
   it.each([
     ['prepare_photo', prepareCommand()],
     ['rename_piece', renameCommand()],
-    ['propose_board', proposeBoardCommand()],
   ] as const)('terminalizes an ambiguous pre-restart %s without replay', async (_policy, command) => {
     const { mailbox, entryPoint, processor } = harness();
     await mailbox.submit(command);
@@ -275,6 +501,175 @@ describe('Pilot Director command processor', () => {
     });
     expect(entryPoint.preparePhotoV3).not.toHaveBeenCalled();
     expect(entryPoint.applyMutationBatchV3).not.toHaveBeenCalled();
+  });
+
+  it('reconstructs the exact recorded Board receipt after restart without reminting or rerecording', async () => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const proposal = boardProposal(command, new Date(BASE_TIME + 1_000).toISOString());
+    const replayProposalV4 = vi.fn(async () => ({
+      outcome: 'already_pending' as const,
+      proposalId: proposal.id,
+      proposal: structuredClone(proposal),
+      admittedAt: proposal.createdAt,
+    }));
+    const getProposalStateV4 = vi.fn(async () => ({
+      status: 'pending' as const,
+      proposal: structuredClone(proposal),
+      admittedAt: proposal.createdAt,
+    }));
+    const mintProposalIdentity = vi.fn(() => {
+      throw new Error('must not mint during replay');
+    });
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4,
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+      mintProposalIdentity,
+    });
+    await mailbox.submit(command);
+    await mailbox.begin(command.projectId, 'processor_before_restart');
+
+    await expect(processor.processProject(command.projectId)).resolves.toEqual({
+      schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      policy: 'propose_board',
+      expectedAuthoringRevision: command.expectedAuthoringRevision,
+      decidedAt: proposal.createdAt,
+      status: 'succeeded',
+      result: { status: 'recorded', proposal },
+    });
+    expect(getProposalStateV4).toHaveBeenCalledWith(command.projectId, proposal.id);
+    expect(replayProposalV4).toHaveBeenCalledWith({
+      projectId: command.projectId,
+      proposalId: proposal.id,
+      proposal,
+    });
+    expect(mintProposalIdentity).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['accepted', 12],
+    ['rejected', null],
+    ['expired', null],
+  ] as const)('replays the actual terminal %s Board decision after restart', async (status, appliedRevision) => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const proposal = boardProposal(command, new Date(BASE_TIME + 1_000).toISOString());
+    const decidedAt = new Date(BASE_TIME + 2_000).toISOString();
+    const replayProposalV4 = vi.fn(async () => ({
+      outcome: 'already_decided' as const,
+      proposalId: proposal.id,
+      status,
+      decidedAt,
+      appliedRevision,
+    }));
+    const mintProposalIdentity = vi.fn();
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4: vi.fn(async () => ({
+          status: 'pending' as const,
+          proposal: structuredClone(proposal),
+          admittedAt: proposal.createdAt,
+        })),
+      },
+      mintProposalIdentity,
+    });
+    await mailbox.submit(command);
+    await mailbox.begin(command.projectId, 'processor_before_restart');
+
+    await expect(processor.processProject(command.projectId)).resolves.toEqual({
+      schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      policy: 'propose_board',
+      expectedAuthoringRevision: command.expectedAuthoringRevision,
+      decidedAt,
+      status: 'succeeded',
+      result: { status, proposalId: proposal.id, decidedAt, appliedRevision },
+    });
+    expect(replayProposalV4).toHaveBeenCalledWith({
+      projectId: command.projectId,
+      proposalId: proposal.id,
+      proposal,
+    });
+    expect(mintProposalIdentity).not.toHaveBeenCalled();
+  });
+
+  it('rejects a resumed terminal tombstone bound to different command bytes', async () => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const proposalId = deriveStudioProposalIdV4(command.projectId, command.commandId);
+    const replayProposalV4 = vi.fn();
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4: vi.fn(async () => ({
+          status: 'rejected' as const,
+          proposalId,
+          decidedAt: new Date(BASE_TIME + 1_000).toISOString(),
+          payloadSha256: 'a'.repeat(64),
+          commandSha256: 'b'.repeat(64),
+          appliedRevision: null,
+          payloadRetained: false,
+        })),
+      },
+    });
+    await mailbox.submit(command);
+    await mailbox.begin(command.projectId, 'processor_before_restart');
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      status: 'rejected',
+      reasonCode: 'identity_collision',
+    });
+    expect(replayProposalV4).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unrecorded resumed Board command indeterminate without reminting or rerecording', async () => {
+    const command = proposeBoardCommand();
+    const replayProposalV4 = vi.fn();
+    const getProposalStateV4 = vi.fn(async () => ({ status: 'unknown' as const }));
+    const mintProposalIdentity = vi.fn();
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4,
+        getProposalStateV4,
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+      mintProposalIdentity,
+    });
+    await mailbox.submit(command);
+    await mailbox.begin(command.projectId, 'processor_before_restart');
+
+    await expect(processor.processProject(command.projectId)).resolves.toMatchObject({
+      policy: 'propose_board',
+      status: 'indeterminate',
+      reasonCode: 'indeterminate_after_restart',
+    });
+    expect(getProposalStateV4).toHaveBeenCalledWith(
+      command.projectId,
+      deriveStudioProposalIdV4(command.projectId, command.commandId)
+    );
+    expect(replayProposalV4).not.toHaveBeenCalled();
+    expect(mintProposalIdentity).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when resumed Board history does not exactly match its immutable command', async () => {
+    const command = proposeBoardCommand() as Extract<StudioPilotDirectorCommand, { policy: 'propose_board' }>;
+    const mismatched = boardProposal({ ...command, handle: 'different_board' });
+    const { mailbox, processor } = harness({
+      proposalAuthority: {
+        replayProposalV4: vi.fn(),
+        getProposalStateV4: vi.fn(async () => ({
+          status: 'pending' as const,
+          proposal: mismatched,
+          admittedAt: mismatched.createdAt,
+        })),
+      } as Pick<CreativeStudioProposalSidecarsV4, 'replayProposalV4' | 'getProposalStateV4'>,
+    });
+    await mailbox.submit(command);
+    await mailbox.begin(command.projectId, 'processor_before_restart');
+
+    await expect(processor.processProject(command.projectId)).rejects.toMatchObject({ code: 'storage_error' });
   });
 
   it('safely replays only a read after restart', async () => {

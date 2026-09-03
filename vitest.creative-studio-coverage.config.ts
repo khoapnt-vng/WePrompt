@@ -56,6 +56,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/catalog.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/editorFolder.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/pieceManifestV3.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/exports/pieceManifestV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/filmExporter.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts',
@@ -93,6 +94,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/pricing/rateCard.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/proposals/binEligibilityAuthorityV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/proposals/proposalContractsV4.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/proposals/proposalReviewV4.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/confirmation.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/contracts.ts',
   'packages/desktop/src/process/services/creative-studio/service/pilot/director/contracts.ts',
@@ -124,6 +126,8 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/store/projectRecords.ts',
   'packages/desktop/src/process/services/creative-studio/store/projectTransactions.ts',
   'packages/desktop/src/process/services/creative-studio/store/pilot/index.ts',
+  'packages/desktop/src/process/services/creative-studio/store/pilot/projectWriterGate.ts',
+  'packages/desktop/src/process/services/creative-studio/store/pilot/proposalLedgerV4.ts',
   'packages/desktop/src/process/services/creative-studio/store/pilot/proposalsV4.ts',
   'packages/desktop/src/process/services/creative-studio/store/pilot/v3.ts',
   'packages/desktop/src/process/services/creative-studio/store/pilot/v4.ts',
@@ -143,8 +147,10 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/renderer/pages/studio/components/Pilot/PilotDirectorRail.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Pilot/PilotLibrary.tsx',
   'packages/desktop/src/renderer/pages/studio/components/Pilot/PilotSpendingLimitDialog.tsx',
+  'packages/desktop/src/renderer/pages/studio/components/Pilot/Phase6/statusVocabulary.ts',
   'packages/desktop/src/renderer/pages/studio/components/Pilot/index.ts',
   'packages/desktop/src/renderer/pages/studio/studioManagedAssetUrl.ts',
+  'packages/desktop/src/renderer/services/i18n/index.ts',
 ] as const;
 
 export default defineConfig({

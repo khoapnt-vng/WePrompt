@@ -940,6 +940,44 @@
         "failed": "디렉터를 안전하게 연결하지 못했습니다. 프로젝트를 다시 불러오세요."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "예산 필요",
+            "proposed": "제안됨",
+            "partial": "일부 렌더링됨",
+            "drafted": "초안",
+            "rendered": "렌더링됨",
+            "imported": "가져옴",
+            "current": "현재",
+            "stale": "오래됨",
+            "failed": "실패",
+            "queued": "대기열에 있음",
+            "generating": "생성 중",
+            "rendering": "렌더링 중"
+          },
+          "member": {
+            "slate": "슬레이트",
+            "queued": "대기열에 있음",
+            "ready_to_render": "렌더링 준비됨",
+            "generating": "생성 중",
+            "rendered": "렌더링됨",
+            "stale": "오래됨",
+            "failed": "실패"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "규칙 위반",
+              "returned_silence": "무음 반환",
+              "provider_failure": "공급자 오류",
+              "local_render_failure": "로컬 렌더링 오류",
+              "download_failure": "다운로드 오류"
+            },
+            "cost": { "spent": "지출 발생", "not_spent": "지출 없음" }
+          },
+          "action": { "re_render_chain": "체인 다시 렌더링", "keep": "유지", "retry": "다시 시도" },
+          "queuedPosition": "대기열에 있음 · {{position}}"
+        },
         "projectActions": "프로젝트 작업",
         "loading": "프로젝트 불러오는 중…",
         "refreshing": "프로젝트 새로 고치는 중…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "시각적 참조",
           "visualReferencesHint": "이 사진을 안내할 현재 Piece를 최대 {{maximum}}개 선택하세요.",
           "visualReferencesCount": "{{maximum}}개 중 {{selected}}개 선택"
+        },
+        "cut": {
+          "length": "{{total}} 중 {{played}}",
+          "playsSummary": "{{played}} 재생 · 필름이 만들어진 지점에서 멈춤",
+          "slatesSummary": "샷 {{count}}개가 슬레이트로 유지 · 미제작 {{unmade}}",
+          "slatesSummary_one": "샷 {{count}}개가 슬레이트로 유지 · 미제작 {{unmade}}",
+          "slatesSummary_other": "샷 {{count}}개가 슬레이트로 유지 · 미제작 {{unmade}}",
+          "slateTally": "슬레이트 {{count}}개 · {{duration}}",
+          "slateTally_one": "슬레이트 {{count}}개 · {{duration}}",
+          "slateTally_other": "슬레이트 {{count}}개 · {{duration}}",
+          "audioBed": "{{handle}} · 가져옴 · 필름 전체에 걸쳐 {{level}}",
+          "audioSegment": "{{handle}} · {{duration}} · {{beat}}에 고정",
+          "audioNotGenerated": "생성되지 않음",
+          "audioMissingDetail": "{{beat}}의 내레이션 — 생성되지 않음. 필름은 해당 구간에서 무음으로 전체 길이만큼 재생됩니다.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "체인 시작",
+          "chainAfter": "{{handle}} 다음",
+          "staleOffChain": "{{handle}}이(가) 다시 렌더링된 뒤 체인에서 벗어났습니다. 계속 재생됩니다.",
+          "reorderHint": "Alt+위/아래로 이동합니다 — {{beat}} 안에서 옮기면 체인이 다시 작성되고 비용은 {{price}}입니다. 비트 사이 이동은 무료입니다.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "트림",
+          "matchTo": "{{handle}}에 맞추기",
+          "play": "재생",
+          "reCut": "다시 컷하기",
+          "level": "레벨 {{level}}",
+          "commissionCost": "미제작 샷 {{count}}개를 제작하는 비용은 {{price}}입니다 — 필름 {{duration}} 분량, 초당 {{rate}}.",
+          "commissionCost_one": "미제작 샷 {{count}}개를 제작하는 비용은 {{price}}입니다 — 필름 {{duration}} 분량, 초당 {{rate}}.",
+          "commissionCost_other": "미제작 샷 {{count}}개를 제작하는 비용은 {{price}}입니다 — 필름 {{duration}} 분량, 초당 {{rate}}.",
+          "commission": "제작 의뢰 · {{price}}",
+          "notNow": "지금은 아니요",
+          "conditions": "조건: {{handles}}",
+          "budgetRemaining": "{{total}} 중 {{remaining}} 남음",
+          "quotesOutstanding": "견적 {{count}}건 대기 중 · 실행하면 {{sum}}",
+          "quotesOutstanding_one": "견적 {{count}}건 대기 중 · 실행하면 {{sum}}",
+          "quotesOutstanding_other": "견적 {{count}}건 대기 중 · 실행하면 {{sum}}",
+          "proposedSummary": "비트 {{beats}}개 · 샷 {{shots}}개",
+          "proposedFrom": "{{handle}}에서 제안했습니다. {{count}}개를 그리는 비용은 {{price}}입니다.",
+          "proposedFrom_one": "{{handle}}에서 제안했습니다. 그리는 비용은 {{price}}입니다.",
+          "proposedFrom_other": "{{handle}}에서 제안했습니다. {{count}}개를 그리는 비용은 {{price}}입니다."
+        },
+        "accessibility": {
+          "filmstrip": "필름스트립, 비트마다 구간 하나씩",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "오디오 레일",
+          "memberInspector": "{{handle}} 세부 정보",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}}을(를) {{position}}번째로 이동했습니다",
+          "reorderAnnouncementWithCost": "{{handle}}을(를) {{position}}번째로 이동했으며 비용은 {{price}}입니다",
+          "slateMember": "{{handle}}, {{duration}} 동안 유지, 아직 제작되지 않음",
+          "quoteRegion": "{{handle}} 견적",
+          "judgementFooter": "{{handle}}에 대한 결정이 필요합니다"
         }
       },
       "spending": {

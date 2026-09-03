@@ -13,7 +13,19 @@ export const studioPersistentIdentitiesV4 = (project: StudioProjectV4): Set<stri
     ...project.rules.map((rule) => rule.id),
     ...Object.keys(project.pieces),
     ...Object.keys(project.assets),
+    ...Object.values(project.pieces).flatMap((piece) =>
+      piece.assetHistory.flatMap((entry) =>
+        entry.state === 'evicted'
+          ? [
+              entry.assetsByRole.primary.id,
+              ...(entry.assetsByRole.poster === null ? [] : [entry.assetsByRole.poster.id]),
+            ]
+          : []
+      )
+    ),
     ...Object.keys(project.jobs),
+    ...Object.keys(project.frameExtractions),
+    ...Object.keys(project.derivedFrames),
     ...project.undoHistory.map((entry) => entry.id),
     ...project.bin.map((entry) => entry.id),
   ]);

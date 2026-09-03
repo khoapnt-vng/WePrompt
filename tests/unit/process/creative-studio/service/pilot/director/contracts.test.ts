@@ -9,6 +9,7 @@ import {
   parseStudioPilotDirectorCommand,
   parseStudioPilotDirectorReceipt,
   serializeStudioPilotDirectorRecord,
+  studioPilotDirectorProposeBoardCommandSha256,
   STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES,
   STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
@@ -74,14 +75,15 @@ const boardCommandAtBytes = (targetBytes: number): StudioPilotDirectorCommand =>
 
 const recordedBoardReceipt = (
   command: ReturnType<typeof boardCommand>,
-  proposalCreatedAt = '2026-09-01T00:00:30.000Z'
+  proposalCreatedAt = '2026-09-01T00:00:30.000Z',
+  receiptDecidedAt = deadlineAt
 ) => ({
   schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
   commandId: command.commandId,
   projectId: command.projectId,
   policy: command.policy,
   expectedAuthoringRevision: command.expectedAuthoringRevision,
-  decidedAt: deadlineAt,
+  decidedAt: receiptDecidedAt,
   status: 'succeeded' as const,
   result: {
     status: 'recorded' as const,
@@ -91,7 +93,11 @@ const recordedBoardReceipt = (
       projectId: command.projectId,
       status: 'pending' as const,
       baseAuthoringRevision: command.expectedAuthoringRevision,
-      source: { kind: 'director_command' as const, commandId: command.commandId },
+      source: {
+        kind: 'director_command' as const,
+        commandId: command.commandId,
+        commandSha256: studioPilotDirectorProposeBoardCommandSha256(command),
+      },
       target: { kind: 'board' as const, boardId: 'board_1' },
       issuedMemberIds: { beatIds: ['beat_1'], shotIds: ['shot_1'] },
       payload: { kind: 'create_board' as const, handle: command.handle, beats: command.beats },
@@ -102,7 +108,28 @@ const recordedBoardReceipt = (
   },
 });
 
-describe('Pilot Director schema-13 contracts', () => {
+const terminalBoardReceipt = (
+  command: ReturnType<typeof boardCommand>,
+  status: 'accepted' | 'rejected' | 'expired',
+  decidedAt: string,
+  appliedRevision: number | null = status === 'accepted' ? 9 : null
+) => ({
+  schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+  commandId: command.commandId,
+  projectId: command.projectId,
+  policy: command.policy,
+  expectedAuthoringRevision: command.expectedAuthoringRevision,
+  decidedAt,
+  status: 'succeeded' as const,
+  result: {
+    status,
+    proposalId: deriveStudioProposalIdV4(command.projectId, command.commandId),
+    decidedAt,
+    appliedRevision,
+  },
+});
+
+describe('Pilot Director schema-14 contracts', () => {
   it.each<StudioPilotDirectorCommand>([
     { ...commandBase, policy: 'get_project_status' },
     prepareCommand(),
@@ -118,8 +145,8 @@ describe('Pilot Director schema-13 contracts', () => {
     expect(parseStudioPilotDirectorCommand(command)).toEqual({ status: 'valid', command });
   });
 
-  it('rejects schema 12 without interpreting it as schema 13', () => {
-    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 12 })).toEqual({
+  it('rejects schema 13 without interpreting it as schema 14', () => {
+    expect(parseStudioPilotDirectorCommand({ ...prepareCommand(), schemaVersion: 13 })).toEqual({
       status: 'unsupported_version',
       commandId: 'command_1',
       projectId: 'project_1',
@@ -223,11 +250,174 @@ describe('Pilot Director schema-13 contracts', () => {
       ).status
     ).toBe('invalid');
     expect(
-      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-09-01T00:01:00.001Z'), command).status
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, deadlineAt, '2026-09-01T00:01:00.001Z'), command)
+        .status
     ).toBe('invalid');
     expect(
-      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-08-31T23:59:59.999Z'), command).status
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-08-31T23:59:29.999Z'), command).status
     ).toBe('invalid');
+  });
+
+  it('accepts a recorded proposal only inside the command execution window', () => {
+    const command = boardCommand();
+
+    expect(
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, '2026-09-01T00:00:59.999Z', deadlineAt), command)
+        .status
+    ).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt(
+        recordedBoardReceipt(command, '2026-09-01T00:01:00.001Z', '2026-09-01T00:01:00.002Z'),
+        command
+      ).status
+    ).toBe('invalid');
+  });
+
+  it('admits local proposal and terminal timestamps only within the Director clock-skew bound', () => {
+    const command = {
+      ...boardCommand(),
+      createdAt: '2026-09-01T00:00:30.000Z',
+      deadlineAt: '2026-09-01T00:01:30.000Z',
+    };
+    expect(
+      parseStudioPilotDirectorReceipt(
+        recordedBoardReceipt(command, '2026-09-01T00:00:00.000Z', '2026-09-01T00:00:00.000Z'),
+        command
+      ).status
+    ).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt(
+        recordedBoardReceipt(command, '2026-08-31T23:59:59.999Z', '2026-08-31T23:59:59.999Z'),
+        command
+      ).status
+    ).toBe('invalid');
+  });
+
+  it('keeps a standalone recorded receipt inside the proposal pending window', () => {
+    const command = boardCommand();
+    const proposalCreatedAt = '2026-09-01T00:00:30.000Z';
+    const proposalExpiresAt = deriveStudioProposalExpiresAtV4(proposalCreatedAt);
+    const lastPendingMillisecond = new Date(Date.parse(proposalExpiresAt) - 1).toISOString();
+
+    expect(
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, proposalCreatedAt, lastPendingMillisecond)).status
+    ).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt(recordedBoardReceipt(command, proposalCreatedAt, proposalExpiresAt)).status
+    ).toBe('invalid');
+  });
+
+  it('binds standalone recorded Board receipts to the receipt command identity', () => {
+    const command = boardCommand();
+    const receipt = recordedBoardReceipt(command);
+
+    expect(parseStudioPilotDirectorReceipt(receipt).status).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt({
+        ...receipt,
+        commandId: 'command_other',
+      }).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt({
+        ...receipt,
+        result: {
+          ...receipt.result,
+          proposal: {
+            ...receipt.result.proposal,
+            source: { ...receipt.result.proposal.source, commandId: 'command_other' },
+          },
+        },
+      }).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt({
+        ...receipt,
+        result: {
+          ...receipt.result,
+          proposal: { ...receipt.result.proposal, projectId: 'project_other' },
+        },
+      }).status
+    ).toBe('invalid');
+  });
+
+  it('binds a standalone recorded proposal id to its outer project and command', () => {
+    const command = boardCommand();
+    const receipt = recordedBoardReceipt(command);
+
+    expect(
+      parseStudioPilotDirectorReceipt({
+        ...receipt,
+        result: {
+          ...receipt.result,
+          proposal: {
+            ...receipt.result.proposal,
+            id: deriveStudioProposalIdV4(command.projectId, 'command_other'),
+          },
+        },
+      }).status
+    ).toBe('invalid');
+  });
+
+  it.each([
+    ['accepted', 9],
+    ['rejected', null],
+    ['expired', null],
+  ] as const)('accepts a byte-truthful terminal Board result for %s', (status, appliedRevision) => {
+    const command = boardCommand();
+    const receipt = terminalBoardReceipt(command, status, deadlineAt, appliedRevision);
+
+    expect(parseStudioPilotDirectorReceipt(receipt, command).status).toBe('valid');
+    expect(
+      parseStudioPilotDirectorReceipt(
+        { ...receipt, result: { ...receipt.result, appliedRevision: status === 'accepted' ? null : 9 } },
+        command
+      ).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt(
+        { ...receipt, result: { ...receipt.result, proposalId: 'proposal_wrong' } },
+        command
+      ).status
+    ).toBe('invalid');
+    expect(
+      parseStudioPilotDirectorReceipt({
+        ...receipt,
+        result: { ...receipt.result, proposalId: 'proposal_wrong' },
+      }).status
+    ).toBe('invalid');
+  });
+
+  it.each(['accepted', 'rejected', 'expired'] as const)(
+    'rejects a %s Board decision beyond clock skew while allowing a post-deadline decision',
+    (status) => {
+      const command = boardCommand();
+
+      expect(
+        parseStudioPilotDirectorReceipt(terminalBoardReceipt(command, status, '2026-08-31T23:59:29.999Z'), command)
+          .status
+      ).toBe('invalid');
+      expect(
+        parseStudioPilotDirectorReceipt(terminalBoardReceipt(command, status, '2026-09-02T00:00:00.000Z'), command)
+          .status
+      ).toBe('valid');
+    }
+  );
+
+  it('rejects a non-proposal receipt that predates its command', () => {
+    const command = prepareCommand();
+    const receipt = {
+      schemaVersion: STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION,
+      commandId: command.commandId,
+      projectId: command.projectId,
+      policy: command.policy,
+      expectedAuthoringRevision: command.expectedAuthoringRevision,
+      decidedAt: '2026-08-31T23:59:59.999Z',
+      status: 'rejected',
+      reasonCode: 'operation_not_available',
+    };
+
+    expect(parseStudioPilotDirectorReceipt(receipt, command).status).toBe('invalid');
   });
 
   it('correlates canonical Board words independently of object insertion order', () => {
@@ -248,6 +438,9 @@ describe('Pilot Director schema-13 contracts', () => {
     expect(parsed.status).toBe('valid');
     if (parsed.status !== 'valid' || parsed.command.policy !== 'propose_board') return;
 
+    expect(studioPilotDirectorProposeBoardCommandSha256(parsed.command)).toBe(
+      studioPilotDirectorProposeBoardCommandSha256(command)
+    );
     expect(parseStudioPilotDirectorReceipt(recordedBoardReceipt(command), parsed.command).status).toBe('valid');
   });
 

@@ -1,0 +1,30 @@
+.statusChip {
+  border-radius: 6px;
+  padding-block: 5px;
+  padding-inline: 11px;
+  color: var(--color-text-3);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.statusChip:lang(tr),
+.statusChip:lang(az),
+.statusChip:lang(de),
+.statusChip:lang(el) {
+  text-transform: none;
+}
+
+.failureLine {
+  color: var(--color-text-2);
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.04em;
+  white-space: normal;
+}
+
+.queuePosition {
+  direction: ltr;
+  unicode-bidi: isolate;
+}

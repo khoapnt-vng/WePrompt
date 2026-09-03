@@ -226,6 +226,8 @@ describe('createEmptyStudioProjectV4', () => {
       spendAuthorizations: [],
       undoHistory: [],
       assets: {},
+      frameExtractions: {},
+      derivedFrames: {},
       jobs: {},
       createdAt: '2026-09-02T00:00:00.000Z',
       updatedAt: '2026-09-02T00:00:00.000Z',

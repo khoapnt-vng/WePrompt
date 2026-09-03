@@ -942,6 +942,44 @@
         "failed": "Yönetmen güvenli şekilde bağlanamadı. Projeyi yeniden yükleyin."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Bütçe gerekli",
+            "proposed": "Önerildi",
+            "partial": "Kısmi",
+            "drafted": "Taslak",
+            "rendered": "İşlendi",
+            "imported": "İçe aktarıldı",
+            "current": "Güncel",
+            "stale": "Eski",
+            "failed": "Başarısız",
+            "queued": "Kuyrukta",
+            "generating": "Oluşturuluyor",
+            "rendering": "İşleniyor"
+          },
+          "member": {
+            "slate": "Slayt",
+            "queued": "Kuyrukta",
+            "ready_to_render": "İşlemeye hazır",
+            "generating": "Oluşturuluyor",
+            "rendered": "İşlendi",
+            "stale": "Eski",
+            "failed": "Başarısız"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "kural ihlali",
+              "returned_silence": "sessiz sonuç",
+              "provider_failure": "sağlayıcı hatası",
+              "local_render_failure": "yerel işleme hatası",
+              "download_failure": "indirme hatası"
+            },
+            "cost": { "spent": "harcandı", "not_spent": "harcanmadı" }
+          },
+          "action": { "re_render_chain": "Zinciri yeniden işle", "keep": "Koru", "retry": "Yeniden dene" },
+          "queuedPosition": "Kuyrukta · {{position}}"
+        },
         "projectActions": "Proje işlemleri",
         "loading": "Proje yükleniyor…",
         "refreshing": "Proje yenileniyor…",
@@ -1100,6 +1138,57 @@
           "visualReferences": "Görsel referanslar",
           "visualReferencesHint": "Bu fotoğrafa yön vermek için en fazla {{maximum}} güncel Piece seçin.",
           "visualReferencesCount": "{{maximum}} öğeden {{selected}} seçildi"
+        },
+        "cut": {
+          "length": "{{total}} içinde {{played}}",
+          "playsSummary": "{{played}} oynatılır · filmin yapımının bittiği yerde durur",
+          "slatesSummary": "{{count}} çekim slayt olarak yer tutuyor · {{unmade}} yapılmamış",
+          "slatesSummary_one": "{{count}} çekim slayt olarak yer tutuyor · {{unmade}} yapılmamış",
+          "slatesSummary_other": "{{count}} çekim slayt olarak yer tutuyor · {{unmade}} yapılmamış",
+          "slateTally": "{{count}} slayt · {{duration}}",
+          "slateTally_one": "{{count}} slayt · {{duration}}",
+          "slateTally_other": "{{count}} slayt · {{duration}}",
+          "audioBed": "{{handle}} · içe aktarıldı · tüm filmin altında {{level}}",
+          "audioSegment": "{{handle}} · {{duration}} · {{beat}} öğesine sabitlendi",
+          "audioNotGenerated": "oluşturulmadı",
+          "audioMissingDetail": "{{beat}} için anlatım — oluşturulmadı. Film orada tam uzunlukta sessiz oynatılır.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Zincir başlangıcı",
+          "chainAfter": "{{handle}} sonrasında",
+          "staleOffChain": "{{handle}} yeniden render edildiğinden beri zincir dışında. Yine de oynatılır.",
+          "reorderHint": "Alt+Yukarı/Aşağı ile taşıyın — {{beat}} içinde taşımak zinciri yeniden yazar ve {{price}} tutar; Beat'ler arasında ücretsizdir.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Kırpma",
+          "matchTo": "{{handle}} ile eşleştir",
+          "play": "Oynat",
+          "reCut": "Yeniden kurgula",
+          "level": "Düzey {{level}}",
+          "commissionCost": "Yapılmamış {{count}} çekimi üretmek {{price}} tutar — saniyesi {{rate}} olan {{duration}} film.",
+          "commissionCost_one": "Yapılmamış {{count}} çekimi üretmek {{price}} tutar — saniyesi {{rate}} olan {{duration}} film.",
+          "commissionCost_other": "Yapılmamış {{count}} çekimi üretmek {{price}} tutar — saniyesi {{rate}} olan {{duration}} film.",
+          "commission": "Sipariş ver · {{price}}",
+          "notNow": "Şimdi değil",
+          "conditions": "Koşullandırma: {{handles}}",
+          "budgetRemaining": "{{total}} içinde {{remaining}} kaldı",
+          "quotesOutstanding": "{{count}} teklif beklemede · tümü çalışırsa {{sum}}",
+          "quotesOutstanding_one": "{{count}} teklif beklemede · çalışırsa {{sum}}",
+          "quotesOutstanding_other": "{{count}} teklif beklemede · tümü çalışırsa {{sum}}",
+          "proposedSummary": "{{beats}} Beat · {{shots}} çekim",
+          "proposedFrom": "{{handle}} kaynaklı. {{count}} tanesinin tümünü çizmek {{price}} tutar.",
+          "proposedFrom_one": "{{handle}} kaynaklı. Bunu çizmek {{price}} tutar.",
+          "proposedFrom_other": "{{handle}} kaynaklı. {{count}} tanesinin tümünü çizmek {{price}} tutar."
+        },
+        "accessibility": {
+          "filmstrip": "Film şeridi, her Beat için bir segment",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Ses şeridi",
+          "memberInspector": "{{handle}} ayrıntıları",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}}, {{position}}. konuma taşındı",
+          "reorderAnnouncementWithCost": "{{handle}}, {{position}}. konuma taşındı, maliyeti {{price}}",
+          "slateMember": "{{handle}}, {{duration}} boyunca kalıyor, henüz yapılmadı",
+          "quoteRegion": "{{handle}} için fiyat teklifi",
+          "judgementFooter": "{{handle}} için karar gerekiyor"
         }
       },
       "spending": {

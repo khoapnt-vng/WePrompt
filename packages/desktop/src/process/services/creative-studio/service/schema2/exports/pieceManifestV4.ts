@@ -5,30 +5,34 @@
  */
 
 import {
-  STUDIO_EXPORT_SCHEMA_VERSION_V3,
-  type StudioPieceExportManifestV3,
-  type StudioProjectV3,
+  STUDIO_EXPORT_SCHEMA_VERSION_V4,
+  type StudioPieceExportManifestV4,
+  type StudioProjectV4,
 } from '@/common/types/project/creativeStudioTypes';
 import { types as nodeTypes } from 'node:util';
-import { validateStudioPieceExportManifestV3, validateStudioProjectV3 } from '../validation';
+import {
+  studioPieceGenerationCompositionDigestV4,
+  validateStudioPieceExportManifestV4,
+  validateStudioProjectV4,
+} from '../validation';
 
-export type StudioPieceExportManifestErrorCodeV3 = 'invalid_manifest' | 'inconsistent_manifest';
+export type StudioPieceExportManifestErrorCodeV4 = 'invalid_manifest' | 'inconsistent_manifest';
 
-export class StudioPieceExportManifestErrorV3 extends Error {
-  readonly code: StudioPieceExportManifestErrorCodeV3;
+export class StudioPieceExportManifestErrorV4 extends Error {
+  readonly code: StudioPieceExportManifestErrorCodeV4;
 
-  constructor(code: StudioPieceExportManifestErrorCodeV3) {
+  constructor(code: StudioPieceExportManifestErrorCodeV4) {
     super(code);
-    this.name = 'StudioPieceExportManifestErrorV3';
+    this.name = 'StudioPieceExportManifestErrorV4';
     this.code = code;
   }
 }
 
-const fail = (code: StudioPieceExportManifestErrorCodeV3): never => {
-  throw new StudioPieceExportManifestErrorV3(code);
+const fail = (code: StudioPieceExportManifestErrorCodeV4): never => {
+  throw new StudioPieceExportManifestErrorV4(code);
 };
 
-const MAX_MANIFEST_BYTES_V3 = 1024 * 1024;
+const MAX_MANIFEST_BYTES_V4 = 1024 * 1024;
 
 const canonicalJson = (value: unknown): string => {
   if (value === null || typeof value !== 'object') return JSON.stringify(value);
@@ -42,27 +46,31 @@ const canonicalJson = (value: unknown): string => {
 
 const sameValue = (left: unknown, right: unknown): boolean => canonicalJson(left) === canonicalJson(right);
 
-/** Serializes an exact export-3 manifest to canonical, no-newline UTF-8 bytes. */
-export const serializeStudioPieceExportManifestV3 = (value: unknown): Uint8Array => {
-  if (!validateStudioPieceExportManifestV3(value)) return fail('invalid_manifest');
-  let snapshot: StudioPieceExportManifestV3;
+/** A Piece retained in the Bin has only the signed Put-back action; it is not exportable. */
+export const isStudioPieceBinnedV4 = (project: StudioProjectV4, pieceId: string): boolean =>
+  project.bin.some((entry) => entry.subject.kind === 'piece' && entry.subject.pieceId === pieceId);
+
+/** Serializes an exact export-4 manifest to canonical, no-newline UTF-8 bytes. */
+export const serializeStudioPieceExportManifestV4 = (value: unknown): Uint8Array => {
+  if (!validateStudioPieceExportManifestV4(value)) return fail('invalid_manifest');
+  let snapshot: StudioPieceExportManifestV4;
   try {
     snapshot = structuredClone(value);
   } catch {
     return fail('invalid_manifest');
   }
   const bytes = Buffer.from(canonicalJson(snapshot), 'utf8');
-  if (bytes.byteLength > MAX_MANIFEST_BYTES_V3) return fail('invalid_manifest');
+  if (bytes.byteLength > MAX_MANIFEST_BYTES_V4) return fail('invalid_manifest');
   return bytes;
 };
 
-/** Parses only canonical exact-key export-3 bytes; BOM, whitespace, and alternate key order fail. */
-export const parseStudioPieceExportManifestV3 = (bytes: Uint8Array): StudioPieceExportManifestV3 => {
+/** Parses only canonical exact-key export-4 bytes; export 3 and alternate encodings fail closed. */
+export const parseStudioPieceExportManifestV4 = (bytes: Uint8Array): StudioPieceExportManifestV4 => {
   if (
     !(bytes instanceof Uint8Array) ||
     nodeTypes.isProxy(bytes) ||
     bytes.byteLength === 0 ||
-    bytes.byteLength > MAX_MANIFEST_BYTES_V3
+    bytes.byteLength > MAX_MANIFEST_BYTES_V4
   ) {
     return fail('invalid_manifest');
   }
@@ -78,26 +86,27 @@ export const parseStudioPieceExportManifestV3 = (bytes: Uint8Array): StudioPiece
   } catch {
     return fail('invalid_manifest');
   }
-  if (!validateStudioPieceExportManifestV3(parsed) || canonicalJson(parsed) !== text) {
+  if (!validateStudioPieceExportManifestV4(parsed) || canonicalJson(parsed) !== text) {
     return fail('invalid_manifest');
   }
   return parsed;
 };
 
 /**
- * Proves that the sidecar describes the exact current Piece asset and its persisted provenance.
- * This function performs no IO and never initiates generation or spend.
+ * Proves that an export-4 sidecar describes the exact current photograph and its schema-7
+ * generation, publication, and attempt provenance. This function performs no IO or spend.
  */
-export const validateStudioPieceExportConsistencyV3 = (
-  project: StudioProjectV3,
-  manifest: StudioPieceExportManifestV3
+export const validateStudioPieceExportConsistencyV4 = (
+  project: StudioProjectV4,
+  manifest: StudioPieceExportManifestV4
 ): boolean => {
-  if (!validateStudioProjectV3(project) || !validateStudioPieceExportManifestV3(manifest)) return false;
+  if (!validateStudioProjectV4(project) || !validateStudioPieceExportManifestV4(manifest)) return false;
   if (
     manifest.projectId !== project.id ||
     manifest.sourceRevision !== project.revision ||
     manifest.exportedAt < project.updatedAt ||
-    !project.pieceOrder.includes(manifest.piece.id)
+    !project.pieceOrder.includes(manifest.piece.id) ||
+    isStudioPieceBinnedV4(project, manifest.piece.id)
   ) {
     return false;
   }
@@ -105,7 +114,10 @@ export const validateStudioPieceExportConsistencyV3 = (
   const asset = Object.hasOwn(project.assets, manifest.asset.id) ? project.assets[manifest.asset.id] : undefined;
   if (
     piece === undefined ||
+    piece.kind !== 'photograph' ||
     asset === undefined ||
+    asset.mediaKind !== 'image' ||
+    asset.role !== 'primary' ||
     piece.kind !== manifest.piece.kind ||
     piece.handle !== manifest.piece.handleAtExport ||
     piece.currentAssetId !== asset.id ||
@@ -129,35 +141,41 @@ export const validateStudioPieceExportConsistencyV3 = (
     : undefined;
   return (
     job !== undefined &&
+    job.purpose === 'piece_image' &&
     authorization !== undefined &&
     job.status === 'succeeded' &&
     job.target.kind === 'piece' &&
     job.target.pieceId === piece.id &&
-    job.purpose === 'piece_image' &&
-    job.outputAssetId === asset.id &&
+    job.outputAssetIdsByRole.primary === asset.id &&
+    job.outputAssetIdsByRole.poster === null &&
     job.spendReceipt !== null &&
+    asset.compositionDigest === studioPieceGenerationCompositionDigestV4(job.composition) &&
     manifest.provenance.producerJobId === job.id &&
     sameValue(manifest.provenance.provider, job.provider) &&
     sameValue(manifest.provenance.composition, job.composition) &&
     sameValue(manifest.provenance.requestPlan, job.requestPlan) &&
+    sameValue(manifest.provenance.publication, job.publication) &&
+    sameValue(manifest.provenance.attempt, job.attempt) &&
     manifest.provenance.authorizationId === authorization.id &&
     manifest.provenance.quoteId === authorization.quote.id &&
     manifest.provenance.quoteRevision === authorization.quote.quoteRevision &&
     sameValue(manifest.provenance.receipt, job.spendReceipt) &&
-    sameValue(authorization.quote.item.requestPlan, job.requestPlan)
+    sameValue(authorization.quote.item.requestPlan, job.requestPlan) &&
+    sameValue(authorization.quote.item.publication, job.publication) &&
+    sameValue(authorization.quote.item.attempt, job.attempt)
   );
 };
 
-export type StudioPieceExportManifestBuildInputV3 = {
+export type StudioPieceExportManifestBuildInputV4 = {
   exportId: string;
   pieceId: string;
   relativePath: string;
   exportedAt: string;
 };
 
-const BUILD_INPUT_KEYS_V3: ReadonlySet<string> = new Set(['exportId', 'pieceId', 'relativePath', 'exportedAt']);
+const BUILD_INPUT_KEYS_V4: ReadonlySet<string> = new Set(['exportId', 'pieceId', 'relativePath', 'exportedAt']);
 
-const snapshotBuildInputV3 = (input: unknown): StudioPieceExportManifestBuildInputV3 => {
+const snapshotBuildInputV4 = (input: unknown): StudioPieceExportManifestBuildInputV4 => {
   try {
     if (typeof input !== 'object' || input === null || Array.isArray(input) || nodeTypes.isProxy(input)) {
       return fail('inconsistent_manifest');
@@ -166,13 +184,13 @@ const snapshotBuildInputV3 = (input: unknown): StudioPieceExportManifestBuildInp
     if (prototype !== Object.prototype && prototype !== null) return fail('inconsistent_manifest');
     const ownKeys = Reflect.ownKeys(input);
     if (
-      ownKeys.length !== BUILD_INPUT_KEYS_V3.size ||
-      ownKeys.some((key) => typeof key !== 'string' || !BUILD_INPUT_KEYS_V3.has(key))
+      ownKeys.length !== BUILD_INPUT_KEYS_V4.size ||
+      ownKeys.some((key) => typeof key !== 'string' || !BUILD_INPUT_KEYS_V4.has(key))
     ) {
       return fail('inconsistent_manifest');
     }
     const snapshot: Record<string, string> = {};
-    for (const key of BUILD_INPUT_KEYS_V3) {
+    for (const key of BUILD_INPUT_KEYS_V4) {
       const descriptor = Object.getOwnPropertyDescriptor(input, key);
       if (
         descriptor === undefined ||
@@ -184,28 +202,37 @@ const snapshotBuildInputV3 = (input: unknown): StudioPieceExportManifestBuildInp
       }
       snapshot[key] = descriptor.value;
     }
-    return snapshot as StudioPieceExportManifestBuildInputV3;
+    return snapshot as StudioPieceExportManifestBuildInputV4;
   } catch (error) {
-    if (error instanceof StudioPieceExportManifestErrorV3) throw error;
+    if (error instanceof StudioPieceExportManifestErrorV4) throw error;
     return fail('inconsistent_manifest');
   }
 };
 
-/** Builds and self-validates exact provenance for the current asset of one Piece. */
-export const buildStudioPieceExportManifestV3 = (
-  project: StudioProjectV3,
-  input: StudioPieceExportManifestBuildInputV3
-): StudioPieceExportManifestV3 => {
-  if (!validateStudioProjectV3(project)) return fail('inconsistent_manifest');
-  const snapshot = snapshotBuildInputV3(input);
+/** Builds and self-validates export-4 provenance for the current primary photograph of one Piece. */
+export const buildStudioPieceExportManifestV4 = (
+  project: StudioProjectV4,
+  input: StudioPieceExportManifestBuildInputV4
+): StudioPieceExportManifestV4 => {
+  if (!validateStudioProjectV4(project)) return fail('inconsistent_manifest');
+  const snapshot = snapshotBuildInputV4(input);
+  if (isStudioPieceBinnedV4(project, snapshot.pieceId)) return fail('inconsistent_manifest');
   const piece = Object.hasOwn(project.pieces, snapshot.pieceId) ? project.pieces[snapshot.pieceId] : undefined;
   const asset =
     piece?.currentAssetId && Object.hasOwn(project.assets, piece.currentAssetId)
       ? project.assets[piece.currentAssetId]
       : undefined;
-  if (piece === undefined || asset === undefined) return fail('inconsistent_manifest');
+  if (
+    piece === undefined ||
+    piece.kind !== 'photograph' ||
+    asset === undefined ||
+    asset.mediaKind !== 'image' ||
+    asset.role !== 'primary'
+  ) {
+    return fail('inconsistent_manifest');
+  }
 
-  let provenance: StudioPieceExportManifestV3['provenance'];
+  let provenance: StudioPieceExportManifestV4['provenance'];
   if (asset.origin === 'imported') {
     provenance = { origin: 'imported' };
   } else {
@@ -213,7 +240,12 @@ export const buildStudioPieceExportManifestV3 = (
     const authorization = job
       ? project.spendAuthorizations.find((candidate) => candidate.id === job.authorizationId)
       : undefined;
-    if (job === undefined || job.spendReceipt === null || authorization === undefined) {
+    if (
+      job === undefined ||
+      job.purpose !== 'piece_image' ||
+      job.spendReceipt === null ||
+      authorization === undefined
+    ) {
       return fail('inconsistent_manifest');
     }
     provenance = {
@@ -222,6 +254,8 @@ export const buildStudioPieceExportManifestV3 = (
       provider: structuredClone(job.provider),
       composition: structuredClone(job.composition),
       requestPlan: structuredClone(job.requestPlan),
+      publication: structuredClone(job.publication),
+      attempt: structuredClone(job.attempt),
       authorizationId: authorization.id,
       quoteId: authorization.quote.id,
       quoteRevision: authorization.quote.quoteRevision,
@@ -229,8 +263,8 @@ export const buildStudioPieceExportManifestV3 = (
     };
   }
 
-  const manifest: StudioPieceExportManifestV3 = {
-    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+  const manifest: StudioPieceExportManifestV4 = {
+    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V4,
     exportId: snapshot.exportId,
     projectId: project.id,
     sourceRevision: project.revision,
@@ -252,6 +286,6 @@ export const buildStudioPieceExportManifestV3 = (
     provenance,
     exportedAt: snapshot.exportedAt,
   };
-  if (!validateStudioPieceExportConsistencyV3(project, manifest)) return fail('inconsistent_manifest');
+  if (!validateStudioPieceExportConsistencyV4(project, manifest)) return fail('inconsistent_manifest');
   return manifest;
 };

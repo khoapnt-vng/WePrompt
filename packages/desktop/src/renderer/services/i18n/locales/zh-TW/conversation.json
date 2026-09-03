@@ -940,6 +940,44 @@
         "failed": "無法安全連接導演。請重新載入專案。"
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "需要預算",
+            "proposed": "已提案",
+            "partial": "部分完成",
+            "drafted": "草稿",
+            "rendered": "已算繪",
+            "imported": "已匯入",
+            "current": "目前",
+            "stale": "已過期",
+            "failed": "失敗",
+            "queued": "已排入佇列",
+            "generating": "正在產生",
+            "rendering": "算繪中"
+          },
+          "member": {
+            "slate": "場記卡",
+            "queued": "已排入佇列",
+            "ready_to_render": "可算繪",
+            "generating": "正在產生",
+            "rendered": "已算繪",
+            "stale": "已過期",
+            "failed": "失敗"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "違反規則",
+              "returned_silence": "傳回靜音",
+              "provider_failure": "供應商失敗",
+              "local_render_failure": "本機算繪失敗",
+              "download_failure": "下載失敗"
+            },
+            "cost": { "spent": "已花費", "not_spent": "未花費" }
+          },
+          "action": { "re_render_chain": "重新算繪此鏈", "keep": "保留", "retry": "重試" },
+          "queuedPosition": "已排入佇列 · {{position}}"
+        },
         "projectActions": "專案操作",
         "loading": "正在載入專案…",
         "refreshing": "正在重新整理專案…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "視覺參考",
           "visualReferencesHint": "選擇最多 {{maximum}} 個目前的 Piece 來引導這張照片。",
           "visualReferencesCount": "已選擇 {{selected}}/{{maximum}}"
+        },
+        "cut": {
+          "length": "{{total}} 中的 {{played}}",
+          "playsSummary": "播放 {{played}} · 在影片尚未製作處停止",
+          "slatesSummary": "{{count}} 個鏡頭以場記卡保留時間 · {{unmade}} 尚未製作",
+          "slatesSummary_one": "{{count}} 個鏡頭以場記卡保留時間 · {{unmade}} 尚未製作",
+          "slatesSummary_other": "{{count}} 個鏡頭以場記卡保留時間 · {{unmade}} 尚未製作",
+          "slateTally": "{{count}} 個場記卡 · {{duration}}",
+          "slateTally_one": "{{count}} 個場記卡 · {{duration}}",
+          "slateTally_other": "{{count}} 個場記卡 · {{duration}}",
+          "audioBed": "{{handle}} · 已匯入 · 以{{level}}鋪在整部影片下方",
+          "audioSegment": "{{handle}} · {{duration}} · 錨定於 {{beat}}",
+          "audioNotGenerated": "尚未產生",
+          "audioMissingDetail": "{{beat}} 的旁白 — 尚未產生。影片會在該處以完整長度靜音播放。",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "鏈首",
+          "chainAfter": "接在 {{handle}} 之後",
+          "staleOffChain": "自 {{handle}} 重新算繪後即脫離鏈。仍可播放。",
+          "reorderHint": "Alt+上/下鍵可移動 — 在 {{beat}} 內移動會重寫鏈並花費 {{price}}；跨節拍移動則免費。",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "修剪",
+          "matchTo": "銜接至 {{handle}}",
+          "play": "播放",
+          "reCut": "重新剪輯",
+          "level": "音量 {{level}}",
+          "commissionCost": "委製這 {{count}} 個尚未製作的鏡頭將花費 {{price}} — {{duration}} 的影片，每秒 {{rate}}。",
+          "commissionCost_one": "委製這 {{count}} 個尚未製作的鏡頭將花費 {{price}} — {{duration}} 的影片，每秒 {{rate}}。",
+          "commissionCost_other": "委製這 {{count}} 個尚未製作的鏡頭將花費 {{price}} — {{duration}} 的影片，每秒 {{rate}}。",
+          "commission": "委製 · {{price}}",
+          "notNow": "現在不要",
+          "conditions": "條件：{{handles}}",
+          "budgetRemaining": "{{total}} 中剩餘 {{remaining}}",
+          "quotesOutstanding": "{{count}} 份報價待處理 · 執行後共需 {{sum}}",
+          "quotesOutstanding_one": "{{count}} 份報價待處理 · 執行後共需 {{sum}}",
+          "quotesOutstanding_other": "{{count}} 份報價待處理 · 執行後共需 {{sum}}",
+          "proposedSummary": "{{beats}} 個節拍 · {{shots}} 個鏡頭",
+          "proposedFrom": "來自 {{handle}}。繪製這 {{count}} 個需花費 {{price}}。",
+          "proposedFrom_one": "來自 {{handle}}。繪製需花費 {{price}}。",
+          "proposedFrom_other": "來自 {{handle}}。繪製這 {{count}} 個需花費 {{price}}。"
+        },
+        "accessibility": {
+          "filmstrip": "影片膠捲，每個節拍一個區段",
+          "filmstripSegment": "{{handle}}，{{duration}}，{{status}}",
+          "audioLane": "音訊軌道",
+          "memberInspector": "{{handle}} 的詳細資料",
+          "blockStatus": "{{handle}}，{{status}}",
+          "reorderAnnouncement": "{{handle}} 已移至第 {{position}} 位",
+          "reorderAnnouncementWithCost": "{{handle}} 已移至第 {{position}} 位，花費 {{price}}",
+          "slateMember": "{{handle}}，保留 {{duration}}，尚未製作",
+          "quoteRegion": "{{handle}} 的報價",
+          "judgementFooter": "{{handle}} 需要你做出決定"
         }
       },
       "spending": {

@@ -940,6 +940,44 @@
         "failed": "اتصال امن کارگردان ممکن نشد. پروژه را دوباره بارگیری کنید."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "نیازمند بودجه",
+            "proposed": "پیشنهادی",
+            "partial": "ناقص",
+            "drafted": "پیش‌نویس",
+            "rendered": "رندر شده",
+            "imported": "واردشده",
+            "current": "فعلی",
+            "stale": "قدیمی",
+            "failed": "ناموفق",
+            "queued": "در صف",
+            "generating": "در حال تولید",
+            "rendering": "در حال رندر"
+          },
+          "member": {
+            "slate": "اسلیت",
+            "queued": "در صف",
+            "ready_to_render": "آماده رندر",
+            "generating": "در حال تولید",
+            "rendered": "رندر شده",
+            "stale": "قدیمی",
+            "failed": "ناموفق"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "نقض قانون",
+              "returned_silence": "سکوت بازگردانده شد",
+              "provider_failure": "خطای ارائه‌دهنده",
+              "local_render_failure": "خطای رندر محلی",
+              "download_failure": "خطای بارگیری"
+            },
+            "cost": { "spent": "هزینه شد", "not_spent": "هزینه نشد" }
+          },
+          "action": { "re_render_chain": "رندر مجدد زنجیره", "keep": "نگه‌داشتن", "retry": "تلاش دوباره" },
+          "queuedPosition": "در صف · {{position}}"
+        },
         "projectActions": "کارهای پروژه",
         "loading": "در حال بارگذاری پروژه…",
         "refreshing": "در حال تازه‌سازی پروژه…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "ارجاع‌های تصویری",
           "visualReferencesHint": "برای هدایت این عکس، حداکثر {{maximum}} قطعهٔ جاری را انتخاب کنید.",
           "visualReferencesCount": "{{selected}} از {{maximum}} انتخاب شده"
+        },
+        "cut": {
+          "length": "{{played}} از {{total}}",
+          "playsSummary": "{{played}} پخش می‌شود · هرجا ساخت فیلم تمام شود، می‌ایستد",
+          "slatesSummary": "{{count}} نما به‌عنوان اسلیت جا نگه می‌دارند · {{unmade}} ساخته‌نشده",
+          "slatesSummary_one": "{{count}} نما به‌عنوان اسلیت جا نگه می‌دارد · {{unmade}} ساخته‌نشده",
+          "slatesSummary_other": "{{count}} نما به‌عنوان اسلیت جا نگه می‌دارند · {{unmade}} ساخته‌نشده",
+          "slateTally": "{{count}} اسلیت · {{duration}}",
+          "slateTally_one": "{{count}} اسلیت · {{duration}}",
+          "slateTally_other": "{{count}} اسلیت · {{duration}}",
+          "audioBed": "{{handle}} · واردشده · {{level}} زیر کل فیلم",
+          "audioSegment": "{{handle}} · {{duration}} · لنگر روی {{beat}}",
+          "audioNotGenerated": "تولید نشده",
+          "audioMissingDetail": "روایت {{beat}} — تولید نشده. فیلم آنجا بی‌صدا و با طول کامل پخش می‌شود.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "ابتدای زنجیره",
+          "chainAfter": "پس از {{handle}}",
+          "staleOffChain": "از زنجیره جدا شده، چون {{handle}} دوباره رندر شد. همچنان پخش می‌شود.",
+          "reorderHint": "Alt + پیکان بالا/پایین آن را جابه‌جا می‌کند — درون {{beat}} زنجیره را بازنویسی می‌کند و {{price}} هزینه دارد؛ میان ضرب‌آهنگ‌ها رایگان است.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "برش",
+          "matchTo": "تطبیق با {{handle}}",
+          "play": "پخش",
+          "reCut": "تدوین دوباره",
+          "level": "سطح {{level}}",
+          "commissionCost": "تولید {{count}} نمای ساخته‌نشده {{price}} هزینه خواهد داشت — {{duration}} فیلم با نرخ {{rate}} در هر ثانیه.",
+          "commissionCost_one": "تولید {{count}} نمای ساخته‌نشده {{price}} هزینه خواهد داشت — {{duration}} فیلم با نرخ {{rate}} در هر ثانیه.",
+          "commissionCost_other": "تولید {{count}} نمای ساخته‌نشده {{price}} هزینه خواهد داشت — {{duration}} فیلم با نرخ {{rate}} در هر ثانیه.",
+          "commission": "سفارش ساخت · {{price}}",
+          "notNow": "الان نه",
+          "conditions": "شرطی‌سازی: {{handles}}",
+          "budgetRemaining": "{{remaining}} از {{total}} باقی مانده",
+          "quotesOutstanding": "{{count}} برآورد در انتظار · {{sum}} اگر همه اجرا شوند",
+          "quotesOutstanding_one": "{{count}} برآورد در انتظار · {{sum}} اگر اجرا شود",
+          "quotesOutstanding_other": "{{count}} برآورد در انتظار · {{sum}} اگر همه اجرا شوند",
+          "proposedSummary": "{{beats}} ضرب‌آهنگ · {{shots}} نما",
+          "proposedFrom": "از {{handle}}. طراحی همهٔ {{count}} مورد {{price}} هزینه خواهد داشت.",
+          "proposedFrom_one": "از {{handle}}. طراحی آن {{price}} هزینه خواهد داشت.",
+          "proposedFrom_other": "از {{handle}}. طراحی همهٔ {{count}} مورد {{price}} هزینه خواهد داشت."
+        },
+        "accessibility": {
+          "filmstrip": "نوار فیلم، برای هر ضرب‌آهنگ یک بخش",
+          "filmstripSegment": "{{handle}}، {{duration}}، {{status}}",
+          "audioLane": "خط صدا",
+          "memberInspector": "جزئیات {{handle}}",
+          "blockStatus": "{{handle}}، {{status}}",
+          "reorderAnnouncement": "{{handle}} به جایگاه {{position}} منتقل شد",
+          "reorderAnnouncementWithCost": "{{handle}} به جایگاه {{position}} منتقل شد، {{price}} هزینه دارد",
+          "slateMember": "{{handle}}، به‌مدت {{duration}} جا نگه می‌دارد، هنوز ساخته نشده",
+          "quoteRegion": "برآورد برای {{handle}}",
+          "judgementFooter": "برای {{handle}} تصمیم لازم است"
         }
       },
       "spending": {

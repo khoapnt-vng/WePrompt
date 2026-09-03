@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { StudioAssetV3, StudioProjectV4 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioAssetV4, StudioProjectV4 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV4 } from '@/process/services/creative-studio/service/schema2/factories';
 
 export const PHASE_6_CREATED_AT = '2026-09-02T00:00:00.000Z';
@@ -17,11 +17,12 @@ export const makePhase6Project = (): StudioProjectV4 => {
     'project_7',
     PHASE_6_CREATED_AT
   );
-  const asset: StudioAssetV3 = {
+  const asset: StudioAssetV4 = {
     id: 'asset_photo_1',
     projectId: project.id,
     pieceId: 'piece_photo_1',
     mediaKind: 'image',
+    role: 'primary',
     mimeType: 'image/png',
     managedAsset: { collection: 'imports', fileName: 'asset_photo_1.png' },
     byteSize: 8,
@@ -41,6 +42,7 @@ export const makePhase6Project = (): StudioProjectV4 => {
     kind: 'photograph',
     handle: 'harbour_morning',
     runStem: null,
+    assetHistory: [],
     priorHandles: [],
     currentAssetId: asset.id,
     jobIds: [],

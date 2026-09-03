@@ -940,6 +940,44 @@
         "failed": "无法安全连接导演。请重新加载项目。"
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "需要预算",
+            "proposed": "已提议",
+            "partial": "部分已渲染",
+            "drafted": "草稿",
+            "rendered": "已渲染",
+            "imported": "已导入",
+            "current": "当前",
+            "stale": "已过期",
+            "failed": "失败",
+            "queued": "已排队",
+            "generating": "正在生成",
+            "rendering": "渲染中"
+          },
+          "member": {
+            "slate": "场记卡",
+            "queued": "已排队",
+            "ready_to_render": "可渲染",
+            "generating": "正在生成",
+            "rendered": "已渲染",
+            "stale": "已过期",
+            "failed": "失败"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "违反规则",
+              "returned_silence": "返回静音",
+              "provider_failure": "提供商失败",
+              "local_render_failure": "本地渲染失败",
+              "download_failure": "下载失败"
+            },
+            "cost": { "spent": "已花费", "not_spent": "未花费" }
+          },
+          "action": { "re_render_chain": "重新渲染此链", "keep": "保留", "retry": "重试" },
+          "queuedPosition": "已排队 · 第 {{position}} 位"
+        },
         "projectActions": "项目操作",
         "loading": "正在加载项目…",
         "refreshing": "正在刷新项目…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "视觉参考",
           "visualReferencesHint": "选择最多 {{maximum}} 个当前 Piece 来指导这张照片。",
           "visualReferencesCount": "已选择 {{selected}}/{{maximum}}"
+        },
+        "cut": {
+          "length": "可播放 {{played}} / 共 {{total}}",
+          "playsSummary": "可播放 {{played}} · 到影片尚未制作处停止",
+          "slatesSummary": "{{count}} 个镜头以场记卡保留时长 · {{unmade}} 尚未制作",
+          "slatesSummary_one": "{{count}} 个镜头以场记卡保留时长 · {{unmade}} 尚未制作",
+          "slatesSummary_other": "{{count}} 个镜头以场记卡保留时长 · {{unmade}} 尚未制作",
+          "slateTally": "{{count}} 个场记卡 · {{duration}}",
+          "slateTally_one": "{{count}} 个场记卡 · {{duration}}",
+          "slateTally_other": "{{count}} 个场记卡 · {{duration}}",
+          "audioBed": "{{handle}} · 已导入 · 以 {{level}} 垫在整部影片之下",
+          "audioSegment": "{{handle}} · {{duration}} · 锚定到 {{beat}}",
+          "audioNotGenerated": "尚未生成",
+          "audioMissingDetail": "{{beat}} 的旁白尚未生成。影片在该处静音播放，并保持完整时长。",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "链首",
+          "chainAfter": "接在 {{handle}} 之后",
+          "staleOffChain": "自 {{handle}} 重新渲染后已脱离链。仍可播放。",
+          "reorderHint": "Alt+上/下方向键可移动它——在 {{beat}} 内移动会重写链并花费 {{price}}；跨节拍移动则免费。",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "修剪",
+          "matchTo": "匹配 {{handle}}",
+          "play": "播放",
+          "reCut": "重新剪辑",
+          "level": "电平 {{level}}",
+          "commissionCost": "生成这 {{count}} 个尚未制作的镜头需花费 {{price}}——{{duration}} 的影片，每秒 {{rate}}。",
+          "commissionCost_one": "生成这 {{count}} 个尚未制作的镜头需花费 {{price}}——{{duration}} 的影片，每秒 {{rate}}。",
+          "commissionCost_other": "生成这 {{count}} 个尚未制作的镜头需花费 {{price}}——{{duration}} 的影片，每秒 {{rate}}。",
+          "commission": "确认制作 · {{price}}",
+          "notNow": "暂不",
+          "conditions": "条件：{{handles}}",
+          "budgetRemaining": "共 {{total}}，剩余 {{remaining}}",
+          "quotesOutstanding": "{{count}} 份报价待处理 · 执行后共需 {{sum}}",
+          "quotesOutstanding_one": "{{count}} 份报价待处理 · 执行后共需 {{sum}}",
+          "quotesOutstanding_other": "{{count}} 份报价待处理 · 执行后共需 {{sum}}",
+          "proposedSummary": "{{beats}} 个节拍 · {{shots}} 个镜头",
+          "proposedFrom": "来自 {{handle}}。绘制全部 {{count}} 个需花费 {{price}}。",
+          "proposedFrom_one": "来自 {{handle}}。绘制它需花费 {{price}}。",
+          "proposedFrom_other": "来自 {{handle}}。绘制全部 {{count}} 个需花费 {{price}}。"
+        },
+        "accessibility": {
+          "filmstrip": "胶片条，每个节拍对应一段",
+          "filmstripSegment": "{{handle}}，{{duration}}，{{status}}",
+          "audioLane": "音频轨道",
+          "memberInspector": "{{handle}} 的详情",
+          "blockStatus": "{{handle}}，{{status}}",
+          "reorderAnnouncement": "{{handle}} 已移至第 {{position}} 位",
+          "reorderAnnouncementWithCost": "{{handle}} 已移至第 {{position}} 位，将花费 {{price}}",
+          "slateMember": "{{handle}}，保留 {{duration}}，尚未制作",
+          "quoteRegion": "{{handle}} 的报价",
+          "judgementFooter": "{{handle}} 需要你作出决定"
         }
       },
       "spending": {

@@ -5,6 +5,7 @@
  */
 
 import {
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   type StudioCanvasBinSubjectV4,
   type StudioPresentationMutationContextV4,
   type StudioProjectV4,
@@ -20,17 +21,15 @@ import { snapshotStudioCanvasBinSubjectV4 } from '../mutations/presentationV4';
 import { studioPersistentIdentitiesV4 } from '../mutations/projectAuthorityV4';
 import { validateStudioProjectV4 } from '../validation';
 import {
-  parseStudioProposalRecordV4,
-  parseStudioProposalSlotV4,
+  parseStudioProposalCurrentV4,
+  type StudioProposalCurrentV4,
   type StudioProposalRecordV4,
-  type StudioProposalSlotV4,
 } from './proposalContractsV4';
 
 /** Inactive schema-7 contract: one store-selected id anchors both immutable proposal records. */
 export type StudioActiveProposalAuthorityV4 = {
   proposalId: string;
-  slot: StudioProposalSlotV4;
-  record: StudioProposalRecordV4;
+  current: StudioProposalCurrentV4;
 };
 
 /** Main-only projection of a validated prepared reservation; renderer quote rows are insufficient. */
@@ -41,6 +40,7 @@ export type StudioActivePhotoQuoteAuthorityV4 = {
   quoteId: string;
   quoteRevision: number;
   targetPieceId: string;
+  referencePieceIds: string[];
   jobId: string;
   authorizationId: string;
   authorizationItemId: string;
@@ -69,7 +69,7 @@ const DERIVATION_KEYS = new Set([
   'activePhotoQuotes',
   'capturedAt',
 ]);
-const ACTIVE_PROPOSAL_KEYS = new Set(['proposalId', 'slot', 'record']);
+const ACTIVE_PROPOSAL_KEYS = new Set(['proposalId', 'current']);
 const ACTIVE_PHOTO_QUOTE_KEYS = new Set([
   'projectId',
   'mode',
@@ -77,6 +77,7 @@ const ACTIVE_PHOTO_QUOTE_KEYS = new Set([
   'quoteId',
   'quoteRevision',
   'targetPieceId',
+  'referencePieceIds',
   'jobId',
   'authorizationId',
   'authorizationItemId',
@@ -99,8 +100,8 @@ const subjectKey = (subject: StudioCanvasBinSubjectV4): string => {
   }
 };
 
-const snapshotIdArray = (value: unknown): string[] | null => {
-  if (!isDenseInputArrayV4(value)) return null;
+const snapshotIdArray = (value: unknown, maximum = Number.MAX_SAFE_INTEGER): string[] | null => {
+  if (!isDenseInputArrayV4(value) || value.length > maximum) return null;
   const ids: string[] = [];
   for (let index = 0; index < value.length; index += 1) {
     const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
@@ -120,6 +121,24 @@ const reserveIdentities = (namespace: Set<string>, identities: readonly string[]
   return true;
 };
 
+const isPieceBinned = (project: StudioProjectV4, pieceId: string): boolean =>
+  project.bin.some((entry) => entry.subject.kind === 'piece' && entry.subject.pieceId === pieceId);
+
+const isCurrentPhotoPiece = (project: StudioProjectV4, pieceId: string): boolean => {
+  const piece = Object.hasOwn(project.pieces, pieceId) ? project.pieces[pieceId] : undefined;
+  const asset =
+    piece?.currentAssetId && Object.hasOwn(project.assets, piece.currentAssetId)
+      ? project.assets[piece.currentAssetId]
+      : undefined;
+  return (
+    piece?.kind === 'photograph' &&
+    asset?.pieceId === pieceId &&
+    asset.mediaKind === 'image' &&
+    asset.role === 'primary' &&
+    !isPieceBinned(project, pieceId)
+  );
+};
+
 const snapshotActiveProposal = (
   project: StudioProjectV4,
   value: unknown,
@@ -128,33 +147,27 @@ const snapshotActiveProposal = (
 ): StudioProposalRecordV4 | null => {
   if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, ACTIVE_PROPOSAL_KEYS)) return null;
   if (!isSafeInputIdV4(value.proposalId)) return null;
-  const recordResult = parseStudioProposalRecordV4({
+  const currentResult = parseStudioProposalCurrentV4({
     projectId: project.id,
-    proposalId: value.proposalId,
-    value: value.record,
+    value: value.current,
   });
-  if (recordResult.status !== 'valid') return null;
-  const slotResult = parseStudioProposalSlotV4({
-    projectId: project.id,
-    proposalId: value.proposalId,
-    value: value.slot,
-  });
+  if (currentResult.status !== 'valid' || currentResult.record.proposalId !== value.proposalId) return null;
+  const record = currentResult.record.proposal;
   if (
-    slotResult.status !== 'valid' ||
-    slotResult.record.reservedAt < project.createdAt ||
-    slotResult.record.reservedAt > recordResult.record.createdAt ||
-    recordResult.record.createdAt > capturedAt ||
-    recordResult.record.baseAuthoringRevision > project.authoringRevision
+    currentResult.record.admittedAt < project.createdAt ||
+    record.createdAt > capturedAt ||
+    record.expiresAt <= capturedAt ||
+    record.baseAuthoringRevision > project.authoringRevision
   ) {
     return null;
   }
   const issuedIds = [
-    recordResult.record.id,
-    recordResult.record.target.boardId,
-    ...recordResult.record.issuedMemberIds.beatIds,
-    ...recordResult.record.issuedMemberIds.shotIds,
+    record.id,
+    record.target.boardId,
+    ...record.issuedMemberIds.beatIds,
+    ...record.issuedMemberIds.shotIds,
   ];
-  return reserveIdentities(namespace, issuedIds) ? recordResult.record : null;
+  return reserveIdentities(namespace, issuedIds) ? record : null;
 };
 
 const snapshotActivePhotoQuote = (
@@ -164,6 +177,7 @@ const snapshotActivePhotoQuote = (
   namespace: Set<string>
 ): StudioActivePhotoQuoteAuthorityV4 | null => {
   if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, ACTIVE_PHOTO_QUOTE_KEYS)) return null;
+  const referencePieceIds = snapshotIdArray(value.referencePieceIds, STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3);
   if (
     value.projectId !== project.id ||
     (value.mode !== 'create' && value.mode !== 'retry') ||
@@ -172,6 +186,9 @@ const snapshotActivePhotoQuote = (
     !Number.isSafeInteger(value.quoteRevision) ||
     (value.quoteRevision as number) < 1 ||
     !isSafeInputIdV4(value.targetPieceId) ||
+    referencePieceIds === null ||
+    referencePieceIds.includes(value.targetPieceId) ||
+    !referencePieceIds.every((pieceId) => isCurrentPhotoPiece(project, pieceId)) ||
     !isSafeInputIdV4(value.jobId) ||
     !isSafeInputIdV4(value.authorizationId) ||
     !isSafeInputIdV4(value.authorizationItemId) ||
@@ -181,8 +198,15 @@ const snapshotActivePhotoQuote = (
   ) {
     return null;
   }
-  const targetExists = Object.hasOwn(project.pieces, value.targetPieceId);
-  if ((value.mode === 'create' && targetExists) || (value.mode === 'retry' && !targetExists)) return null;
+  const targetPiece = Object.hasOwn(project.pieces, value.targetPieceId)
+    ? project.pieces[value.targetPieceId]
+    : undefined;
+  if (
+    (value.mode === 'create' && targetPiece !== undefined) ||
+    (value.mode === 'retry' && (targetPiece?.kind !== 'photograph' || isPieceBinned(project, value.targetPieceId)))
+  ) {
+    return null;
+  }
   const reservedIds = [
     value.reservationId,
     value.quoteId,
@@ -200,6 +224,7 @@ const snapshotActivePhotoQuote = (
     quoteId: value.quoteId,
     quoteRevision: value.quoteRevision as number,
     targetPieceId: value.targetPieceId,
+    referencePieceIds,
     jobId: value.jobId,
     authorizationId: value.authorizationId,
     authorizationItemId: value.authorizationItemId,
@@ -252,12 +277,15 @@ export const deriveStudioBinEligibilityEvidenceV4 = (
 
   if (!isDenseInputArrayV4(input.activePhotoQuotes)) return invalidAuthority();
   const quoteTargetKeys = new Set<string>();
+  const quoteDependencyKeys = new Set<string>();
   for (let index = 0; index < input.activePhotoQuotes.length; index += 1) {
     const quote = snapshotActivePhotoQuote(input.project, input.activePhotoQuotes[index], input.capturedAt, namespace);
     if (quote === null) return invalidAuthority();
     const key = subjectKey({ kind: 'piece', pieceId: quote.targetPieceId });
     if (quoteTargetKeys.has(key)) return invalidAuthority();
     quoteTargetKeys.add(key);
+    quoteDependencyKeys.add(key);
+    quote.referencePieceIds.forEach((pieceId) => quoteDependencyKeys.add(subjectKey({ kind: 'piece', pieceId })));
   }
   if (!reserveIdentities(namespace, entryIds)) return invalidAuthority();
 
@@ -275,7 +303,7 @@ export const deriveStudioBinEligibilityEvidenceV4 = (
           subject.boardId === proposal.target.boardId;
         return {
           subject,
-          state: blockedByBoardProposal ? 'proposed' : quoteTargetKeys.has(key) ? 'needs_budget' : 'clear',
+          state: blockedByBoardProposal ? 'proposed' : quoteDependencyKeys.has(key) ? 'needs_budget' : 'clear',
         };
       }),
       capturedAt: input.capturedAt,

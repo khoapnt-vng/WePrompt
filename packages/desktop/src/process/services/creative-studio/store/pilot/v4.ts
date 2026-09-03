@@ -9,7 +9,11 @@ import { promises as nodeFs } from 'node:fs';
 import path from 'node:path';
 import { types as nodeTypes } from 'node:util';
 import { syncDurableDirectory } from '../../service/durableDirectory';
-import { STUDIO_PROJECT_SCHEMA_VERSION_V4, type StudioProjectV4 } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_PROJECT_SCHEMA_VERSION_V4,
+  isStudioProjectIdV4,
+  type StudioProjectV4,
+} from '@/common/types/project/creativeStudioTypes';
 import {
   canonicalizeRecordRoot,
   readBoundedRegularBinaryFileWithIdentity,
@@ -32,6 +36,14 @@ import {
 } from '../../service/schema2/mutations/deletionClaimsV3';
 import { studioProjectAuthoringEqualsV4 } from '../../service/schema2/generation/submission/v4';
 import { validateStudioProjectV4 } from '../../service/schema2/validation';
+import {
+  STUDIO_PROJECT_WRITER_MAIN_INSTANCE_ID_V4,
+  StudioProjectWriterGateErrorV4,
+  createStudioProjectWriterGateV4,
+  type StudioProjectWriterGateStepV4,
+  type StudioProjectWriterIntentV4,
+  type StudioProjectWriterLeaseV4,
+} from './projectWriterGate';
 
 const PROJECT_MANIFEST = 'project.json';
 const PROJECT_BRIEF = 'brief.md';
@@ -43,7 +55,6 @@ const PROJECT_DELETION_SCHEMA_VERSION = 1 as const;
 export const STUDIO_MAX_PROJECT_MANIFEST_BYTES_V4 = 1_048_576;
 const MAX_BRIEF_BYTES = 65_536;
 const MAX_CONTROL_RECORD_BYTES = 16_384;
-const SAFE_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const SAFE_TEMPORARY_ID = /^[A-Za-z0-9_-]{8,128}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const CANONICAL_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -67,6 +78,8 @@ const PROJECT_MANIFEST_KEYS = new Set([
   'spendAuthorizations',
   'undoHistory',
   'assets',
+  'frameExtractions',
+  'derivedFrames',
   'jobs',
   'createdAt',
   'updatedAt',
@@ -95,6 +108,12 @@ const DELETION_MARKER_KEYS = new Set([
   'quarantineName',
 ]);
 const DIRECTORY_IDENTITY_KEYS = new Set(['dev', 'ino']);
+/**
+ * Creation publishes through an unkeyed `.create-*` stage before the project id has a durable
+ * directory. Keep startup reclamation and every local publication mutually exclusive across store
+ * instances; the filesystem remains the cross-process authority.
+ */
+const PROCESS_CREATE_ROOT_QUEUES = new Map<string, Promise<void>>();
 
 type PlainRecord = Record<string, unknown>;
 
@@ -132,6 +151,18 @@ export type StudioPilotProjectLoadResultV4 =
 
 export type StudioPilotProjectCommitKindV4 = 'authoring' | 'runtime';
 
+/** Exact project-manifest evidence for a durable candidate that has not yet begun replacing live state. */
+export type StudioPilotProjectCommitCandidateEvidenceV4 = Readonly<{
+  projectId: string;
+  beforeRevision: number;
+  afterRevision: number;
+  beforeAuthoringRevision: number;
+  afterAuthoringRevision: number;
+  beforeManifestSha256: string;
+  afterManifestSha256: string;
+  committedAt: string;
+}>;
+
 export type StudioPilotProjectCommitFactsV4 = Readonly<{
   projectId: string;
   operation: 'created' | 'updated' | 'deleted';
@@ -140,10 +171,19 @@ export type StudioPilotProjectCommitFactsV4 = Readonly<{
   committedAt: string;
 }>;
 
+export type StudioPilotProjectCommitStateV4 = Readonly<{
+  projectId: string;
+  revision: number;
+  authoringRevision: number;
+  manifestSha256: string;
+}>;
+
 export type StudioPilotProjectUpdateOptionsV4 = {
   expectedRevision?: number;
   kind: StudioPilotProjectCommitKindV4;
-  authorizeBeforeReplace?: () => void | Promise<void>;
+  /** Main-frozen commit time used when replaying an already-published cross-store transaction. */
+  committedAt?: string;
+  authorizeBeforeReplace?: (evidence: StudioPilotProjectCommitCandidateEvidenceV4) => void | Promise<void>;
 };
 
 export type StudioPilotProjectAuthoritySnapshotV4 = {
@@ -152,12 +192,25 @@ export type StudioPilotProjectAuthoritySnapshotV4 = {
   assertCurrent(): Promise<void>;
   /** Revalidates schema, project-directory identity, and authored state while tolerating runtime-only commits. */
   assertAuthoringCurrent(): Promise<void>;
+  /** Revalidates and returns the exact current manifest authority, including after this scope commits. */
+  readCommitState(): Promise<StudioPilotProjectCommitStateV4>;
+};
+
+export type StudioPilotProjectWriterAuthorityV4 = StudioPilotProjectAuthoritySnapshotV4 & {
+  /** Marks a published cross-file intent that only the matching recovery operation may finish. */
+  retainWriterForRecovery(): void;
   commit(
     update: (project: StudioProjectV4) => StudioProjectV4,
     options: StudioPilotProjectUpdateOptionsV4
   ): Promise<StudioProjectV4>;
   delete(expectedRevision: number): Promise<boolean>;
 };
+
+export type StudioPilotAbandonedProjectWriteV4 = Readonly<{
+  projectId: string;
+  purpose: StudioProjectWriterIntentV4['purpose'];
+  proposalId: string | null;
+}>;
 
 export type StudioPilotStorageStepV4 =
   | 'create:brief_durable'
@@ -166,6 +219,7 @@ export type StudioPilotStorageStepV4 =
   | 'create:published'
   | 'create:root_durable'
   | 'update:candidates_durable'
+  | 'update:authority_committed'
   | 'update:journal_durable'
   | 'update:brief_published'
   | 'update:manifest_published'
@@ -185,9 +239,16 @@ export type CreativeStudioPilotStoreOptionsV4 = {
   now?: () => string;
   createProjectId?: () => string;
   createTemporaryId?: () => string;
+  createWriterOperationId?: () => string;
+  createWriterRetirementId?: () => string;
+  /** One process-wide Main identity. Tests may inject a different value to model restart. */
+  mainInstanceId?: string;
+  /** Must prove Electron's actual single-instance lock; wall clocks and PIDs are never authority. */
+  hasSingleInstanceRecoveryAuthority?: () => boolean;
   deletionClaims?: StudioDeletionClaimCacheV4;
   deletionClaimOptions?: StudioDeletionClaimCacheOptionsV4;
   onStorageStep?: (step: StudioPilotStorageStepV4, projectId: string) => void | Promise<void>;
+  onWriterGateStep?: (step: StudioProjectWriterGateStepV4, projectId: string) => void | Promise<void>;
 };
 
 export type CreativeStudioPilotStoreV4 = {
@@ -207,6 +268,24 @@ export type CreativeStudioPilotStoreV4 = {
     projectId: string,
     operation: (snapshot: StudioPilotProjectAuthoritySnapshotV4) => Promise<T>
   ): Promise<T>;
+  withProjectWriterAuthorityV4<T>(
+    projectId: string,
+    intent: StudioProjectWriterIntentV4,
+    operation: (snapshot: StudioPilotProjectWriterAuthorityV4) => Promise<T>
+  ): Promise<T>;
+  recoverProjectWriterAuthorityV4<T>(
+    projectId: string,
+    intent: StudioProjectWriterIntentV4,
+    operation: (snapshot: StudioPilotProjectWriterAuthorityV4) => Promise<T>
+  ): Promise<T>;
+  /** Observes a validated durable writer intent without acquiring or recovering it. */
+  readProjectWriterIntentV4(projectId: string): Promise<StudioProjectWriterIntentV4 | null>;
+  /** Waits only for a competing writer owned by this Main process; never infers cross-process authority. */
+  waitForLocalProjectWriterV4(projectId: string): Promise<boolean>;
+  /** Recovers only the exact journal/deletion operation named by an abandoned project-update gate. */
+  recoverProjectWriteV4(projectId: string): Promise<void>;
+  /** Enumerates bounded exact writer owners only after Electron proves sole-process authority. */
+  listAbandonedProjectWritesV4(): Promise<StudioPilotAbandonedProjectWriteV4[]>;
   issueDeletionClaimV4(projectId: string): Promise<StudioIssuedDeletionClaimV4>;
   deleteProjectV4(
     projectId: string,
@@ -223,6 +302,7 @@ export type CreativeStudioPilotStoreErrorCodeV4 =
   | 'unsupported'
   | 'quarantined'
   | 'already_exists'
+  | 'busy'
   | 'storage_error';
 
 export class CreativeStudioPilotStoreErrorV4 extends Error {
@@ -316,6 +396,23 @@ const hasExactDataKeys = (value: PlainRecord, keys: ReadonlySet<string>): boolea
 
 const clone = <T>(value: T): T => structuredClone(value);
 
+const serializeCreateRoot = async <T>(canonicalRoot: string, operation: () => Promise<T>): Promise<T> => {
+  const previous = PROCESS_CREATE_ROOT_QUEUES.get(canonicalRoot) ?? Promise.resolve();
+  let release!: () => void;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.catch((): undefined => undefined).then(() => current);
+  PROCESS_CREATE_ROOT_QUEUES.set(canonicalRoot, tail);
+  await previous.catch((): undefined => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+    if (PROCESS_CREATE_ROOT_QUEUES.get(canonicalRoot) === tail) PROCESS_CREATE_ROOT_QUEUES.delete(canonicalRoot);
+  }
+};
+
 const canonicalJson = (value: unknown): string => `${JSON.stringify(value, null, 2)}\n`;
 
 const toSummary = (project: StudioProjectV4): StudioPilotProjectSummaryV4 => ({
@@ -404,7 +501,7 @@ const parseTransaction = (bytes: string): ProjectWriteTransactionV4 | null => {
   if (
     value.schemaVersion !== PROJECT_TRANSACTION_SCHEMA_VERSION ||
     typeof value.projectId !== 'string' ||
-    !SAFE_ID.test(value.projectId) ||
+    !isStudioProjectIdV4(value.projectId) ||
     typeof value.transactionId !== 'string' ||
     !SAFE_TEMPORARY_ID.test(value.transactionId) ||
     value.manifestTemporaryFile !== `.project-${value.transactionId}.tmp` ||
@@ -448,7 +545,7 @@ const parseDeletionMarker = (bytes: string): ProjectDeletionMarkerV4 | null => {
   if (
     value.schemaVersion !== PROJECT_DELETION_SCHEMA_VERSION ||
     typeof value.catalogueId !== 'string' ||
-    !SAFE_ID.test(value.catalogueId) ||
+    !isStudioProjectIdV4(value.catalogueId) ||
     (value.classification !== 'healthy' &&
       value.classification !== 'unsupported' &&
       value.classification !== 'quarantined') ||
@@ -582,6 +679,9 @@ const manifestFingerprint = async (
 
 const normalizeError = (error: unknown): never => {
   if (error instanceof CreativeStudioPilotStoreErrorV4 || error instanceof StudioDeletionClaimErrorV4) throw error;
+  if (error instanceof StudioProjectWriterGateErrorV4) {
+    throw new CreativeStudioPilotStoreErrorV4(error.code === 'busy' ? 'busy' : 'storage_error');
+  }
   throw new CreativeStudioPilotStoreErrorV4('storage_error');
 };
 
@@ -630,6 +730,14 @@ export const createCreativeStudioPilotStoreV4 = (
     throw new TypeError('Invalid Creative Studio manifest byte limit');
   }
   const fs = options.fs ?? nodeFs;
+  const writerGate = createStudioProjectWriterGateV4({
+    fs,
+    mainInstanceId: options.mainInstanceId ?? STUDIO_PROJECT_WRITER_MAIN_INSTANCE_ID_V4,
+    createOperationId: options.createWriterOperationId,
+    createRetirementId: options.createWriterRetirementId,
+    hasSingleInstanceRecoveryAuthority: options.hasSingleInstanceRecoveryAuthority,
+    onStep: options.onWriterGateStep,
+  });
   const manifestByteLimit = options.maxManifestBytes ?? STUDIO_MAX_PROJECT_MANIFEST_BYTES_V4;
   const readNow = options.now ?? (() => new Date().toISOString());
   const mintProjectId = options.createProjectId ?? (() => `project_${randomBytes(18).toString('base64url')}`);
@@ -666,6 +774,12 @@ export const createCreativeStudioPilotStoreV4 = (
       } catch {
         // A renderer observer cannot roll back or poison an already durable Main commit.
       }
+    }
+  };
+
+  const requireCreateStageRecoveryAuthority = (): void => {
+    if (options.hasSingleInstanceRecoveryAuthority?.() !== true) {
+      throw new StudioProjectWriterGateErrorV4('recovery_refused');
     }
   };
 
@@ -734,18 +848,21 @@ export const createCreativeStudioPilotStoreV4 = (
     liveFile: string,
     previousDigest: string,
     nextDigest: string,
-    maximumBytes: number
+    maximumBytes: number,
+    writerLease: StudioProjectWriterLeaseV4
   ): Promise<void> => {
     const temporaryPath = resolveConfinedRecordPath(root.canonicalRoot, projectDir, temporaryFile);
     const livePath = resolveConfinedRecordPath(root.canonicalRoot, projectDir, liveFile);
     const liveDigest = await readDigest(fs, root.canonicalRoot, livePath, maximumBytes);
     if (liveDigest === nextDigest) {
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, temporaryPath);
       return;
     }
     if (liveDigest !== previousDigest) throw new CreativeStudioPilotStoreErrorV4('quarantined');
     const temporaryDigest = await readDigest(fs, root.canonicalRoot, temporaryPath, maximumBytes);
     if (temporaryDigest !== nextDigest) throw new CreativeStudioPilotStoreErrorV4('quarantined');
+    await writerLease.assertOwned();
     await fs.rename(temporaryPath, livePath);
   };
 
@@ -767,12 +884,22 @@ export const createCreativeStudioPilotStoreV4 = (
     if (temporaryDigest !== nextDigest) throw new CreativeStudioPilotStoreErrorV4('quarantined');
   };
 
-  const replayProjectTransaction = async (root: RootState, projectId: string, projectDir: string): Promise<void> => {
+  const replayProjectTransaction = async (
+    root: RootState,
+    projectId: string,
+    projectDir: string,
+    writerLease: StudioProjectWriterLeaseV4
+  ): Promise<void> => {
+    await writerLease.assertOwned();
     const transactionFile = path.join(projectDir, PROJECT_TRANSACTION);
     const transactionBytes = await readBoundedBytes(fs, root.canonicalRoot, transactionFile, MAX_CONTROL_RECORD_BYTES);
     if (transactionBytes === null) return;
     const transaction = parseTransaction(decodeUtf8(transactionBytes));
-    if (transaction === null || transaction.projectId !== projectId) {
+    if (
+      transaction === null ||
+      transaction.projectId !== projectId ||
+      transaction.transactionId !== writerLease.owner.operationId
+    ) {
       throw new CreativeStudioPilotStoreErrorV4('quarantined');
     }
     await assertTransactionFilePublishable(
@@ -800,7 +927,8 @@ export const createCreativeStudioPilotStoreV4 = (
       PROJECT_BRIEF,
       transaction.previousBriefSha256,
       transaction.nextBriefSha256,
-      MAX_BRIEF_BYTES
+      MAX_BRIEF_BYTES,
+      writerLease
     );
     await publishTransactionFile(
       root,
@@ -809,8 +937,10 @@ export const createCreativeStudioPilotStoreV4 = (
       PROJECT_MANIFEST,
       transaction.previousManifestSha256,
       transaction.nextManifestSha256,
-      manifestByteLimit
+      manifestByteLimit,
+      writerLease
     );
+    await writerLease.assertOwned();
     await syncDirectory(fs, projectDir);
     const liveManifest = await readDigest(
       fs,
@@ -822,17 +952,37 @@ export const createCreativeStudioPilotStoreV4 = (
     if (liveManifest !== transaction.nextManifestSha256 || liveBrief !== transaction.nextBriefSha256) {
       throw new CreativeStudioPilotStoreErrorV4('quarantined');
     }
+    await writerLease.assertOwned();
     await removeRegularIfPresent(fs, transactionFile);
+    await writerLease.assertOwned();
     await syncDirectory(fs, projectDir);
   };
 
-  const inspectProject = async (root: RootState, projectId: string): Promise<ProjectInspection> => {
+  const inspectProject = async (
+    root: RootState,
+    projectId: string,
+    writerLease?: StudioProjectWriterLeaseV4,
+    recoverJournal = false
+  ): Promise<ProjectInspection> => {
+    if (writerLease === undefined) {
+      await writerGate.assertUnlocked(root.canonicalRoot, projectId);
+    } else {
+      await writerLease.assertOwned();
+    }
     const projectDir = await resolveExistingProjectDirectory(root, projectId);
     if (projectDir === null) return { status: 'not_found', catalogueId: projectId };
     const directoryIdentity = await lstatDirectoryIdentity(fs, projectDir);
     try {
-      await replayProjectTransaction(root, projectId, projectDir);
-    } catch {
+      const transactionPath = path.join(projectDir, PROJECT_TRANSACTION);
+      const transaction = await readBoundedBytes(fs, root.canonicalRoot, transactionPath, MAX_CONTROL_RECORD_BYTES);
+      if (transaction !== null) {
+        if (writerLease === undefined || !recoverJournal) {
+          throw new CreativeStudioPilotStoreErrorV4('quarantined');
+        }
+        await replayProjectTransaction(root, projectId, projectDir, writerLease);
+      }
+    } catch (error) {
+      if (error instanceof StudioProjectWriterGateErrorV4) throw error;
       return {
         status: 'quarantined',
         observedSchemaVersion: null,
@@ -928,8 +1078,12 @@ export const createCreativeStudioPilotStoreV4 = (
     };
   };
 
-  const assertInspectionCurrent = async (root: RootState, captured: HealthyInspection): Promise<void> => {
-    const current = await inspectProject(root, captured.catalogueId);
+  const assertInspectionCurrent = async (
+    root: RootState,
+    captured: HealthyInspection,
+    writerLease?: StudioProjectWriterLeaseV4
+  ): Promise<void> => {
+    const current = await inspectProject(root, captured.catalogueId, writerLease);
     if (
       current.status !== 'healthy' ||
       current.project.revision !== captured.project.revision ||
@@ -940,8 +1094,12 @@ export const createCreativeStudioPilotStoreV4 = (
     }
   };
 
-  const assertInspectionAuthoringCurrent = async (root: RootState, captured: HealthyInspection): Promise<void> => {
-    const current = await inspectProject(root, captured.catalogueId);
+  const assertInspectionAuthoringCurrent = async (
+    root: RootState,
+    captured: HealthyInspection,
+    writerLease?: StudioProjectWriterLeaseV4
+  ): Promise<void> => {
+    const current = await inspectProject(root, captured.catalogueId, writerLease);
     if (
       current.status !== 'healthy' ||
       current.project.authoringRevision !== captured.project.authoringRevision ||
@@ -956,8 +1114,10 @@ export const createCreativeStudioPilotStoreV4 = (
     root: RootState,
     captured: HealthyInspection,
     next: StudioProjectV4,
-    authorizeBeforeReplace?: () => void | Promise<void>
+    writerLease: StudioProjectWriterLeaseV4,
+    authorizeBeforeReplace?: (evidence: StudioPilotProjectCommitCandidateEvidenceV4) => void | Promise<void>
   ): Promise<void> => {
+    await writerLease.assertOwned();
     const serialized = serializeProject(next);
     if (
       Buffer.byteLength(serialized.manifestBytes, 'utf8') > manifestByteLimit ||
@@ -965,7 +1125,7 @@ export const createCreativeStudioPilotStoreV4 = (
     ) {
       throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
     }
-    const transactionId = temporaryId();
+    const transactionId = writerLease.owner.operationId;
     const transaction: ProjectWriteTransactionV4 = {
       schemaVersion: PROJECT_TRANSACTION_SCHEMA_VERSION,
       projectId: next.id,
@@ -982,16 +1142,35 @@ export const createCreativeStudioPilotStoreV4 = (
     const transactionPath = path.join(captured.projectDir, PROJECT_TRANSACTION);
     const transactionPublicationTemporaryPath = path.join(captured.projectDir, `.transaction-${transactionId}.tmp`);
     let journalPublished = false;
+    let externalAuthorityCommitted = false;
     try {
       await writeExclusiveDurable(fs, manifestTemporaryPath, serialized.manifestBytes);
       await writeExclusiveDurable(fs, briefTemporaryPath, serialized.briefBytes);
       await syncDirectory(fs, captured.projectDir);
       await storageStep('update:candidates_durable', next.id);
-      await assertInspectionCurrent(root, captured);
-      await authorizeBeforeReplace?.();
+      await writerLease.assertOwned();
+      await assertInspectionCurrent(root, captured, writerLease);
+      if (authorizeBeforeReplace !== undefined) {
+        await authorizeBeforeReplace(
+          Object.freeze({
+            projectId: next.id,
+            beforeRevision: captured.project.revision,
+            afterRevision: next.revision,
+            beforeAuthoringRevision: captured.project.authoringRevision,
+            afterAuthoringRevision: next.authoringRevision,
+            beforeManifestSha256: transaction.previousManifestSha256,
+            afterManifestSha256: transaction.nextManifestSha256,
+            committedAt: next.updatedAt,
+          })
+        );
+        externalAuthorityCommitted = true;
+        await storageStep('update:authority_committed', next.id);
+      }
       await writeExclusiveDurable(fs, transactionPublicationTemporaryPath, canonicalJson(transaction));
+      await writerLease.assertOwned();
       await fs.link(transactionPublicationTemporaryPath, transactionPath);
       journalPublished = true;
+      writerLease.retainForRecovery();
       await syncDirectory(fs, captured.projectDir);
       await removeRegularIfPresent(fs, transactionPublicationTemporaryPath);
       await storageStep('update:journal_durable', next.id);
@@ -1002,9 +1181,11 @@ export const createCreativeStudioPilotStoreV4 = (
         PROJECT_BRIEF,
         transaction.previousBriefSha256,
         transaction.nextBriefSha256,
-        MAX_BRIEF_BYTES
+        MAX_BRIEF_BYTES,
+        writerLease
       );
       await storageStep('update:brief_published', next.id);
+      await writerLease.assertOwned();
       await publishTransactionFile(
         root,
         captured.projectDir,
@@ -1012,16 +1193,20 @@ export const createCreativeStudioPilotStoreV4 = (
         PROJECT_MANIFEST,
         transaction.previousManifestSha256,
         transaction.nextManifestSha256,
-        manifestByteLimit
+        manifestByteLimit,
+        writerLease
       );
       await storageStep('update:manifest_published', next.id);
+      await writerLease.assertOwned();
       await syncDirectory(fs, captured.projectDir);
       await storageStep('update:directory_durable', next.id);
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, transactionPath);
+      await writerLease.assertOwned();
       await syncDirectory(fs, captured.projectDir);
       await storageStep('update:complete', next.id);
     } catch (error) {
-      if (!journalPublished) {
+      if (!journalPublished && !externalAuthorityCommitted) {
         await removeRegularIfPresent(fs, manifestTemporaryPath).catch((): undefined => undefined);
         await removeRegularIfPresent(fs, briefTemporaryPath).catch((): undefined => undefined);
         await removeRegularIfPresent(fs, transactionPublicationTemporaryPath).catch((): undefined => undefined);
@@ -1034,13 +1219,16 @@ export const createCreativeStudioPilotStoreV4 = (
     root: RootState,
     captured: HealthyInspection,
     update: (project: StudioProjectV4) => StudioProjectV4,
-    optionsInput: StudioPilotProjectUpdateOptionsV4
+    optionsInput: StudioPilotProjectUpdateOptionsV4,
+    writerLease: StudioProjectWriterLeaseV4,
+    recordCommit: (facts: StudioPilotProjectCommitFactsV4) => void
   ): Promise<StudioProjectV4> => {
     if (
       typeof update !== 'function' ||
       !isPlainRecord(optionsInput) ||
       (optionsInput.kind !== 'authoring' && optionsInput.kind !== 'runtime') ||
       (optionsInput.expectedRevision !== undefined && !isSafePositiveInteger(optionsInput.expectedRevision)) ||
+      (optionsInput.committedAt !== undefined && !parseCanonicalTimestamp(optionsInput.committedAt)) ||
       (optionsInput.authorizeBeforeReplace !== undefined && typeof optionsInput.authorizeBeforeReplace !== 'function')
     ) {
       throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
@@ -1062,7 +1250,12 @@ export const createCreativeStudioPilotStoreV4 = (
     ) {
       throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
     }
-    const committedAt = now();
+    const observedAt = now();
+    if (!parseCanonicalTimestamp(observedAt)) throw new CreativeStudioPilotStoreErrorV4('storage_error');
+    const committedAt = optionsInput.committedAt ?? observedAt;
+    if (committedAt < captured.project.updatedAt || committedAt > observedAt) {
+      throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+    }
     const next: StudioProjectV4 = {
       ...(candidate as StudioProjectV4),
       schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V4,
@@ -1076,8 +1269,8 @@ export const createCreativeStudioPilotStoreV4 = (
     if (optionsInput.kind === 'runtime' && !studioProjectAuthoringEqualsV4(captured.project, next)) {
       throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
     }
-    await writeProjectUpdate(root, captured, next, optionsInput.authorizeBeforeReplace);
-    emit({
+    await writeProjectUpdate(root, captured, next, writerLease, optionsInput.authorizeBeforeReplace);
+    recordCommit({
       projectId: next.id,
       operation: 'updated',
       previousRevision: captured.project.revision,
@@ -1087,14 +1280,26 @@ export const createCreativeStudioPilotStoreV4 = (
     return clone(next);
   };
 
-  const quarantineOwnedTree = async (root: RootState, directory: string, quarantineName: string): Promise<void> => {
+  const quarantineOwnedTree = async (
+    root: RootState,
+    directory: string,
+    quarantineName: string,
+    authorizeDestructiveStep: () => void
+  ): Promise<void> => {
     const quarantine = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, quarantineName);
     if (await pathExists(fs, quarantine)) throw new CreativeStudioPilotStoreErrorV4('storage_error');
+    authorizeDestructiveStep();
     await fs.rename(directory, quarantine);
+    authorizeDestructiveStep();
     await syncDirectory(fs, root.projectsRoot);
   };
 
-  const recoverCreateStage = async (root: RootState, entryName: string): Promise<void> => {
+  const recoverCreateStage = async (
+    root: RootState,
+    entryName: string,
+    authorizeDestructiveStep: () => void
+  ): Promise<void> => {
+    authorizeDestructiveStep();
     const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, entryName);
     await lstatDirectoryIdentity(fs, stage);
     let pair: Awaited<ReturnType<typeof readProjectPair>>;
@@ -1104,13 +1309,15 @@ export const createCreativeStudioPilotStoreV4 = (
       pair = null;
     }
     const project = pair === null ? null : parseProjectEnvelope(pair.manifestBytes, pair.briefBytes);
-    if (project === null || !SAFE_ID.test(project.id)) {
-      await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`);
+    if (project === null || !isStudioProjectIdV4(project.id)) {
+      await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`, authorizeDestructiveStep);
       return;
     }
     const target = projectDirectory(root, project.id);
     if (!(await pathExists(fs, target))) {
+      authorizeDestructiveStep();
       await fs.rename(stage, target);
+      authorizeDestructiveStep();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
@@ -1121,60 +1328,116 @@ export const createCreativeStudioPilotStoreV4 = (
       existing.manifestSha256 === pair.manifestSha256 &&
       existing.briefSha256 === pair.briefSha256
     ) {
+      authorizeDestructiveStep();
       await fs.rm(stage, { recursive: true });
+      authorizeDestructiveStep();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
-    await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`);
+    await quarantineOwnedTree(root, stage, `.abandoned-${temporaryId()}`, authorizeDestructiveStep);
   };
 
   const removeDeletionTree = async (
     root: RootState,
     quarantinePath: string,
-    expectedIdentity: StudioProjectDirectoryIdentityV4
+    expectedIdentity: StudioProjectDirectoryIdentityV4,
+    writerLease: StudioProjectWriterLeaseV4
   ): Promise<void> => {
     const actualIdentity = await lstatDirectoryIdentity(fs, quarantinePath);
     if (!sameIdentity(actualIdentity, expectedIdentity)) throw new CreativeStudioPilotStoreErrorV4('storage_error');
+    await writerLease.assertOwned();
     await fs.rm(quarantinePath, { recursive: true });
+    await writerLease.assertOwned();
     await syncDirectory(fs, root.projectsRoot);
   };
 
-  const replayDeletionMarker = async (root: RootState, markerName: string): Promise<void> => {
+  const replayDeletionMarker = async (
+    root: RootState,
+    markerName: string,
+    writerLease: StudioProjectWriterLeaseV4
+  ): Promise<void> => {
+    if (markerName !== `.delete-${writerLease.owner.operationId}.json`) {
+      throw new CreativeStudioPilotStoreErrorV4('storage_error');
+    }
+    await writerLease.assertOwned();
     const markerPath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, markerName);
     const bytes = await readBoundedBytes(fs, root.canonicalRoot, markerPath, MAX_CONTROL_RECORD_BYTES);
     if (bytes === null) return;
     const marker = parseDeletionMarker(decodeUtf8(bytes));
     if (marker === null) {
+      await writerLease.assertOwned();
       await fs.rename(
         markerPath,
         resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, `.invalid-${temporaryId()}`)
       );
+      await writerLease.assertOwned();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
     const quarantinePath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, marker.quarantineName);
     if (await pathExists(fs, quarantinePath)) {
-      await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+      await removeDeletionTree(root, quarantinePath, marker.directoryIdentity, writerLease);
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, markerPath);
+      await writerLease.assertOwned();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
-    const current = await inspectProject(root, marker.catalogueId);
+    const current = await inspectProject(root, marker.catalogueId, writerLease);
     if (current.status === 'not_found') {
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, markerPath);
+      await writerLease.assertOwned();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
     if (!sameObservation(marker, current)) {
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, markerPath);
+      await writerLease.assertOwned();
       await syncDirectory(fs, root.projectsRoot);
       return;
     }
+    await writerLease.assertOwned();
     await fs.rename(current.projectDir, quarantinePath);
+    await writerLease.assertOwned();
     await syncDirectory(fs, root.projectsRoot);
-    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity, writerLease);
+    await writerLease.assertOwned();
     await removeRegularIfPresent(fs, markerPath);
+    await writerLease.assertOwned();
     await syncDirectory(fs, root.projectsRoot);
+  };
+
+  const recoverProjectWriteState = async (
+    root: RootState,
+    projectId: string,
+    writerLease: StudioProjectWriterLeaseV4
+  ): Promise<void> => {
+    await writerLease.assertOwned();
+    const markerName = `.delete-${writerLease.owner.operationId}.json`;
+    const markerPath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, markerName);
+    if (await pathExists(fs, markerPath)) {
+      await replayDeletionMarker(root, markerName, writerLease);
+      return;
+    }
+    const projectDir = await resolveExistingProjectDirectory(root, projectId);
+    if (projectDir === null) return;
+    const transactionPath = path.join(projectDir, PROJECT_TRANSACTION);
+    if (await pathExists(fs, transactionPath)) {
+      await replayProjectTransaction(root, projectId, projectDir, writerLease);
+      return;
+    }
+    // A process may die after durable gate acquisition or candidate writes but before journal
+    // publication. Those exact operation-id candidates have no authority and are safe to remove.
+    await writerLease.assertOwned();
+    await removeRegularIfPresent(fs, path.join(projectDir, `.project-${writerLease.owner.operationId}.tmp`));
+    await writerLease.assertOwned();
+    await removeRegularIfPresent(fs, path.join(projectDir, `.brief-${writerLease.owner.operationId}.tmp`));
+    await writerLease.assertOwned();
+    await removeRegularIfPresent(fs, path.join(projectDir, `.transaction-${writerLease.owner.operationId}.tmp`));
+    await writerLease.assertOwned();
+    await syncDirectory(fs, projectDir);
   };
 
   const initializeRoot = async (): Promise<RootState> => {
@@ -1184,39 +1447,22 @@ export const createCreativeStudioPilotStoreV4 = (
     // namespace—makes schema-6 records unsupported at the clean cutover and keeps them deletable.
     const projectsRoot = canonicalRoot;
     const root = { canonicalRoot, projectsRoot };
-    const entries = await fs.readdir(projectsRoot, { withFileTypes: true });
-    for (const entry of entries.filter((candidate) => candidate.name.startsWith('.delete-'))) {
-      if (!entry.isFile() || entry.isSymbolicLink()) continue;
-      try {
-        // Replay root mutations serially so two recovery records cannot authorize the same path concurrently.
-        // eslint-disable-next-line no-await-in-loop
-        await replayDeletionMarker(root, entry.name);
-      } catch {
-        // One unsafe or incomplete deletion record must not disable unrelated projects.
-      }
-    }
-    const afterDeletion = await fs.readdir(projectsRoot, { withFileTypes: true });
-    for (const entry of afterDeletion.filter((candidate) => candidate.name.startsWith('.create-'))) {
-      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
-      try {
-        // Creation stages can claim the same minted id and therefore recover in lexical sequence.
-        // eslint-disable-next-line no-await-in-loop
-        await recoverCreateStage(root, entry.name);
-      } catch {
-        // The stage remains isolated from inventory for a later diagnostic/recovery pass.
-      }
-    }
-    const projectEntries = await fs.readdir(projectsRoot, { withFileTypes: true });
-    for (const entry of projectEntries) {
-      if (!entry.isDirectory() || entry.isSymbolicLink() || !SAFE_ID.test(entry.name)) continue;
-      const directory = projectDirectory(root, entry.name);
-      try {
-        // Per-project journals are replayed serially during the one-time root bootstrap.
-        // eslint-disable-next-line no-await-in-loop
-        await replayProjectTransaction(root, entry.name, directory);
-      } catch {
-        // Inspection classifies only this project as quarantined.
-      }
+    if (options.hasSingleInstanceRecoveryAuthority?.() === true) {
+      await serializeCreateRoot(canonicalRoot, async () => {
+        requireCreateStageRecoveryAuthority();
+        const afterDeletion = await fs.readdir(projectsRoot, { withFileTypes: true });
+        for (const entry of afterDeletion.filter((candidate) => candidate.name.startsWith('.create-'))) {
+          if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+          try {
+            // Creation stages can claim the same minted id and therefore recover in lexical sequence.
+            // eslint-disable-next-line no-await-in-loop
+            await recoverCreateStage(root, entry.name, requireCreateStageRecoveryAuthority);
+          } catch (error) {
+            if (error instanceof StudioProjectWriterGateErrorV4 && error.code === 'recovery_refused') throw error;
+            // The stage remains isolated from inventory for a later diagnostic/recovery pass.
+          }
+        }
+      });
     }
     return root;
   };
@@ -1233,7 +1479,7 @@ export const createCreativeStudioPilotStoreV4 = (
   const scan = async (root: RootState): Promise<ProjectInspection[]> => {
     const entries = await fs.readdir(root.projectsRoot, { withFileTypes: true });
     const projectIds = entries
-      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && SAFE_ID.test(entry.name))
+      .filter((entry) => entry.isDirectory() && !entry.isSymbolicLink() && isStudioProjectIdV4(entry.name))
       .map((entry) => entry.name)
       .toSorted();
     const inspections: ProjectInspection[] = [];
@@ -1252,10 +1498,13 @@ export const createCreativeStudioPilotStoreV4 = (
   const deleteInsideQueue = async (
     root: RootState,
     inspection: Exclude<ProjectInspection, { status: 'not_found' }>,
-    expectedRevision: number | null
+    expectedRevision: number | null,
+    writerLease: StudioProjectWriterLeaseV4,
+    recordCommit: (facts: StudioPilotProjectCommitFactsV4) => void
   ): Promise<boolean> => {
+    await writerLease.assertOwned();
     const committedAt = now();
-    const id = temporaryId();
+    const id = writerLease.owner.operationId;
     const markerName = `.delete-${id}.json`;
     const quarantineName = `.deleting-${id}`;
     const markerPath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, markerName);
@@ -1274,24 +1523,32 @@ export const createCreativeStudioPilotStoreV4 = (
       quarantineName,
     };
     await publishExclusiveControlRecord(fs, root.projectsRoot, markerPath, markerTemporaryPath, canonicalJson(marker));
+    writerLease.retainForRecovery();
     await storageStep('delete:marker_durable', inspection.catalogueId);
-    const current = await inspectProject(root, inspection.catalogueId);
+    await writerLease.assertOwned();
+    const current = await inspectProject(root, inspection.catalogueId, writerLease);
     if (current.status === 'not_found' || !sameObservation(marker, current)) {
+      await writerLease.assertOwned();
       await removeRegularIfPresent(fs, markerPath);
+      await writerLease.assertOwned();
       await syncDirectory(fs, root.projectsRoot);
+      writerLease.clearRecoveryRetention();
       throw new CreativeStudioPilotStoreErrorV4('stale_project');
     }
     const quarantinePath = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, quarantineName);
+    await writerLease.assertOwned();
     await fs.rename(current.projectDir, quarantinePath);
     await storageStep('delete:quarantined', inspection.catalogueId);
     await syncDirectory(fs, root.projectsRoot);
     await storageStep('delete:root_durable', inspection.catalogueId);
-    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity);
+    await removeDeletionTree(root, quarantinePath, marker.directoryIdentity, writerLease);
     await storageStep('delete:tree_removed', inspection.catalogueId);
+    await writerLease.assertOwned();
     await removeRegularIfPresent(fs, markerPath);
+    await writerLease.assertOwned();
     await syncDirectory(fs, root.projectsRoot);
     await storageStep('delete:complete', inspection.catalogueId);
-    emit({
+    recordCommit({
       projectId: inspection.catalogueId,
       operation: 'deleted',
       previousRevision: inspection.status === 'healthy' ? inspection.project.revision : null,
@@ -1299,6 +1556,118 @@ export const createCreativeStudioPilotStoreV4 = (
       committedAt,
     });
     return true;
+  };
+
+  const runProjectWriterAuthority = async <Result>(
+    projectId: string,
+    intent: StudioProjectWriterIntentV4,
+    operation: (snapshot: StudioPilotProjectWriterAuthorityV4) => Promise<Result>,
+    recover: boolean
+  ): Promise<Result> => {
+    if (!isStudioProjectIdV4(projectId) || typeof operation !== 'function') {
+      throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+    }
+    const committedFacts: StudioPilotProjectCommitFactsV4[] = [];
+    let outcome: Result;
+    try {
+      outcome = await enqueue(
+        projectId,
+        async () => {
+          const root = await rootState();
+          const runGate = recover ? writerGate.recoverWriter : writerGate.withWriter;
+          return runGate(root.canonicalRoot, projectId, intent, async (writerLease) => {
+            if (recover) {
+              await recoverProjectWriteState(root, projectId, writerLease);
+            }
+            const inspection = await inspectProject(
+              root,
+              projectId,
+              writerLease,
+              recover && intent.purpose === 'proposal_terminal'
+            );
+            if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV4('not_found');
+            if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV4(inspection.status);
+            let currentInspection = inspection;
+            let active = true;
+            let mutationUsed = false;
+            let pending: Promise<unknown> | null = null;
+            try {
+              return await operation({
+                project: clone(inspection.project),
+                projectDir: inspection.projectDir,
+                retainWriterForRecovery: () => writerLease.retainForRecovery(),
+                assertCurrent: async () => {
+                  if (!active) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+                  await writerLease.assertOwned();
+                  await assertInspectionCurrent(root, currentInspection, writerLease);
+                },
+                assertAuthoringCurrent: async () => {
+                  if (!active) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+                  await writerLease.assertOwned();
+                  await assertInspectionAuthoringCurrent(root, currentInspection, writerLease);
+                },
+                readCommitState: async () => {
+                  if (!active) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+                  await writerLease.assertOwned();
+                  await assertInspectionCurrent(root, currentInspection, writerLease);
+                  return Object.freeze({
+                    projectId: currentInspection.project.id,
+                    revision: currentInspection.project.revision,
+                    authoringRevision: currentInspection.project.authoringRevision,
+                    manifestSha256: currentInspection.manifestSha256,
+                  });
+                },
+                commit: (update, updateOptions) => {
+                  if (!active || mutationUsed) {
+                    return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
+                  }
+                  mutationUsed = true;
+                  pending = updateInsideQueue(root, currentInspection, update, updateOptions, writerLease, (facts) =>
+                    committedFacts.push(facts)
+                  ).then((committed) => {
+                    const serialized = serializeProject(committed);
+                    currentInspection = {
+                      ...currentInspection,
+                      project: clone(committed),
+                      manifestFingerprint: sha256(serialized.manifestBytes),
+                      manifestSha256: sha256(serialized.manifestBytes),
+                      briefSha256: sha256(serialized.briefBytes),
+                    };
+                    return committed;
+                  });
+                  return pending as Promise<StudioProjectV4>;
+                },
+                delete: (expectedRevision) => {
+                  if (!active || mutationUsed || !isSafePositiveInteger(expectedRevision)) {
+                    return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
+                  }
+                  if (expectedRevision !== inspection.project.revision) {
+                    return Promise.reject(new CreativeStudioPilotStoreErrorV4('stale_project'));
+                  }
+                  mutationUsed = true;
+                  pending = deleteInsideQueue(root, inspection, expectedRevision, writerLease, (facts) =>
+                    committedFacts.push(facts)
+                  );
+                  return pending as Promise<boolean>;
+                },
+              });
+            } finally {
+              try {
+                await pending;
+              } finally {
+                active = false;
+              }
+            }
+          });
+        },
+        true
+      );
+    } catch (error) {
+      if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+      throw error;
+    }
+    for (const facts of committedFacts) emit(facts);
+    return outcome;
   };
 
   const publicStore: CreativeStudioPilotStoreV4 = {
@@ -1339,7 +1708,7 @@ export const createCreativeStudioPilotStoreV4 = (
       const exactInput = snapshotCreateInput(input);
       if (exactInput === null) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       const projectId = mintProjectId();
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+      if (!isStudioProjectIdV4(projectId)) {
         throw new CreativeStudioPilotStoreErrorV4('storage_error');
       }
       return enqueue(projectId, async () => {
@@ -1361,35 +1730,37 @@ export const createCreativeStudioPilotStoreV4 = (
         ) {
           throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
         }
-        const stageName = `.create-${temporaryId()}`;
-        const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, stageName);
-        let published = false;
-        try {
-          await fs.mkdir(stage);
-          await writeExclusiveDurable(fs, path.join(stage, PROJECT_BRIEF), serialized.briefBytes);
-          await storageStep('create:brief_durable', projectId);
-          await writeExclusiveDurable(fs, path.join(stage, PROJECT_MANIFEST), serialized.manifestBytes);
-          await storageStep('create:manifest_durable', projectId);
-          await syncDirectory(fs, stage);
-          await storageStep('create:stage_durable', projectId);
-          const target = projectDirectory(root, projectId);
-          if (await pathExists(fs, target)) throw new CreativeStudioPilotStoreErrorV4('already_exists');
-          await fs.rename(stage, target);
-          published = true;
-          await storageStep('create:published', projectId);
-          await syncDirectory(fs, root.projectsRoot);
-          await storageStep('create:root_durable', projectId);
-        } catch (error) {
-          if (!published) {
-            // Keep a partial stage when a fault models process death; startup will isolate or finish it.
-            const stageExists = await pathExists(fs, stage).catch(() => false);
-            if (stageExists && options.onStorageStep === undefined) {
-              await fs.rm(stage, { recursive: true }).catch((): undefined => undefined);
-              await syncDirectory(fs, root.projectsRoot).catch((): undefined => undefined);
+        await serializeCreateRoot(root.canonicalRoot, async () => {
+          const stageName = `.create-${temporaryId()}`;
+          const stage = resolveConfinedRecordPath(root.canonicalRoot, root.projectsRoot, stageName);
+          let published = false;
+          try {
+            await fs.mkdir(stage);
+            await writeExclusiveDurable(fs, path.join(stage, PROJECT_BRIEF), serialized.briefBytes);
+            await storageStep('create:brief_durable', projectId);
+            await writeExclusiveDurable(fs, path.join(stage, PROJECT_MANIFEST), serialized.manifestBytes);
+            await storageStep('create:manifest_durable', projectId);
+            await syncDirectory(fs, stage);
+            await storageStep('create:stage_durable', projectId);
+            const target = projectDirectory(root, projectId);
+            if (await pathExists(fs, target)) throw new CreativeStudioPilotStoreErrorV4('already_exists');
+            await fs.rename(stage, target);
+            published = true;
+            await storageStep('create:published', projectId);
+            await syncDirectory(fs, root.projectsRoot);
+            await storageStep('create:root_durable', projectId);
+          } catch (error) {
+            if (!published) {
+              // Keep a partial stage when a fault models process death; startup will isolate or finish it.
+              const stageExists = await pathExists(fs, stage).catch(() => false);
+              if (stageExists && options.onStorageStep === undefined) {
+                await fs.rm(stage, { recursive: true }).catch((): undefined => undefined);
+                await syncDirectory(fs, root.projectsRoot).catch((): undefined => undefined);
+              }
             }
+            return normalizeError(error);
           }
-          return normalizeError(error);
-        }
+        });
         emit({
           projectId,
           operation: 'created',
@@ -1402,7 +1773,7 @@ export const createCreativeStudioPilotStoreV4 = (
     },
 
     async getProjectV4(projectId) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+      if (!isStudioProjectIdV4(projectId)) {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
       return enqueue(projectId, async () => {
@@ -1420,7 +1791,7 @@ export const createCreativeStudioPilotStoreV4 = (
     },
 
     async getVerifiedProjectDirectoryV4(projectId) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+      if (!isStudioProjectIdV4(projectId)) {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
       return enqueue(projectId, async () => {
@@ -1437,77 +1808,147 @@ export const createCreativeStudioPilotStoreV4 = (
     },
 
     async updateProjectV4(projectId, update, updateOptions) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+      if (!isStudioProjectIdV4(projectId)) {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
-      return enqueue(projectId, async () => {
+      const committed = await enqueue(projectId, async () => {
         const root = await rootState();
-        const inspection = await inspectProject(root, projectId);
-        if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV4('not_found');
-        if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV4(inspection.status);
-        return updateInsideQueue(root, inspection, update, updateOptions);
+        return writerGate.withWriter(root.canonicalRoot, projectId, { purpose: 'project_update' }, async (lease) => {
+          const inspection = await inspectProject(root, projectId, lease);
+          if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV4('not_found');
+          if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV4(inspection.status);
+          return updateInsideQueue(root, inspection, update, updateOptions, lease, () => undefined);
+        });
       });
+      emit({
+        projectId: committed.id,
+        operation: 'updated',
+        previousRevision: committed.revision - 1,
+        committedRevision: committed.revision,
+        committedAt: committed.updatedAt,
+      });
+      return committed;
     },
 
     async withProjectAuthorityV4(projectId, operation) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId) || typeof operation !== 'function') {
+      if (!isStudioProjectIdV4(projectId) || typeof operation !== 'function') {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
-      return enqueue(
-        projectId,
-        async () => {
-          const root = await rootState();
-          const inspection = await inspectProject(root, projectId);
-          if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV4('not_found');
-          if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV4(inspection.status);
-          let active = true;
-          let mutationUsed = false;
-          let pending: Promise<unknown> | null = null;
-          try {
-            return await operation({
-              project: clone(inspection.project),
-              projectDir: inspection.projectDir,
-              assertCurrent: () => {
-                if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
-                return assertInspectionCurrent(root, inspection);
-              },
-              assertAuthoringCurrent: () => {
-                if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
-                return assertInspectionAuthoringCurrent(root, inspection);
-              },
-              commit: (update, updateOptions) => {
-                if (!active || mutationUsed)
-                  return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
-                mutationUsed = true;
-                pending = updateInsideQueue(root, inspection, update, updateOptions);
-                return pending as Promise<StudioProjectV4>;
-              },
-              delete: (expectedRevision) => {
-                if (!active || mutationUsed || !isSafePositiveInteger(expectedRevision)) {
-                  return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
-                }
-                if (expectedRevision !== inspection.project.revision) {
-                  return Promise.reject(new CreativeStudioPilotStoreErrorV4('stale_project'));
-                }
-                mutationUsed = true;
-                pending = deleteInsideQueue(root, inspection, expectedRevision);
-                return pending as Promise<boolean>;
-              },
-            });
-          } finally {
+      try {
+        return await enqueue(
+          projectId,
+          async () => {
+            const root = await rootState();
+            const inspection = await inspectProject(root, projectId);
+            if (inspection.status === 'not_found') throw new CreativeStudioPilotStoreErrorV4('not_found');
+            if (inspection.status !== 'healthy') throw new CreativeStudioPilotStoreErrorV4(inspection.status);
+            let active = true;
             try {
-              await pending;
+              return await operation({
+                project: clone(inspection.project),
+                projectDir: inspection.projectDir,
+                assertCurrent: () => {
+                  if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
+                  return assertInspectionCurrent(root, inspection);
+                },
+                assertAuthoringCurrent: () => {
+                  if (!active) return Promise.reject(new CreativeStudioPilotStoreErrorV4('invalid_payload'));
+                  return assertInspectionAuthoringCurrent(root, inspection);
+                },
+                readCommitState: async () => {
+                  if (!active) throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+                  await assertInspectionCurrent(root, inspection);
+                  return Object.freeze({
+                    projectId: inspection.project.id,
+                    revision: inspection.project.revision,
+                    authoringRevision: inspection.project.authoringRevision,
+                    manifestSha256: inspection.manifestSha256,
+                  });
+                },
+              });
             } finally {
               active = false;
             }
-          }
-        },
-        true
-      );
+          },
+          true
+        );
+      } catch (error) {
+        if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+        throw error;
+      }
+    },
+
+    withProjectWriterAuthorityV4(projectId, intent, operation) {
+      return runProjectWriterAuthority(projectId, intent, operation, false);
+    },
+
+    recoverProjectWriterAuthorityV4(projectId, intent, operation) {
+      return runProjectWriterAuthority(projectId, intent, operation, true);
+    },
+
+    async readProjectWriterIntentV4(projectId) {
+      if (!isStudioProjectIdV4(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+      }
+      try {
+        const root = await rootState();
+        return await writerGate.readIntent(root.canonicalRoot, projectId);
+      } catch (error) {
+        if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+        throw error;
+      }
+    },
+
+    async waitForLocalProjectWriterV4(projectId) {
+      if (!isStudioProjectIdV4(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+      }
+      try {
+        const root = await rootState();
+        return await writerGate.waitForLocalWriter(root.canonicalRoot, projectId);
+      } catch (error) {
+        if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+        throw error;
+      }
+    },
+
+    async recoverProjectWriteV4(projectId) {
+      if (!isStudioProjectIdV4(projectId)) {
+        throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+      }
+      try {
+        await enqueue(
+          projectId,
+          async () => {
+            const root = await rootState();
+            await writerGate.recoverWriter(
+              root.canonicalRoot,
+              projectId,
+              { purpose: 'project_update' },
+              (writerLease) => recoverProjectWriteState(root, projectId, writerLease)
+            );
+          },
+          true
+        );
+      } catch (error) {
+        if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+        throw error;
+      }
+    },
+
+    async listAbandonedProjectWritesV4() {
+      try {
+        const root = await rootState();
+        const owners = await writerGate.listRecoveryCandidates(root.canonicalRoot);
+        return owners.map(({ projectId, purpose, proposalId }) => Object.freeze({ projectId, purpose, proposalId }));
+      } catch (error) {
+        if (error instanceof StudioProjectWriterGateErrorV4) return normalizeError(error);
+        throw error;
+      }
     },
 
     async issueDeletionClaimV4(projectId) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId)) {
+      if (!isStudioProjectIdV4(projectId)) {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
       return enqueue(projectId, async () => {
@@ -1519,38 +1960,45 @@ export const createCreativeStudioPilotStoreV4 = (
     },
 
     async deleteProjectV4(projectId, authority) {
-      if (typeof projectId !== 'string' || !SAFE_ID.test(projectId) || !isPlainRecord(authority)) {
+      if (!isStudioProjectIdV4(projectId) || !isPlainRecord(authority)) {
         throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
       }
-      return enqueue(projectId, async () => {
+      const committedFacts: StudioPilotProjectCommitFactsV4[] = [];
+      const deleted = await enqueue(projectId, async () => {
         const root = await rootState();
-        const inspection = await inspectProject(root, projectId);
-        if (inspection.status === 'not_found') return false;
-        const authorityRecord = authority as unknown as PlainRecord;
-        if (
-          hasExactDataKeys(authorityRecord, new Set(['deletionClaim'])) &&
-          typeof authorityRecord.deletionClaim === 'string'
-        ) {
-          deletionClaims.consume(authorityRecord.deletionClaim, observationFor(inspection));
-          if (inspection.status === 'healthy') {
-            throw new CreativeStudioPilotStoreErrorV4('stale_project');
-          }
-          return deleteInsideQueue(root, inspection, null);
-        }
-        if (inspection.status === 'healthy') {
+        return writerGate.withWriter(root.canonicalRoot, projectId, { purpose: 'project_update' }, async (lease) => {
+          const inspection = await inspectProject(root, projectId, lease);
+          if (inspection.status === 'not_found') return false;
+          const authorityRecord = authority as unknown as PlainRecord;
           if (
-            !hasExactDataKeys(authorityRecord, new Set(['expectedRevision'])) ||
-            !isSafePositiveInteger(authorityRecord.expectedRevision)
+            hasExactDataKeys(authorityRecord, new Set(['deletionClaim'])) &&
+            typeof authorityRecord.deletionClaim === 'string'
           ) {
-            throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+            deletionClaims.consume(authorityRecord.deletionClaim, observationFor(inspection));
+            if (inspection.status === 'healthy') {
+              throw new CreativeStudioPilotStoreErrorV4('stale_project');
+            }
+            return deleteInsideQueue(root, inspection, null, lease, (facts) => committedFacts.push(facts));
           }
-          if (authorityRecord.expectedRevision !== inspection.project.revision) {
-            throw new CreativeStudioPilotStoreErrorV4('stale_project');
+          if (inspection.status === 'healthy') {
+            if (
+              !hasExactDataKeys(authorityRecord, new Set(['expectedRevision'])) ||
+              !isSafePositiveInteger(authorityRecord.expectedRevision)
+            ) {
+              throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+            }
+            if (authorityRecord.expectedRevision !== inspection.project.revision) {
+              throw new CreativeStudioPilotStoreErrorV4('stale_project');
+            }
+            return deleteInsideQueue(root, inspection, authorityRecord.expectedRevision, lease, (facts) =>
+              committedFacts.push(facts)
+            );
           }
-          return deleteInsideQueue(root, inspection, authorityRecord.expectedRevision);
-        }
-        throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+          throw new CreativeStudioPilotStoreErrorV4('invalid_payload');
+        });
       });
+      for (const facts of committedFacts) emit(facts);
+      return deleted;
     },
 
     watchProjectsV4(listener) {

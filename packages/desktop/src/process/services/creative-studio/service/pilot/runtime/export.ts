@@ -13,26 +13,37 @@ import path from 'node:path';
 import { syncDurableDirectory } from '../../durableDirectory';
 import {
   STUDIO_EXPORT_SCHEMA_VERSION_V3,
+  STUDIO_EXPORT_SCHEMA_VERSION_V4,
   STUDIO_MAX_IMAGE_ASSET_BYTES_V3,
   STUDIO_MAX_PIECE_EXPORTS_PER_PIECE_V3,
   STUDIO_MAX_PIECE_EXPORTS_PER_PROJECT_V3,
   type StudioAssetV3,
+  type StudioAssetV4,
   type StudioDeliverPieceExportRequestV3,
   type StudioExportPieceResultV3,
   type StudioPieceExportArtifactRequestV3,
   type StudioPieceExportArtifactV3,
+  type StudioPieceExportArtifactV4,
   type StudioPieceExportCatalogV3,
   type StudioProjectV3,
   type StudioProjectV4,
   type StudioRendererPieceExportCatalogV3,
+  type StudioRendererPieceExportCatalogV4,
+  type StudioExportPieceResultV4,
 } from '@/common/types/project/creativeStudioTypes';
 import type { CreativeStudioPilotStoreV3 } from '@process/services/creative-studio/store/pilot';
+import { CreativeStudioPilotStoreErrorV4 } from '@process/services/creative-studio/store/pilot/v4';
 import {
   buildStudioPieceExportManifestV3,
-  buildStudioPieceExportManifestV4,
   parseStudioPieceExportManifestV3,
   serializeStudioPieceExportManifestV3,
 } from '../../schema2/exports/pieceManifestV3';
+import {
+  buildStudioPieceExportManifestV4,
+  isStudioPieceBinnedV4,
+  parseStudioPieceExportManifestV4,
+  serializeStudioPieceExportManifestV4,
+} from '../../schema2/exports/pieceManifestV4';
 import { isCanonicalStudioPieceHandleV3 } from '../../schema2/mutations/pieceHandles';
 import { studioPersistentIdentitiesV4 } from '../../schema2/mutations/projectAuthorityV4';
 import {
@@ -47,7 +58,8 @@ const SAFE_EXPORT_ID = /^[A-Za-z0-9_-]{1,200}$/;
 const SAFE_NONCE = /^[A-Za-z0-9_-]{1,32}$/;
 const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
 const SAFE_FOLDER_NAME = /^[A-Za-z0-9._-]{1,256}$/;
-const CATALOG_FILE_NAME = 'catalog-v3.json';
+const CATALOG_FILE_NAME_V3 = 'catalog-v3.json';
+const CATALOG_FILE_NAME_V4 = 'catalog-v4.json';
 const MANIFEST_FILE_NAME = 'manifest.json';
 const EXPORTS_DIRECTORY_NAME = 'exports';
 const QUARANTINE_DIRECTORY_NAME = 'quarantine';
@@ -86,6 +98,13 @@ export type StudioPilotManagedAssetVerifierV3 = {
     projectId: string;
     assetId: string;
   }): Promise<{ asset: StudioAssetV3; absolutePath: string }>;
+};
+
+export type StudioPilotManagedAssetVerifierV4 = {
+  verifyManagedAssetV4(input: {
+    projectId: string;
+    assetId: string;
+  }): Promise<{ asset: StudioAssetV4; absolutePath: string }>;
 };
 
 export type StudioPieceExportRuntimeStepV3 =
@@ -129,8 +148,9 @@ export type StudioPieceExportProjectStoreV4 = {
   ): Promise<T>;
 };
 
-export type StudioPieceExportRuntimeDepsV4 = Omit<StudioPieceExportRuntimeDepsV3, 'store'> & {
+export type StudioPieceExportRuntimeDepsV4 = Omit<StudioPieceExportRuntimeDepsV3, 'store' | 'media'> & {
   store: StudioPieceExportProjectStoreV4;
+  media: StudioPilotManagedAssetVerifierV4;
 };
 
 export type StudioPieceExportRuntimeV3 = {
@@ -142,8 +162,11 @@ export type StudioPieceExportRuntimeV3 = {
   recover(projectId: string): Promise<StudioRendererPieceExportCatalogV3>;
 };
 
-/** Project schema 7 continues to emit and manage the independent export-3 protocol. */
-export type StudioPieceExportRuntimeV4 = StudioPieceExportRuntimeV3;
+export type StudioPieceExportRuntimeV4 = Omit<StudioPieceExportRuntimeV3, 'create' | 'list' | 'recover'> & {
+  create(input: unknown): Promise<StudioExportPieceResultV4>;
+  list(projectId: string): Promise<StudioRendererPieceExportCatalogV4>;
+  recover(projectId: string): Promise<StudioRendererPieceExportCatalogV4>;
+};
 
 type StudioPieceExportProjectAuthority<Project extends StudioPieceExportProjectV3OrV4> = {
   project: Project;
@@ -159,28 +182,76 @@ type StudioPieceExportProjectStore<Project extends StudioPieceExportProjectV3OrV
   ): Promise<T>;
 };
 
-type StudioPieceExportRuntimeCoreDeps<Project extends StudioPieceExportProjectV3OrV4> = Omit<
-  StudioPieceExportRuntimeDepsV3,
-  'store'
-> & {
-  store: StudioPieceExportProjectStore<Project>;
+type StudioPieceExportSchemaVersion = typeof STUDIO_EXPORT_SCHEMA_VERSION_V3 | typeof STUDIO_EXPORT_SCHEMA_VERSION_V4;
+type StudioPieceExportArtifact = Omit<StudioPieceExportArtifactV3, 'schemaVersion'> & {
+  schemaVersion: StudioPieceExportSchemaVersion;
+};
+type StudioPieceExportCatalog = Omit<StudioPieceExportCatalogV3, 'schemaVersion' | 'artifacts'> & {
+  schemaVersion: StudioPieceExportSchemaVersion;
+  artifacts: StudioPieceExportArtifact[];
+};
+type StudioPieceExportManifest =
+  | ReturnType<typeof buildStudioPieceExportManifestV3>
+  | ReturnType<typeof buildStudioPieceExportManifestV4>;
+type StudioPieceExportImageAsset = StudioAssetV3 | Extract<StudioAssetV4, { mediaKind: 'image'; role: 'primary' }>;
+type StudioPieceExportManagedAsset = StudioAssetV3 | StudioAssetV4;
+
+type StudioPieceExportProtocol<Project extends StudioPieceExportProjectV3OrV4> = {
+  schemaVersion: StudioPieceExportSchemaVersion;
+  catalogFileName: string;
+  finalName(exportId: string): string;
+  stageName(exportId: string, nonce: string): string;
+  stageNonce(exportId: string, name: string): string | null;
+  markerName(exportId: string): string;
+  recognizesFinalName(name: string): boolean;
+  recognizesStageName(name: string): boolean;
+  recognizesMarkerName(name: string): boolean;
+  isPieceAvailable(project: Project, pieceId: string): boolean;
   buildManifest(
     project: Project,
     input: Parameters<typeof buildStudioPieceExportManifestV3>[1]
-  ): ReturnType<typeof buildStudioPieceExportManifestV3>;
+  ): StudioPieceExportManifest;
+  parseManifest(bytes: Uint8Array): StudioPieceExportManifest;
+  serializeManifest(value: unknown): Uint8Array;
+};
+type StudioPieceExportReadProtocol = Pick<
+  StudioPieceExportProtocol<StudioPieceExportProjectV3OrV4>,
+  | 'schemaVersion'
+  | 'catalogFileName'
+  | 'finalName'
+  | 'stageName'
+  | 'stageNonce'
+  | 'markerName'
+  | 'recognizesFinalName'
+  | 'recognizesStageName'
+  | 'recognizesMarkerName'
+  | 'parseManifest'
+  | 'serializeManifest'
+>;
+
+type StudioPieceExportRuntimeCoreDeps<Project extends StudioPieceExportProjectV3OrV4> = Omit<
+  StudioPieceExportRuntimeDepsV3,
+  'store' | 'media'
+> & {
+  store: StudioPieceExportProjectStore<Project>;
+  verifyManagedAsset(input: {
+    projectId: string;
+    assetId: string;
+  }): Promise<{ asset: StudioPieceExportManagedAsset; absolutePath: string }>;
+  protocol: StudioPieceExportProtocol<Project>;
   projectIdentities(project: Project): Iterable<string>;
 };
 
-type PendingMarkerV3 = {
-  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+type PendingMarker = {
+  schemaVersion: StudioPieceExportSchemaVersion;
   projectId: string;
   exportId: string;
   stageName: string;
   finalName: string;
 };
 
-type CopyIntentV3 = {
-  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
+type CopyIntent = {
+  schemaVersion: StudioPieceExportSchemaVersion;
   projectId: string;
   artifactId: string;
   catalogRevision: number;
@@ -189,8 +260,8 @@ type CopyIntentV3 = {
   stageName: string;
 };
 
-type VerifiedArtifactV3 = {
-  artifact: StudioPieceExportArtifactV3;
+type VerifiedArtifact = {
+  artifact: StudioPieceExportArtifact;
   directoryPath: string;
 };
 
@@ -200,8 +271,8 @@ type OpenedSourceV3 = {
   close(): Promise<void>;
 };
 
-type ExportPayloadSnapshotV3 = {
-  artifact: StudioPieceExportArtifactV3;
+type ExportPayloadSnapshot = {
+  artifact: StudioPieceExportArtifact;
   directoryPath: string;
   files: ReadonlyArray<{ name: string; bytes: Buffer }>;
 };
@@ -260,6 +331,19 @@ const serviceFailure = (code: ConstructorParameters<typeof CreativeStudioPilotSe
 
 const normalizeExportError = (error: unknown): never => {
   if (error instanceof CreativeStudioPilotServiceErrorV3) throw error;
+  if (error instanceof CreativeStudioPilotStoreErrorV4) {
+    const code = {
+      invalid_payload: 'invalid_payload',
+      not_found: 'not_found',
+      stale_project: 'stale_project',
+      unsupported: 'unsupported_project',
+      quarantined: 'project_quarantined',
+      already_exists: 'storage_error',
+      busy: 'busy',
+      storage_error: 'storage_error',
+    }[error.code] as ConstructorParameters<typeof CreativeStudioPilotServiceErrorV3>[0];
+    return serviceFailure(code);
+  }
   if (hasErrorCode(error, 'invalid_media')) return serviceFailure('invalid_media');
   if (hasErrorCode(error, 'not_found')) return serviceFailure('not_found');
   return normalizeCreativeStudioPilotErrorV3(error);
@@ -306,11 +390,12 @@ const writeExclusiveDurable = async (
 
 const writeCatalogDurable = async (
   exportsRoot: string,
-  catalog: StudioPieceExportCatalogV3,
-  nonce: string
+  catalog: StudioPieceExportCatalog,
+  nonce: string,
+  catalogFileName: string
 ): Promise<void> => {
-  const catalogPath = path.join(exportsRoot, CATALOG_FILE_NAME);
-  const temporaryPath = path.join(exportsRoot, `.${CATALOG_FILE_NAME}-${nonce}.part`);
+  const catalogPath = path.join(exportsRoot, catalogFileName);
+  const temporaryPath = path.join(exportsRoot, `.${catalogFileName}-${nonce}.part`);
   await writeExclusiveDurable(temporaryPath, Buffer.from(canonicalJson(catalog), 'utf8'));
   await fs.rename(temporaryPath, catalogPath);
   await syncDirectory(exportsRoot);
@@ -435,7 +520,10 @@ const readBoundedRegularFile = async (filePath: string, maximumBytes: number): P
   }
 };
 
-const openVerifiedSource = async (absolutePath: string, expected: StudioAssetV3): Promise<OpenedSourceV3> => {
+const openVerifiedSource = async (
+  absolutePath: string,
+  expected: StudioPieceExportImageAsset
+): Promise<OpenedSourceV3> => {
   if (!path.isAbsolute(absolutePath)) return serviceFailure('invalid_media');
   let handle: FileHandle | null = null;
   try {
@@ -481,29 +569,66 @@ const openVerifiedSource = async (absolutePath: string, expected: StudioAssetV3)
   }
 };
 
-const assetFactsEqual = (left: StudioAssetV3, right: StudioAssetV3): boolean =>
+const assetFactsEqual = (left: StudioPieceExportManagedAsset, right: StudioPieceExportManagedAsset): boolean =>
   canonicalJson(left) === canonicalJson(right);
 
-const folderNameForExport = (exportId: string): string => {
+const legacyFolderNameForExport = (exportId: string): string => {
   if (!SAFE_EXPORT_ID.test(exportId)) return serviceFailure('storage_error');
   const value = `piece-${exportId}`;
   if (!SAFE_FOLDER_NAME.test(value)) return serviceFailure('storage_error');
   return value;
 };
 
-const stageNameForExport = (exportId: string, nonce: string): string => {
+const legacyStageNameForExport = (exportId: string, nonce: string): string => {
   if (!SAFE_EXPORT_ID.test(exportId) || !SAFE_NONCE.test(nonce)) return serviceFailure('storage_error');
   const value = `.stage-${exportId}-${nonce}`;
   if (!SAFE_FOLDER_NAME.test(value)) return serviceFailure('storage_error');
   return value;
 };
 
-const markerNameForExport = (exportId: string): string => `.pending-${exportId}.json`;
+const legacyMarkerNameForExport = (exportId: string): string => `.pending-${exportId}.json`;
 
-const validateArtifact = (value: unknown, projectId: string): value is StudioPieceExportArtifactV3 => {
+const v4FolderNameForExport = (exportId: string): string => {
+  if (!SAFE_EXPORT_ID.test(exportId)) return serviceFailure('storage_error');
+  const value = `v4-piece-${exportId}`;
+  if (!SAFE_FOLDER_NAME.test(value)) return serviceFailure('storage_error');
+  return value;
+};
+
+const v4StageNameForExport = (exportId: string, nonce: string): string => {
+  if (!SAFE_EXPORT_ID.test(exportId) || !SAFE_NONCE.test(nonce)) return serviceFailure('storage_error');
+  const value = `.v4-stage-${exportId}-${nonce}`;
+  if (!SAFE_FOLDER_NAME.test(value)) return serviceFailure('storage_error');
+  return value;
+};
+
+const v4MarkerNameForExport = (exportId: string): string => `.v4-pending-${exportId}.json`;
+
+const LEGACY_FINAL_PREFIX = 'piece-';
+const LEGACY_STAGE_PREFIX = '.stage-';
+const LEGACY_MARKER_PREFIX = '.pending-';
+const V4_FINAL_PREFIX = 'v4-piece-';
+const V4_STAGE_PREFIX = '.v4-stage-';
+const V4_MARKER_PREFIX = '.v4-pending-';
+
+const recognizesName = (name: string, prefix: string, suffix = ''): boolean =>
+  name.startsWith(prefix) && name.endsWith(suffix) && name.length > prefix.length + suffix.length;
+
+const stageNonceFromName = (name: string, prefix: string, exportId: string): string | null => {
+  const exactPrefix = `${prefix}${exportId}-`;
+  if (!SAFE_EXPORT_ID.test(exportId) || !name.startsWith(exactPrefix)) return null;
+  const nonce = name.slice(exactPrefix.length);
+  return SAFE_NONCE.test(nonce) ? nonce : null;
+};
+
+const validateArtifact = (
+  value: unknown,
+  projectId: string,
+  protocol: StudioPieceExportReadProtocol
+): value is StudioPieceExportArtifact => {
   if (!isPlainRecord(value) || !hasExactKeys(value, ARTIFACT_KEYS)) return false;
   if (
-    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    value.schemaVersion !== protocol.schemaVersion ||
     typeof value.id !== 'string' ||
     !SAFE_EXPORT_ID.test(value.id) ||
     value.projectId !== projectId ||
@@ -515,7 +640,7 @@ const validateArtifact = (value: unknown, projectId: string): value is StudioPie
     !hasExactKeys(value.managedExport, MANAGED_EXPORT_KEYS) ||
     value.managedExport.collection !== 'exports' ||
     typeof value.managedExport.fileName !== 'string' ||
-    value.managedExport.fileName !== folderNameForExport(value.id) ||
+    value.managedExport.fileName !== protocol.finalName(value.id) ||
     !isPositiveInteger(value.byteSize) ||
     value.payloadFileCount !== 2 ||
     typeof value.manifestSha256 !== 'string' ||
@@ -527,14 +652,13 @@ const validateArtifact = (value: unknown, projectId: string): value is StudioPie
   return true;
 };
 
-const artifactOrder = (left: StudioPieceExportArtifactV3, right: StudioPieceExportArtifactV3): number =>
+const artifactOrder = (left: StudioPieceExportArtifact, right: StudioPieceExportArtifact): number =>
   left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
 
-/** Applies the independent export-3 five-per-Piece and 480-per-project retention contract. */
-export const retainStudioPieceExportArtifactsV3 = (
-  artifacts: readonly StudioPieceExportArtifactV3[]
-): StudioPieceExportArtifactV3[] => {
-  const byPiece = new Map<string, StudioPieceExportArtifactV3[]>();
+const retainStudioPieceExportArtifacts = <Artifact extends StudioPieceExportArtifact>(
+  artifacts: readonly Artifact[]
+): Artifact[] => {
+  const byPiece = new Map<string, Artifact[]>();
   for (const artifact of artifacts.toSorted(artifactOrder)) {
     const group = byPiece.get(artifact.pieceId) ?? [];
     group.push(artifact);
@@ -546,11 +670,25 @@ export const retainStudioPieceExportArtifactsV3 = (
     .slice(-STUDIO_MAX_PIECE_EXPORTS_PER_PROJECT_V3);
 };
 
-const validateCatalog = (value: unknown, projectId: string): value is StudioPieceExportCatalogV3 => {
+/** Applies the independent export-3 five-per-Piece and 480-per-project retention contract. */
+export const retainStudioPieceExportArtifactsV3 = (
+  artifacts: readonly StudioPieceExportArtifactV3[]
+): StudioPieceExportArtifactV3[] => retainStudioPieceExportArtifacts(artifacts);
+
+/** Applies the identical cardinality policy to the distinct export-4 artifact family. */
+export const retainStudioPieceExportArtifactsV4 = (
+  artifacts: readonly StudioPieceExportArtifactV4[]
+): StudioPieceExportArtifactV4[] => retainStudioPieceExportArtifacts(artifacts);
+
+const validateCatalog = (
+  value: unknown,
+  projectId: string,
+  protocol: StudioPieceExportReadProtocol
+): value is StudioPieceExportCatalog => {
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, CATALOG_KEYS) ||
-    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    value.schemaVersion !== protocol.schemaVersion ||
     value.projectId !== projectId ||
     !isPositiveInteger(value.revision) ||
     !Array.isArray(value.artifacts) ||
@@ -565,7 +703,7 @@ const validateCatalog = (value: unknown, projectId: string): value is StudioPiec
   if (
     artifacts.some(
       (artifact) =>
-        !validateArtifact(artifact, projectId) ||
+        !validateArtifact(artifact, projectId, protocol) ||
         ids.has(artifact.id) ||
         folders.has(artifact.managedExport.fileName) ||
         (ids.add(artifact.id), folders.add(artifact.managedExport.fileName), false)
@@ -573,18 +711,25 @@ const validateCatalog = (value: unknown, projectId: string): value is StudioPiec
   ) {
     return false;
   }
-  const retained = retainStudioPieceExportArtifactsV3(artifacts as StudioPieceExportArtifactV3[]);
+  const retained = retainStudioPieceExportArtifacts(artifacts as StudioPieceExportArtifact[]);
   return canonicalJson(retained) === canonicalJson(artifacts);
 };
 
-const logicalCatalog = (projectId: string): StudioPieceExportCatalogV3 => ({
-  schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+const logicalCatalog = (
+  projectId: string,
+  schemaVersion: StudioPieceExportSchemaVersion
+): StudioPieceExportCatalog => ({
+  schemaVersion,
   projectId,
   revision: 1,
   artifacts: [],
 });
 
-const parseCatalog = (bytes: Uint8Array, projectId: string): StudioPieceExportCatalogV3 | null => {
+const parseCatalog = (
+  bytes: Uint8Array,
+  projectId: string,
+  protocol: StudioPieceExportReadProtocol
+): StudioPieceExportCatalog | null => {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -597,10 +742,14 @@ const parseCatalog = (bytes: Uint8Array, projectId: string): StudioPieceExportCa
   } catch {
     return null;
   }
-  return validateCatalog(value, projectId) && canonicalJson(value) === text ? value : null;
+  return validateCatalog(value, projectId, protocol) && canonicalJson(value) === text ? value : null;
 };
 
-const parsePendingMarker = (bytes: Uint8Array, projectId: string): PendingMarkerV3 | null => {
+const parsePendingMarker = (
+  bytes: Uint8Array,
+  projectId: string,
+  protocol: StudioPieceExportReadProtocol
+): PendingMarker | null => {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -615,27 +764,26 @@ const parsePendingMarker = (bytes: Uint8Array, projectId: string): PendingMarker
   }
   const exportId = isPlainRecord(value) && typeof value.exportId === 'string' ? value.exportId : '';
   const stageName = isPlainRecord(value) && typeof value.stageName === 'string' ? value.stageName : '';
-  const stagePrefix = `.stage-${exportId}-`;
-  const nonce = stageName.startsWith(stagePrefix) ? stageName.slice(stagePrefix.length) : '';
+  const nonce = protocol.stageNonce(exportId, stageName) ?? '';
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, PENDING_MARKER_KEYS) ||
-    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    value.schemaVersion !== protocol.schemaVersion ||
     value.projectId !== projectId ||
     !SAFE_EXPORT_ID.test(exportId) ||
     typeof value.stageName !== 'string' ||
     !SAFE_NONCE.test(nonce) ||
     !SAFE_FOLDER_NAME.test(stageName) ||
     typeof value.finalName !== 'string' ||
-    value.finalName !== folderNameForExport(exportId) ||
+    value.finalName !== protocol.finalName(exportId) ||
     canonicalJson(value) !== text
   ) {
     return null;
   }
-  return value as PendingMarkerV3;
+  return value as PendingMarker;
 };
 
-const projectRendererCatalog = (catalog: StudioPieceExportCatalogV3): StudioRendererPieceExportCatalogV3 => ({
+const projectRendererCatalog = (catalog: StudioPieceExportCatalog): StudioRendererPieceExportCatalogV3 => ({
   revision: catalog.revision,
   artifacts: catalog.artifacts.map((artifact) => ({
     id: artifact.id,
@@ -652,8 +800,9 @@ const projectRendererCatalog = (catalog: StudioPieceExportCatalogV3): StudioRend
 const artifactFromDirectory = async (
   projectId: string,
   directoryPath: string,
-  finalName: string
-): Promise<VerifiedArtifactV3 | null> => {
+  finalName: string,
+  protocol: StudioPieceExportReadProtocol
+): Promise<VerifiedArtifact | null> => {
   try {
     const directoryStats = await fs.lstat(directoryPath);
     if (
@@ -672,10 +821,10 @@ const artifactFromDirectory = async (
       path.join(directoryPath, MANIFEST_FILE_NAME),
       MANIFEST_MAX_BYTES
     );
-    const manifest = parseStudioPieceExportManifestV3(manifestBytes);
+    const manifest = protocol.parseManifest(manifestBytes);
     if (
       manifest.projectId !== projectId ||
-      finalName !== folderNameForExport(manifest.exportId) ||
+      finalName !== protocol.finalName(manifest.exportId) ||
       manifest.asset.relativePath !== photoEntry.name ||
       photoEntry.name !== `photo.${imageExtension(manifest.asset.mimeType)}`
     ) {
@@ -686,8 +835,8 @@ const artifactFromDirectory = async (
       STUDIO_MAX_IMAGE_ASSET_BYTES_V3
     );
     await verifyImageBytes(photoBytes, manifest.asset);
-    const artifact: StudioPieceExportArtifactV3 = {
-      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+    const artifact: StudioPieceExportArtifact = {
+      schemaVersion: protocol.schemaVersion,
       id: manifest.exportId,
       projectId,
       pieceId: manifest.piece.id,
@@ -699,7 +848,7 @@ const artifactFromDirectory = async (
       manifestSha256: sha256(manifestBytes),
       createdAt: manifest.exportedAt,
     };
-    return validateArtifact(artifact, projectId) ? { artifact, directoryPath } : null;
+    return validateArtifact(artifact, projectId, protocol) ? { artifact, directoryPath } : null;
   } catch {
     return null;
   }
@@ -707,8 +856,8 @@ const artifactFromDirectory = async (
 
 const exactCatalogArtifact = (
   request: StudioPieceExportArtifactRequestV3,
-  catalog: StudioPieceExportCatalogV3
-): StudioPieceExportArtifactV3 => {
+  catalog: StudioPieceExportCatalog
+): StudioPieceExportArtifact => {
   if (request.projectId !== catalog.projectId || request.expectedCatalogRevision !== catalog.revision) {
     return serviceFailure('stale_export_catalog');
   }
@@ -719,15 +868,16 @@ const exactCatalogArtifact = (
 
 const readExportPayloadSnapshot = async (
   projectId: string,
-  artifact: StudioPieceExportArtifactV3,
-  directoryPath: string
-): Promise<ExportPayloadSnapshotV3> => {
-  const firstProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName);
+  artifact: StudioPieceExportArtifact,
+  directoryPath: string,
+  protocol: StudioPieceExportReadProtocol
+): Promise<ExportPayloadSnapshot> => {
+  const firstProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName, protocol);
   if (firstProof === null || canonicalJson(firstProof.artifact) !== canonicalJson(artifact)) {
     return serviceFailure('storage_error');
   }
   const manifestBytes = await readBoundedRegularFile(path.join(directoryPath, MANIFEST_FILE_NAME), MANIFEST_MAX_BYTES);
-  const manifest = parseStudioPieceExportManifestV3(manifestBytes);
+  const manifest = protocol.parseManifest(manifestBytes);
   const photoName = manifest.asset.relativePath;
   if (
     !SAFE_FOLDER_NAME.test(photoName) ||
@@ -744,7 +894,7 @@ const readExportPayloadSnapshot = async (
   ) {
     return serviceFailure('storage_error');
   }
-  const finalProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName);
+  const finalProof = await artifactFromDirectory(projectId, directoryPath, artifact.managedExport.fileName, protocol);
   if (finalProof === null || canonicalJson(finalProof.artifact) !== canonicalJson(artifact)) {
     return serviceFailure('storage_error');
   }
@@ -802,9 +952,10 @@ const pathExists = async (entryPath: string): Promise<boolean> => {
 
 const copyPublicationNames = (
   request: StudioPieceExportArtifactRequestV3,
-  artifact: StudioPieceExportArtifactV3,
-  destinationName: string
-): { stageName: string; intentName: string; intent: CopyIntentV3; intentBytes: Buffer } => {
+  artifact: StudioPieceExportArtifact,
+  destinationName: string,
+  schemaVersion: StudioPieceExportSchemaVersion
+): { stageName: string; intentName: string; intent: CopyIntent; intentBytes: Buffer } => {
   const artifactSha256 = sha256(Buffer.from(canonicalJson(artifact), 'utf8'));
   const digest = sha256(
     Buffer.from(
@@ -820,8 +971,8 @@ const copyPublicationNames = (
   ).slice(0, 48);
   const stageName = `.copy-${digest}.part`;
   const intentName = `.copy-${digest}.intent.json`;
-  const intent: CopyIntentV3 = {
-    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+  const intent: CopyIntent = {
+    schemaVersion,
     projectId: request.projectId,
     artifactId: request.artifactId,
     catalogRevision: request.expectedCatalogRevision,
@@ -832,7 +983,7 @@ const copyPublicationNames = (
   return { stageName, intentName, intent, intentBytes: Buffer.from(canonicalJson(intent), 'utf8') };
 };
 
-const parseCopyIntent = (bytes: Uint8Array, expected: CopyIntentV3): CopyIntentV3 | null => {
+const parseCopyIntent = (bytes: Uint8Array, expected: CopyIntent): CopyIntent | null => {
   let text: string;
   try {
     text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
@@ -848,7 +999,7 @@ const parseCopyIntent = (bytes: Uint8Array, expected: CopyIntentV3): CopyIntentV
   if (
     !isPlainRecord(value) ||
     !hasExactKeys(value, COPY_INTENT_KEYS) ||
-    value.schemaVersion !== STUDIO_EXPORT_SCHEMA_VERSION_V3 ||
+    value.schemaVersion !== expected.schemaVersion ||
     typeof value.projectId !== 'string' ||
     !SAFE_PERSISTED_ID.test(value.projectId) ||
     typeof value.artifactId !== 'string' ||
@@ -865,10 +1016,10 @@ const parseCopyIntent = (bytes: Uint8Array, expected: CopyIntentV3): CopyIntentV
   ) {
     return null;
   }
-  return value as CopyIntentV3;
+  return value as CopyIntent;
 };
 
-const readCopyIntent = async (intentPath: string, expected: CopyIntentV3): Promise<Buffer | null> => {
+const readCopyIntent = async (intentPath: string, expected: CopyIntent): Promise<Buffer | null> => {
   if (!(await pathExists(intentPath))) return null;
   const bytes = await readBoundedRegularFile(intentPath, MARKER_MAX_BYTES);
   return parseCopyIntent(bytes, expected) === null ? serviceFailure('storage_error') : bytes;
@@ -885,7 +1036,7 @@ const removeExactCopyIntent = async (intentPath: string, expectedBytes: Buffer):
 
 const verifyCopyDirectory = async (
   directoryPath: string,
-  snapshot: ExportPayloadSnapshotV3,
+  snapshot: ExportPayloadSnapshot,
   expected?: OwnedCopyProofV3
 ): Promise<OwnedCopyProofV3> => {
   const openedDirectory = await readVerifiedDirectoryIdentity(directoryPath);
@@ -921,7 +1072,7 @@ const verifyCopyDirectory = async (
 
 const writeCopyDirectory = async (
   directoryPath: string,
-  snapshot: ExportPayloadSnapshotV3
+  snapshot: ExportPayloadSnapshot
 ): Promise<OwnedCopyProofV3> => {
   let proof: OwnedCopyProofV3 | null = null;
   try {
@@ -993,7 +1144,7 @@ const removeOwnedCopyDirectory = async (directoryPath: string, proof: OwnedCopyP
   }
 };
 
-const sameExportPayloadSnapshot = (left: ExportPayloadSnapshotV3, right: ExportPayloadSnapshotV3): boolean =>
+const sameExportPayloadSnapshot = (left: ExportPayloadSnapshot, right: ExportPayloadSnapshot): boolean =>
   canonicalJson(left.artifact) === canonicalJson(right.artifact) &&
   left.directoryPath === right.directoryPath &&
   left.files.length === right.files.length &&
@@ -1018,7 +1169,6 @@ const quarantineEntry = async (
 ): Promise<void> => {
   if (path.dirname(entryPath) !== exportsRoot) return serviceFailure('storage_error');
   const name = path.basename(entryPath);
-  if (!SAFE_FOLDER_NAME.test(name)) return serviceFailure('storage_error');
   if (!SAFE_NONCE.test(nonce)) return serviceFailure('storage_error');
   const target = path.join(
     quarantineRoot,
@@ -1063,7 +1213,7 @@ const removeEvictedDirectory = async (
 const nextTimestamp = (
   requested: string,
   project: StudioPieceExportProjectV3OrV4,
-  catalog: StudioPieceExportCatalogV3
+  catalog: StudioPieceExportCatalog
 ): string => {
   if (!isCanonicalTimestamp(requested)) return serviceFailure('storage_error');
   const floor = Math.max(
@@ -1076,8 +1226,9 @@ const nextTimestamp = (
 const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3OrV4>(
   authority: StudioPieceExportProjectAuthority<Project>,
   createNonce: () => string,
-  onStep: (step: StudioPieceExportRuntimeStepV3, projectId: string) => Promise<void>
-): Promise<StudioPieceExportCatalogV3> => {
+  onStep: (step: StudioPieceExportRuntimeStepV3, projectId: string) => Promise<void>,
+  protocol: StudioPieceExportProtocol<Project>
+): Promise<StudioPieceExportCatalog> => {
   const project = authority.project;
   const projectDir = await fs.realpath(authority.projectDir);
   if (projectDir !== authority.projectDir) return serviceFailure('storage_error');
@@ -1085,21 +1236,21 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
   const quarantineRoot = await ensureDirectory(exportsRoot, QUARANTINE_DIRECTORY_NAME);
   const entries = await fs.readdir(exportsRoot, { withFileTypes: true });
 
-  const pending = new Map<string, { marker: PendingMarkerV3; markerPath: string }>();
+  const pending = new Map<string, { marker: PendingMarker; markerPath: string }>();
   for (const entry of entries) {
-    if (!entry.name.startsWith('.pending-') || !entry.name.endsWith('.json')) continue;
+    if (!protocol.recognizesMarkerName(entry.name)) continue;
     const markerPath = path.join(exportsRoot, entry.name);
     if (!entry.isFile() || entry.isSymbolicLink()) {
       await quarantineEntry(exportsRoot, quarantineRoot, markerPath, createNonce());
       continue;
     }
-    let marker: PendingMarkerV3 | null = null;
+    let marker: PendingMarker | null = null;
     try {
-      marker = parsePendingMarker(await readBoundedRegularFile(markerPath, MARKER_MAX_BYTES), project.id);
+      marker = parsePendingMarker(await readBoundedRegularFile(markerPath, MARKER_MAX_BYTES), project.id, protocol);
     } catch {
       // The bounded marker is isolated below.
     }
-    if (marker === null || markerNameForExport(marker.exportId) !== entry.name || pending.has(marker.exportId)) {
+    if (marker === null || protocol.markerName(marker.exportId) !== entry.name || pending.has(marker.exportId)) {
       await quarantineEntry(exportsRoot, quarantineRoot, markerPath, createNonce());
       continue;
     }
@@ -1117,7 +1268,7 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
       finalExists = false;
     }
     if (!finalExists) {
-      const staged = await artifactFromDirectory(project.id, stagePath, marker.finalName);
+      const staged = await artifactFromDirectory(project.id, stagePath, marker.finalName, protocol);
       if (staged !== null && staged.artifact.id === marker.exportId) {
         await fs.rename(stagePath, finalPath);
         await syncDirectory(exportsRoot);
@@ -1132,12 +1283,12 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
     }
   }
 
-  const catalogPath = path.join(exportsRoot, CATALOG_FILE_NAME);
+  const catalogPath = path.join(exportsRoot, protocol.catalogFileName);
   let catalogStatus: 'missing' | 'valid' | 'malformed' = 'missing';
-  let catalog = logicalCatalog(project.id);
+  let catalog = logicalCatalog(project.id, protocol.schemaVersion);
   try {
     const bytes = await readBoundedRegularFile(catalogPath, CATALOG_MAX_BYTES);
-    const parsed = parseCatalog(bytes, project.id);
+    const parsed = parseCatalog(bytes, project.id, protocol);
     if (parsed === null) {
       catalogStatus = 'malformed';
       await quarantineEntry(exportsRoot, quarantineRoot, catalogPath, createNonce());
@@ -1157,13 +1308,13 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
   }
 
   const currentEntries = await fs.readdir(exportsRoot, { withFileTypes: true });
-  const verifiedByFolder = new Map<string, VerifiedArtifactV3>();
+  const verifiedByFolder = new Map<string, VerifiedArtifact>();
   for (const entry of currentEntries) {
-    if (!entry.name.startsWith('piece-')) continue;
+    if (!protocol.recognizesFinalName(entry.name)) continue;
     const directoryPath = path.join(exportsRoot, entry.name);
     const verified =
       entry.isDirectory() && !entry.isSymbolicLink()
-        ? await artifactFromDirectory(project.id, directoryPath, entry.name)
+        ? await artifactFromDirectory(project.id, directoryPath, entry.name, protocol)
         : null;
     if (verified === null || verifiedByFolder.has(entry.name)) {
       await quarantineEntry(exportsRoot, quarantineRoot, directoryPath, createNonce());
@@ -1192,24 +1343,24 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
   for (const [exportId, { marker }] of pending) {
     const verified =
       verifiedByFolder.get(marker.finalName) ??
-      (await artifactFromDirectory(project.id, path.join(exportsRoot, marker.finalName), marker.finalName));
+      (await artifactFromDirectory(project.id, path.join(exportsRoot, marker.finalName), marker.finalName, protocol));
     if (verified !== null && verified.artifact.id === exportId && !recoveredIds.has(exportId)) {
       recovered.push(verified.artifact);
       recoveredIds.add(exportId);
       verifiedByFolder.set(marker.finalName, verified);
     }
   }
-  const retained = retainStudioPieceExportArtifactsV3(recovered);
+  const retained = retainStudioPieceExportArtifacts(recovered);
   const retainedIds = new Set(retained.map((artifact) => artifact.id));
   const changed = !trustedCatalog || canonicalJson(retained) !== canonicalJson(catalog.artifacts);
-  const nextCatalog: StudioPieceExportCatalogV3 = {
-    schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+  const nextCatalog: StudioPieceExportCatalog = {
+    schemaVersion: protocol.schemaVersion,
     projectId: project.id,
     revision: trustedCatalog && changed ? catalog.revision + 1 : trustedCatalog ? catalog.revision : 1,
     artifacts: retained,
   };
   if (changed && (catalogStatus !== 'missing' || retained.length > 0)) {
-    await writeCatalogDurable(exportsRoot, nextCatalog, createNonce());
+    await writeCatalogDurable(exportsRoot, nextCatalog, createNonce(), protocol.catalogFileName);
   }
 
   for (const { marker, markerPath } of pending.values()) {
@@ -1229,7 +1380,7 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
   }
   const after = await fs.readdir(exportsRoot, { withFileTypes: true });
   for (const entry of after) {
-    if (entry.name.startsWith('.stage-') || entry.name.startsWith(`.${CATALOG_FILE_NAME}-`)) {
+    if (protocol.recognizesStageName(entry.name) || entry.name.startsWith(`.${protocol.catalogFileName}-`)) {
       await quarantineEntry(exportsRoot, quarantineRoot, path.join(exportsRoot, entry.name), createNonce());
     }
   }
@@ -1238,19 +1389,32 @@ const recoverInsideAuthority = async <Project extends StudioPieceExportProjectV3
   return nextCatalog;
 };
 
-const findCurrentAsset = (project: StudioPieceExportProjectV3OrV4, pieceId: string): StudioAssetV3 => {
+const findCurrentAsset = (
+  project: StudioPieceExportProjectV3OrV4,
+  pieceId: string,
+  isPieceAvailable: (project: StudioPieceExportProjectV3OrV4, pieceId: string) => boolean
+): StudioPieceExportImageAsset => {
+  if (!isPieceAvailable(project, pieceId)) return serviceFailure('export_unavailable');
   const piece = project.pieces[pieceId];
-  if (piece === undefined || piece.currentAssetId === null) return serviceFailure('export_unavailable');
-  const asset = project.assets[piece.currentAssetId];
-  if (asset === undefined || asset.pieceId !== piece.id || asset.projectId !== project.id) {
+  if (piece === undefined || piece.kind !== 'photograph' || piece.currentAssetId === null) {
     return serviceFailure('export_unavailable');
   }
-  return asset;
+  const asset = project.assets[piece.currentAssetId];
+  if (
+    asset === undefined ||
+    asset.pieceId !== piece.id ||
+    asset.projectId !== project.id ||
+    asset.mediaKind !== 'image' ||
+    ('role' in asset && asset.role !== 'primary')
+  ) {
+    return serviceFailure('export_unavailable');
+  }
+  return asset as StudioPieceExportImageAsset;
 };
 
 const uniqueExportId = (
   mint: () => string,
-  catalog: StudioPieceExportCatalogV3,
+  catalog: StudioPieceExportCatalog,
   projectIdentities: Iterable<string>
 ): string => {
   const unavailable = new Set([...catalog.artifacts.map((artifact) => artifact.id), ...projectIdentities]);
@@ -1281,7 +1445,7 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
     if (typeof projectId !== 'string' || !SAFE_PERSISTED_ID.test(projectId)) return serviceFailure('invalid_payload');
     try {
       return await deps.store.withProjectAuthority(projectId, async (authority) =>
-        projectRendererCatalog(await recoverInsideAuthority(authority, createNonce, onStep))
+        projectRendererCatalog(await recoverInsideAuthority(authority, createNonce, onStep, deps.protocol))
       );
     } catch (error) {
       return normalizeExportError(error);
@@ -1293,7 +1457,7 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
       const request: StudioDeliverPieceExportRequestV3 = parseStudioDeliverPieceExportRequestV3(input);
       const project = await deps.store.loadProject(request.projectId);
       if (project.revision !== request.expectedRevision) return serviceFailure('stale_project');
-      findCurrentAsset(project, request.pieceId);
+      findCurrentAsset(project, request.pieceId, deps.protocol.isPieceAvailable);
       // The selected exact project decoder guarantees a canonical handle; findCurrentAsset proved ownership.
       const piece = project.pieces[request.pieceId]!;
       return { suggestedName: `piece-${piece.handle}-export` };
@@ -1309,19 +1473,24 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
         const request = parseStudioExportPieceRequestV3(input);
         const preliminaryProject = await deps.store.loadProject(request.projectId);
         if (preliminaryProject.revision !== request.expectedRevision) return serviceFailure('stale_project');
-        const preliminaryAsset = findCurrentAsset(preliminaryProject, request.pieceId);
-        const mediaProof = await deps.media.verifyManagedAssetV3({
+        const preliminaryAsset = findCurrentAsset(preliminaryProject, request.pieceId, deps.protocol.isPieceAvailable);
+        const mediaProof = await deps.verifyManagedAsset({
           projectId: request.projectId,
           assetId: preliminaryAsset.id,
         });
         return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
           const project = authority.project;
           if (project.revision !== request.expectedRevision) return serviceFailure('stale_project');
-          const asset = findCurrentAsset(project, request.pieceId);
-          if (asset.id !== mediaProof.asset.id || !assetFactsEqual(asset, mediaProof.asset)) {
+          const asset = findCurrentAsset(project, request.pieceId, deps.protocol.isPieceAvailable);
+          if (
+            mediaProof.asset.mediaKind !== 'image' ||
+            ('role' in mediaProof.asset && mediaProof.asset.role !== 'primary') ||
+            asset.id !== mediaProof.asset.id ||
+            !assetFactsEqual(asset, mediaProof.asset)
+          ) {
             return serviceFailure('invalid_media');
           }
-          const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
+          const catalog = await recoverInsideAuthority(authority, createNonce, onStep, deps.protocol);
           if (catalog.revision !== request.expectedCatalogRevision) {
             return serviceFailure('stale_export_catalog');
           }
@@ -1332,20 +1501,20 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
             const quarantineRoot = await ensureDirectory(exportsRoot, QUARANTINE_DIRECTORY_NAME);
             const exportId = uniqueExportId(createExportId, catalog, deps.projectIdentities(project));
             const nonce = createNonce();
-            const finalName = folderNameForExport(exportId);
-            const stageName = stageNameForExport(exportId, nonce);
+            const finalName = deps.protocol.finalName(exportId);
+            const stageName = deps.protocol.stageName(exportId, nonce);
             const stagePath = path.join(exportsRoot, stageName);
             const finalPath = path.join(exportsRoot, finalName);
-            const markerPath = path.join(exportsRoot, markerNameForExport(exportId));
+            const markerPath = path.join(exportsRoot, deps.protocol.markerName(exportId));
             const exportedAt = nextTimestamp(now(), project, catalog);
             const relativePhotoPath = `photo.${imageExtension(asset.mimeType)}`;
-            const manifest = deps.buildManifest(project, {
+            const manifest = deps.protocol.buildManifest(project, {
               exportId,
               pieceId: request.pieceId,
               relativePath: relativePhotoPath,
               exportedAt,
             });
-            const manifestBytes = serializeStudioPieceExportManifestV3(manifest);
+            const manifestBytes = deps.protocol.serializeManifest(manifest);
 
             await fs.mkdir(stagePath, { recursive: false, mode: 0o700 });
             await syncDirectory(exportsRoot);
@@ -1362,14 +1531,14 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
               await syncDirectory(exportsRoot);
               throw error;
             }
-            const verifiedStage = await artifactFromDirectory(project.id, stagePath, finalName);
+            const verifiedStage = await artifactFromDirectory(project.id, stagePath, finalName, deps.protocol);
             if (verifiedStage === null) {
               await fs.rm(stagePath, { recursive: true, force: true });
               await syncDirectory(exportsRoot);
               return serviceFailure('storage_error');
             }
-            const marker: PendingMarkerV3 = {
-              schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+            const marker: PendingMarker = {
+              schemaVersion: deps.protocol.schemaVersion,
               projectId: project.id,
               exportId,
               stageName,
@@ -1384,14 +1553,14 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
             await onStep('artifact_published', project.id);
             await authority.assertCurrent();
 
-            const artifacts = retainStudioPieceExportArtifactsV3([...catalog.artifacts, verifiedStage.artifact]);
-            const nextCatalog: StudioPieceExportCatalogV3 = {
-              schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+            const artifacts = retainStudioPieceExportArtifacts([...catalog.artifacts, verifiedStage.artifact]);
+            const nextCatalog: StudioPieceExportCatalog = {
+              schemaVersion: deps.protocol.schemaVersion,
               projectId: project.id,
               revision: catalog.revision + 1,
               artifacts,
             };
-            await writeCatalogDurable(exportsRoot, nextCatalog, createNonce());
+            await writeCatalogDurable(exportsRoot, nextCatalog, createNonce(), deps.protocol.catalogFileName);
             await onStep('catalog_committed', project.id);
             await fs.rm(markerPath);
             await syncDirectory(exportsRoot);
@@ -1421,23 +1590,33 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
       try {
         const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
         return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
-          const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
+          const catalog = await recoverInsideAuthority(authority, createNonce, onStep, deps.protocol);
           const artifact = exactCatalogArtifact(request, catalog);
           const projectDir = await fs.realpath(authority.projectDir);
           if (projectDir !== authority.projectDir) return serviceFailure('storage_error');
           const exportsRoot = await ensureDirectory(projectDir, EXPORTS_DIRECTORY_NAME);
           const sourcePath = path.join(exportsRoot, artifact.managedExport.fileName);
-          const snapshot = await readExportPayloadSnapshot(request.projectId, artifact, sourcePath);
+          const snapshot = await readExportPayloadSnapshot(request.projectId, artifact, sourcePath, deps.protocol);
           const destination = await validateCopyDestination(projectDir, destinationPath);
-          const publication = copyPublicationNames(request, artifact, path.basename(destinationPath));
+          const publication = copyPublicationNames(
+            request,
+            artifact,
+            path.basename(destinationPath),
+            deps.protocol.schemaVersion
+          );
           const stagePath = path.join(destination.parentPath, publication.stageName);
           const intentPath = path.join(destination.parentPath, publication.intentName);
 
           const assertCopyAuthority = async (): Promise<void> => {
             await reproveDestinationParent(destination);
-            const currentSource = await readExportPayloadSnapshot(request.projectId, artifact, sourcePath);
+            const currentSource = await readExportPayloadSnapshot(
+              request.projectId,
+              artifact,
+              sourcePath,
+              deps.protocol
+            );
             if (!sameExportPayloadSnapshot(snapshot, currentSource)) return serviceFailure('storage_error');
-            const currentCatalog = await recoverInsideAuthority(authority, createNonce, onStep);
+            const currentCatalog = await recoverInsideAuthority(authority, createNonce, onStep, deps.protocol);
             if (currentCatalog.revision !== request.expectedCatalogRevision) {
               return serviceFailure('stale_export_catalog');
             }
@@ -1505,14 +1684,14 @@ const createStudioPieceExportRuntime = <Project extends StudioPieceExportProject
       try {
         const request = parseStudioPieceExportArtifactRequestV3(rawRequest);
         return await deps.store.withProjectAuthority(request.projectId, async (authority) => {
-          const catalog = await recoverInsideAuthority(authority, createNonce, onStep);
+          const catalog = await recoverInsideAuthority(authority, createNonce, onStep, deps.protocol);
           const artifact = exactCatalogArtifact(request, catalog);
           const projectDir = await fs.realpath(authority.projectDir);
           if (projectDir !== authority.projectDir) return serviceFailure('storage_error');
           const exportsRoot = await ensureDirectory(projectDir, EXPORTS_DIRECTORY_NAME);
           const directoryPath = path.join(exportsRoot, artifact.managedExport.fileName);
           if (path.dirname(directoryPath) !== exportsRoot) return serviceFailure('storage_error');
-          await readExportPayloadSnapshot(request.projectId, artifact, directoryPath);
+          await readExportPayloadSnapshot(request.projectId, artifact, directoryPath, deps.protocol);
           await authority.assertCurrent();
           return directoryPath;
         });
@@ -1537,13 +1716,27 @@ export const createStudioPieceExportRuntimeV3 = (deps: StudioPieceExportRuntimeD
       withProjectAuthority: (projectId, operation) =>
         deps.store.withProjectAuthorityV3(projectId, (authority) => operation(authority)),
     },
-    buildManifest: buildStudioPieceExportManifestV3,
+    verifyManagedAsset: (input) => deps.media.verifyManagedAssetV3(input),
+    protocol: {
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V3,
+      catalogFileName: CATALOG_FILE_NAME_V3,
+      finalName: legacyFolderNameForExport,
+      stageName: legacyStageNameForExport,
+      markerName: legacyMarkerNameForExport,
+      stageNonce: (exportId, name) => stageNonceFromName(name, LEGACY_STAGE_PREFIX, exportId),
+      recognizesFinalName: (name) => recognizesName(name, LEGACY_FINAL_PREFIX),
+      recognizesStageName: (name) => recognizesName(name, LEGACY_STAGE_PREFIX),
+      recognizesMarkerName: (name) => recognizesName(name, LEGACY_MARKER_PREFIX, '.json'),
+      isPieceAvailable: () => true,
+      buildManifest: buildStudioPieceExportManifestV3,
+      parseManifest: parseStudioPieceExportManifestV3,
+      serializeManifest: serializeStudioPieceExportManifestV3,
+    },
     projectIdentities: studioPieceExportPersistentIdentitiesV3,
   });
 
 /**
- * Creates the exact schema-7/export-3 runtime without admitting schema 6. The independent export
- * protocol stays at version 3; only its authoritative project reader and identity namespace move.
+ * Creates the exact schema-7/export-4 runtime without admitting schema 6 or any export-3 record.
  */
 export const createStudioPieceExportRuntimeV4 = (deps: StudioPieceExportRuntimeDepsV4): StudioPieceExportRuntimeV4 =>
   createStudioPieceExportRuntime({
@@ -1553,6 +1746,21 @@ export const createStudioPieceExportRuntimeV4 = (deps: StudioPieceExportRuntimeD
       withProjectAuthority: (projectId, operation) =>
         deps.store.withProjectAuthorityV4(projectId, (authority) => operation(authority)),
     },
-    buildManifest: buildStudioPieceExportManifestV4,
+    verifyManagedAsset: (input) => deps.media.verifyManagedAssetV4(input),
+    protocol: {
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V4,
+      catalogFileName: CATALOG_FILE_NAME_V4,
+      finalName: v4FolderNameForExport,
+      stageName: v4StageNameForExport,
+      markerName: v4MarkerNameForExport,
+      stageNonce: (exportId, name) => stageNonceFromName(name, V4_STAGE_PREFIX, exportId),
+      recognizesFinalName: (name) => recognizesName(name, V4_FINAL_PREFIX),
+      recognizesStageName: (name) => recognizesName(name, V4_STAGE_PREFIX),
+      recognizesMarkerName: (name) => recognizesName(name, V4_MARKER_PREFIX, '.json'),
+      isPieceAvailable: (project, pieceId) => !isStudioPieceBinnedV4(project, pieceId),
+      buildManifest: buildStudioPieceExportManifestV4,
+      parseManifest: parseStudioPieceExportManifestV4,
+      serializeManifest: serializeStudioPieceExportManifestV4,
+    },
     projectIdentities: studioPersistentIdentitiesV4,
   });

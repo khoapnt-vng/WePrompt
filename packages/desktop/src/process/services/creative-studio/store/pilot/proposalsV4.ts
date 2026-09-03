@@ -4,120 +4,97 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { createHash, randomBytes } from 'node:crypto';
-import { type Dirent, promises as nodeFs } from 'node:fs';
-import path from 'node:path';
-import { syncDurableDirectory } from '../../service/durableDirectory';
+import { createHash } from 'node:crypto';
+import type { StudioProposalDecisionResultV4 } from '@/common/types/project/creativeStudioTypes';
+import { applyStudioCreateBoardV4 } from '../../service/schema2/mutations/boardV4';
 import {
-  readBoundedRegularFileWithIdentity,
-  resolveSafeRecordDirectory,
-  type RecordIoFileSystem,
-} from '../../service/recordIo';
-import { hasExactInputKeysV4, isPlainInputRecordV4 } from '../../service/schema2/mutations/exactInputV4';
+  hasExactInputKeysV4,
+  isCanonicalInputTimestampV4,
+  isPlainInputRecordV4,
+} from '../../service/schema2/mutations/exactInputV4';
 import {
-  STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4,
+  STUDIO_PROPOSAL_HISTORY_MAX_BYTES_V4,
+  STUDIO_PROPOSAL_MAX_FUTURE_SKEW_MS_V4,
+  STUDIO_PROPOSAL_RETAINED_PAYLOAD_LIMIT_V4,
+  STUDIO_PROPOSAL_RETAINED_PAYLOAD_MS_V4,
   STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+  STUDIO_PROPOSAL_TERMINAL_TRANSACTION_SCHEMA_VERSION_V4,
   admitStudioProposalRecordV4,
-  parseStudioProposalRecordV4,
-  parseStudioProposalSlotV4,
+  parseStudioProposalCurrentV4,
+  parseStudioProposalDecidedEnvelopeV4,
+  parseStudioProposalHistoryV4,
+  type StudioProposalCommitAttributionV4,
+  type StudioProposalCurrentV4,
+  type StudioProposalDecidedEnvelopeV4,
+  type StudioProposalDecisionStatusV4,
+  type StudioProposalHistoryV4,
   type StudioProposalRecordV4,
-  type StudioProposalSlotV4,
+  type StudioProposalReplayResultV4,
+  type StudioProposalTerminalTransactionV4,
+  type StudioProposalTombstoneV4,
 } from '../../service/schema2/proposals/proposalContractsV4';
 import {
-  CreativeStudioPilotStoreErrorV4,
-  type CreativeStudioPilotStoreV4,
-  type StudioPilotProjectAuthoritySnapshotV4,
-} from './v4';
+  deriveStudioBoardProposalEffectV4,
+  snapshotStudioProposalDecisionRequestV4,
+} from '../../service/schema2/proposals/proposalReviewV4';
+import {
+  CreativeStudioProposalLedgerErrorV4,
+  createCreativeStudioProposalLedgerV4,
+  type StudioProposalLedgerAuthorityV4,
+  type StudioProposalLedgerRecordV4,
+  type StudioProposalLedgerWriterAuthorityV4,
+} from './proposalLedgerV4';
+import { CreativeStudioPilotStoreErrorV4, type CreativeStudioPilotStoreV4 } from './v4';
 
-const PROPOSAL_DIRECTORY = 'proposals';
-const PENDING_RECORD = 'pending-v4.json';
-const PENDING_ENVELOPE_SCHEMA_VERSION = 1 as const;
-const MAX_PENDING_ENVELOPE_BYTES = 1_048_576;
-const MAX_PENDING_DIRECTORY_ENTRIES = 8;
-const SAFE_TEMPORARY_ID = /^[A-Za-z0-9_-]{8,128}$/;
-const SAFE_MAIN_INSTANCE_ID = /^[A-Za-z0-9_-]{8,64}$/;
-const PENDING_TEMPORARY = /^pending-v4\.json\.([A-Za-z0-9_-]{8,64})\.([A-Za-z0-9_-]{8,128})\.tmp$/;
-const LOWERCASE_SHA256 = /^[a-f0-9]{64}$/;
-const PROCESS_MAIN_INSTANCE_ID = randomBytes(16).toString('hex');
 const RECORD_INPUT_KEYS = new Set(['projectId', 'proposalId', 'proposal']);
-const ENVELOPE_KEYS = new Set([
-  'schemaVersion',
-  'projectId',
-  'proposalId',
-  'baseRevision',
-  'baseAuthoringRevision',
-  'proposalSha256',
-  'proposalBytes',
-  'slot',
-]);
-
-type PendingEnvelopeV4 = {
-  schemaVersion: typeof PENDING_ENVELOPE_SCHEMA_VERSION;
-  projectId: string;
-  proposalId: string;
-  baseRevision: number;
-  baseAuthoringRevision: number;
-  proposalSha256: string;
-  proposalBytes: string;
-  slot: StudioProposalSlotV4;
-};
-
-type IdentifiedPendingEnvelopeV4 = {
-  envelope: PendingEnvelopeV4;
-  bytes: string;
-  identity: { dev: number; ino: number };
-};
-
-type DirectoryAuthorityV4 = {
-  path: string;
-  dev: number;
-  ino: number;
-};
+/** Keeps one decide/recovery pass bounded even if an older build left excess retained payloads. */
+const STUDIO_PROPOSAL_PRUNE_WORK_LIMIT_V4 = 64;
 
 export type StudioPendingProposalSnapshotV4 = {
   record: StudioProposalRecordV4;
-  slot: StudioProposalSlotV4;
   proposalBytes: string;
   proposalSha256: string;
   baseRevision: number;
   baseAuthoringRevision: number;
 };
-
-export type StudioRecordProposalResultV4 =
-  | ({ status: 'recorded' } & StudioPendingProposalSnapshotV4)
-  | { status: 'refused'; reason: 'invalid_payload' | 'stale_authoring' | 'existing_pending' }
-  | {
-      status: 'refused';
-      reason: 'proposal_too_large';
-      byteLength: number;
-      maxBytes: typeof STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4;
-    };
-
 export type StudioProposalSidecarStorageStepV4 =
-  | 'temporary_durable'
-  | 'pending_linked'
-  | 'pending_durable'
+  | 'current_durable'
+  | 'terminal_transaction_durable'
+  | 'project_committed'
+  | 'history_durable'
+  | 'pending_released'
+  | 'payload_pruned'
   | 'complete';
-
+export type StudioProposalSidecarCommitFactsV4 = Readonly<{
+  projectId: string;
+  proposalId: string;
+  status: 'recorded' | 'accepted' | 'rejected' | 'expired';
+  recordedAt: string;
+}>;
 export type CreativeStudioProposalSidecarsOptionsV4 = {
   projectStore: CreativeStudioPilotStoreV4;
-  fs?: RecordIoFileSystem;
-  /** Test seam; production sidecars in one Main process share the module-scoped instance id. */
-  mainInstanceId?: string;
-  createTemporaryId?: () => string;
+  fs?: Parameters<typeof createCreativeStudioProposalLedgerV4>[0]['fs'];
+  now?: () => string;
+  historyMaxBytes?: number;
   onStorageStep?: (step: StudioProposalSidecarStorageStepV4, projectId: string) => void | Promise<void>;
 };
-
+export type StudioProposalStateV4 =
+  | { status: 'pending'; proposal: StudioProposalRecordV4; admittedAt: string }
+  | ({ status: 'accepted' | 'rejected' | 'expired' } & Omit<StudioProposalTombstoneV4, 'status'>)
+  | { status: 'unknown' };
 export type CreativeStudioProposalSidecarsV4 = {
-  recordProposalV4(input: unknown): Promise<StudioRecordProposalResultV4>;
+  replayProposalV4(input: unknown): Promise<StudioProposalReplayResultV4>;
+  getProposalStateV4(projectId: string, proposalId: string): Promise<StudioProposalStateV4>;
   getPendingProposalV4(projectId: string): Promise<StudioPendingProposalSnapshotV4 | null>;
+  recoverPendingProposalV4(projectId: string): Promise<void>;
+  recoverProposalTerminalV4(projectId: string, proposalId: string): Promise<StudioProposalDecisionResultV4 | null>;
+  acceptProposalV4(input: unknown): Promise<StudioProposalDecisionResultV4>;
+  rejectProposalV4(input: unknown): Promise<StudioProposalDecisionResultV4>;
+  watchProposalsV4(listener: (facts: StudioProposalSidecarCommitFactsV4) => void): () => void;
 };
-
 export type CreativeStudioProposalSidecarErrorCodeV4 = 'unsupported_prototype_schema' | 'storage_error';
-
 export class CreativeStudioProposalSidecarErrorV4 extends Error {
   readonly code: CreativeStudioProposalSidecarErrorCodeV4;
-
   constructor(code: CreativeStudioProposalSidecarErrorCodeV4) {
     super(code);
     this.name = 'CreativeStudioProposalSidecarErrorV4';
@@ -125,552 +102,713 @@ export class CreativeStudioProposalSidecarErrorV4 extends Error {
   }
 }
 
-const sha256Utf8 = (value: string): string => createHash('sha256').update(value, 'utf8').digest('hex');
-
-const sameIdentity = (left: { dev: number; ino: number }, right: { dev: number; ino: number }): boolean =>
-  left.dev === right.dev && left.ino === right.ino;
-
-const isPositiveSafeInteger = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && (value as number) >= 1;
-
-const hasErrorCode = (error: unknown, code: string): boolean =>
-  typeof error === 'object' && error !== null && !Array.isArray(error) && (error as { code?: unknown }).code === code;
-
-const storageError = (error: unknown): never => {
-  if (error instanceof CreativeStudioProposalSidecarErrorV4 || error instanceof CreativeStudioPilotStoreErrorV4) {
-    throw error;
+const sha256 = (v: string) => createHash('sha256').update(v, 'utf8').digest('hex');
+const json = (bytes: string): unknown => {
+  try {
+    return JSON.parse(bytes) as unknown;
+  } catch {
+    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
   }
+};
+const fail = (error: unknown): never => {
+  if (error instanceof CreativeStudioProposalSidecarErrorV4 || error instanceof CreativeStudioPilotStoreErrorV4)
+    throw error;
   throw new CreativeStudioProposalSidecarErrorV4('storage_error');
 };
-
-const snapshotRecordInput = (value: unknown): { projectId: string; proposalId: string; proposal: unknown } | null => {
+const inputSnapshot = (value: unknown): { projectId: string; proposalId: string; proposal: unknown } | null => {
   try {
     if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, RECORD_INPUT_KEYS)) return null;
-    return {
-      projectId: value.projectId as string,
-      proposalId: value.proposalId as string,
-      proposal: value.proposal,
-    };
+    return { projectId: value.projectId as string, proposalId: value.proposalId as string, proposal: value.proposal };
   } catch {
     return null;
   }
 };
 
-const captureDirectory = async (fs: RecordIoFileSystem, directory: string): Promise<DirectoryAuthorityV4> => {
-  const stats = await fs.lstat(directory);
-  if (!stats.isDirectory() || stats.isSymbolicLink() || (await fs.realpath(directory)) !== directory) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  return { path: directory, dev: stats.dev, ino: stats.ino };
-};
-
-const assertDirectory = async (fs: RecordIoFileSystem, authority: DirectoryAuthorityV4): Promise<void> => {
-  const current = await captureDirectory(fs, authority.path);
-  if (!sameIdentity(current, authority)) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-};
-
-const resolveProposalDirectory = async (input: {
-  fs: RecordIoFileSystem;
-  snapshot: StudioPilotProjectAuthoritySnapshotV4;
-  createIfMissing: boolean;
-}): Promise<DirectoryAuthorityV4 | null> => {
-  try {
-    const project = await captureDirectory(input.fs, input.snapshot.projectDir);
-    await input.snapshot.assertAuthoringCurrent();
-    let resolved: string | null;
-    try {
-      resolved = await resolveSafeRecordDirectory({
-        fs: input.fs,
-        canonicalRoot: project.path,
-        parent: project.path,
-        name: PROPOSAL_DIRECTORY,
-        createIfMissing: input.createIfMissing,
-      });
-    } catch (error) {
-      if (!input.createIfMissing) throw error;
-      // Another Main instance may have won the empty-family mkdir. Accept only the same safe,
-      // canonical directory on the retry; every other creation failure remains a storage error.
-      resolved = await resolveSafeRecordDirectory({
-        fs: input.fs,
-        canonicalRoot: project.path,
-        parent: project.path,
-        name: PROPOSAL_DIRECTORY,
-        createIfMissing: false,
-      });
-      if (resolved === null) throw error;
-    }
-    await input.snapshot.assertAuthoringCurrent();
-    if (resolved === null) return null;
-    const proposals = await captureDirectory(input.fs, resolved);
-    await assertDirectory(input.fs, project);
-    await input.snapshot.assertAuthoringCurrent();
-    return proposals;
-  } catch (error) {
-    return storageError(error);
-  }
-};
-
-const parsePendingEnvelope = (input: {
-  projectId: string;
-  bytes: string;
-}): { envelope: PendingEnvelopeV4; record: StudioProposalRecordV4 } => {
-  let value: unknown;
-  try {
-    value = JSON.parse(input.bytes) as unknown;
-  } catch {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  if (!isPlainInputRecordV4(value) || !hasExactInputKeysV4(value, ENVELOPE_KEYS)) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  if (
-    value.schemaVersion !== PENDING_ENVELOPE_SCHEMA_VERSION ||
-    value.projectId !== input.projectId ||
-    typeof value.proposalId !== 'string' ||
-    !isPositiveSafeInteger(value.baseRevision) ||
-    !isPositiveSafeInteger(value.baseAuthoringRevision) ||
-    value.baseAuthoringRevision > value.baseRevision ||
-    typeof value.proposalSha256 !== 'string' ||
-    !LOWERCASE_SHA256.test(value.proposalSha256) ||
-    typeof value.proposalBytes !== 'string'
-  ) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  if (Buffer.byteLength(value.proposalBytes, 'utf8') > STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  let proposalValue: unknown;
-  try {
-    proposalValue = JSON.parse(value.proposalBytes) as unknown;
-  } catch {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  const parsedProposal = parseStudioProposalRecordV4({
-    projectId: input.projectId,
-    proposalId: value.proposalId,
-    value: proposalValue,
-  });
-  if (parsedProposal.status === 'unsupported_prototype_schema') {
-    throw new CreativeStudioProposalSidecarErrorV4('unsupported_prototype_schema');
-  }
-  if (parsedProposal.status !== 'valid') throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  const parsedSlot = parseStudioProposalSlotV4({
-    projectId: input.projectId,
-    proposalId: value.proposalId,
-    value: value.slot,
-  });
-  if (parsedSlot.status === 'unsupported_prototype_schema') {
-    throw new CreativeStudioProposalSidecarErrorV4('unsupported_prototype_schema');
-  }
-  if (
-    parsedSlot.status !== 'valid' ||
-    parsedProposal.record.baseAuthoringRevision !== value.baseAuthoringRevision ||
-    parsedSlot.record.reservedAt !== parsedProposal.record.createdAt ||
-    sha256Utf8(value.proposalBytes) !== value.proposalSha256 ||
-    JSON.stringify(parsedProposal.record) !== value.proposalBytes
-  ) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  const envelope: PendingEnvelopeV4 = {
-    schemaVersion: PENDING_ENVELOPE_SCHEMA_VERSION,
-    projectId: input.projectId,
-    proposalId: value.proposalId,
-    baseRevision: value.baseRevision,
-    baseAuthoringRevision: value.baseAuthoringRevision,
-    proposalSha256: value.proposalSha256,
-    proposalBytes: value.proposalBytes,
-    slot: parsedSlot.record,
-  };
-  if (JSON.stringify(envelope) !== input.bytes) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  return { envelope, record: parsedProposal.record };
-};
-
-const readPending = async (input: {
-  fs: RecordIoFileSystem;
-  snapshot: StudioPilotProjectAuthoritySnapshotV4;
-  directory: DirectoryAuthorityV4 | null;
-  mainInstanceId: string;
-}): Promise<(IdentifiedPendingEnvelopeV4 & { record: StudioProposalRecordV4 }) | null> => {
-  if (input.directory === null) return null;
-  try {
-    await assertDirectory(input.fs, input.directory);
-    const directory = await input.fs.opendir(input.directory.path);
-    const entries: Dirent[] = [];
-    try {
-      for await (const entry of directory) {
-        if (entries.length >= MAX_PENDING_DIRECTORY_ENTRIES) {
-          throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-        }
-        entries.push(entry);
-      }
-    } finally {
-      await directory.close().catch((): undefined => undefined);
-    }
-    const temporaryEntries: Array<{ name: string; mainInstanceId: string }> = [];
-    for (const entry of entries) {
-      const isPending = entry.name === PENDING_RECORD;
-      const temporary = PENDING_TEMPORARY.exec(entry.name);
-      if ((!isPending && temporary === null) || !entry.isFile() || entry.isSymbolicLink()) {
-        throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-      }
-      if (temporary !== null) temporaryEntries.push({ name: entry.name, mainInstanceId: temporary[1]! });
-    }
-    const file = path.join(input.directory.path, PENDING_RECORD);
-    const identified = await readBoundedRegularFileWithIdentity({
-      fs: input.fs,
-      canonicalRoot: input.snapshot.projectDir,
-      file,
-      maxBytes: MAX_PENDING_ENVELOPE_BYTES,
-    });
-    await assertDirectory(input.fs, input.directory);
-    await input.snapshot.assertAuthoringCurrent();
-    if (identified === null) {
-      // Current-instance staging may still be live. A different instance id proves an actual Main
-      // restart in this single-process service, so its unpublished residue can be reclaimed.
-      if (temporaryEntries.some((entry) => entry.mainInstanceId === input.mainInstanceId)) {
-        throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-      }
-      for (const entry of temporaryEntries) {
-        // eslint-disable-next-line no-await-in-loop
-        await removeClassifiedTemporary({
-          fs: input.fs,
-          directory: input.directory,
-          file: path.join(input.directory.path, entry.name),
-        });
-      }
-      if (temporaryEntries.length > 0) {
-        await assertDirectory(input.fs, input.directory);
-        await input.snapshot.assertAuthoringCurrent();
-      }
-      return null;
-    }
-    const parsed = parsePendingEnvelope({ projectId: input.snapshot.project.id, bytes: identified.bytes });
-    let removedLinkedCompanion = false;
-    for (const entry of temporaryEntries) {
-      const temporaryFile = path.join(input.directory.path, entry.name);
-      if (entry.mainInstanceId !== input.mainInstanceId) {
-        // The canonical final record owns the slot. Any candidate from a prior Main instance is
-        // non-authoritative regardless of how far its write progressed.
-        // eslint-disable-next-line no-await-in-loop
-        await removeClassifiedTemporary({ fs: input.fs, directory: input.directory, file: temporaryFile });
-        removedLinkedCompanion = true;
-        continue;
-      }
-      // A crash after link(2) leaves two names for the same inode. That is the only temporary
-      // residue safe to reconcile automatically; every other candidate fails closed.
-      // eslint-disable-next-line no-await-in-loop
-      const temporary = await readBoundedRegularFileWithIdentity({
-        fs: input.fs,
-        canonicalRoot: input.snapshot.projectDir,
-        file: temporaryFile,
-        maxBytes: MAX_PENDING_ENVELOPE_BYTES,
-      });
-      if (temporary === null) {
-        // Another authority holder may have reconciled the same observed name first.
-        continue;
-      }
-      if (sameIdentity(temporary.identity, identified.identity)) {
-        if (temporary.bytes !== identified.bytes) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-      } else {
-        // A concurrently staged, fully valid loser cannot acquire the already-published slot. It
-        // is safe to remove; malformed lookalikes remain storage errors rather than being erased.
-        parsePendingEnvelope({ projectId: input.snapshot.project.id, bytes: temporary.bytes });
-      }
-      // eslint-disable-next-line no-await-in-loop
-      await assertDirectory(input.fs, input.directory);
-      let current: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        current = await input.fs.lstat(temporaryFile);
-      } catch (error) {
-        if (hasErrorCode(error, 'ENOENT')) continue;
-        throw error;
-      }
-      if (!current.isFile() || current.isSymbolicLink() || !sameIdentity(current, temporary.identity)) {
-        throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-      }
-      // eslint-disable-next-line no-await-in-loop
-      await input.fs.rm(temporaryFile);
-      // eslint-disable-next-line no-await-in-loop
-      await syncDurableDirectory(input.fs, input.directory.path);
-      removedLinkedCompanion = true;
-    }
-    if (removedLinkedCompanion) {
-      await assertDirectory(input.fs, input.directory);
-      await input.snapshot.assertAuthoringCurrent();
-    }
-    return { envelope: parsed.envelope, record: parsed.record, bytes: identified.bytes, identity: identified.identity };
-  } catch (error) {
-    return storageError(error);
-  }
-};
-
-const snapshotFromPending = (
-  pending: IdentifiedPendingEnvelopeV4 & { record: StudioProposalRecordV4 }
-): StudioPendingProposalSnapshotV4 => ({
-  record: structuredClone(pending.record),
-  slot: structuredClone(pending.envelope.slot),
-  proposalBytes: pending.envelope.proposalBytes,
-  proposalSha256: pending.envelope.proposalSha256,
-  baseRevision: pending.envelope.baseRevision,
-  baseAuthoringRevision: pending.envelope.baseAuthoringRevision,
-});
-
-const removeOwnedTemporary = async (input: {
-  fs: RecordIoFileSystem;
-  directory: DirectoryAuthorityV4;
-  file: string;
-  identity: { dev: number; ino: number } | null;
-}): Promise<void> => {
-  if (input.identity === null) return;
-  try {
-    await assertDirectory(input.fs, input.directory);
-    const stats = await input.fs.lstat(input.file);
-    if (stats.isFile() && !stats.isSymbolicLink() && sameIdentity(stats, input.identity)) {
-      await input.fs.rm(input.file);
-      await syncDurableDirectory(input.fs, input.directory.path);
-    }
-  } catch {
-    // A uniquely named, non-authoritative temporary is preserved after lost authority.
-  }
-};
-
-const removeClassifiedTemporary = async (input: {
-  fs: RecordIoFileSystem;
-  directory: DirectoryAuthorityV4;
-  file: string;
-}): Promise<void> => {
-  await assertDirectory(input.fs, input.directory);
-  let observed: Awaited<ReturnType<RecordIoFileSystem['lstat']>>;
-  try {
-    observed = await input.fs.lstat(input.file);
-  } catch (error) {
-    if (hasErrorCode(error, 'ENOENT')) return;
-    throw error;
-  }
-  if (!observed.isFile() || observed.isSymbolicLink()) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  await assertDirectory(input.fs, input.directory);
-  const current = await input.fs.lstat(input.file);
-  if (!current.isFile() || current.isSymbolicLink() || !sameIdentity(current, observed)) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  await input.fs.rm(input.file);
-  await syncDurableDirectory(input.fs, input.directory.path);
-};
-
-const publishPending = async (input: {
-  fs: RecordIoFileSystem;
-  snapshot: StudioPilotProjectAuthoritySnapshotV4;
-  directory: DirectoryAuthorityV4;
-  envelope: PendingEnvelopeV4;
-  envelopeBytes: string;
-  mainInstanceId: string;
-  temporaryId: string;
-  storageStep: (step: StudioProposalSidecarStorageStepV4) => Promise<void>;
-}): Promise<'published' | 'already_exists'> => {
-  const finalFile = path.join(input.directory.path, PENDING_RECORD);
-  const temporaryFile = `${finalFile}.${input.mainInstanceId}.${input.temporaryId}.tmp`;
-  let handle: Awaited<ReturnType<RecordIoFileSystem['open']>> | undefined;
-  let temporaryIdentity: { dev: number; ino: number } | null = null;
-  let linked = false;
-  try {
-    await assertDirectory(input.fs, input.directory);
-    handle = await input.fs.open(temporaryFile, 'wx');
-    const opened = await handle.stat();
-    if (!opened.isFile()) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-    temporaryIdentity = { dev: opened.dev, ino: opened.ino };
-    await handle.writeFile(input.envelopeBytes, { encoding: 'utf8' });
-    await handle.sync();
-    await handle.close();
-    handle = undefined;
-    const staged = await readBoundedRegularFileWithIdentity({
-      fs: input.fs,
-      canonicalRoot: input.snapshot.projectDir,
-      file: temporaryFile,
-      maxBytes: MAX_PENDING_ENVELOPE_BYTES,
-    });
-    if (
-      staged === null ||
-      staged.bytes !== input.envelopeBytes ||
-      !sameIdentity(staged.identity, temporaryIdentity) ||
-      parsePendingEnvelope({ projectId: input.snapshot.project.id, bytes: staged.bytes }).envelope.proposalSha256 !==
-        input.envelope.proposalSha256
-    ) {
-      throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-    }
-    await input.storageStep('temporary_durable');
-    await assertDirectory(input.fs, input.directory);
-    await input.snapshot.assertAuthoringCurrent();
-    try {
-      await input.fs.link(temporaryFile, finalFile);
-      linked = true;
-    } catch (error) {
-      // A competing reader may have reconciled this valid loser after another writer published.
-      // In both races the caller must reread and validate the authoritative final record below.
-      if (!hasErrorCode(error, 'EEXIST') && !hasErrorCode(error, 'ENOENT')) throw error;
-      await removeOwnedTemporary({
-        fs: input.fs,
-        directory: input.directory,
-        file: temporaryFile,
-        identity: temporaryIdentity,
-      });
-      return 'already_exists';
-    }
-    await input.storageStep('pending_linked');
-    await syncDurableDirectory(input.fs, input.directory.path);
-    await input.storageStep('pending_durable');
-    await assertDirectory(input.fs, input.directory);
-    await input.snapshot.assertAuthoringCurrent();
-    const published = await readBoundedRegularFileWithIdentity({
-      fs: input.fs,
-      canonicalRoot: input.snapshot.projectDir,
-      file: finalFile,
-      maxBytes: MAX_PENDING_ENVELOPE_BYTES,
-    });
-    if (
-      published === null ||
-      published.bytes !== input.envelopeBytes ||
-      !sameIdentity(published.identity, temporaryIdentity)
-    ) {
-      throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-    }
-    await removeOwnedTemporary({
-      fs: input.fs,
-      directory: input.directory,
-      file: temporaryFile,
-      identity: temporaryIdentity,
-    });
-    await input.storageStep('complete');
-    return 'published';
-  } catch (error) {
-    await handle?.close().catch((): undefined => undefined);
-    if (!linked) {
-      await removeOwnedTemporary({
-        fs: input.fs,
-        directory: input.directory,
-        file: temporaryFile,
-        identity: temporaryIdentity,
-      });
-    }
-    return storageError(error);
-  }
-};
-
-/**
- * Creates the inactive schema-7 proposal authority. A pending proposal is one immutable envelope;
- * its exact admitted bytes are the later commit-attribution input, while the envelope version and
- * proposal protocol version remain independent from the project schema discriminator.
- */
 export const createCreativeStudioProposalSidecarsV4 = (
   options: CreativeStudioProposalSidecarsOptionsV4
 ): CreativeStudioProposalSidecarsV4 => {
-  const fs = options.fs ?? nodeFs;
-  const mainInstanceId = options.mainInstanceId ?? PROCESS_MAIN_INSTANCE_ID;
-  if (typeof mainInstanceId !== 'string' || !SAFE_MAIN_INSTANCE_ID.test(mainInstanceId)) {
-    throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-  }
-  const createTemporaryId = options.createTemporaryId ?? (() => randomBytes(16).toString('hex'));
-  const storageStep = async (step: StudioProposalSidecarStorageStepV4, projectId: string): Promise<void> => {
-    await options.onStorageStep?.(step, projectId);
+  const ledger = createCreativeStudioProposalLedgerV4({ projectStore: options.projectStore, fs: options.fs });
+  const now = () => {
+    const value = (options.now ?? (() => new Date().toISOString()))();
+    if (!isCanonicalInputTimestampV4(value)) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    return value;
+  };
+  const historyMax = options.historyMaxBytes ?? STUDIO_PROPOSAL_HISTORY_MAX_BYTES_V4;
+  const listeners = new Set<(f: StudioProposalSidecarCommitFactsV4) => void>();
+  const emit = (f: StudioProposalSidecarCommitFactsV4) => {
+    const frozen = Object.freeze({ ...f });
+    for (const listener of listeners) {
+      try {
+        listener(frozen);
+      } catch {}
+    }
+  };
+  const step = (s: StudioProposalSidecarStorageStepV4, p: string) => options.onStorageStep?.(s, p);
+  const withRead = async <T>(p: string, fn: (a: StudioProposalLedgerAuthorityV4) => Promise<T>): Promise<T> => {
+    try {
+      return await ledger.withProposalLedgerAuthorityV4(p, fn);
+    } catch (e) {
+      return fail(e);
+    }
+  };
+  const withTerminal = async <T>(
+    p: string,
+    id: string,
+    fn: (a: StudioProposalLedgerWriterAuthorityV4) => Promise<T>,
+    recover = false
+  ): Promise<T> => {
+    try {
+      return await (recover
+        ? ledger.recoverProposalTerminalAuthorityV4(p, id, fn)
+        : ledger.withProposalTerminalAuthorityV4(p, id, fn));
+    } catch (e) {
+      return fail(e);
+    }
   };
 
-  return {
-    async recordProposalV4(inputValue) {
-      const input = snapshotRecordInput(inputValue);
-      if (input === null) return { status: 'refused', reason: 'invalid_payload' };
-      let admission: ReturnType<typeof admitStudioProposalRecordV4>;
+  const current = async (
+    a: StudioProposalLedgerAuthorityV4
+  ): Promise<{ value: StudioProposalCurrentV4; raw: StudioProposalLedgerRecordV4 } | null> => {
+    const raw = await a.readCurrentV4();
+    if (raw === null) return null;
+    const parsed = parseStudioProposalCurrentV4({ projectId: a.snapshot.project.id, value: json(raw.bytes) });
+    if (parsed.status !== 'valid' || JSON.stringify(parsed.record) !== raw.bytes)
+      throw new CreativeStudioProposalSidecarErrorV4(
+        parsed.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'storage_error'
+      );
+    return { value: parsed.record, raw };
+  };
+  const history = async (
+    a: StudioProposalLedgerAuthorityV4
+  ): Promise<{ value: StudioProposalHistoryV4; raw: Awaited<ReturnType<typeof a.readHistoryV4>> }> => {
+    const raw = await a.readHistoryV4();
+    if (raw.record === null) return { value: { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4, entries: [] }, raw };
+    const parsed = parseStudioProposalHistoryV4(json(raw.record.bytes));
+    if (parsed.status !== 'valid' || JSON.stringify(parsed.record) !== raw.record.bytes)
+      throw new CreativeStudioProposalSidecarErrorV4(
+        parsed.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'storage_error'
+      );
+    return { value: parsed.record, raw };
+  };
+  const decided = async (
+    a: StudioProposalLedgerAuthorityV4,
+    id: string
+  ): Promise<{ value: StudioProposalDecidedEnvelopeV4; raw: StudioProposalLedgerRecordV4 } | null> => {
+    const raw = await a.readDecidedV4(id);
+    if (raw === null) return null;
+    const parsed = parseStudioProposalDecidedEnvelopeV4({
+      projectId: a.snapshot.project.id,
+      proposalId: id,
+      value: json(raw.bytes),
+    });
+    if (parsed.status !== 'valid' || JSON.stringify(parsed.record) !== raw.bytes)
+      throw new CreativeStudioProposalSidecarErrorV4(
+        parsed.status === 'unsupported_prototype_schema' ? 'unsupported_prototype_schema' : 'storage_error'
+      );
+    return { value: parsed.record, raw };
+  };
+  const tombstone = (h: StudioProposalHistoryV4, id: string) => h.entries.find((e) => e.proposalId === id) ?? null;
+  const assertDecisionClock = (h: StudioProposalHistoryV4, observedAt: string): void => {
+    const previous = h.entries.at(-1);
+    if (previous !== undefined && observedAt < previous.decidedAt) {
+      throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    }
+  };
+  const pruneCandidateIds = (h: StudioProposalHistoryV4, observedAt: string): Set<string> => {
+    const keep = new Set(
+      h.entries
+        .slice(-STUDIO_PROPOSAL_RETAINED_PAYLOAD_LIMIT_V4)
+        .filter(
+          (entry) => Date.parse(observedAt) - Date.parse(entry.decidedAt) <= STUDIO_PROPOSAL_RETAINED_PAYLOAD_MS_V4
+        )
+        .map((entry) => entry.proposalId)
+    );
+    return new Set(
+      h.entries
+        .filter((entry) => entry.payloadRetained && !keep.has(entry.proposalId))
+        .slice(0, STUDIO_PROPOSAL_PRUNE_WORK_LIMIT_V4)
+        .map((entry) => entry.proposalId)
+    );
+  };
+  const historyAfterMaximumPruneFlags = (h: StudioProposalHistoryV4): StudioProposalHistoryV4 => {
+    // Passive expiry or terminal recovery may be observed arbitrarily after the recorded decision.
+    // Reserve the eventual maximum, not merely one pass: repeated bounded recovery passes may
+    // ultimately flip every retained `true` to the one-byte-larger `false`.
+    return h.entries.every((entry) => !entry.payloadRetained)
+      ? h
+      : {
+          schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+          entries: h.entries.map((entry) => (entry.payloadRetained ? { ...entry, payloadRetained: false } : entry)),
+        };
+  };
+  const pendingSnapshot = (c: { value: StudioProposalCurrentV4 }): StudioPendingProposalSnapshotV4 => ({
+    record: structuredClone(c.value.proposal),
+    proposalBytes: JSON.stringify(c.value.proposal),
+    proposalSha256: c.value.payloadSha256,
+    baseRevision: c.value.proposal.baseAuthoringRevision,
+    baseAuthoringRevision: c.value.proposal.baseAuthoringRevision,
+  });
+  const duplicateResult = (t: StudioProposalTombstoneV4): StudioProposalDecisionResultV4 =>
+    t.status === 'accepted'
+      ? { status: 'already_accepted', decidedAt: t.decidedAt, appliedRevision: t.appliedRevision! }
+      : t.status === 'rejected'
+        ? { status: 'rejected' }
+        : { status: 'expired' };
+  const publishCurrent = async (
+    a: StudioProposalLedgerAuthorityV4,
+    proposal: StudioProposalRecordV4,
+    proposalBytes: string
+  ) => {
+    const value: StudioProposalCurrentV4 = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+      proposalId: proposal.id,
+      payloadSha256: sha256(proposalBytes),
+      admittedAt: proposal.createdAt,
+      proposal,
+    };
+    const bytes = JSON.stringify(value);
+    try {
+      await a.publishCurrentV4(bytes);
+    } catch (e) {
+      if (!(e instanceof CreativeStudioProposalLedgerErrorV4) || e.code !== 'already_exists') throw e;
+      const found = await current(a);
+      if (found === null || found.raw.bytes !== bytes) throw e;
+    }
+    await step('current_durable', proposal.projectId);
+  };
+  const appendHistory = async (a: StudioProposalLedgerWriterAuthorityV4, t: StudioProposalTombstoneV4) => {
+    const h = await history(a);
+    const existing = tombstone(h.value, t.proposalId);
+    if (existing) {
+      if (JSON.stringify(existing) !== JSON.stringify(t))
+        throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+      return;
+    }
+    const previous = h.value.entries.at(-1);
+    if (previous !== undefined && t.decidedAt < previous.decidedAt)
+      throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    const entries = [...h.value.entries, t];
+    const value = { schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4, entries } satisfies StudioProposalHistoryV4;
+    const bytes = JSON.stringify(value);
+    if (Buffer.byteLength(bytes) > historyMax) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    await a.replaceHistoryV4(h.raw, bytes);
+    await step('history_durable', a.snapshot.project.id);
+  };
+  const prune = async (a: StudioProposalLedgerWriterAuthorityV4, h: StudioProposalHistoryV4, observedAt: string) => {
+    const candidates = pruneCandidateIds(h, observedAt);
+    const pruned = new Set<string>();
+    for (const proposalId of candidates) {
+      const payload = await a.readDecidedV4(proposalId);
+      // A crash may happen after unlink and before the tombstone flag is replaced. Absence is
+      // therefore an idempotent prune result, not corruption; history remains decision authority.
+      if (payload) await a.removeDecidedV4(proposalId, payload);
+      pruned.add(proposalId);
+      await step('payload_pruned', a.snapshot.project.id);
+    }
+    if (pruned.size > 0) {
+      const latest = await history(a);
+      const updated: StudioProposalHistoryV4 = {
+        schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+        entries: latest.value.entries.map((entry) =>
+          pruned.has(entry.proposalId) && entry.payloadRetained ? { ...entry, payloadRetained: false } : entry
+        ),
+      };
+      const bytes = JSON.stringify(updated);
+      if (Buffer.byteLength(bytes) > historyMax) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+      await a.replaceHistoryV4(latest.raw, bytes);
+    }
+  };
+  const terminalEnvelope = (
+    proposal: StudioProposalRecordV4,
+    proposalBytes: string,
+    status: StudioProposalDecisionStatusV4,
+    decidedAt: string,
+    commit?: StudioProposalCommitAttributionV4
+  ): StudioProposalDecidedEnvelopeV4 => {
+    const decision = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+      proposalId: proposal.id,
+      projectId: proposal.projectId,
+      status,
+      decidedAt,
+    } as const;
+    const decisionBytes = JSON.stringify(decision);
+    const terminal: StudioProposalTerminalTransactionV4 =
+      status === 'accepted'
+        ? {
+            schemaVersion: STUDIO_PROPOSAL_TERMINAL_TRANSACTION_SCHEMA_VERSION_V4,
+            kind: 'accept_board',
+            proposalId: proposal.id,
+            projectId: proposal.projectId,
+            proposalSha256: sha256(proposalBytes),
+            commitBytes: JSON.stringify(commit),
+            decisionBytes,
+          }
+        : {
+            schemaVersion: STUDIO_PROPOSAL_TERMINAL_TRANSACTION_SCHEMA_VERSION_V4,
+            kind: status === 'rejected' ? 'reject_board' : 'expire_board',
+            proposalId: proposal.id,
+            projectId: proposal.projectId,
+            proposalSha256: sha256(proposalBytes),
+            decisionBytes,
+          };
+    const value = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+      proposal,
+      payloadSha256: sha256(proposalBytes),
+      terminalTransaction: terminal,
+    };
+    const parsed = parseStudioProposalDecidedEnvelopeV4({
+      projectId: proposal.projectId,
+      proposalId: proposal.id,
+      value,
+    });
+    if (parsed.status !== 'valid') throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    return parsed.record;
+  };
+  const settle = async (
+    a: StudioProposalLedgerWriterAuthorityV4,
+    c: { value: StudioProposalCurrentV4; raw: StudioProposalLedgerRecordV4 },
+    status: StudioProposalDecisionStatusV4,
+    decidedAt: string
+  ): Promise<StudioProposalDecisionResultV4> => {
+    const proposal = c.value.proposal,
+      proposalBytes = JSON.stringify(proposal);
+    if (decidedAt < proposal.createdAt) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    assertDecisionClock((await history(a)).value, decidedAt);
+    let envelope: StudioProposalDecidedEnvelopeV4;
+    let effect: ReturnType<typeof deriveStudioBoardProposalEffectV4> | null = null;
+    if (status === 'accepted') {
+      const applied = applyStudioCreateBoardV4(
+        a.snapshot.project,
+        {
+          projectId: proposal.projectId,
+          expectedAuthoringRevision: proposal.baseAuthoringRevision,
+          handle: proposal.payload.handle,
+          beats: proposal.payload.beats,
+        },
+        {
+          boardId: proposal.target.boardId,
+          beatIds: proposal.issuedMemberIds.beatIds,
+          shotIds: proposal.issuedMemberIds.shotIds,
+          capturedAt: decidedAt,
+        }
+      );
+      if (applied.status !== 'applied') return { status: 'stale_authoring' };
+      let built: StudioProposalDecidedEnvelopeV4 | null = null;
+      a.snapshot.retainWriterForRecovery();
+      await a.snapshot.commit(() => applied.project, {
+        expectedRevision: a.snapshot.project.revision,
+        kind: 'authoring',
+        committedAt: decidedAt,
+        authorizeBeforeReplace: async (evidence) => {
+          const commit: StudioProposalCommitAttributionV4 = {
+            schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+            kind: 'create_board',
+            proposalId: proposal.id,
+            projectId: proposal.projectId,
+            beforeRevision: evidence.beforeRevision,
+            afterRevision: evidence.afterRevision,
+            beforeAuthoringRevision: evidence.beforeAuthoringRevision,
+            afterAuthoringRevision: evidence.afterAuthoringRevision,
+            target: { ...proposal.target },
+            createdBeatIds: [...proposal.issuedMemberIds.beatIds],
+            createdShotIds: [...proposal.issuedMemberIds.shotIds],
+            proposalSha256: sha256(proposalBytes),
+            beforeManifestSha256: evidence.beforeManifestSha256,
+            afterManifestSha256: evidence.afterManifestSha256,
+            committedAt: decidedAt,
+          };
+          built = terminalEnvelope(proposal, proposalBytes, status, decidedAt, commit);
+          try {
+            await a.publishDecidedV4(proposal.id, JSON.stringify(built));
+          } catch (e) {
+            const d = await decided(a, proposal.id);
+            if (d === null || d.raw.bytes !== JSON.stringify(built)) throw e;
+          }
+          await step('terminal_transaction_durable', proposal.projectId);
+        },
+      });
+      await step('project_committed', proposal.projectId);
+      if (built === null) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+      envelope = built;
+      effect = deriveStudioBoardProposalEffectV4(proposal);
+    } else {
+      envelope = terminalEnvelope(proposal, proposalBytes, status, decidedAt);
+      a.snapshot.retainWriterForRecovery();
       try {
-        admission = admitStudioProposalRecordV4({
+        await a.publishDecidedV4(proposal.id, JSON.stringify(envelope));
+      } catch (e) {
+        const d = await decided(a, proposal.id);
+        if (d === null || d.raw.bytes !== JSON.stringify(envelope)) throw e;
+      }
+      await step('terminal_transaction_durable', proposal.projectId);
+    }
+    const tx = envelope.terminalTransaction;
+    const decision = json(tx.decisionBytes) as { decidedAt: string };
+    const commit = tx.kind === 'accept_board' ? (json(tx.commitBytes) as StudioProposalCommitAttributionV4) : null;
+    const t: StudioProposalTombstoneV4 = {
+      proposalId: proposal.id,
+      status,
+      decidedAt: decision.decidedAt,
+      payloadSha256: envelope.payloadSha256,
+      commandSha256: proposal.source.commandSha256,
+      appliedRevision: commit?.afterRevision ?? null,
+      payloadRetained: true,
+    };
+    await appendHistory(a, t);
+    await a.removeCurrentV4(c.raw);
+    await step('pending_released', proposal.projectId);
+    const h = await history(a);
+    await prune(a, h.value, decidedAt);
+    emit({ projectId: proposal.projectId, proposalId: proposal.id, status, recordedAt: decidedAt });
+    return status === 'accepted'
+      ? { status: 'accepted', effect: effect! }
+      : status === 'rejected'
+        ? { status: 'rejected' }
+        : { status: 'expired' };
+  };
+  const recoverInside = async (
+    a: StudioProposalLedgerWriterAuthorityV4,
+    id: string
+  ): Promise<StudioProposalDecisionResultV4 | null> => {
+    const c = await current(a);
+    const h = await history(a);
+    const t = tombstone(h.value, id);
+    if (t) {
+      if (c?.value.proposalId === id) {
+        if (c.value.payloadSha256 !== t.payloadSha256) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+        await a.removeCurrentV4(c.raw);
+        await step('pending_released', a.snapshot.project.id);
+      }
+      await prune(a, h.value, now());
+      return duplicateResult(t);
+    }
+    const d = await decided(a, id);
+    if (d === null) return null;
+    if (c === null || c.value.proposalId !== id || c.value.payloadSha256 !== d.value.payloadSha256)
+      throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+    const tx = d.value.terminalTransaction;
+    const decision = json(tx.decisionBytes) as { status: StudioProposalDecisionStatusV4; decidedAt: string };
+    if (tx.kind === 'accept_board') {
+      const commit = json(tx.commitBytes) as StudioProposalCommitAttributionV4;
+      let state = await a.snapshot.readCommitState();
+      if (
+        state.revision === commit.beforeRevision &&
+        state.authoringRevision === commit.beforeAuthoringRevision &&
+        state.manifestSha256 === commit.beforeManifestSha256
+      ) {
+        const applied = applyStudioCreateBoardV4(
+          a.snapshot.project,
+          {
+            projectId: c.value.proposal.projectId,
+            expectedAuthoringRevision: c.value.proposal.baseAuthoringRevision,
+            handle: c.value.proposal.payload.handle,
+            beats: c.value.proposal.payload.beats,
+          },
+          {
+            boardId: c.value.proposal.target.boardId,
+            beatIds: c.value.proposal.issuedMemberIds.beatIds,
+            shotIds: c.value.proposal.issuedMemberIds.shotIds,
+            capturedAt: decision.decidedAt,
+          }
+        );
+        if (applied.status !== 'applied') throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+        await a.snapshot.commit(() => applied.project, {
+          expectedRevision: commit.beforeRevision,
+          kind: 'authoring',
+          committedAt: decision.decidedAt,
+          authorizeBeforeReplace: (evidence) => {
+            if (
+              evidence.afterRevision !== commit.afterRevision ||
+              evidence.afterAuthoringRevision !== commit.afterAuthoringRevision ||
+              evidence.afterManifestSha256 !== commit.afterManifestSha256
+            ) {
+              throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+            }
+          },
+        });
+        state = await a.snapshot.readCommitState();
+      }
+      if (
+        state.revision !== commit.afterRevision ||
+        state.authoringRevision !== commit.afterAuthoringRevision ||
+        state.manifestSha256 !== commit.afterManifestSha256
+      ) {
+        throw new CreativeStudioProposalSidecarErrorV4('storage_error');
+      }
+      const tomb: StudioProposalTombstoneV4 = {
+        proposalId: id,
+        status: 'accepted',
+        decidedAt: decision.decidedAt,
+        payloadSha256: d.value.payloadSha256,
+        commandSha256: d.value.proposal.source.commandSha256,
+        appliedRevision: commit.afterRevision,
+        payloadRetained: true,
+      };
+      await appendHistory(a, tomb);
+      await a.removeCurrentV4(c.raw);
+      await step('pending_released', a.snapshot.project.id);
+      await prune(a, (await history(a)).value, now());
+      return { status: 'already_accepted', decidedAt: decision.decidedAt, appliedRevision: commit.afterRevision };
+    }
+    const tomb: StudioProposalTombstoneV4 = {
+      proposalId: id,
+      status: decision.status,
+      decidedAt: decision.decidedAt,
+      payloadSha256: d.value.payloadSha256,
+      commandSha256: d.value.proposal.source.commandSha256,
+      appliedRevision: null,
+      payloadRetained: true,
+    };
+    await appendHistory(a, tomb);
+    await a.removeCurrentV4(c.raw);
+    await step('pending_released', a.snapshot.project.id);
+    await prune(a, (await history(a)).value, now());
+    return decision.status === 'rejected' ? { status: 'rejected' } : { status: 'expired' };
+  };
+
+  const expireCurrentOnce = async (projectId: string): Promise<void> => {
+    const captured = await withRead(projectId, current);
+    if (captured === null) return;
+    const observedAt = now();
+    if (observedAt < captured.value.proposal.expiresAt) return;
+    await withTerminal(projectId, captured.value.proposalId, async (a) => {
+      const recovered = await recoverInside(a, captured.value.proposalId);
+      if (recovered !== null) return;
+      const locked = await current(a);
+      if (locked?.value.proposalId !== captured.value.proposalId) return;
+      const decisionAt = now();
+      if (decisionAt < locked.value.proposal.expiresAt) return;
+      await settle(a, locked, 'expired', decisionAt);
+    });
+  };
+
+  const replay = async (
+    inputValue: unknown,
+    retryAfterRetiredWriter = true,
+    waitForLocalWriter = true
+  ): Promise<StudioProposalReplayResultV4> => {
+    const input = inputSnapshot(inputValue);
+    if (input === null) return { outcome: 'refused', reason: 'invalid_payload' };
+    let admission: ReturnType<typeof admitStudioProposalRecordV4>;
+    try {
+      admission = admitStudioProposalRecordV4({
+        projectId: input.projectId,
+        proposalId: input.proposalId,
+        value: input.proposal,
+      });
+    } catch {
+      return { outcome: 'refused', reason: 'invalid_payload' };
+    }
+    if (admission.status !== 'valid' && admission.status !== 'proposal_too_large')
+      return { outcome: 'refused', reason: 'invalid_payload' };
+    try {
+      await expireCurrentOnce(input.projectId);
+      return await withTerminal(input.projectId, input.proposalId, async (a) => {
+        const bytes = admission.proposalBytes,
+          digest = sha256(bytes);
+        // Replay is the recovery mechanism for a proposal whose receipt was not published. A
+        // terminal envelope may already be durable while current.json still presents the proposal
+        // as pending, so settle that exact residue before classifying the replayed payload.
+        await recoverInside(a, input.proposalId);
+        const c = await current(a);
+        const h = await history(a);
+        const terminal = tombstone(h.value, input.proposalId);
+        if (terminal)
+          return terminal.payloadSha256 === digest
+            ? {
+                outcome: 'already_decided',
+                proposalId: input.proposalId,
+                status: terminal.status,
+                decidedAt: terminal.decidedAt,
+                appliedRevision: terminal.appliedRevision,
+              }
+            : { outcome: 'identity_collision', proposalId: input.proposalId, expectedSha256: terminal.payloadSha256 };
+        if (c) {
+          if (c.value.proposalId === input.proposalId)
+            return c.value.payloadSha256 === digest
+              ? {
+                  outcome: 'already_pending',
+                  proposalId: input.proposalId,
+                  proposal: structuredClone(c.value.proposal),
+                  admittedAt: c.value.admittedAt,
+                }
+              : { outcome: 'identity_collision', proposalId: input.proposalId, expectedSha256: c.value.payloadSha256 };
+          return { outcome: 'busy', holdingProposalId: c.value.proposalId };
+        }
+        const d = await decided(a, input.proposalId);
+        if (d)
+          return d.value.payloadSha256 === digest
+            ? { outcome: 'unavailable', reason: 'corrupt_storage' }
+            : { outcome: 'identity_collision', proposalId: input.proposalId, expectedSha256: d.value.payloadSha256 };
+        if (admission.status === 'proposal_too_large') return { outcome: 'refused', reason: 'proposal_too_large' };
+        const observed = now();
+        assertDecisionClock(h.value, observed);
+        if (
+          Date.parse(admission.record.createdAt) - Date.parse(observed) > STUDIO_PROPOSAL_MAX_FUTURE_SKEW_MS_V4 ||
+          observed >= admission.record.expiresAt ||
+          admission.record.baseAuthoringRevision !== a.snapshot.project.authoringRevision
+        )
+          return { outcome: 'refused', reason: 'stale_authoring' };
+        const feasibility = applyStudioCreateBoardV4(
+          a.snapshot.project,
+          {
+            projectId: input.projectId,
+            expectedAuthoringRevision: admission.record.baseAuthoringRevision,
+            handle: admission.record.payload.handle,
+            beats: admission.record.payload.beats,
+          },
+          {
+            boardId: admission.record.target.boardId,
+            beatIds: admission.record.issuedMemberIds.beatIds,
+            shotIds: admission.record.issuedMemberIds.shotIds,
+            capturedAt: observed,
+          }
+        );
+        if (feasibility.status === 'refused') {
+          switch (feasibility.reason) {
+            case 'capacity_reached':
+              return { outcome: 'refused', reason: 'board_capacity_reached' };
+            case 'handle_taken':
+              return { outcome: 'refused', reason: 'handle_collision' };
+            case 'identity_collision':
+              return { outcome: 'refused', reason: 'identity_collision' };
+            case 'stale_project':
+              return { outcome: 'refused', reason: 'stale_authoring' };
+            case 'invalid_project':
+            case 'invalid_request':
+            case 'validation_failed':
+              return { outcome: 'unavailable', reason: 'corrupt_storage' };
+            default: {
+              const exhaustive: never = feasibility.reason;
+              return exhaustive;
+            }
+          }
+        }
+        const reserve: StudioProposalTombstoneV4 = {
+          proposalId: admission.record.id,
+          status: 'accepted',
+          decidedAt: admission.record.expiresAt,
+          payloadSha256: digest,
+          commandSha256: admission.record.source.commandSha256,
+          appliedRevision: Number.MAX_SAFE_INTEGER,
+          payloadRetained: true,
+        };
+        const reservedHistory = historyAfterMaximumPruneFlags({
+          schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+          entries: [...h.value.entries, reserve],
+        });
+        if (Buffer.byteLength(JSON.stringify(reservedHistory)) > historyMax)
+          return { outcome: 'refused', reason: 'history_capacity' };
+        await publishCurrent(a, admission.record, bytes);
+        emit({
           projectId: input.projectId,
           proposalId: input.proposalId,
-          value: input.proposal,
+          status: 'recorded',
+          recordedAt: admission.record.createdAt,
         });
-      } catch {
-        return { status: 'refused', reason: 'invalid_payload' };
+        return { outcome: 'admitted', proposalId: input.proposalId, proposal: structuredClone(admission.record) };
+      });
+    } catch (error) {
+      if (error instanceof CreativeStudioPilotStoreErrorV4 && error.code === 'busy') {
+        try {
+          if (waitForLocalWriter && (await options.projectStore.waitForLocalProjectWriterV4(input.projectId))) {
+            return replay(inputValue, retryAfterRetiredWriter, false);
+          }
+          const intent = await options.projectStore.readProjectWriterIntentV4(input.projectId);
+          if (intent?.purpose === 'proposal_terminal') {
+            if (intent.proposalId !== input.proposalId) {
+              return { outcome: 'busy', holdingProposalId: intent.proposalId };
+            }
+            if (retryAfterRetiredWriter) {
+              await withTerminal(input.projectId, input.proposalId, (a) => recoverInside(a, input.proposalId), true);
+              return replay(inputValue, false, false);
+            }
+          }
+          // The competing writer may have retired between the failed acquire and this exact read.
+          // Reclassify once from durable proposal state; never spin or infer success from elapsed time.
+          if (intent === null && retryAfterRetiredWriter) return replay(inputValue, false, false);
+        } catch {
+          // An incomplete or unsafe writer record cannot support a user-visible proposal claim.
+        }
       }
-      if (admission.status !== 'valid' && admission.status !== 'proposal_too_large') {
-        return { status: 'refused', reason: 'invalid_payload' };
-      }
-      const baseAuthoringRevision =
-        admission.status === 'valid'
-          ? admission.record.baseAuthoringRevision
-          : // Admission has already walked and validated every own data property before returning
-            // proposal_too_large; only the size arm omits its canonical snapshot from the public result.
-            (input.proposal as StudioProposalRecordV4).baseAuthoringRevision;
-
-      return options.projectStore.withProjectAuthorityV4(input.projectId, async (snapshot) => {
-        if (baseAuthoringRevision !== snapshot.project.authoringRevision) {
-          return { status: 'refused', reason: 'stale_authoring' } as const;
-        }
-        const existingDirectory = await resolveProposalDirectory({ fs, snapshot, createIfMissing: false });
-        const existing = await readPending({ fs, snapshot, directory: existingDirectory, mainInstanceId });
-        if (existing !== null) return { status: 'refused', reason: 'existing_pending' } as const;
-        if (admission.status === 'proposal_too_large') {
-          return {
-            status: 'refused',
-            reason: 'proposal_too_large',
-            byteLength: admission.byteLength,
-            maxBytes: admission.maxBytes,
-          } as const;
-        }
-        const proposalSha256 = sha256Utf8(admission.proposalBytes);
-        const slot: StudioProposalSlotV4 = {
-          schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
-          proposalId: admission.record.id,
-          projectId: admission.record.projectId,
-          reservedAt: admission.record.createdAt,
-        };
-        const envelope: PendingEnvelopeV4 = {
-          schemaVersion: PENDING_ENVELOPE_SCHEMA_VERSION,
-          projectId: admission.record.projectId,
-          proposalId: admission.record.id,
-          baseRevision: snapshot.project.revision,
-          baseAuthoringRevision: admission.record.baseAuthoringRevision,
-          proposalSha256,
-          proposalBytes: admission.proposalBytes,
-          slot,
-        };
-        const envelopeBytes = JSON.stringify(envelope);
-        if (Buffer.byteLength(envelopeBytes, 'utf8') > MAX_PENDING_ENVELOPE_BYTES) {
-          throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-        }
-        const temporaryId = createTemporaryId();
-        if (typeof temporaryId !== 'string' || !SAFE_TEMPORARY_ID.test(temporaryId)) {
-          throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-        }
-        const directory = await resolveProposalDirectory({ fs, snapshot, createIfMissing: true });
-        if (directory === null) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-        const outcome = await publishPending({
-          fs,
-          snapshot,
-          directory,
-          envelope,
-          envelopeBytes,
-          mainInstanceId,
-          temporaryId,
-          storageStep: (step) => storageStep(step, input.projectId),
-        });
-        if (outcome === 'already_exists') {
-          const raced = await readPending({ fs, snapshot, directory, mainInstanceId });
-          if (raced === null) throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-          return { status: 'refused', reason: 'existing_pending' } as const;
-        }
-        const durable = await readPending({ fs, snapshot, directory, mainInstanceId });
-        if (durable === null || durable.bytes !== envelopeBytes || durable.envelope.proposalSha256 !== proposalSha256) {
-          throw new CreativeStudioProposalSidecarErrorV4('storage_error');
-        }
-        return { status: 'recorded', ...snapshotFromPending(durable) } as const;
+      return { outcome: 'unavailable', reason: 'corrupt_storage' };
+    }
+  };
+  const sidecars: CreativeStudioProposalSidecarsV4 = {
+    replayProposalV4: replay,
+    async getProposalStateV4(projectId, id) {
+      await expireCurrentOnce(projectId);
+      return withRead(projectId, async (a) => {
+        const c = await current(a);
+        const h = await history(a);
+        const t = tombstone(h.value, id);
+        if (t) return { status: t.status, ...structuredClone(t) } as StudioProposalStateV4;
+        return c?.value.proposalId === id
+          ? { status: 'pending', proposal: structuredClone(c.value.proposal), admittedAt: c.value.admittedAt }
+          : { status: 'unknown' };
       });
     },
-
     async getPendingProposalV4(projectId) {
-      return options.projectStore.withProjectAuthorityV4(projectId, async (snapshot) => {
-        const directory = await resolveProposalDirectory({ fs, snapshot, createIfMissing: false });
-        const pending = await readPending({ fs, snapshot, directory, mainInstanceId });
-        return pending === null ? null : snapshotFromPending(pending);
+      await expireCurrentOnce(projectId);
+      return withRead(projectId, async (a) => {
+        const c = await current(a);
+        return c ? pendingSnapshot(c) : null;
       });
+    },
+    async recoverPendingProposalV4(projectId) {
+      for (let pass = 0; pass < 2; pass += 1) {
+        try {
+          await expireCurrentOnce(projectId);
+          return;
+        } catch (e) {
+          if (!(e instanceof CreativeStudioPilotStoreErrorV4) || e.code !== 'busy' || pass > 0) throw e;
+          const intent = await options.projectStore.readProjectWriterIntentV4(projectId);
+          if (intent?.purpose !== 'proposal_terminal' || intent.proposalId === undefined) return;
+          const proposalId = intent.proposalId;
+          await withTerminal(projectId, proposalId, (a) => recoverInside(a, proposalId), true);
+        }
+      }
+    },
+    recoverProposalTerminalV4: (p, id) => withTerminal(p, id, (a) => recoverInside(a, id), true),
+    async acceptProposalV4(v) {
+      const input = snapshotStudioProposalDecisionRequestV4(v);
+      if (!input) return { status: 'unknown' };
+      return withTerminal(input.projectId, input.proposalId, async (a) => {
+        const recovered = await recoverInside(a, input.proposalId);
+        if (recovered) return recovered;
+        const h = await history(a),
+          t = tombstone(h.value, input.proposalId);
+        if (t) return duplicateResult(t);
+        const c = await current(a);
+        if (!c || c.value.proposalId !== input.proposalId) return { status: 'unknown' };
+        const observed = now();
+        if (observed >= c.value.proposal.expiresAt) return settle(a, c, 'expired', observed);
+        if (c.value.proposal.baseAuthoringRevision !== a.snapshot.project.authoringRevision)
+          return { status: 'stale_authoring' };
+        return settle(a, c, 'accepted', observed);
+      });
+    },
+    async rejectProposalV4(v) {
+      const input = snapshotStudioProposalDecisionRequestV4(v);
+      if (!input) return { status: 'unknown' };
+      return withTerminal(input.projectId, input.proposalId, async (a) => {
+        const recovered = await recoverInside(a, input.proposalId);
+        if (recovered) return recovered;
+        const h = await history(a),
+          t = tombstone(h.value, input.proposalId);
+        if (t) return duplicateResult(t);
+        const c = await current(a);
+        if (!c || c.value.proposalId !== input.proposalId) return { status: 'unknown' };
+        const observed = now();
+        return settle(a, c, observed >= c.value.proposal.expiresAt ? 'expired' : 'rejected', observed);
+      });
+    },
+    watchProposalsV4(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
     },
   };
+  return sidecars;
 };

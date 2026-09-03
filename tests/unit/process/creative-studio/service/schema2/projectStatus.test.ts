@@ -91,6 +91,7 @@ const appendImportedPiece = (
     kind: 'photograph',
     handle: `photo_${suffix}`,
     runStem,
+    assetHistory: [],
     priorHandles: [],
     currentAssetId: assetId,
     jobIds: [],
@@ -102,6 +103,7 @@ const appendImportedPiece = (
     projectId: project.id,
     pieceId,
     mediaKind: 'image',
+    role: 'primary',
     mimeType: 'image/png',
     managedAsset: { collection: 'imports', fileName: `${assetId}.png` },
     byteSize: 8,
@@ -151,8 +153,8 @@ describe('schema-7 canvas and Assembly projections', () => {
         'failed',
         'stale',
       ],
-      document: ['drafted', 'current', 'proposed'],
-      board: ['needs_budget', 'proposed', 'generating', 'partial'],
+      document: ['drafted', 'current', 'proposed', 'generating', 'failed'],
+      board: ['needs_budget', 'proposed', 'queued', 'generating', 'partial', 'stale'],
       sound: {
         imported: ['imported'],
         generated: ['needs_budget', 'proposed', 'queued', 'generating', 'rendered', 'stale', 'failed'],
@@ -231,26 +233,28 @@ describe('schema-7 canvas and Assembly projections', () => {
     expect(partial.visibleBlockCount).toBe(2);
   });
 
-  it('orders Bin items newest first while preserving selection order for equal timestamps', () => {
+  it('preserves canonical newest-first Bin order and selection order for equal timestamps', () => {
     const value = withoutAssembly();
     appendImportedPiece(value, 'second');
-    const storedOrder = ['bin_old', 'bin_new_first', 'bin_new_second'];
+    const newestAt = '2026-09-02T00:00:03.000Z';
+    value.updatedAt = newestAt;
+    const storedOrder = ['bin_new_first', 'bin_new_second', 'bin_old'];
     value.bin = [
-      {
-        id: 'bin_old',
-        subject: { kind: 'board', boardId: 'board_1' },
-        reason: 'lifted',
-        liftedAt: '2026-09-02T00:00:01.000Z',
-      },
       {
         id: 'bin_new_first',
         subject: { kind: 'piece', pieceId: 'piece_photo_1' },
         reason: 'lifted',
-        liftedAt: PHASE_6_CURRENT_AT,
+        liftedAt: newestAt,
       },
       {
         id: 'bin_new_second',
         subject: { kind: 'piece', pieceId: 'piece_second' },
+        reason: 'lifted',
+        liftedAt: newestAt,
+      },
+      {
+        id: 'bin_old',
+        subject: { kind: 'board', boardId: 'board_1' },
         reason: 'lifted',
         liftedAt: PHASE_6_CURRENT_AT,
       },

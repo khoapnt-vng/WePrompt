@@ -940,6 +940,44 @@
         "failed": "Не вдалося безпечно під’єднати режисера. Перезавантажте проєкт."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Потрібен бюджет",
+            "proposed": "Запропоновано",
+            "partial": "Частково",
+            "drafted": "Чернетка",
+            "rendered": "Відрендерено",
+            "imported": "Імпортовано",
+            "current": "Актуально",
+            "stale": "Застаріло",
+            "failed": "Помилка",
+            "queued": "У черзі",
+            "generating": "Генерація",
+            "rendering": "Рендеринг"
+          },
+          "member": {
+            "slate": "Заставка",
+            "queued": "У черзі",
+            "ready_to_render": "Готовий до рендеру",
+            "generating": "Генерація",
+            "rendered": "Відрендерено",
+            "stale": "Застаріло",
+            "failed": "Помилка"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "порушення правила",
+              "returned_silence": "отримано тишу",
+              "provider_failure": "помилка постачальника",
+              "local_render_failure": "помилка локального рендерингу",
+              "download_failure": "помилка завантаження"
+            },
+            "cost": { "spent": "витрачено", "not_spent": "не витрачено" }
+          },
+          "action": { "re_render_chain": "Повторний рендеринг ланцюжка", "keep": "Залишити", "retry": "Повторити" },
+          "queuedPosition": "У черзі · {{position}}"
+        },
         "projectActions": "Дії з проєктом",
         "loading": "Завантаження проєкту…",
         "refreshing": "Оновлення проєкту…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "Візуальні референси",
           "visualReferencesHint": "Виберіть до {{maximum}} поточних Piece як орієнтири для цього фото.",
           "visualReferencesCount": "Вибрано: {{selected}} із {{maximum}}"
+        },
+        "cut": {
+          "length": "{{played}} з {{total}}",
+          "playsSummary": "відтворюється {{played}} · зупиняється там, де фільм ще не зроблено",
+          "slatesSummary": "Шоти зберігають час як заставки ({{count}}) · не зроблено: {{unmade}}",
+          "slatesSummary_one": "Шот зберігає час як заставка ({{count}}) · не зроблено: {{unmade}}",
+          "slatesSummary_other": "Шоти зберігають час як заставки ({{count}}) · не зроблено: {{unmade}}",
+          "slateTally": "Заставок: {{count}} · {{duration}}",
+          "slateTally_one": "Заставка: {{count}} · {{duration}}",
+          "slateTally_other": "Заставок: {{count}} · {{duration}}",
+          "audioBed": "{{handle}} · імпортовано · {{level}} під усім фільмом",
+          "audioSegment": "{{handle}} · {{duration}} · прив’язано до {{beat}}",
+          "audioNotGenerated": "не створено",
+          "audioMissingDetail": "Озвучення для {{beat}} — не створено. Фільм відтворюється там без звуку, на повну тривалість.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Початок ланцюжка",
+          "chainAfter": "Після {{handle}}",
+          "staleOffChain": "Поза ланцюжком після повторного рендерингу {{handle}}. Відтворюється.",
+          "reorderHint": "Alt+↑/↓ переміщує його — усередині {{beat}} це перезаписує ланцюжок і коштує {{price}}; між бітами це безкоштовно.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Обрізати",
+          "matchTo": "Узгодити з {{handle}}",
+          "play": "Відтворити",
+          "reCut": "Перемонтувати",
+          "level": "Рівень {{level}}",
+          "commissionCost": "Виробництво незроблених шотів ({{count}}) коштуватиме {{price}} — {{duration}} фільму по {{rate}} за секунду.",
+          "commissionCost_one": "Виробництво незробленого шоту ({{count}}) коштуватиме {{price}} — {{duration}} фільму по {{rate}} за секунду.",
+          "commissionCost_other": "Виробництво незроблених шотів ({{count}}) коштуватиме {{price}} — {{duration}} фільму по {{rate}} за секунду.",
+          "commission": "Замовити · {{price}}",
+          "notNow": "Не зараз",
+          "conditions": "Умови: {{handles}}",
+          "budgetRemaining": "Залишилося {{remaining}} із {{total}}",
+          "quotesOutstanding": "Кошторисів на розгляді: {{count}} · {{sum}}, якщо виконати всі",
+          "quotesOutstanding_one": "Кошторис на розгляді: {{count}} · {{sum}}, якщо його виконати",
+          "quotesOutstanding_other": "Кошторисів на розгляді: {{count}} · {{sum}}, якщо виконати всі",
+          "proposedSummary": "Бітів: {{beats}} · шотів: {{shots}}",
+          "proposedFrom": "Від {{handle}}. Намалювати всі ({{count}}) коштуватиме {{price}}.",
+          "proposedFrom_one": "Від {{handle}}. Намалювати це коштуватиме {{price}}.",
+          "proposedFrom_other": "Від {{handle}}. Намалювати всі ({{count}}) коштуватиме {{price}}."
+        },
+        "accessibility": {
+          "filmstrip": "Кіноплівка, по одному сегменту на кожен біт",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Аудіодоріжка",
+          "memberInspector": "Відомості про {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} переміщено на позицію {{position}}",
+          "reorderAnnouncementWithCost": "{{handle}} переміщено на позицію {{position}}, це коштує {{price}}",
+          "slateMember": "{{handle}}, зберігає {{duration}}, ще не зроблено",
+          "quoteRegion": "Кошторис для {{handle}}",
+          "judgementFooter": "Потрібне рішення щодо {{handle}}"
         }
       },
       "spending": {

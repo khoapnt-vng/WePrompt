@@ -941,6 +941,44 @@
         "failed": "Die Regie konnte nicht sicher verbunden werden. Lade das Projekt neu."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Budget erforderlich",
+            "proposed": "Vorgeschlagen",
+            "partial": "Teilweise gerendert",
+            "drafted": "Entwurf",
+            "rendered": "Gerendert",
+            "imported": "Importiert",
+            "current": "Aktuell",
+            "stale": "Veraltet",
+            "failed": "Fehlgeschlagen",
+            "queued": "In Warteschlange",
+            "generating": "Wird erstellt",
+            "rendering": "Wird gerendert"
+          },
+          "member": {
+            "slate": "Platzhalter",
+            "queued": "In Warteschlange",
+            "ready_to_render": "Bereit zum Rendern",
+            "generating": "Wird erstellt",
+            "rendered": "Gerendert",
+            "stale": "Veraltet",
+            "failed": "Fehlgeschlagen"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "Regelverstoß",
+              "returned_silence": "Stille zurückgegeben",
+              "provider_failure": "Anbieterfehler",
+              "local_render_failure": "lokaler Renderfehler",
+              "download_failure": "Downloadfehler"
+            },
+            "cost": { "spent": "Kosten angefallen", "not_spent": "Keine Kosten angefallen" }
+          },
+          "action": { "re_render_chain": "Kette neu rendern", "keep": "Behalten", "retry": "Erneut versuchen" },
+          "queuedPosition": "In Warteschlange · {{position}}"
+        },
         "projectActions": "Projektaktionen",
         "loading": "Projekt wird geladen…",
         "refreshing": "Projekt wird aktualisiert…",
@@ -1099,6 +1137,57 @@
           "visualReferences": "Visuelle Referenzen",
           "visualReferencesHint": "Wähle bis zu {{maximum}} aktuelle Pieces als Orientierung für dieses Foto.",
           "visualReferencesCount": "{{selected}} von {{maximum}} ausgewählt"
+        },
+        "cut": {
+          "length": "{{played}} von {{total}}",
+          "playsSummary": "spielt {{played}} · endet dort, wo der Film noch nicht produziert ist",
+          "slatesSummary": "{{count}} Shots bleiben als Platzhalter im Film · {{unmade}} noch nicht produziert",
+          "slatesSummary_one": "{{count}} Shot bleibt als Platzhalter im Film · {{unmade}} noch nicht produziert",
+          "slatesSummary_other": "{{count}} Shots bleiben als Platzhalter im Film · {{unmade}} noch nicht produziert",
+          "slateTally": "{{count}} Platzhalter · {{duration}}",
+          "slateTally_one": "{{count}} Platzhalter · {{duration}}",
+          "slateTally_other": "{{count}} Platzhalter · {{duration}}",
+          "audioBed": "{{handle}} · importiert · {{level}} unter dem gesamten Film",
+          "audioSegment": "{{handle}} · {{duration}} · an {{beat}} verankert",
+          "audioNotGenerated": "nicht erzeugt",
+          "audioMissingDetail": "Erzählstimme für {{beat}} — nicht erzeugt. Der Film läuft dort stumm, in voller Länge.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Kettenanfang",
+          "chainAfter": "Nach {{handle}}",
+          "staleOffChain": "Nicht mehr in der Kette, seit {{handle}} neu gerendert wurde. Wird weiterhin abgespielt.",
+          "reorderHint": "Alt+Pfeil oben/unten verschiebt ihn — innerhalb von {{beat}} schreibt das die Kette neu und kostet {{price}}; über Beats hinweg ist es kostenlos.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Trimmen",
+          "matchTo": "An {{handle}} anpassen",
+          "play": "Abspielen",
+          "reCut": "Neu schneiden",
+          "level": "Pegel {{level}}",
+          "commissionCost": "Die {{count}} noch nicht produzierten Shots zu generieren würde {{price}} kosten — {{duration}} Film zu {{rate}} pro Sekunde.",
+          "commissionCost_one": "Den {{count}} noch nicht produzierten Shot zu generieren würde {{price}} kosten — {{duration}} Film zu {{rate}} pro Sekunde.",
+          "commissionCost_other": "Die {{count}} noch nicht produzierten Shots zu generieren würde {{price}} kosten — {{duration}} Film zu {{rate}} pro Sekunde.",
+          "commission": "Beauftragen · {{price}}",
+          "notNow": "Jetzt nicht",
+          "conditions": "Konditionierung: {{handles}}",
+          "budgetRemaining": "{{remaining}} von {{total}} übrig",
+          "quotesOutstanding": "{{count}} Angebote ausstehend · {{sum}}, wenn alle ausgeführt werden",
+          "quotesOutstanding_one": "{{count}} Angebot ausstehend · {{sum}}, wenn es ausgeführt wird",
+          "quotesOutstanding_other": "{{count}} Angebote ausstehend · {{sum}}, wenn alle ausgeführt werden",
+          "proposedSummary": "{{beats}} Beats · {{shots}} Shots",
+          "proposedFrom": "Von {{handle}}. Das Zeichnen aller {{count}} würde {{price}} kosten.",
+          "proposedFrom_one": "Von {{handle}}. Das Zeichnen würde {{price}} kosten.",
+          "proposedFrom_other": "Von {{handle}}. Das Zeichnen aller {{count}} würde {{price}} kosten."
+        },
+        "accessibility": {
+          "filmstrip": "Filmstreifen, ein Segment pro Beat",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Audiospur",
+          "memberInspector": "Details zu {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} wurde auf Position {{position}} verschoben",
+          "reorderAnnouncementWithCost": "{{handle}} wurde auf Position {{position}} verschoben, kostet {{price}}",
+          "slateMember": "{{handle}}, bleibt für {{duration}} im Film, noch nicht produziert",
+          "quoteRegion": "Angebot für {{handle}}",
+          "judgementFooter": "Für {{handle}} ist eine Entscheidung erforderlich"
         }
       },
       "spending": {

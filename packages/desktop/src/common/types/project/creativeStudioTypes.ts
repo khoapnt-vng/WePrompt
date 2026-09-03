@@ -1916,6 +1916,493 @@ export type StudioPieceGeneratedAssetV3 = StudioPieceAssetBaseV3 & {
 
 export type StudioAssetV3 = StudioPieceImportedAssetV3 | StudioPieceGeneratedAssetV3;
 
+/** Schema-7 media protocols are versioned independently from the project discriminator. */
+export const STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V4 = 4 as const;
+export const STUDIO_AUTHORING_FINGERPRINT_VERSION_V4 = 3 as const;
+export const STUDIO_PIECE_PUBLICATION_INTENT_SCHEMA_VERSION_V4 = 1 as const;
+/** Schema-7 exports are a distinct protocol family; schema 6 remains frozen on export 3. */
+export const STUDIO_EXPORT_SCHEMA_VERSION_V4 = 4 as const;
+export const STUDIO_MAX_ASSETS_PER_GENERATION_V4 = 2;
+/** One imported root plus one immutable media version for each succeeded generation Job. */
+export const STUDIO_MAX_ASSET_HISTORY_ENTRIES_PER_PIECE_V4 = 1 + STUDIO_MAX_JOBS_PER_PIECE_V3;
+export const STUDIO_MAX_ASSETS_V4 = STUDIO_MAX_PIECES_V3 + STUDIO_MAX_JOBS_V3 * STUDIO_MAX_ASSETS_PER_GENERATION_V4;
+/** Images remain on the Pilot's 50 MiB bound; motion alone needs the larger finalized-payload cap. */
+export const STUDIO_MAX_IMAGE_ASSET_BYTES_V4 = STUDIO_MAX_IMAGE_ASSET_BYTES_V3;
+export const STUDIO_MAX_VIDEO_ASSET_BYTES_V4 = 2 * 1024 * 1024 * 1024;
+
+export type StudioPieceKindV4 = 'photograph' | 'motion';
+export type StudioPieceGenerationPurposeV4 = 'piece_image' | 'piece_motion';
+export type StudioPieceGenerationTargetV4 = { kind: 'piece'; pieceId: string };
+
+export type StudioPiecePhotoSettingsV4 = {
+  kind: 'photograph';
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+};
+
+/** Requested provider duration. Board Shot duration remains the sole presentation clock. */
+export type StudioPieceMotionSettingsV4 = {
+  kind: 'motion';
+  aspectRatio: StudioAspectRatio;
+  resolution: StudioResolution;
+  requestedDurationSeconds: number;
+};
+
+export type StudioPieceSettingsV4 = StudioPiecePhotoSettingsV4 | StudioPieceMotionSettingsV4;
+
+export type StudioPieceConditioningInputSnapshotV4 = {
+  pieceId: string;
+  assetId: string;
+  sha256: string;
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  byteSize: number;
+};
+
+export type StudioPieceDirectFirstFrameSnapshotV4 = StudioPieceConditioningInputSnapshotV4 & {
+  kind: 'piece_image';
+};
+
+/** Exact trim-aware endpoint extracted from the immediately preceding Shot's selected motion. */
+export type StudioPiecePredecessorFirstFrameSnapshotV4 = {
+  kind: 'predecessor_frame';
+  assemblyId: string;
+  boardId: string;
+  dependentShotId: string;
+  predecessorShotId: string;
+  sourcePieceId: string;
+  sourceVideoAssetId: string;
+  sourceVideoSha256: string;
+  endpointSeconds: number;
+  frameExtractionId: string;
+  frameAssetId: string;
+  frameSha256: string;
+  frameMimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  frameByteSize: number;
+};
+
+export type StudioPieceFirstFrameSnapshotV4 =
+  | StudioPieceDirectFirstFrameSnapshotV4
+  | StudioPiecePredecessorFirstFrameSnapshotV4;
+
+type StudioPieceGenerationCompositionInputBaseV4 = {
+  schemaVersion: typeof STUDIO_GENERATION_COMPOSITION_SCHEMA_VERSION_V4;
+  projectRevisionAtPreparation: number;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V4;
+  authoringFingerprint: string;
+  brief: string;
+  rules: StudioBriefRule[];
+  route: StudioMediaModelRef;
+  instructionProfile: string;
+};
+
+export type StudioPiecePhotoGenerationSourceV4 = {
+  kind: 'piece';
+  pieceId: string;
+  words: string;
+  settings: StudioPiecePhotoSettingsV4;
+};
+
+export type StudioPieceMotionGenerationSourceV4 = {
+  kind: 'piece';
+  pieceId: string;
+  words: string;
+  settings: StudioPieceMotionSettingsV4;
+};
+
+export type StudioPiecePhotoGenerationCompositionInputSnapshotV4 = StudioPieceGenerationCompositionInputBaseV4 & {
+  source: StudioPiecePhotoGenerationSourceV4;
+  purpose: 'piece_image';
+  conditioningInputs: StudioPieceConditioningInputSnapshotV4[];
+};
+
+export type StudioPieceMotionGenerationCompositionInputSnapshotV4 = StudioPieceGenerationCompositionInputBaseV4 & {
+  source: StudioPieceMotionGenerationSourceV4;
+  purpose: 'piece_motion';
+  firstFrame: StudioPieceFirstFrameSnapshotV4 | null;
+};
+
+export type StudioPiecePhotoGenerationCompositionV4 = {
+  inputs: StudioPiecePhotoGenerationCompositionInputSnapshotV4;
+  prompt: string;
+};
+
+export type StudioPieceMotionGenerationCompositionV4 = {
+  inputs: StudioPieceMotionGenerationCompositionInputSnapshotV4;
+  prompt: string;
+};
+
+export type StudioPieceGenerationCompositionV4 =
+  | StudioPiecePhotoGenerationCompositionV4
+  | StudioPieceMotionGenerationCompositionV4;
+
+export type StudioPiecePhotoGenerationRequestSnapshotV4 = {
+  composition: StudioPiecePhotoGenerationCompositionV4;
+  settings: StudioPiecePhotoSettingsV4;
+  conditioningInputs: StudioPieceConditioningInputSnapshotV4[];
+};
+
+export type StudioPieceMotionGenerationRequestSnapshotV4 = {
+  composition: StudioPieceMotionGenerationCompositionV4;
+  settings: StudioPieceMotionSettingsV4;
+  firstFrame: StudioPieceFirstFrameSnapshotV4 | null;
+};
+
+export type StudioPieceMotionGenerationRequestTemplateV4 = {
+  composition: StudioPieceMotionGenerationCompositionV4;
+  settings: StudioPieceMotionSettingsV4;
+};
+
+/** Symbolic authority frozen while the immediately preceding Shot's motion is still being made. */
+export type StudioPieceAuthorizedPredecessorDependencyV4 = {
+  kind: 'authorized_predecessor';
+  upstreamItemId: string;
+  assemblyId: string;
+  boardId: string;
+  dependentShotId: string;
+  predecessorShotId: string;
+  sourcePieceId: string;
+};
+
+export type StudioPiecePhotoGenerationRequestPlanV4 = {
+  kind: 'resolved';
+  snapshot: StudioPiecePhotoGenerationRequestSnapshotV4;
+};
+
+export type StudioPieceMotionGenerationRequestPlanV4 =
+  | {
+      kind: 'resolved';
+      snapshot: StudioPieceMotionGenerationRequestSnapshotV4;
+    }
+  | {
+      kind: 'after_upstream_completion';
+      template: StudioPieceMotionGenerationRequestTemplateV4;
+      dependency: StudioPieceAuthorizedPredecessorDependencyV4;
+    };
+
+export type StudioPieceGenerationRequestPlanV4 =
+  | StudioPiecePhotoGenerationRequestPlanV4
+  | StudioPieceMotionGenerationRequestPlanV4;
+
+export type StudioPieceManagedAssetRefV4 = {
+  collection: 'assets' | 'imports';
+  fileName: string;
+};
+
+type StudioPieceAssetOwnershipV4 = {
+  id: string;
+  projectId: string;
+  pieceId: string;
+  byteSize: number;
+  sha256: string;
+  createdAt: string;
+};
+
+type StudioPieceImportedAssetProvenanceV4 = {
+  origin: 'imported';
+  managedAsset: { collection: 'imports'; fileName: string };
+  producerJobId: null;
+  compositionDigest: null;
+};
+
+type StudioPieceGeneratedAssetProvenanceV4 = {
+  origin: 'generated';
+  managedAsset: { collection: 'assets'; fileName: string };
+  producerJobId: string;
+  compositionDigest: string;
+};
+
+type StudioPiecePhotographAssetPayloadV4 = {
+  mediaKind: 'image';
+  role: 'primary';
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  width: number;
+  height: number;
+};
+
+type StudioPieceMotionAssetPayloadV4 = {
+  mediaKind: 'video';
+  role: 'primary';
+  mimeType: 'video/mp4' | 'video/webm';
+  width: number;
+  height: number;
+  /** Decoded from finalized bytes; never copied from the requested duration. */
+  durationSeconds: number;
+};
+
+type StudioPieceMotionPosterAssetPayloadV4 = {
+  mediaKind: 'image';
+  role: 'poster';
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  width: number;
+  height: number;
+};
+
+export type StudioPieceImportedPhotographAssetV4 = StudioPieceAssetOwnershipV4 &
+  StudioPiecePhotographAssetPayloadV4 &
+  StudioPieceImportedAssetProvenanceV4;
+export type StudioPieceGeneratedPhotographAssetV4 = StudioPieceAssetOwnershipV4 &
+  StudioPiecePhotographAssetPayloadV4 &
+  StudioPieceGeneratedAssetProvenanceV4;
+export type StudioPieceImportedMotionAssetV4 = StudioPieceAssetOwnershipV4 &
+  StudioPieceMotionAssetPayloadV4 &
+  StudioPieceImportedAssetProvenanceV4;
+export type StudioPieceGeneratedMotionAssetV4 = StudioPieceAssetOwnershipV4 &
+  StudioPieceMotionAssetPayloadV4 &
+  StudioPieceGeneratedAssetProvenanceV4;
+export type StudioPieceGeneratedMotionPosterAssetV4 = StudioPieceAssetOwnershipV4 &
+  StudioPieceMotionPosterAssetPayloadV4 &
+  StudioPieceGeneratedAssetProvenanceV4;
+
+export type StudioAssetV4 =
+  | StudioPieceImportedPhotographAssetV4
+  | StudioPieceGeneratedPhotographAssetV4
+  | StudioPieceImportedMotionAssetV4
+  | StudioPieceGeneratedMotionAssetV4
+  | StudioPieceGeneratedMotionPosterAssetV4;
+
+export const STUDIO_MAX_FRAME_EXTRACTIONS_V4 = STUDIO_MAX_JOBS_V3;
+
+/** A derived endpoint is managed media, but never a Piece version or a generation output. */
+export type StudioDerivedFrameAssetV4 = {
+  id: string;
+  projectId: string;
+  targetPieceId: string;
+  extractionId: string;
+  mediaKind: 'image';
+  role: 'conditioning_frame';
+  mimeType: 'image/jpeg' | 'image/png' | 'image/webp';
+  managedAsset: { collection: 'assets'; fileName: string };
+  byteSize: number;
+  sha256: string;
+  width: number;
+  height: number;
+  createdAt: string;
+};
+
+export type StudioFrameExtractionV4 = {
+  id: string;
+  projectId: string;
+  targetPieceId: string;
+  jobId: string;
+  assemblyId: string;
+  boardId: string;
+  dependentShotId: string;
+  predecessorShotId: string;
+  sourcePieceId: string;
+  sourceVideoAssetId: string;
+  sourceVideoSha256: string;
+  endpointSeconds: number;
+  frameAssetId: string | null;
+  status: 'pending' | 'extracting' | 'ready' | 'failed';
+  errorCode: 'decode_failed' | 'source_missing' | 'storage_error' | null;
+  attemptCount: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type StudioPieceAssetTombstoneFromAssetV4<T extends StudioAssetV4> = T extends StudioAssetV4
+  ? Omit<T, 'projectId' | 'pieceId' | 'managedAsset'>
+  : never;
+
+/** Durable provenance for evicted bytes. Ownership is the containing Piece, never a copied id. */
+export type StudioPieceAssetTombstoneV4 = StudioPieceAssetTombstoneFromAssetV4<StudioAssetV4>;
+
+export type StudioPieceImportedAssetTombstoneV4 = Extract<StudioPieceAssetTombstoneV4, { origin: 'imported' }>;
+export type StudioPieceGeneratedAssetTombstoneV4 = Extract<StudioPieceAssetTombstoneV4, { origin: 'generated' }>;
+
+type StudioPieceCurrentAssetSnapshotFromAssetV4<T extends StudioAssetV4> = T extends StudioAssetV4
+  ? Omit<T, 'id' | 'projectId' | 'managedAsset' | 'role'> & { assetId: string; role: 'primary' }
+  : never;
+
+/** Immutable CAS and provenance facts for the exact current primary asset a replacement targets. */
+export type StudioPieceCurrentAssetSnapshotV4 = StudioPieceCurrentAssetSnapshotFromAssetV4<
+  Extract<StudioAssetV4, { role: 'primary' }>
+>;
+
+export type StudioPieceImportedCurrentAssetSnapshotV4 = Extract<
+  StudioPieceCurrentAssetSnapshotV4,
+  { origin: 'imported' }
+>;
+export type StudioPieceGeneratedCurrentAssetSnapshotV4 = Extract<
+  StudioPieceCurrentAssetSnapshotV4,
+  { origin: 'generated' }
+>;
+
+/** `replace_current` is a publication action; it never makes the old image a provider input. */
+export type StudioPiecePublicationIntentV4 =
+  | {
+      schemaVersion: typeof STUDIO_PIECE_PUBLICATION_INTENT_SCHEMA_VERSION_V4;
+      kind: 'fill_empty';
+    }
+  | {
+      schemaVersion: typeof STUDIO_PIECE_PUBLICATION_INTENT_SCHEMA_VERSION_V4;
+      kind: 'replace_current';
+      currentAsset: StudioPieceCurrentAssetSnapshotV4;
+    };
+
+/** Paid-attempt topology stays orthogonal to whether success fills or replaces current media. */
+export type StudioPieceGenerationAttemptV4 =
+  | { kind: 'first' }
+  | {
+      kind: 'retry';
+      sourceJobId: string;
+      reason: StudioPieceJobRetryReasonV3;
+    };
+
+type StudioPieceQuotedGenerationBaseV4 = {
+  id: string;
+  target: StudioPieceGenerationTargetV4;
+  routeId: string;
+  generationCount: 1;
+  rateMinorUnits: number;
+  publication: StudioPiecePublicationIntentV4;
+  attempt: StudioPieceGenerationAttemptV4;
+};
+
+export type StudioPiecePhotoQuotedGenerationV4 = StudioPieceQuotedGenerationBaseV4 & {
+  purpose: 'piece_image';
+  requestPlan: StudioPiecePhotoGenerationRequestPlanV4;
+  rateUnit: 'generation';
+};
+
+export type StudioPieceMotionQuotedGenerationV4 = StudioPieceQuotedGenerationBaseV4 & {
+  purpose: 'piece_motion';
+  requestPlan: StudioPieceMotionGenerationRequestPlanV4;
+  rateUnit: 'second';
+  requestedDurationSeconds: number;
+  billedDurationSeconds: number;
+};
+
+export type StudioPieceQuotedGenerationV4 = StudioPiecePhotoQuotedGenerationV4 | StudioPieceMotionQuotedGenerationV4;
+
+export type StudioPieceSubmissionQuoteV4 = {
+  id: string;
+  reservationId: string;
+  quoteRevision: number;
+  projectId: string;
+  projectRevisionAtPreparation: number;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V4;
+  authoringFingerprint: string;
+  rateCardDigest: string;
+  currency: string;
+  item: StudioPieceQuotedGenerationV4;
+  lowerMinorUnits: number;
+  upperMinorUnits: number;
+  expiresAt: string;
+};
+
+export type StudioPieceSpendAuthorizationV4 = {
+  id: string;
+  quote: StudioPieceSubmissionQuoteV4;
+  confirmedAt: string;
+  projectRevisionAtAuthorization: number;
+  cancellationPolicy: StudioCancellationPolicy;
+  providerBinding: {
+    itemId: string;
+    provider: StudioProviderRef;
+  };
+  idempotencyKey: {
+    itemId: string;
+    key: string;
+  };
+};
+
+type StudioPieceSpendReceiptBaseV4 = {
+  authorizationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  itemId: string;
+  jobId: string;
+  routeId: string;
+  currency: string;
+  rateMinorUnits: number;
+  generationCount: 1;
+  totalMinorUnits: number;
+  recordedAt: string;
+};
+
+export type StudioPiecePhotoSpendReceiptV4 = StudioPieceSpendReceiptBaseV4 & {
+  purpose: 'piece_image';
+  rateUnit: 'generation';
+};
+
+export type StudioPieceMotionSpendReceiptV4 = StudioPieceSpendReceiptBaseV4 & {
+  purpose: 'piece_motion';
+  rateUnit: 'second';
+  requestedDurationSeconds: number;
+  billedDurationSeconds: number;
+};
+
+export type StudioPieceSpendReceiptV4 = StudioPiecePhotoSpendReceiptV4 | StudioPieceMotionSpendReceiptV4;
+
+type StudioPieceJobBaseV4 = {
+  id: string;
+  projectId: string;
+  target: StudioPieceGenerationTargetV4;
+  status: StudioJobStatus | 'waiting_for_conditioning';
+  provider: StudioProviderRef;
+  idempotencyKey: string;
+  providerSubmissionKind: StudioPieceProviderSubmissionKindV3 | null;
+  providerJobId: string | null;
+  remoteStartedAt: string | null;
+  cancellationPolicy: StudioCancellationPolicy;
+  outputAssetIdsByRole: StudioJobOutputAssetIdsByRoleV2;
+  error: StudioPieceJobErrorV3 | null;
+  progress: number | null;
+  publication: StudioPiecePublicationIntentV4;
+  attempt: StudioPieceGenerationAttemptV4;
+  duplicateChargeAcknowledged: boolean;
+  duplicateChargeAcknowledgedAt: string | null;
+  authorizationId: string;
+  authorizationItemId: string;
+  authoringRevision: number;
+  authoringFingerprintVersion: typeof STUDIO_AUTHORING_FINGERPRINT_VERSION_V4;
+  authoringFingerprint: string;
+  projectRevisionAtPreparation: number;
+  projectRevisionAtAuthorization: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type StudioPiecePhotoJobV4 = StudioPieceJobBaseV4 & {
+  purpose: 'piece_image';
+  composition: StudioPiecePhotoGenerationCompositionV4;
+  requestPlan: StudioPiecePhotoGenerationRequestPlanV4;
+  spendReceipt: StudioPiecePhotoSpendReceiptV4 | null;
+};
+
+export type StudioPieceMotionJobV4 = StudioPieceJobBaseV4 & {
+  purpose: 'piece_motion';
+  /** Frozen quoted composition; a deferred plan keeps its null first frame permanently. */
+  composition: StudioPieceMotionGenerationCompositionV4;
+  requestPlan: StudioPieceMotionGenerationRequestPlanV4;
+  /** Null only while a symbolic predecessor dependency is unresolved, including cancellation before extraction. */
+  requestSnapshot: StudioPieceMotionGenerationRequestSnapshotV4 | null;
+  spendReceipt: StudioPieceMotionSpendReceiptV4 | null;
+};
+
+/** Schema 7 has no scalar output id or nullable schema-6 retry pair. */
+export type StudioPieceJobV4 = StudioPiecePhotoJobV4 | StudioPieceMotionJobV4;
+
+/** Oldest-first superseded lineage. Retained entries still resolve through the project asset map. */
+export type StudioPieceAssetHistoryEntryV4 =
+  | {
+      state: 'retained';
+      assetIdsByRole: { primary: string; poster: string | null };
+      supersededAt: string;
+    }
+  | {
+      state: 'evicted';
+      assetsByRole: {
+        primary: StudioPieceAssetTombstoneV4;
+        poster: StudioPieceAssetTombstoneV4 | null;
+      };
+      supersededAt: string;
+      evictedAt: string;
+    };
+
 export type StudioPieceV2 = {
   id: string;
   kind: StudioPieceKindV2;
@@ -1932,8 +2419,11 @@ export type StudioPieceV2 = {
  * handle suggestion and groups adjacent sibling attempts without parsing their collision suffixes.
  * Imports and prompt-fallback creates store null, so visual handle similarity never invents a run.
  */
-export type StudioPieceV4 = StudioPieceV2 & {
+export type StudioPieceV4 = Omit<StudioPieceV2, 'kind'> & {
+  kind: StudioPieceKindV4;
   runStem: string | null;
+  /** Every superseded asset remains addressable here, even after its managed bytes are evicted. */
+  assetHistory: StudioPieceAssetHistoryEntryV4[];
 };
 
 export type StudioPieceCatalogUndoPatchV3 = {
@@ -2192,7 +2682,23 @@ export type StudioPieceExportGeneratedProvenanceV3 = {
   receipt: StudioPieceSpendReceiptV3;
 };
 
+/** Exact schema-7 generated-photo provenance carried only by export protocol 4. */
+export type StudioPieceExportGeneratedProvenanceV4 = {
+  origin: 'generated';
+  producerJobId: string;
+  provider: StudioProviderRef;
+  composition: StudioPiecePhotoGenerationCompositionV4;
+  requestPlan: StudioPiecePhotoGenerationRequestPlanV4;
+  publication: StudioPiecePublicationIntentV4;
+  attempt: StudioPieceGenerationAttemptV4;
+  authorizationId: string;
+  quoteId: string;
+  quoteRevision: number;
+  receipt: StudioPiecePhotoSpendReceiptV4;
+};
+
 export type StudioPieceExportProvenanceV3 = { origin: 'imported' } | StudioPieceExportGeneratedProvenanceV3;
+export type StudioPieceExportProvenanceV4 = { origin: 'imported' } | StudioPieceExportGeneratedProvenanceV4;
 
 export type StudioPieceExportManifestV3 = {
   schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V3;
@@ -2215,6 +2721,31 @@ export type StudioPieceExportManifestV3 = {
     relativePath: string;
   };
   provenance: StudioPieceExportProvenanceV3;
+  exportedAt: string;
+};
+
+/** Exact export-4 sidecar for one current schema-7 photograph. */
+export type StudioPieceExportManifestV4 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V4;
+  exportId: string;
+  projectId: string;
+  sourceRevision: number;
+  piece: {
+    id: string;
+    kind: 'photograph';
+    handleAtExport: string;
+  };
+  asset: {
+    id: string;
+    sha256: string;
+    mimeType: string;
+    byteSize: number;
+    width: number;
+    height: number;
+    createdAt: string;
+    relativePath: string;
+  };
+  provenance: StudioPieceExportProvenanceV4;
   exportedAt: string;
 };
 
@@ -2431,6 +2962,17 @@ export type StudioPieceExportCatalogV3 = {
   artifacts: StudioPieceExportArtifactV3[];
 };
 
+export type StudioPieceExportArtifactV4 = Omit<StudioPieceExportArtifactV3, 'schemaVersion'> & {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V4;
+};
+
+export type StudioPieceExportCatalogV4 = {
+  schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V4;
+  projectId: string;
+  revision: number;
+  artifacts: StudioPieceExportArtifactV4[];
+};
+
 export type StudioRendererPieceExportArtifactV3 = Pick<
   StudioPieceExportArtifactV3,
   'id' | 'pieceId' | 'sourceRevision' | 'handleAtExport' | 'byteSize' | 'payloadFileCount' | 'createdAt'
@@ -2441,9 +2983,24 @@ export type StudioRendererPieceExportCatalogV3 = {
   artifacts: StudioRendererPieceExportArtifactV3[];
 };
 
+export type StudioRendererPieceExportArtifactV4 = Pick<
+  StudioPieceExportArtifactV4,
+  'id' | 'pieceId' | 'sourceRevision' | 'handleAtExport' | 'byteSize' | 'payloadFileCount' | 'createdAt'
+> & { folderName: string };
+
+export type StudioRendererPieceExportCatalogV4 = {
+  revision: number;
+  artifacts: StudioRendererPieceExportArtifactV4[];
+};
+
 export type StudioExportPieceResultV3 = {
   status: 'exported';
   catalog: StudioRendererPieceExportCatalogV3;
+};
+
+export type StudioExportPieceResultV4 = {
+  status: 'exported';
+  catalog: StudioRendererPieceExportCatalogV4;
 };
 
 /** Native delivery result. The selected destination remains Main-only. */
@@ -3451,8 +4008,17 @@ export type StudioRemoveConnectionRequest = { bindingId: string };
  * by a production reader until the Phase 6 cutover is complete; keeping the discriminator separate
  * prevents an intermediate build from defaulting or migrating a schema-6 project.
  */
+/** `.project-write-` plus `.lock` consumes 20 bytes of a common 255-byte path component. */
+export const STUDIO_PROJECT_ID_MAX_BYTES_V4 = 235;
+const STUDIO_PROJECT_ID_PATTERN_V4 = /^[A-Za-z0-9_-]+$/u;
+/** Schema-7 project ids are also exact safe writer-lock directory components. */
+export const isStudioProjectIdV4 = (value: unknown): value is string =>
+  typeof value === 'string' &&
+  value.length >= 1 &&
+  value.length <= STUDIO_PROJECT_ID_MAX_BYTES_V4 &&
+  STUDIO_PROJECT_ID_PATTERN_V4.test(value);
+
 export const STUDIO_PROJECT_SCHEMA_VERSION_V4 = 7 as const;
-export const STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V4 = 7 as const;
 export const STUDIO_MAX_BOARDS_V4 = 24;
 export const STUDIO_MAX_ASSEMBLIES_V4 = 24;
 export const STUDIO_MAX_BEATS_PER_BOARD_V4 = 24;
@@ -3460,12 +4026,13 @@ export const STUDIO_MAX_SHOTS_PER_BOARD_V4 = 96;
 export const STUDIO_MAX_SOUND_BINDINGS_PER_ASSEMBLY_V4 = 96;
 /** A Bin may quiet terminal history, never paid or unresolved work that still needs attention. */
 export const STUDIO_BIN_BLOCKING_JOB_STATUSES_V4 = [
+  'waiting_for_conditioning',
   'queued_local',
   'submitting',
   'queued_remote',
   'running',
   'needs_attention',
-] as const satisfies readonly StudioJobStatus[];
+] as const satisfies readonly StudioPieceJobV4['status'][];
 /** The widest lift request selects every Piece, Assembly, and individual Board Shot. */
 export const STUDIO_MAX_BIN_LIFT_SUBJECTS_V4 =
   STUDIO_MAX_PIECES_V3 + STUDIO_MAX_ASSEMBLIES_V4 + STUDIO_MAX_BOARDS_V4 * STUDIO_MAX_SHOTS_PER_BOARD_V4;
@@ -3492,6 +4059,23 @@ export type StudioCanvasMemberStatusV4 = (typeof STUDIO_CANVAS_MEMBER_STATUSES_V
 export const STUDIO_CANVAS_BLOCK_KINDS_V4 = ['stills', 'motion', 'document', 'board', 'sound', 'cut'] as const;
 export type StudioCanvasBlockKindV4 = (typeof STUDIO_CANVAS_BLOCK_KINDS_V4)[number];
 
+/** Exhaustive block-level vocabulary; the per-kind matrix below is the legality authority. */
+export const STUDIO_CANVAS_BLOCK_STATUSES_V4 = [
+  'needs_budget',
+  'proposed',
+  'partial',
+  'drafted',
+  'rendered',
+  'imported',
+  'current',
+  'stale',
+  'failed',
+  'queued',
+  'generating',
+  'rendering',
+] as const;
+export type StudioCanvasBlockStatusV4 = (typeof STUDIO_CANVAS_BLOCK_STATUSES_V4)[number];
+
 export const STUDIO_STILLS_BLOCK_STATUSES_V4 = [
   'imported',
   'needs_budget',
@@ -3502,19 +4086,34 @@ export const STUDIO_STILLS_BLOCK_STATUSES_V4 = [
   'partial',
   'failed',
   'stale',
-] as const;
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioStillsBlockStatusV4 = (typeof STUDIO_STILLS_BLOCK_STATUSES_V4)[number];
 
 export const STUDIO_MOTION_BLOCK_STATUSES_V4 = STUDIO_STILLS_BLOCK_STATUSES_V4;
 export type StudioMotionBlockStatusV4 = (typeof STUDIO_MOTION_BLOCK_STATUSES_V4)[number];
 
-export const STUDIO_DOCUMENT_BLOCK_STATUSES_V4 = ['drafted', 'current', 'proposed'] as const;
+export const STUDIO_DOCUMENT_BLOCK_STATUSES_V4 = [
+  'drafted',
+  'current',
+  'proposed',
+  'generating',
+  'failed',
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioDocumentBlockStatusV4 = (typeof STUDIO_DOCUMENT_BLOCK_STATUSES_V4)[number];
 
-export const STUDIO_BOARD_BLOCK_STATUSES_V4 = ['needs_budget', 'proposed', 'generating', 'partial'] as const;
+export const STUDIO_BOARD_BLOCK_STATUSES_V4 = [
+  'needs_budget',
+  'proposed',
+  'queued',
+  'generating',
+  'partial',
+  'stale',
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioBoardBlockStatusV4 = (typeof STUDIO_BOARD_BLOCK_STATUSES_V4)[number];
 
-export const STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4 = ['imported'] as const;
+export const STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4 = [
+  'imported',
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioImportedSoundBlockStatusV4 = (typeof STUDIO_IMPORTED_SOUND_BLOCK_STATUSES_V4)[number];
 
 export const STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4 = [
@@ -3525,7 +4124,7 @@ export const STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4 = [
   'rendered',
   'stale',
   'failed',
-] as const;
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioGeneratedSoundBlockStatusV4 = (typeof STUDIO_GENERATED_SOUND_BLOCK_STATUSES_V4)[number];
 export type StudioSoundBlockStatusV4 = StudioImportedSoundBlockStatusV4 | StudioGeneratedSoundBlockStatusV4;
 
@@ -3537,16 +4136,8 @@ export const STUDIO_CUT_BLOCK_STATUSES_V4 = [
   'partial',
   'stale',
   'failed',
-] as const;
+] as const satisfies readonly StudioCanvasBlockStatusV4[];
 export type StudioCutBlockStatusV4 = (typeof STUDIO_CUT_BLOCK_STATUSES_V4)[number];
-
-export type StudioCanvasBlockStatusV4 =
-  | StudioStillsBlockStatusV4
-  | StudioMotionBlockStatusV4
-  | StudioDocumentBlockStatusV4
-  | StudioBoardBlockStatusV4
-  | StudioSoundBlockStatusV4
-  | StudioCutBlockStatusV4;
 
 /** Runtime legality matrix shared by Main projection and renderer presentation; no UI may widen it. */
 export const STUDIO_CANVAS_BLOCK_STATUS_MATRIX_V4 = {
@@ -3699,12 +4290,20 @@ export type StudioCanvasBinEntryV4 = {
 };
 
 /**
- * Wave-1 schema-7 envelope. Job/media contracts remain schema-6 shapes while Piece run lineage,
- * Assembly, ordering, and recoverable presentation contracts are made explicit.
+ * Wave-1 schema-7 envelope. Composition protocol 4, publication, and paid-attempt authority use
+ * their exact schema-7 shapes without compatibility fields.
  */
-export type StudioProjectV4 = Omit<StudioProjectV3, 'schemaVersion' | 'pieces'> & {
+export type StudioProjectV4 = Omit<
+  StudioProjectV3,
+  'schemaVersion' | 'pieces' | 'spendAuthorizations' | 'assets' | 'jobs'
+> & {
   schemaVersion: typeof STUDIO_PROJECT_SCHEMA_VERSION_V4;
   pieces: Record<string, StudioPieceV4>;
+  spendAuthorizations: StudioPieceSpendAuthorizationV4[];
+  assets: Record<string, StudioAssetV4>;
+  frameExtractions: Record<string, StudioFrameExtractionV4>;
+  derivedFrames: Record<string, StudioDerivedFrameAssetV4>;
+  jobs: Record<string, StudioPieceJobV4>;
   boardOrder: string[];
   boards: Record<string, StudioBoardV2>;
   assemblyOrder: string[];
@@ -3844,6 +4443,65 @@ export type StudioBoardDraftBeatV4 = {
   targetSeconds: number | null;
   shots: StudioBoardDraftShotV4[];
 };
+
+/** Renderer-safe authored Shot facts for a proposed future Board; no durable member id crosses. */
+export type StudioRendererBoardProposalShotV4 = {
+  shootingScript: string;
+  durationSeconds: number;
+};
+
+/** Renderer-safe authored Beat facts for a proposed future Board; order is array order. */
+export type StudioRendererBoardProposalBeatV4 = {
+  title: string;
+  story: string;
+  targetSeconds: number | null;
+  shots: StudioRendererBoardProposalShotV4[];
+};
+
+/** Concise human-visible effect of accepting one create-Board proposal. */
+export type StudioBoardProposalEffectV4 = {
+  kind: 'create_board';
+  boardId: string;
+  handle: string;
+  beatCount: number;
+  shotCount: number;
+  durationSeconds: number;
+};
+
+/** Exact review projection of one pending create-Board proposal. */
+export type StudioRendererBoardProposalV4 = {
+  proposalId: string;
+  kind: 'board';
+  status: 'proposed';
+  boardId: string;
+  handle: string;
+  beats: StudioRendererBoardProposalBeatV4[];
+  beatCount: number;
+  shotCount: number;
+  durationSeconds: number;
+  createdAt: string;
+  expiresAt: string;
+};
+
+export type StudioBoardProposalReviewV4 =
+  | { status: 'ready'; proposal: StudioRendererBoardProposalV4 }
+  | { status: 'stale_authoring'; proposal: StudioRendererBoardProposalV4 }
+  | { status: 'unavailable' };
+
+/** Human renderer decisions carry correlation only; Main owns every revision and identity fence. */
+export type StudioProposalDecisionRequestV4 = {
+  projectId: string;
+  proposalId: string;
+};
+
+/** `accepted` is the first successful commit; every other arm is idempotent or fail-closed. */
+export type StudioProposalDecisionResultV4 =
+  | { status: 'accepted'; effect: StudioBoardProposalEffectV4 }
+  | { status: 'already_accepted'; decidedAt: string; appliedRevision: number }
+  | { status: 'rejected' }
+  | { status: 'expired' }
+  | { status: 'unknown' }
+  | { status: 'stale_authoring' };
 
 /** Proposal payload contains authored facts only; Main owns every durable identity. */
 export type StudioCreateBoardRequestV4 = {

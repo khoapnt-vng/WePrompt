@@ -6,8 +6,9 @@
  * @vitest-environment node
  */
 
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { StudioCanvasBinSubjectV4 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioCanvasBinSubjectV4, StudioProjectV4 } from '@/common/types/project/creativeStudioTypes';
 import {
   deriveStudioBinEligibilityEvidenceV4,
   type StudioActiveProposalAuthorityV4,
@@ -16,21 +17,26 @@ import {
 import { liftStudioCanvasSubjectsToBinV4 } from '@/process/services/creative-studio/service/schema2/mutations/presentationV4';
 import {
   STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+  deriveStudioProposalExpiresAtV4,
+  deriveStudioProposalIdV4,
   type StudioProposalRecordV4,
 } from '@/process/services/creative-studio/service/schema2/proposals/proposalContractsV4';
 import { makePhase6Project } from '../../../../../../fixtures/creative-studio/phase6Project';
 
 const capturedAt = '2026-09-02T00:00:03.000Z';
 const proposalCreatedAt = '2026-09-02T00:00:02.500Z';
-const proposalReservedAt = '2026-09-02T00:00:02.250Z';
+const proposalReservedAt = proposalCreatedAt;
 const quoteExpiresAt = '2026-09-02T01:00:00.000Z';
+const proposalCommandId = 'command_future';
+const proposalId = deriveStudioProposalIdV4('project_7', proposalCommandId);
 
 const proposalRecord = (): StudioProposalRecordV4 => ({
   schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
-  id: 'proposal_1',
+  id: proposalId,
   projectId: 'project_7',
   status: 'pending',
   baseAuthoringRevision: 2,
+  source: { kind: 'director_command', commandId: proposalCommandId, commandSha256: 'a'.repeat(64) },
   target: { kind: 'board', boardId: 'board_future' },
   issuedMemberIds: { beatIds: ['beat_future'], shotIds: ['shot_future'] },
   payload: {
@@ -46,19 +52,23 @@ const proposalRecord = (): StudioProposalRecordV4 => ({
     ],
   },
   createdAt: proposalCreatedAt,
+  expiresAt: deriveStudioProposalExpiresAtV4(proposalCreatedAt),
   decidedAt: null,
 });
 
-const activeProposal = (): StudioActiveProposalAuthorityV4 => ({
-  proposalId: 'proposal_1',
-  slot: {
-    schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
-    proposalId: 'proposal_1',
-    projectId: 'project_7',
-    reservedAt: proposalReservedAt,
-  },
-  record: proposalRecord(),
-});
+const activeProposal = (): StudioActiveProposalAuthorityV4 => {
+  const record = proposalRecord();
+  return {
+    proposalId,
+    current: {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V4,
+      proposalId,
+      payloadSha256: createHash('sha256').update(JSON.stringify(record)).digest('hex'),
+      admittedAt: proposalReservedAt,
+      proposal: record,
+    },
+  };
+};
 
 const photoQuote = (overrides: Partial<StudioActivePhotoQuoteAuthorityV4> = {}): StudioActivePhotoQuoteAuthorityV4 => ({
   reservationId: 'reservation_1',
@@ -66,6 +76,7 @@ const photoQuote = (overrides: Partial<StudioActivePhotoQuoteAuthorityV4> = {}):
   quoteId: 'quote_1',
   quoteRevision: 1,
   targetPieceId: 'piece_photo_1',
+  referencePieceIds: [],
   jobId: 'job_future_1',
   authorizationId: 'authorization_future_1',
   authorizationItemId: 'item_future_1',
@@ -74,6 +85,26 @@ const photoQuote = (overrides: Partial<StudioActivePhotoQuoteAuthorityV4> = {}):
   mode: 'retry',
   ...overrides,
 });
+
+const addImportedPhotoPiece = (project: StudioProjectV4, suffix: number): string => {
+  const pieceId = `piece_photo_${suffix}`;
+  const assetId = `asset_photo_${suffix}`;
+  project.pieceOrder.push(pieceId);
+  project.pieces[pieceId] = {
+    ...structuredClone(project.pieces.piece_photo_1!),
+    id: pieceId,
+    handle: `photo_${suffix}`,
+    currentAssetId: assetId,
+  };
+  project.assets[assetId] = {
+    ...structuredClone(project.assets.asset_photo_1!),
+    id: assetId,
+    pieceId,
+    managedAsset: { collection: 'imports', fileName: `${assetId}.png` },
+    sha256: String(suffix).repeat(64),
+  };
+  return pieceId;
+};
 
 const derive = (overrides: Partial<Parameters<typeof deriveStudioBinEligibilityEvidenceV4>[0]> = {}) => {
   const project = makePhase6Project();
@@ -191,26 +222,80 @@ describe('schema-7 Main Bin eligibility authority', () => {
     ]);
   });
 
+  it.each([
+    { mode: 'create' as const, targetPieceId: 'piece_future' },
+    { mode: 'retry' as const, targetPieceId: 'piece_photo_1' },
+  ])('marks a $mode quote conditioning reference as quote-pending while unrelated Pieces stay clear', (quote) => {
+    const project = makePhase6Project();
+    const referencePieceId = addImportedPhotoPiece(project, 2);
+    const unrelatedPieceId = addImportedPhotoPiece(project, 3);
+    const authority = photoQuote({ ...quote, referencePieceIds: [referencePieceId] });
+    const subjects: StudioCanvasBinSubjectV4[] = [
+      { kind: 'piece', pieceId: referencePieceId },
+      { kind: 'piece', pieceId: unrelatedPieceId },
+    ];
+    const result = deriveStudioBinEligibilityEvidenceV4({
+      project,
+      subjects,
+      entryIds: ['bin_reference', 'bin_unrelated'],
+      activeProposal: null,
+      activePhotoQuotes: [authority],
+      capturedAt,
+    });
+
+    expect(result.status).toBe('valid');
+    if (result.status !== 'valid') return;
+    expect(result.evidence.decisions).toEqual([
+      { subject: subjects[0], state: 'needs_budget' },
+      { subject: subjects[1], state: 'clear' },
+    ]);
+
+    const referenceOnly = deriveStudioBinEligibilityEvidenceV4({
+      project,
+      subjects: [subjects[0]],
+      entryIds: ['bin_reference'],
+      activeProposal: null,
+      activePhotoQuotes: [authority],
+      capturedAt,
+    });
+    expect(referenceOnly.status).toBe('valid');
+    if (referenceOnly.status !== 'valid') return;
+    expect(
+      liftStudioCanvasSubjectsToBinV4(
+        project,
+        { projectId: project.id, expectedRevision: project.revision, subjects: [subjects[0]] },
+        referenceOnly.evidence
+      )
+    ).toEqual({ status: 'refused', reason: 'quote_pending' });
+    expect(project.bin).toEqual([]);
+  });
+
   it('fails closed for an uncorrelated, future, or chronologically impossible proposal authority', () => {
     const wrongSlot = activeProposal();
-    wrongSlot.slot.proposalId = 'proposal_other';
+    wrongSlot.current.proposalId = 'proposal_other';
     expect(derive({ activeProposal: wrongSlot })).toEqual({ status: 'invalid_authority' });
 
     const futureRevision = activeProposal();
-    futureRevision.record.baseAuthoringRevision = 3;
+    futureRevision.current.proposal.baseAuthoringRevision = 3;
     expect(derive({ activeProposal: futureRevision })).toEqual({ status: 'invalid_authority' });
 
     const lateSlot = activeProposal();
-    lateSlot.slot.reservedAt = capturedAt;
+    lateSlot.current.admittedAt = capturedAt;
     expect(derive({ activeProposal: lateSlot })).toEqual({ status: 'invalid_authority' });
 
     const preProjectSlot = activeProposal();
-    preProjectSlot.slot.reservedAt = '2026-09-01T23:59:59.999Z';
+    preProjectSlot.current.admittedAt = '2026-09-01T23:59:59.999Z';
     expect(derive({ activeProposal: preProjectSlot })).toEqual({ status: 'invalid_authority' });
 
     const futureRecord = activeProposal();
-    futureRecord.record.createdAt = quoteExpiresAt;
+    futureRecord.current.proposal.createdAt = quoteExpiresAt;
     expect(derive({ activeProposal: futureRecord })).toEqual({ status: 'invalid_authority' });
+
+    const expired = activeProposal();
+    expired.current.proposal.createdAt = '2026-08-25T00:00:00.000Z';
+    expired.current.proposal.expiresAt = deriveStudioProposalExpiresAtV4(expired.current.proposal.createdAt);
+    expired.current.admittedAt = expired.current.proposal.createdAt;
+    expect(derive({ activeProposal: expired })).toEqual({ status: 'invalid_authority' });
   });
 
   it('fails closed for foreign, expired, malformed, or duplicate active quote targets', () => {
@@ -223,9 +308,71 @@ describe('schema-7 Main Bin eligibility authority', () => {
     expect(derive({ activePhotoQuotes: [photoQuote({ targetPieceId: 'piece:unsafe' })] })).toEqual({
       status: 'invalid_authority',
     });
+    expect(derive({ activePhotoQuotes: [photoQuote({ referencePieceIds: ['piece_missing'] })] })).toEqual({
+      status: 'invalid_authority',
+    });
+    expect(
+      derive({ activePhotoQuotes: [photoQuote({ referencePieceIds: ['piece_photo_1', 'piece_photo_1'] })] })
+    ).toEqual({ status: 'invalid_authority' });
+    expect(
+      derive({
+        activePhotoQuotes: [photoQuote({ referencePieceIds: ['piece_photo_2', 'piece_photo_3', 'piece_photo_4'] })],
+      })
+    ).toEqual({ status: 'invalid_authority' });
+    expect(derive({ activePhotoQuotes: [photoQuote({ referencePieceIds: ['piece_photo_1'] })] })).toEqual({
+      status: 'invalid_authority',
+    });
     expect(
       derive({
         activePhotoQuotes: [photoQuote(), photoQuote({ reservationId: 'reservation_2', quoteId: 'quote_2' })],
+      })
+    ).toEqual({ status: 'invalid_authority' });
+  });
+
+  it('rejects active quote authority that targets or conditions on an already binned Piece', () => {
+    const project = makePhase6Project();
+    const binnedPieceId = addImportedPhotoPiece(project, 2);
+    const clearEvidence = deriveStudioBinEligibilityEvidenceV4({
+      project,
+      subjects: [{ kind: 'piece', pieceId: binnedPieceId }],
+      entryIds: ['bin_existing'],
+      activeProposal: null,
+      activePhotoQuotes: [],
+      capturedAt,
+    });
+    expect(clearEvidence.status).toBe('valid');
+    if (clearEvidence.status !== 'valid') return;
+    const lifted = liftStudioCanvasSubjectsToBinV4(
+      project,
+      {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        subjects: [{ kind: 'piece', pieceId: binnedPieceId }],
+      },
+      clearEvidence.evidence
+    );
+    expect(lifted.status).toBe('applied');
+    if (lifted.status !== 'applied') return;
+
+    const base = {
+      project: lifted.project,
+      subjects: [{ kind: 'board', boardId: 'board_1' }],
+      entryIds: ['bin_board'],
+      activeProposal: null,
+      capturedAt,
+    };
+    expect(
+      deriveStudioBinEligibilityEvidenceV4({
+        ...base,
+        activePhotoQuotes: [photoQuote({ mode: 'retry', targetPieceId: binnedPieceId })],
+      })
+    ).toEqual({ status: 'invalid_authority' });
+    expect(
+      deriveStudioBinEligibilityEvidenceV4({
+        ...base,
+        activePhotoQuotes: [
+          photoQuote({ mode: 'create', targetPieceId: 'piece_future', referencePieceIds: [binnedPieceId] }),
+        ],
       })
     ).toEqual({ status: 'invalid_authority' });
   });
@@ -309,7 +456,7 @@ describe('schema-7 Main Bin eligibility authority', () => {
       expect(derive({ subjects: subject, entryIds: [entryId] }), entryId).toEqual({ status: 'invalid_authority' });
     }
 
-    for (const entryId of ['proposal_1', 'board_future', 'beat_future', 'shot_future']) {
+    for (const entryId of [proposalId, 'board_future', 'beat_future', 'shot_future']) {
       expect(derive({ subjects: subject, entryIds: [entryId], activeProposal: activeProposal() }), entryId).toEqual({
         status: 'invalid_authority',
       });
@@ -333,7 +480,7 @@ describe('schema-7 Main Bin eligibility authority', () => {
         subjects: subject,
         entryIds: ['bin_1'],
         activeProposal: activeProposal(),
-        activePhotoQuotes: [photoQuote({ jobId: 'proposal_1' })],
+        activePhotoQuotes: [photoQuote({ jobId: proposalId })],
       })
     ).toEqual({ status: 'invalid_authority' });
   });

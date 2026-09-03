@@ -17,8 +17,24 @@ const authorityFixture = (): StudioProjectV4 =>
   ({
     id: 'project_7',
     rules: [{ id: 'rule_1' }],
-    pieces: { piece_1: { handle: 'piece_now', priorHandles: ['piece_before'] } },
+    pieces: {
+      piece_1: {
+        handle: 'piece_now',
+        priorHandles: ['piece_before'],
+        assetHistory: [
+          {
+            state: 'evicted',
+            assetsByRole: {
+              primary: { id: 'asset_tombstone_primary' },
+              poster: { id: 'asset_tombstone_poster' },
+            },
+          },
+        ],
+      },
+    },
     assets: { asset_1: {} },
+    frameExtractions: { frame_extraction_1: {} },
+    derivedFrames: { derived_frame_1: {} },
     jobs: { job_1: {} },
     undoHistory: [{ id: 'undo_1' }],
     bin: [{ id: 'bin_1' }],
@@ -60,6 +76,10 @@ describe('schema-7 shared project authority', () => {
         'rule_1',
         'piece_1',
         'asset_1',
+        'asset_tombstone_primary',
+        'asset_tombstone_poster',
+        'frame_extraction_1',
+        'derived_frame_1',
         'job_1',
         'undo_1',
         'bin_1',

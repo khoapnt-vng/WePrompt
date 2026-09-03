@@ -22,14 +22,17 @@ import {
   buildStudioPieceExportManifestV3,
   parseStudioPieceExportManifestV3,
 } from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV3';
+import { parseStudioPieceExportManifestV4 } from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV4';
 import {
   createStudioPieceExportRuntimeV3,
   createStudioPieceExportRuntimeV4,
   retainStudioPieceExportArtifactsV3,
   type StudioPieceExportProjectStoreV4,
   type StudioPieceExportRuntimeDepsV3,
+  type StudioPieceExportRuntimeDepsV4,
   type StudioPieceExportRuntimeStepV3,
 } from '@/process/services/creative-studio/service/pilot/runtime/export';
+import { CreativeStudioPilotStoreErrorV4 } from '@/process/services/creative-studio/store/pilot/v4';
 import { validateStudioProjectV4 } from '@/process/services/creative-studio/service/schema2/validation';
 import { makePhase6Project, PHASE_6_CURRENT_AT } from '../../../../fixtures/creative-studio/phase6Project';
 import { createPilotPhotoFixtureV3, type PilotPhotoFixtureV3, type PilotPhotoFixtureOptionsV3 } from './realFixture';
@@ -742,60 +745,133 @@ describe('schema-6 standalone Piece export runtime', () => {
     expect(recovered.artifacts).toHaveLength(expectedArtifacts);
     expect(await restarted.list(harness.project.id)).toEqual(recovered);
   });
+
+  it('leaves export-4 publication names untouched during export-3 recovery', async () => {
+    const harness = await importedHarness();
+    const runtime = harness.createRuntime();
+    const created = await runtime.create(exportRequest(harness));
+    const exportsRoot = exportsDirectory(harness.root, harness.project.id);
+    const foreignNames = ['v4-piece-export_1', '.v4-stage-export_1-foreign_nonce'];
+    await Promise.all(foreignNames.map((name) => mkdir(path.join(exportsRoot, name))));
+    const foreignMarker = '.v4-pending-export_1.json';
+    await writeFile(path.join(exportsRoot, foreignMarker), '{}', 'utf8');
+
+    await expect(runtime.recover(harness.project.id)).resolves.toEqual(created.catalog);
+    const remaining = await readdir(exportsRoot);
+    expect(remaining).toEqual(expect.arrayContaining([...foreignNames, foreignMarker]));
+  });
 });
 
-describe('schema-7 standalone Piece export runtime seam', () => {
-  it('uses the exact schema-7 reader and rejects every occupied canvas identity before publishing', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'weprompt-schema-7-export-'));
-    temporaryRoots.push(root);
-    const projectDirPath = path.join(root, 'project');
-    await mkdir(projectDirPath);
-    const projectDir = await realpath(projectDirPath);
-    const sourceBytes = await makePng(70);
-    const sourcePath = path.join(root, 'source.png');
-    await writeFile(sourcePath, sourceBytes);
+const schemaSevenHarness = async (
+  configure: (project: StudioProjectV4) => void = () => undefined
+): Promise<{
+  project: StudioProjectV4;
+  projectDir: string;
+  sourceBytes: Buffer;
+  sourcePath: string;
+  media: StudioPieceExportRuntimeDepsV4['media'];
+  createRuntime(
+    overrides?: Partial<StudioPieceExportRuntimeDepsV4>
+  ): ReturnType<typeof createStudioPieceExportRuntimeV4>;
+}> => {
+  const root = await mkdtemp(path.join(tmpdir(), 'weprompt-schema-7-export-'));
+  temporaryRoots.push(root);
+  const projectDirPath = path.join(root, 'project');
+  await mkdir(projectDirPath);
+  const projectDir = await realpath(projectDirPath);
+  const sourceBytes = await makePng(70);
+  const sourcePath = path.join(root, 'source.png');
+  await writeFile(sourcePath, sourceBytes);
 
-    const project: StudioProjectV4 = makePhase6Project();
-    const asset = project.assets.asset_photo_1!;
-    asset.sha256 = createHash('sha256').update(sourceBytes).digest('hex');
-    asset.byteSize = sourceBytes.byteLength;
-    asset.width = 32;
-    asset.height = 24;
-    project.bin = [
-      {
-        id: 'bin_entry_1',
-        subject: { kind: 'assembly', assemblyId: 'assembly_1' },
-        reason: 'lifted',
-        liftedAt: PHASE_6_CURRENT_AT,
-      },
-    ];
-    expect(validateStudioProjectV4(project)).toBe(true);
+  const project = makePhase6Project();
+  const asset = project.assets.asset_photo_1!;
+  asset.sha256 = createHash('sha256').update(sourceBytes).digest('hex');
+  asset.byteSize = sourceBytes.byteLength;
+  asset.width = 32;
+  asset.height = 24;
+  configure(project);
+  expect(validateStudioProjectV4(project)).toBe(true);
 
-    const store: StudioPieceExportProjectStoreV4 = {
-      async loadProjectV4(projectId) {
-        if (projectId !== project.id) throw new Error('not found');
-        return structuredClone(project);
-      },
-      async withProjectAuthorityV4(projectId, operation) {
-        if (projectId !== project.id) throw new Error('not found');
-        return operation({
-          project: structuredClone(project),
-          projectDir,
-          assertCurrent: async () => undefined,
-        });
-      },
-    };
-    const candidates = [project.id, 'board_1', 'beat_1', 'shot_1', 'assembly_1', 'bin_entry_1', 'export_schema_7'];
-    const createExportId = vi.fn(() => candidates.shift() ?? 'export_fallback');
-    const media = {
-      verifyManagedAssetV3: vi.fn(async () => ({ asset: structuredClone(asset), absolutePath: sourcePath })),
-    };
-    const runtime = createStudioPieceExportRuntimeV4({
+  const store: StudioPieceExportProjectStoreV4 = {
+    async loadProjectV4(projectId) {
+      if (projectId !== project.id) throw new Error('not found');
+      return structuredClone(project);
+    },
+    async withProjectAuthorityV4(projectId, operation) {
+      if (projectId !== project.id) throw new Error('not found');
+      return operation({
+        project: structuredClone(project),
+        projectDir,
+        assertCurrent: async () => undefined,
+      });
+    },
+  };
+  const media = {
+    verifyManagedAssetV4: vi.fn(async () => ({ asset: structuredClone(asset), absolutePath: sourcePath })),
+  };
+  let nonce = 0;
+  const createRuntime = (overrides: Partial<StudioPieceExportRuntimeDepsV4> = {}) =>
+    createStudioPieceExportRuntimeV4({
       store,
       media,
       now: () => PHASE_6_EXPORT_TIME,
+      createExportId: () => 'export_schema_7',
+      createNonce: () => `schema7_nonce_${++nonce}`,
+      ...overrides,
+    });
+  return { project, projectDir, sourceBytes, sourcePath, media, createRuntime };
+};
+
+describe('schema-7 standalone Piece export-4 runtime', () => {
+  it('rejects a binned Piece before media verification or export publication', async () => {
+    const harness = await schemaSevenHarness((project) => {
+      project.assemblyOrder = [];
+      project.assemblies = {};
+      project.bin = [
+        {
+          id: 'bin_piece_photo_1',
+          subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+          reason: 'lifted',
+          liftedAt: PHASE_6_CURRENT_AT,
+        },
+      ];
+    });
+    const onStep = vi.fn();
+    const createExportId = vi.fn(() => 'export_must_not_be_minted');
+    const runtime = harness.createRuntime({ onStep, createExportId });
+    const request = {
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+    };
+
+    await expect(runtime.describe(request)).rejects.toMatchObject({ code: 'export_unavailable' });
+    await expect(runtime.create({ ...request, expectedCatalogRevision: 1 })).rejects.toMatchObject({
+      code: 'export_unavailable',
+    });
+
+    expect(harness.media.verifyManagedAssetV4).not.toHaveBeenCalled();
+    expect(createExportId).not.toHaveBeenCalled();
+    expect(onStep).not.toHaveBeenCalled();
+    await expect(readdir(path.join(harness.projectDir, 'exports'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('uses the exact schema-7 reader and rejects every occupied canvas identity before publishing', async () => {
+    const harness = await schemaSevenHarness((project) => {
+      project.bin = [
+        {
+          id: 'bin_entry_1',
+          subject: { kind: 'assembly', assemblyId: 'assembly_1' },
+          reason: 'lifted',
+          liftedAt: PHASE_6_CURRENT_AT,
+        },
+      ];
+    });
+    const { project, projectDir, media } = harness;
+    const candidates = [project.id, 'board_1', 'beat_1', 'shot_1', 'assembly_1', 'bin_entry_1', 'export_schema_7'];
+    const createExportId = vi.fn(() => candidates.shift() ?? 'export_fallback');
+    const runtime = harness.createRuntime({
       createExportId,
-      createNonce: () => 'schema7_nonce',
     });
 
     const result = await runtime.create({
@@ -809,13 +885,13 @@ describe('schema-7 standalone Piece export runtime seam', () => {
       catalog: { revision: 2, artifacts: [{ id: 'export_schema_7', pieceId: 'piece_photo_1' }] },
     });
     expect(createExportId).toHaveBeenCalledTimes(7);
-    expect(media.verifyManagedAssetV3).toHaveBeenCalledOnce();
+    expect(media.verifyManagedAssetV4).toHaveBeenCalledOnce();
 
-    const manifest = parseStudioPieceExportManifestV3(
-      await readFile(path.join(projectDir, 'exports', 'piece-export_schema_7', 'manifest.json'))
+    const manifest = parseStudioPieceExportManifestV4(
+      await readFile(path.join(projectDir, 'exports', 'v4-piece-export_schema_7', 'manifest.json'))
     );
     expect(manifest).toMatchObject({
-      schemaVersion: 3,
+      schemaVersion: 4,
       projectId: project.id,
       sourceRevision: project.revision,
       piece: { id: 'piece_photo_1', handleAtExport: 'harbour_morning' },
@@ -823,5 +899,183 @@ describe('schema-7 standalone Piece export runtime seam', () => {
     });
     expect(project.spendAuthorizations).toEqual([]);
     expect(project.jobs).toEqual({});
+    expect(JSON.parse(await readFile(path.join(projectDir, 'exports', 'catalog-v4.json'), 'utf8'))).toMatchObject({
+      schemaVersion: 4,
+      projectId: project.id,
+      revision: 2,
+    });
+    await expect(readFile(path.join(projectDir, 'exports', 'catalog-v3.json'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('persists export-4 recovery markers and recovers them only into catalog-v4', async () => {
+    const harness = await schemaSevenHarness();
+    const request = {
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+      expectedCatalogRevision: 1,
+    };
+    const crashing = harness.createRuntime({
+      onStep: (step) => {
+        if (step === 'intent_committed') throw new Error('crash:intent_committed');
+      },
+    });
+    await expect(crashing.create(request)).rejects.toMatchObject({ code: 'storage_error' });
+
+    const exportsRoot = path.join(harness.projectDir, 'exports');
+    const markerName = (await readdir(exportsRoot)).find((name) => name.startsWith('.v4-pending-'));
+    expect(markerName).toBeDefined();
+    expect(JSON.parse(await readFile(path.join(exportsRoot, markerName!), 'utf8'))).toMatchObject({
+      schemaVersion: 4,
+      projectId: harness.project.id,
+      exportId: 'export_schema_7',
+    });
+
+    const recovered = await harness.createRuntime().recover(harness.project.id);
+    expect(recovered).toMatchObject({ revision: 2, artifacts: [{ id: 'export_schema_7' }] });
+    expect(JSON.parse(await readFile(path.join(exportsRoot, 'catalog-v4.json'), 'utf8'))).toMatchObject({
+      schemaVersion: 4,
+      artifacts: [{ schemaVersion: 4, id: 'export_schema_7' }],
+    });
+    await expect(readFile(path.join(exportsRoot, 'catalog-v3.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('persists export-4 copy intents and resumes exact native publication after interruption', async () => {
+    const harness = await schemaSevenHarness();
+    const runtime = harness.createRuntime();
+    const created = await runtime.create({
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+      expectedCatalogRevision: 1,
+    });
+    const artifact = created.catalog.artifacts[0]!;
+    const selection = {
+      projectId: harness.project.id,
+      expectedCatalogRevision: created.catalog.revision,
+      artifactId: artifact.id,
+    };
+    const destinationParent = path.dirname(harness.projectDir);
+    const destination = path.join(destinationParent, 'schema-7-delivery');
+    const crashing = harness.createRuntime({
+      onStep: (step) => {
+        if (step === 'copy_intent_committed') throw new Error('crash:copy_intent_committed');
+      },
+    });
+    await expect(crashing.copy(selection, destination)).rejects.toMatchObject({ code: 'storage_error' });
+
+    const intentName = (await readdir(destinationParent)).find((name) => name.endsWith('.intent.json'));
+    expect(intentName).toBeDefined();
+    expect(JSON.parse(await readFile(path.join(destinationParent, intentName!), 'utf8'))).toMatchObject({
+      schemaVersion: 4,
+      projectId: harness.project.id,
+      artifactId: artifact.id,
+      catalogRevision: created.catalog.revision,
+    });
+
+    await expect(harness.createRuntime().copy(selection, destination)).resolves.toEqual({ status: 'copied' });
+    expect(parseStudioPieceExportManifestV4(await readFile(path.join(destination, 'manifest.json')))).toMatchObject({
+      schemaVersion: 4,
+      projectId: harness.project.id,
+    });
+    await expect(readFile(path.join(destinationParent, intentName!))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('rejects an export-3 catalog presented at the export-4 path and rebuilds only from export-4 artifacts', async () => {
+    const harness = await schemaSevenHarness();
+    const runtime = harness.createRuntime();
+    await runtime.create({
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+      expectedCatalogRevision: 1,
+    });
+    const exportsRoot = path.join(harness.projectDir, 'exports');
+    const catalogPath = path.join(exportsRoot, 'catalog-v4.json');
+    const catalog = JSON.parse(await readFile(catalogPath, 'utf8')) as Record<string, unknown>;
+    await writeFile(catalogPath, JSON.stringify({ ...catalog, schemaVersion: 3 }), 'utf8');
+
+    const recovered = await runtime.recover(harness.project.id);
+    expect(recovered).toMatchObject({ revision: 1, artifacts: [{ id: 'export_schema_7' }] });
+    expect(JSON.parse(await readFile(catalogPath, 'utf8'))).toMatchObject({
+      schemaVersion: 4,
+      artifacts: [{ schemaVersion: 4 }],
+    });
+    const quarantine = await readdir(path.join(exportsRoot, 'quarantine'));
+    expect(quarantine.some((name) => name.startsWith('quarantine-'))).toBe(true);
+  });
+
+  it('keeps the export-3 recovery family isolated when both protocols use the same export id', async () => {
+    const harness = await schemaSevenHarness();
+    const runtime = harness.createRuntime();
+    const created = await runtime.create({
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+      expectedCatalogRevision: 1,
+    });
+    const exportsRoot = path.join(harness.projectDir, 'exports');
+    const foreignNames = ['piece-export_schema_7', '.stage-export_schema_7-foreign_nonce'];
+    await Promise.all(foreignNames.map((name) => mkdir(path.join(exportsRoot, name))));
+    const foreignMarker = '.pending-export_schema_7.json';
+    await writeFile(path.join(exportsRoot, foreignMarker), '{}', 'utf8');
+
+    await expect(runtime.recover(harness.project.id)).resolves.toEqual(created.catalog);
+    const remaining = await readdir(exportsRoot);
+    expect(remaining).toEqual(expect.arrayContaining([...foreignNames, foreignMarker]));
+    expect(remaining).toContain('v4-piece-export_schema_7');
+  });
+
+  it('quarantines malformed names owned by export-4 without rejecting arbitrary source basenames', async () => {
+    const harness = await schemaSevenHarness();
+    const runtime = harness.createRuntime();
+    await runtime.create({
+      projectId: harness.project.id,
+      pieceId: 'piece_photo_1',
+      expectedRevision: harness.project.revision,
+      expectedCatalogRevision: 1,
+    });
+    const exportsRoot = path.join(harness.projectDir, 'exports');
+    const malformed = '.v4-pending-bad:name.json';
+    await writeFile(path.join(exportsRoot, malformed), '{}', 'utf8');
+
+    await expect(runtime.recover(harness.project.id)).resolves.toMatchObject({
+      artifacts: [{ id: 'export_schema_7' }],
+    });
+    expect(await readdir(exportsRoot)).not.toContain(malformed);
+    expect(await readdir(path.join(exportsRoot, 'quarantine'))).toContainEqual(expect.stringMatching(/^quarantine-/));
+  });
+
+  it.each([
+    ['invalid_payload', 'invalid_payload'],
+    ['not_found', 'not_found'],
+    ['stale_project', 'stale_project'],
+    ['unsupported', 'unsupported_project'],
+    ['quarantined', 'project_quarantined'],
+    ['already_exists', 'storage_error'],
+    ['busy', 'busy'],
+    ['storage_error', 'storage_error'],
+  ] as const)('normalizes schema-7 store %s as %s', async (storeCode, serviceCode) => {
+    const harness = await schemaSevenHarness();
+    const runtime = harness.createRuntime({
+      store: {
+        async loadProjectV4() {
+          throw new CreativeStudioPilotStoreErrorV4(storeCode);
+        },
+        async withProjectAuthorityV4() {
+          throw new CreativeStudioPilotStoreErrorV4(storeCode);
+        },
+      },
+    });
+
+    await expect(
+      runtime.describe({
+        projectId: harness.project.id,
+        pieceId: 'piece_photo_1',
+        expectedRevision: harness.project.revision,
+      })
+    ).rejects.toMatchObject({ code: serviceCode });
   });
 });

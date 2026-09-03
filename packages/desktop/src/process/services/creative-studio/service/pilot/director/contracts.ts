@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { createHash } from 'node:crypto';
 import { isDeepStrictEqual, types as nodeTypes } from 'node:util';
 import {
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION_V3,
@@ -19,18 +20,19 @@ import { isCanonicalStudioPieceHandleV3 } from '../../schema2/mutations/pieceHan
 import {
   deriveStudioProposalIdV4,
   parseStudioProposalRecordV4,
+  STUDIO_PROPOSAL_MAX_FUTURE_SKEW_MS_V4,
   STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4,
   type StudioProposalRecordV4,
 } from '../../schema2/proposals/proposalContractsV4';
 import { parseStudioApplyMutationBatchRequestV3, parseStudioPreparePhotoRequestV3 } from '../contracts';
 
-export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 13 as const;
+export const STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION = 14 as const;
 export const STUDIO_PILOT_DIRECTOR_COMMAND_MAX_BYTES = 64 * 1024;
 export const STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES = STUDIO_PROPOSAL_MAX_RECORD_BYTES_V4;
 export const STUDIO_PILOT_DIRECTOR_COMMAND_PHYSICAL_MAX_BYTES = STUDIO_PILOT_DIRECTOR_PROPOSE_BOARD_COMMAND_MAX_BYTES;
 export const STUDIO_PILOT_DIRECTOR_RECEIPT_MAX_BYTES = 1024 * 1024;
 export const STUDIO_PILOT_DIRECTOR_MAX_DEADLINE_MS = 5 * 60 * 1000;
-export const STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS = 30 * 1000;
+export const STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS = STUDIO_PROPOSAL_MAX_FUTURE_SKEW_MS_V4;
 export const STUDIO_PILOT_DIRECTOR_RECEIPT_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
 export const STUDIO_PILOT_DIRECTOR_MAX_RECEIPTS = 128;
 
@@ -112,16 +114,27 @@ export type StudioPilotDirectorSucceededReceipt =
       policy: 'propose_board';
       expectedAuthoringRevision: number;
       status: 'succeeded';
-      result: { status: 'recorded'; proposal: StudioProposalRecordV4 };
+      result:
+        | { status: 'recorded'; proposal: StudioProposalRecordV4 }
+        | {
+            status: 'accepted' | 'rejected' | 'expired';
+            proposalId: string;
+            decidedAt: string;
+            appliedRevision: number | null;
+          };
     });
 
 export type StudioPilotDirectorRejectedReason =
   | CreativeStudioPilotErrorCodeV3
   | 'result_mismatch'
   | 'operation_not_available'
+  | 'identity_collision'
   | 'proposal_pending'
   | 'proposal_too_large'
-  | 'board_capacity_reached';
+  | 'board_capacity_reached'
+  | 'handle_collision'
+  | 'history_capacity'
+  | 'corrupt_storage';
 
 export type StudioPilotDirectorRejectedReceipt = StudioPilotDirectorReceiptBase & {
   policy: StudioPilotDirectorPolicy;
@@ -237,9 +250,13 @@ const REJECTED_REASONS = new Set<StudioPilotDirectorRejectedReason>([
   'runtime_inactive',
   'result_mismatch',
   'operation_not_available',
+  'identity_collision',
   'proposal_pending',
   'proposal_too_large',
   'board_capacity_reached',
+  'handle_collision',
+  'history_capacity',
+  'corrupt_storage',
 ]);
 
 type PlainRecord = Record<string, unknown>;
@@ -263,6 +280,33 @@ export const serializeStudioPilotDirectorRecord = (value: unknown): string | nul
     return null;
   }
 };
+
+/** Stable content identity for a Board proposal command, independent of caller property order. */
+export const studioPilotDirectorProposeBoardCommandSha256 = (command: StudioPilotDirectorProposeBoardCommand): string =>
+  createHash('sha256')
+    .update(
+      JSON.stringify({
+        schemaVersion: command.schemaVersion,
+        commandId: command.commandId,
+        projectId: command.projectId,
+        createdAt: command.createdAt,
+        deadlineAt: command.deadlineAt,
+        policy: command.policy,
+        expectedAuthoringRevision: command.expectedAuthoringRevision,
+        handle: command.handle,
+        beats: command.beats.map((beat) => ({
+          title: beat.title,
+          story: beat.story,
+          targetSeconds: beat.targetSeconds,
+          shots: beat.shots.map((shot) => ({
+            shootingScript: shot.shootingScript,
+            durationSeconds: shot.durationSeconds,
+          })),
+        })),
+      }),
+      'utf8'
+    )
+    .digest('hex');
 
 const byteLengthWithin = (value: unknown, maximum: number): boolean => {
   const bytes = serializeStudioPilotDirectorRecord(value);
@@ -354,7 +398,7 @@ const validCommandBase = (snapshot: PlainRecord): boolean => {
   );
 };
 
-/** Parses the exact schema-13 Director surface; command status and proposal decisions are deliberately absent. */
+/** Parses the exact schema-14 Director command surface; command-status polling remains separate. */
 export const parseStudioPilotDirectorCommand = (value: unknown): StudioPilotDirectorCommandParseResult => {
   const envelope = commandEnvelope(value);
   if (envelope.schemaVersion !== STUDIO_PILOT_DIRECTOR_COMMAND_SCHEMA_VERSION) {
@@ -458,12 +502,29 @@ const isMutationResult = (value: unknown, projectId: string): value is StudioApp
 const isProposalResult = (
   value: unknown,
   projectId: string,
+  commandId: string,
   expectedAuthoringRevision: number,
   decidedAt: string,
   command?: StudioPilotDirectorProposeBoardCommand
-): value is { status: 'recorded'; proposal: StudioProposalRecordV4 } => {
+): value is Extract<StudioPilotDirectorSucceededReceipt, { policy: 'propose_board' }>['result'] => {
+  if (!isOwnJsonData(value) || typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const status = Reflect.get(value, 'status');
+  const expectedProposalId = deriveStudioProposalIdV4(projectId, commandId);
+  if (status === 'accepted' || status === 'rejected' || status === 'expired') {
+    const terminal = snapshotExactRecord(value, new Set(['status', 'proposalId', 'decidedAt', 'appliedRevision']));
+    if (
+      terminal === null ||
+      !isSafeId(terminal.proposalId) ||
+      studioPilotDirectorTimestampMs(terminal.decidedAt) === null ||
+      terminal.decidedAt !== decidedAt ||
+      (status === 'accepted' ? !isPositiveRevision(terminal.appliedRevision) : terminal.appliedRevision !== null)
+    ) {
+      return false;
+    }
+    return terminal.proposalId === expectedProposalId;
+  }
   const snapshot = snapshotExactRecord(value, new Set(['status', 'proposal']));
-  if (snapshot === null || snapshot.status !== 'recorded') return false;
+  if (snapshot === null || status !== 'recorded') return false;
   const proposal = snapshot.proposal;
   if (typeof proposal !== 'object' || proposal === null) return false;
   const proposalId = Reflect.get(proposal, 'id');
@@ -471,24 +532,29 @@ const isProposalResult = (
   const parsed = parseStudioProposalRecordV4({ projectId, proposalId, value: proposal });
   if (parsed.status !== 'valid') return false;
   const proposalCreatedAt = studioPilotDirectorTimestampMs(parsed.record.createdAt);
+  const proposalExpiresAt = studioPilotDirectorTimestampMs(parsed.record.expiresAt);
   const receiptDecidedAt = studioPilotDirectorTimestampMs(decidedAt);
   const commandCreatedAt = command === undefined ? null : studioPilotDirectorTimestampMs(command.createdAt);
+  const commandDeadlineAt = command === undefined ? null : studioPilotDirectorTimestampMs(command.deadlineAt);
   const commandBeats = command === undefined ? null : snapshotStudioBoardDraftBeatsV4(command.beats);
   const proposalBeats = snapshotStudioBoardDraftBeatsV4(parsed.record.payload.beats);
-  const commandProposalId =
-    command === undefined ? null : deriveStudioProposalIdV4(command.projectId, command.commandId);
   return (
     parsed.record.baseAuthoringRevision === expectedAuthoringRevision &&
+    parsed.record.id === expectedProposalId &&
+    parsed.record.source.commandId === commandId &&
     proposalCreatedAt !== null &&
+    proposalExpiresAt !== null &&
     receiptDecidedAt !== null &&
     proposalCreatedAt <= receiptDecidedAt &&
+    receiptDecidedAt < proposalExpiresAt &&
     (command === undefined ||
       (commandCreatedAt !== null &&
+        commandDeadlineAt !== null &&
         commandBeats !== null &&
         proposalBeats !== null &&
-        parsed.record.id === commandProposalId &&
-        parsed.record.source.commandId === command.commandId &&
-        proposalCreatedAt >= commandCreatedAt &&
+        commandCreatedAt - proposalCreatedAt <= STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS &&
+        proposalCreatedAt < commandDeadlineAt &&
+        parsed.record.source.commandSha256 === studioPilotDirectorProposeBoardCommandSha256(command) &&
         parsed.record.payload.handle === command.handle &&
         isDeepStrictEqual(proposalBeats, commandBeats)))
   );
@@ -530,14 +596,22 @@ export const parseStudioPilotDirectorReceipt = (
   ) {
     return { status: 'invalid' };
   }
-  if (
-    command !== undefined &&
-    (snapshot.commandId !== command.commandId ||
+  if (command !== undefined) {
+    const receiptDecidedAt = studioPilotDirectorTimestampMs(snapshot.decidedAt);
+    const commandCreatedAt = studioPilotDirectorTimestampMs(command.createdAt);
+    if (
+      snapshot.commandId !== command.commandId ||
       snapshot.projectId !== command.projectId ||
       snapshot.policy !== command.policy ||
-      snapshot.expectedAuthoringRevision !== expectedAuthoringRevisionFor(command))
-  ) {
-    return { status: 'invalid' };
+      snapshot.expectedAuthoringRevision !== expectedAuthoringRevisionFor(command) ||
+      receiptDecidedAt === null ||
+      commandCreatedAt === null ||
+      (receiptDecidedAt < commandCreatedAt &&
+        (command.policy !== 'propose_board' ||
+          commandCreatedAt - receiptDecidedAt > STUDIO_PILOT_DIRECTOR_CLOCK_SKEW_MS))
+    ) {
+      return { status: 'invalid' };
+    }
   }
   if (status === 'succeeded') {
     const resultValid =
@@ -550,6 +624,7 @@ export const parseStudioPilotDirectorReceipt = (
             : isProposalResult(
                 snapshot.result,
                 snapshot.projectId as string,
+                snapshot.commandId as string,
                 snapshot.expectedAuthoringRevision as number,
                 snapshot.decidedAt as string,
                 command?.policy === 'propose_board' ? command : undefined

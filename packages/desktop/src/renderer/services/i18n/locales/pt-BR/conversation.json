@@ -946,6 +946,48 @@
         "failed": "Não foi possível conectar o Diretor com segurança. Recarregue o projeto."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Precisa de verba",
+            "proposed": "Proposto",
+            "partial": "Parcial",
+            "drafted": "Rascunho",
+            "rendered": "Renderizado",
+            "imported": "Importado",
+            "current": "Atual",
+            "stale": "Desatualizado",
+            "failed": "Falhou",
+            "queued": "Na fila",
+            "generating": "Gerando",
+            "rendering": "Renderizando"
+          },
+          "member": {
+            "slate": "Cartela",
+            "queued": "Na fila",
+            "ready_to_render": "Pronto para renderizar",
+            "generating": "Gerando",
+            "rendered": "Renderizado",
+            "stale": "Desatualizado",
+            "failed": "Falhou"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "violação de regra",
+              "returned_silence": "retornou silêncio",
+              "provider_failure": "falha do provedor",
+              "local_render_failure": "falha de renderização local",
+              "download_failure": "falha no download"
+            },
+            "cost": { "spent": "com gasto", "not_spent": "sem gasto" }
+          },
+          "action": {
+            "re_render_chain": "Renderizar a cadeia novamente",
+            "keep": "Manter",
+            "retry": "Tentar novamente"
+          },
+          "queuedPosition": "Na fila · {{position}}"
+        },
         "projectActions": "Ações do projeto",
         "loading": "Carregando projeto…",
         "refreshing": "Atualizando projeto…",
@@ -1104,6 +1146,57 @@
           "visualReferences": "Referências visuais",
           "visualReferencesHint": "Escolha até {{maximum}} Pieces atuais para orientar esta foto.",
           "visualReferencesCount": "{{selected}} de {{maximum}} selecionadas"
+        },
+        "cut": {
+          "length": "{{played}} de {{total}}",
+          "playsSummary": "reproduz {{played}} · para onde a cobertura do filme termina",
+          "slatesSummary": "{{count}} planos permanecem como cartelas · {{unmade}} sem cobertura",
+          "slatesSummary_one": "{{count}} plano permanece como cartela · {{unmade}} sem cobertura",
+          "slatesSummary_other": "{{count}} planos permanecem como cartelas · {{unmade}} sem cobertura",
+          "slateTally": "{{count}} cartelas · {{duration}}",
+          "slateTally_one": "{{count}} cartela · {{duration}}",
+          "slateTally_other": "{{count}} cartelas · {{duration}}",
+          "audioBed": "{{handle}} · importada · {{level}} sob todo o filme",
+          "audioSegment": "{{handle}} · {{duration}} · ancorado a {{beat}}",
+          "audioNotGenerated": "não gerada",
+          "audioMissingDetail": "Narração de {{beat}} — não gerada. O filme é reproduzido sem som nesse trecho, com a duração completa.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Início da cadeia",
+          "chainAfter": "Depois de {{handle}}",
+          "staleOffChain": "Fora da cadeia desde a nova renderização de {{handle}}. Ainda é reproduzido.",
+          "reorderHint": "Alt+Cima/Baixo move — dentro de {{beat}}, isso reescreve a cadeia e custa {{price}}; entre Beats, é grátis.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Aparar",
+          "matchTo": "Igualar a {{handle}}",
+          "play": "Reproduzir",
+          "reCut": "Refazer corte",
+          "level": "Nível {{level}}",
+          "commissionCost": "Produzir os {{count}} planos sem cobertura custaria {{price}} — {{duration}} de filme a {{rate}} por segundo.",
+          "commissionCost_one": "Produzir {{count}} plano sem cobertura custaria {{price}} — {{duration}} de filme a {{rate}} por segundo.",
+          "commissionCost_other": "Produzir os {{count}} planos sem cobertura custaria {{price}} — {{duration}} de filme a {{rate}} por segundo.",
+          "commission": "Produzir · {{price}}",
+          "notNow": "Não agora",
+          "conditions": "Condicionamento: {{handles}}",
+          "budgetRemaining": "{{remaining}} restantes de {{total}}",
+          "quotesOutstanding": "{{count}} orçamentos em aberto · {{sum}} se todos forem executados",
+          "quotesOutstanding_one": "{{count}} orçamento em aberto · {{sum}} se for executado",
+          "quotesOutstanding_other": "{{count}} orçamentos em aberto · {{sum}} se todos forem executados",
+          "proposedSummary": "{{beats}} Beats · {{shots}} planos",
+          "proposedFrom": "De {{handle}}. Desenhar todos os {{count}} custaria {{price}}.",
+          "proposedFrom_one": "De {{handle}}. Desenhá-lo custaria {{price}}.",
+          "proposedFrom_other": "De {{handle}}. Desenhar todos os {{count}} custaria {{price}}."
+        },
+        "accessibility": {
+          "filmstrip": "Tira de filme, um segmento por Beat",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Pista de áudio",
+          "memberInspector": "Detalhes de {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} foi movido para a posição {{position}}",
+          "reorderAnnouncementWithCost": "{{handle}} foi movido para a posição {{position}}, e isso custa {{price}}",
+          "slateMember": "{{handle}}, permanece por {{duration}}, ainda sem cobertura",
+          "quoteRegion": "Orçamento de {{handle}}",
+          "judgementFooter": "Decisão necessária para {{handle}}"
         }
       },
       "spending": {

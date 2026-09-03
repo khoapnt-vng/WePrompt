@@ -103,6 +103,9 @@ async function loadLocaleModules(locale: string): Promise<Record<string, unknown
 }
 
 const initialLanguage = getInitialLanguage();
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = initialLanguage;
+}
 const initialResources: Record<string, { translation: Record<string, unknown> }> = {
   [DEFAULT_LANGUAGE]: {
     translation: fallbackLocale,
@@ -156,6 +159,9 @@ async function initLanguage(): Promise<void> {
 // Listen for language changes and lazy load translations
 i18n.on('languageChanged', async (lang: string) => {
   const normalizedLang = normalizeLanguageCode(lang);
+  if (typeof document !== 'undefined') {
+    document.documentElement.lang = normalizedLang;
+  }
   if (i18n.hasResourceBundle(normalizedLang, 'translation')) return;
 
   try {

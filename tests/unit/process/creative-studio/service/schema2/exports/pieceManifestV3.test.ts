@@ -12,7 +12,9 @@ import {
   STUDIO_PROJECT_SCHEMA_VERSION_V4,
   type StudioAssetV3,
   type StudioPieceGenerationCompositionV3,
+  type StudioPieceGenerationCompositionV4,
   type StudioPieceGenerationRequestPlanV3,
+  type StudioPieceGenerationRequestPlanV4,
   type StudioPieceJobV3,
   type StudioPieceSpendAuthorizationV3,
   type StudioPieceSubmissionQuoteV3,
@@ -21,15 +23,21 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import {
   buildStudioPieceExportManifestV3,
-  buildStudioPieceExportManifestV4,
   parseStudioPieceExportManifestV3,
   serializeStudioPieceExportManifestV3,
   validateStudioPieceExportConsistencyV3,
-  validateStudioPieceExportConsistencyV4,
 } from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV3';
+import {
+  buildStudioPieceExportManifestV4,
+  parseStudioPieceExportManifestV4,
+  serializeStudioPieceExportManifestV4,
+  validateStudioPieceExportConsistencyV4,
+} from '@/process/services/creative-studio/service/schema2/exports/pieceManifestV4';
 import { createEmptyStudioProjectV3 } from '@/process/services/creative-studio/service/schema2/factories';
 import { createStudioPieceQuotedGenerationIdV3 } from '@/process/services/creative-studio/service/schema2/generation/submission/v3';
 import {
+  createStudioPieceQuotedGenerationIdV4,
+  studioPieceGenerationCompositionDigestV4,
   validateStudioProjectV3,
   validateStudioProjectV4,
 } from '@/process/services/creative-studio/service/schema2/validation';
@@ -258,12 +266,113 @@ const build = (project: StudioProjectV3) =>
 
 const schemaSevenProject = (project: StudioProjectV3): StudioProjectV4 => {
   const snapshot = structuredClone(project);
+  const compositionByJobId = new Map<string, StudioPieceGenerationCompositionV4>();
+  const requestByJobId = new Map<string, StudioPieceGenerationRequestPlanV4>();
+  for (const [jobId, job] of Object.entries(snapshot.jobs)) {
+    const settings = { kind: 'photograph' as const, ...job.composition.inputs.source.settings };
+    const composition: StudioPieceGenerationCompositionV4 = {
+      ...job.composition,
+      inputs: {
+        ...job.composition.inputs,
+        schemaVersion: 4,
+        authoringFingerprintVersion: 3,
+        source: { ...job.composition.inputs.source, settings },
+      },
+    };
+    compositionByJobId.set(jobId, composition);
+    requestByJobId.set(jobId, {
+      kind: 'resolved',
+      snapshot: { composition, settings, conditioningInputs: [...job.requestPlan.snapshot.conditioningInputs] },
+    });
+  }
+  const spendAuthorizations = snapshot.spendAuthorizations.map((authorization) => {
+    const sourceJob = Object.values(snapshot.jobs).find((job) => job.authorizationId === authorization.id)!;
+    const publication = { schemaVersion: 1 as const, kind: 'fill_empty' as const };
+    const attempt =
+      sourceJob.retryOfJobId === null
+        ? ({ kind: 'first' } as const)
+        : ({ kind: 'retry', sourceJobId: sourceJob.retryOfJobId, reason: sourceJob.retryReason! } as const);
+    const itemId = createStudioPieceQuotedGenerationIdV4({
+      projectId: snapshot.id,
+      reservationId: authorization.quote.reservationId,
+      quoteId: authorization.quote.id,
+      quoteRevision: authorization.quote.quoteRevision,
+      target: sourceJob.target,
+      purpose: 'piece_image',
+    });
+    return {
+      ...authorization,
+      quote: {
+        ...authorization.quote,
+        authoringFingerprintVersion: 3 as const,
+        item: {
+          ...authorization.quote.item,
+          id: itemId,
+          requestPlan: requestByJobId.get(sourceJob.id)!,
+          publication,
+          attempt,
+        },
+      },
+      providerBinding: { ...authorization.providerBinding, itemId },
+      idempotencyKey: { ...authorization.idempotencyKey, itemId },
+    };
+  });
+  const jobs = Object.fromEntries(
+    Object.entries(snapshot.jobs).map(([jobId, job]) => {
+      const {
+        outputAssetId,
+        retryOfJobId: _retryOfJobId,
+        retryReason: _retryReason,
+        composition: _composition,
+        requestPlan: _requestPlan,
+        ...base
+      } = job;
+      const authorization = spendAuthorizations.find((candidate) => candidate.id === job.authorizationId)!;
+      return [
+        jobId,
+        {
+          ...base,
+          outputAssetIdsByRole: { primary: outputAssetId, poster: null },
+          publication: authorization.quote.item.publication,
+          attempt: authorization.quote.item.attempt,
+          authorizationItemId: authorization.quote.item.id,
+          composition: compositionByJobId.get(jobId)!,
+          requestPlan: requestByJobId.get(jobId)!,
+          spendReceipt: job.spendReceipt === null ? null : { ...job.spendReceipt, itemId: authorization.quote.item.id },
+          authoringFingerprintVersion: 3 as const,
+        },
+      ];
+    })
+  ) as StudioProjectV4['jobs'];
   const value: StudioProjectV4 = {
     ...snapshot,
     schemaVersion: STUDIO_PROJECT_SCHEMA_VERSION_V4,
     pieces: Object.fromEntries(
-      Object.entries(snapshot.pieces).map(([pieceId, piece]) => [pieceId, { ...piece, runStem: null }])
+      Object.entries(snapshot.pieces).map(([pieceId, piece]) => [
+        pieceId,
+        { ...piece, runStem: null, assetHistory: [] },
+      ])
     ),
+    spendAuthorizations,
+    assets: Object.fromEntries(
+      Object.entries(snapshot.assets).map(([assetId, asset]) => {
+        const producer = asset.producerJobId === null ? null : jobs[asset.producerJobId];
+        return [
+          assetId,
+          {
+            ...asset,
+            role: 'primary' as const,
+            compositionDigest:
+              producer === null || producer === undefined
+                ? null
+                : studioPieceGenerationCompositionDigestV4(producer.composition),
+          },
+        ];
+      })
+    ) as StudioProjectV4['assets'],
+    jobs,
+    frameExtractions: {},
+    derivedFrames: {},
     boardOrder: [],
     boards: {},
     assemblyOrder: [],
@@ -306,6 +415,9 @@ describe('schema-3 standalone Piece export manifest', () => {
       schemaVersion: manifest.schemaVersion,
     };
     const bytes = serializeStudioPieceExportManifestV3(manifest);
+    expect(createHash('sha256').update(bytes).digest('hex')).toBe(
+      '315cfb0de8ad63ac079c36ea55f632ad609530ca04402822ef357a74d7c9499e'
+    );
     expect(serializeStudioPieceExportManifestV3(reordered)).toEqual(bytes);
     expect(parseStudioPieceExportManifestV3(bytes)).toEqual(manifest);
     expect(Buffer.from(bytes).toString('utf8').endsWith('\n')).toBe(false);
@@ -514,18 +626,30 @@ describe('schema-3 standalone Piece export manifest', () => {
   });
 });
 
-describe('schema-7 project to export-3 compatibility', () => {
-  it('emits the exact export-3 imported manifest without admitting either project at the other entry point', () => {
+describe('schema-7 project to exact export-4 protocol', () => {
+  it('keeps export 3 and export 4 disjoint at every builder, parser, and consistency entry point', () => {
     const schemaSix = importedProject();
     const schemaSeven = schemaSevenProject(schemaSix);
     const fromSix = build(schemaSix);
     const fromSeven = buildV4(schemaSeven);
 
-    expect(fromSeven).toEqual(fromSix);
-    expect(fromSeven.schemaVersion).toBe(3);
+    expect(fromSeven).toEqual({ ...fromSix, schemaVersion: 4 });
+    expect(fromSeven.schemaVersion).toBe(4);
     expect(validateStudioPieceExportConsistencyV4(schemaSeven, fromSeven)).toBe(true);
     expect(validateStudioPieceExportConsistencyV3(schemaSeven as never, fromSeven)).toBe(false);
     expect(validateStudioPieceExportConsistencyV4(schemaSix as never, fromSix)).toBe(false);
+    expect(() => parseStudioPieceExportManifestV3(serializeStudioPieceExportManifestV4(fromSeven))).toThrow(
+      expect.objectContaining({ code: 'invalid_manifest' })
+    );
+    expect(() => parseStudioPieceExportManifestV4(serializeStudioPieceExportManifestV3(fromSix))).toThrow(
+      expect.objectContaining({ code: 'invalid_manifest' })
+    );
+    expect(() => serializeStudioPieceExportManifestV3(fromSeven)).toThrow(
+      expect.objectContaining({ code: 'invalid_manifest' })
+    );
+    expect(() => serializeStudioPieceExportManifestV4(fromSix)).toThrow(
+      expect.objectContaining({ code: 'invalid_manifest' })
+    );
     expect(() =>
       buildStudioPieceExportManifestV3(schemaSeven as never, {
         exportId: 'export_cross_schema',
@@ -549,13 +673,23 @@ describe('schema-7 project to export-3 compatibility', () => {
     const project = schemaSevenProject(schemaSix);
     const manifest = buildV4(project);
     const schemaSixManifest = build(schemaSix);
-    expect(manifest).toEqual(schemaSixManifest);
-    expect(serializeStudioPieceExportManifestV3(manifest)).toEqual(
+    expect(manifest).not.toEqual(schemaSixManifest);
+    expect(serializeStudioPieceExportManifestV4(manifest)).not.toEqual(
       serializeStudioPieceExportManifestV3(schemaSixManifest)
     );
     expect(manifest.provenance.origin).toBe('generated');
     expect(validateStudioPieceExportConsistencyV4(project, manifest)).toBe(true);
     if (manifest.provenance.origin !== 'generated') throw new Error('Expected generated provenance');
+    expect(manifest.provenance.composition.inputs.schemaVersion).toBe(4);
+    expect(manifest.provenance.composition.inputs.authoringFingerprintVersion).toBe(3);
+    expect(manifest.provenance.requestPlan.snapshot.settings).toEqual({
+      kind: 'photograph',
+      aspectRatio: '4:3',
+      resolution: '1080p',
+    });
+    expect(manifest.provenance.publication).toEqual({ schemaVersion: 1, kind: 'fill_empty' });
+    expect(manifest.provenance.attempt).toEqual({ kind: 'first' });
+    expect(parseStudioPieceExportManifestV4(serializeStudioPieceExportManifestV4(manifest))).toEqual(manifest);
 
     const changedHash = structuredClone(manifest);
     changedHash.asset.sha256 = 'd'.repeat(64);
@@ -582,6 +716,34 @@ describe('schema-7 project to export-3 compatibility', () => {
     const changedReceipt = structuredClone(manifest);
     if (changedReceipt.provenance.origin !== 'generated') throw new Error('Expected generated provenance');
     changedReceipt.provenance.receipt.totalMinorUnits += 1;
+    const changedPublication = structuredClone(manifest);
+    if (changedPublication.provenance.origin !== 'generated') throw new Error('Expected generated provenance');
+    changedPublication.provenance.publication = {
+      schemaVersion: 1,
+      kind: 'replace_current',
+      currentAsset: {
+        pieceId: 'piece_1',
+        assetId: 'asset_other',
+        mediaKind: 'image',
+        role: 'primary',
+        mimeType: 'image/png',
+        byteSize: 100,
+        sha256: digest,
+        width: 1920,
+        height: 1080,
+        createdAt: T1,
+        origin: 'imported',
+        producerJobId: null,
+        compositionDigest: null,
+      },
+    };
+    const changedAttempt = structuredClone(manifest);
+    if (changedAttempt.provenance.origin !== 'generated') throw new Error('Expected generated provenance');
+    changedAttempt.provenance.attempt = {
+      kind: 'retry',
+      sourceJobId: 'job_other',
+      reason: 'provider_failure',
+    };
 
     for (const changed of [
       changedHash,
@@ -593,6 +755,8 @@ describe('schema-7 project to export-3 compatibility', () => {
       changedAuthorization,
       changedQuote,
       changedReceipt,
+      changedPublication,
+      changedAttempt,
     ]) {
       expect(validateStudioPieceExportConsistencyV4(project, changed)).toBe(false);
     }
@@ -601,7 +765,7 @@ describe('schema-7 project to export-3 compatibility', () => {
   it('rejects a stale or non-current export without mutating already serialized artifact bytes', () => {
     const project = schemaSevenProject(importedProject());
     const manifest = buildV4(project);
-    const artifactBytes = serializeStudioPieceExportManifestV3(manifest);
+    const artifactBytes = serializeStudioPieceExportManifestV4(manifest);
 
     const nonCurrent = structuredClone(manifest);
     nonCurrent.asset.id = 'asset_other';
@@ -615,7 +779,7 @@ describe('schema-7 project to export-3 compatibility', () => {
     project.updatedAt = T3;
     expect(validateStudioProjectV4(project)).toBe(true);
     expect(validateStudioPieceExportConsistencyV4(project, manifest)).toBe(false);
-    expect(serializeStudioPieceExportManifestV3(manifest)).toEqual(artifactBytes);
+    expect(serializeStudioPieceExportManifestV4(manifest)).toEqual(artifactBytes);
 
     const fresh = buildStudioPieceExportManifestV4(project, {
       exportId: 'export_2',
@@ -638,7 +802,7 @@ describe('schema-7 project to export-3 compatibility', () => {
     });
 
     expect(project.updatedAt).toBe(PHASE_6_CURRENT_AT);
-    expect(manifest.schemaVersion).toBe(3);
+    expect(manifest.schemaVersion).toBe(4);
     expect(manifest.provenance).toEqual({ origin: 'imported' });
     expect(Object.keys(manifest.piece).toSorted()).toEqual(['handleAtExport', 'id', 'kind']);
     expect(manifest).not.toHaveProperty('runStem');
@@ -648,6 +812,71 @@ describe('schema-7 project to export-3 compatibility', () => {
     expect(manifest).not.toHaveProperty('assemblies');
     expect(manifest).not.toHaveProperty('bin');
     expect(validateStudioPieceExportConsistencyV4(project, manifest)).toBe(true);
+  });
+
+  it('rejects manifest construction and consistency after a Piece is lifted to the Bin', () => {
+    const project = makePhase6Project();
+    const manifest = buildStudioPieceExportManifestV4(project, {
+      exportId: 'export_before_bin',
+      pieceId: 'piece_photo_1',
+      relativePath: 'harbour_morning.png',
+      exportedAt: PHASE_6_EXPORTED_AT,
+    });
+    project.assemblyOrder = [];
+    project.assemblies = {};
+    project.bin = [
+      {
+        id: 'bin_piece_photo_1',
+        subject: { kind: 'piece', pieceId: 'piece_photo_1' },
+        reason: 'lifted',
+        liftedAt: PHASE_6_CURRENT_AT,
+      },
+    ];
+
+    expect(validateStudioProjectV4(project)).toBe(true);
+    expect(validateStudioPieceExportConsistencyV4(project, manifest)).toBe(false);
+    expect(() =>
+      buildStudioPieceExportManifestV4(project, {
+        exportId: 'export_while_binned',
+        pieceId: 'piece_photo_1',
+        relativePath: 'harbour_morning.png',
+        exportedAt: PHASE_6_EXPORTED_AT,
+      })
+    ).toThrow(expect.objectContaining({ code: 'inconsistent_manifest' }));
+  });
+
+  it('refuses motion and poster-shaped current assets instead of exporting them as photos', () => {
+    const motion = makePhase6Project();
+    motion.pieces.piece_photo_1!.kind = 'motion';
+    motion.assets.asset_photo_1 = {
+      ...motion.assets.asset_photo_1!,
+      mediaKind: 'video',
+      role: 'primary',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'imports', fileName: 'asset_photo_1.mp4' },
+      durationSeconds: 5,
+    };
+    expect(validateStudioProjectV4(motion)).toBe(true);
+    expect(() =>
+      buildStudioPieceExportManifestV4(motion, {
+        exportId: 'export_motion',
+        pieceId: 'piece_photo_1',
+        relativePath: 'motion.mp4',
+        exportedAt: PHASE_6_EXPORTED_AT,
+      })
+    ).toThrow(expect.objectContaining({ code: 'inconsistent_manifest' }));
+
+    const poster = makePhase6Project();
+    (poster.assets.asset_photo_1 as Record<string, unknown>).role = 'poster';
+    expect(validateStudioProjectV4(poster)).toBe(false);
+    expect(() =>
+      buildStudioPieceExportManifestV4(poster, {
+        exportId: 'export_poster',
+        pieceId: 'piece_photo_1',
+        relativePath: 'poster.png',
+        exportedAt: PHASE_6_EXPORTED_AT,
+      })
+    ).toThrow(expect.objectContaining({ code: 'inconsistent_manifest' }));
   });
 
   it('rejects a schema-7 project with a missing or noncanonical Piece run stem', () => {

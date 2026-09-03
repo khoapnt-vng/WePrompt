@@ -940,6 +940,44 @@
         "failed": "Не удалось безопасно подключить режиссёра. Перезагрузите проект."
       },
       "canvas": {
+        "status": {
+          "block": {
+            "needs_budget": "Нужен бюджет",
+            "proposed": "Предложено",
+            "partial": "Частично",
+            "drafted": "Черновик",
+            "rendered": "Отрендерено",
+            "imported": "Импортировано",
+            "current": "Актуально",
+            "stale": "Устарело",
+            "failed": "Ошибка",
+            "queued": "В очереди",
+            "generating": "Генерация",
+            "rendering": "Рендеринг"
+          },
+          "member": {
+            "slate": "Заставка",
+            "queued": "В очереди",
+            "ready_to_render": "Готово к рендеру",
+            "generating": "Генерация",
+            "rendered": "Отрендерено",
+            "stale": "Устарело",
+            "failed": "Ошибка"
+          },
+          "failure": {
+            "line": "{{status}} · {{reason}} · {{cost}}",
+            "reason": {
+              "rule_breach": "нарушение правила",
+              "returned_silence": "получена тишина",
+              "provider_failure": "ошибка поставщика",
+              "local_render_failure": "ошибка локального рендера",
+              "download_failure": "ошибка загрузки"
+            },
+            "cost": { "spent": "со списанием", "not_spent": "без списания" }
+          },
+          "action": { "re_render_chain": "Повторный рендер цепочки", "keep": "Оставить", "retry": "Повторить" },
+          "queuedPosition": "В очереди · {{position}}"
+        },
         "projectActions": "Действия с проектом",
         "loading": "Загрузка проекта…",
         "refreshing": "Обновление проекта…",
@@ -1098,6 +1136,57 @@
           "visualReferences": "Визуальные референсы",
           "visualReferencesHint": "Выберите до {{maximum}} текущих Piece, чтобы использовать их как ориентир для фото.",
           "visualReferencesCount": "Выбрано: {{selected}} из {{maximum}}"
+        },
+        "cut": {
+          "length": "{{played}} из {{total}}",
+          "playsSummary": "воспроизводится {{played}} · останавливается там, где фильм ещё не снят",
+          "slatesSummary": "кадры остаются заставками ({{count}}) · не снято: {{unmade}}",
+          "slatesSummary_one": "{{count}} кадр остаётся заставкой · не снято: {{unmade}}",
+          "slatesSummary_other": "кадры остаются заставками ({{count}}) · не снято: {{unmade}}",
+          "slateTally": "заставок: {{count}} · {{duration}}",
+          "slateTally_one": "{{count}} заставка · {{duration}}",
+          "slateTally_other": "заставок: {{count}} · {{duration}}",
+          "audioBed": "{{handle}} · импортировано · {{level}} под всем фильмом",
+          "audioSegment": "{{handle}} · {{duration}} · закреплено за {{beat}}",
+          "audioNotGenerated": "не создано",
+          "audioMissingDetail": "Закадровый текст для {{beat}} — не создан. Фильм воспроизводится там без звука, сохраняя полную длительность.",
+          "memberSummary": "{{duration}} · {{chainPosition}}",
+          "chainHead": "Начало цепочки",
+          "chainAfter": "После {{handle}}",
+          "staleOffChain": "Вне цепочки с момента повторного рендеринга {{handle}}. Всё ещё воспроизводится.",
+          "reorderHint": "Alt+Вверх/Вниз перемещает кадр — внутри {{beat}} это перестраивает цепочку и стоит {{price}}; между битами — бесплатно.",
+          "actionWithPrice": "{{action}} · {{price}}",
+          "trim": "Обрезка",
+          "matchTo": "Подогнать под {{handle}}",
+          "play": "Воспроизвести",
+          "reCut": "Перемонтировать",
+          "level": "Уровень {{level}}",
+          "commissionCost": "Производство неснятых кадров ({{count}}) обойдётся в {{price}} — {{duration}} фильма по {{rate}} за секунду.",
+          "commissionCost_one": "Производство {{count}} неснятого кадра обойдётся в {{price}} — {{duration}} фильма по {{rate}} за секунду.",
+          "commissionCost_other": "Производство неснятых кадров ({{count}}) обойдётся в {{price}} — {{duration}} фильма по {{rate}} за секунду.",
+          "commission": "Заказать · {{price}}",
+          "notNow": "Не сейчас",
+          "conditions": "Условия: {{handles}}",
+          "budgetRemaining": "осталось {{remaining}} из {{total}}",
+          "quotesOutstanding": "смет в ожидании: {{count}} · {{sum}}, если запустить все",
+          "quotesOutstanding_one": "{{count}} смета в ожидании · {{sum}}, если её запустить",
+          "quotesOutstanding_other": "смет в ожидании: {{count}} · {{sum}}, если запустить все",
+          "proposedSummary": "битов: {{beats}} · кадров: {{shots}}",
+          "proposedFrom": "От {{handle}}. Отрисовка всех ({{count}}) обойдётся в {{price}}.",
+          "proposedFrom_one": "От {{handle}}. Отрисовка обойдётся в {{price}}.",
+          "proposedFrom_other": "От {{handle}}. Отрисовка всех ({{count}}) обойдётся в {{price}}."
+        },
+        "accessibility": {
+          "filmstrip": "Киноплёнка, по одному сегменту на каждый бит",
+          "filmstripSegment": "{{handle}}, {{duration}}, {{status}}",
+          "audioLane": "Звуковая дорожка",
+          "memberInspector": "Сведения о кадре {{handle}}",
+          "blockStatus": "{{handle}}, {{status}}",
+          "reorderAnnouncement": "{{handle}} перемещён на позицию {{position}}",
+          "reorderAnnouncementWithCost": "{{handle}} перемещён на позицию {{position}}, стоит {{price}}",
+          "slateMember": "{{handle}}, остаётся в монтаже на {{duration}}, ещё не снят",
+          "quoteRegion": "Смета для {{handle}}",
+          "judgementFooter": "Требуется решение для {{handle}}"
         }
       },
       "spending": {
