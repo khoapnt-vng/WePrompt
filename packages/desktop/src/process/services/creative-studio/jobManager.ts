@@ -38,7 +38,9 @@ import { CreativeStudioStoreError, type CreativeStudioStore } from './store';
 import { createStudioSpendReceiptV2 } from './service/schema2/pricing';
 import {
   createStudioAutomaticReferenceRetryJobId,
+  createStudioAutomaticVideoRetryJobId,
   createStudioFrameExtractionId,
+  studioAutomaticVideoRetryFailureCodeIsEligibleV2,
   studioGenerationCompositionMatchesAuthorityV2,
 } from './service/schema2/generation';
 import {
@@ -809,6 +811,131 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
     return { failedJob, retryJobId };
   };
 
+  /**
+   * Commits one unequivocal remote video failure together with its pre-authorized retry. The retry
+   * reuses the exact resolved predecessor-frame request but owns the second frozen idempotency key.
+   * Persisting both records together makes a crash before dispatch recoverable without minting work.
+   */
+  const failRemoteVideoAndQueueRetryV2 = async (
+    projectId: string,
+    jobId: string,
+    providerJobId: string,
+    code: StudioJobErrorCode
+  ): Promise<{ failedJob: StudioJobV2; retryJobId: string | null }> => {
+    let retryJobId: string | null = null;
+    let retryWasCreated = false;
+    const failedJob = await mutateJobV2(projectId, jobId, (project, current) => {
+      const existingRetry = Object.values(project.jobs).find(
+        (candidate) =>
+          candidate.retryOfJobId === current.id &&
+          candidate.retryReason === 'provider_failure' &&
+          candidate.authorizationId === current.authorizationId &&
+          candidate.authorizationItemId === current.authorizationItemId
+      );
+      if (existingRetry !== undefined) {
+        retryJobId = existingRetry.id;
+        return false;
+      }
+      if (
+        current.providerJobId !== providerJobId ||
+        (current.status !== 'queued_remote' && current.status !== 'running')
+      ) {
+        return false;
+      }
+
+      const authority = authorizationItemForJobV2(project, current);
+      const retryKeys = authority?.authorization.idempotencyKeys.filter(
+        (entry) => entry.itemId === current.authorizationItemId
+      );
+      const requestPlan = authority?.item.requestPlan;
+      const conditioningInput = requestPlan?.kind === 'resolved' ? requestPlan.snapshot.conditioningInput : null;
+      const canRetry =
+        studioAutomaticVideoRetryFailureCodeIsEligibleV2(code) &&
+        current.spendReceipt === null &&
+        current.purpose === 'video_take' &&
+        current.target.kind === 'shot' &&
+        authority?.item.purpose === 'video_take' &&
+        authority.item.target.kind === 'shot' &&
+        authority.item.generationCount === 2 &&
+        requestPlan?.kind === 'resolved' &&
+        conditioningInput?.kind === 'predecessor_frame' &&
+        current.requestSnapshot !== null &&
+        JSON.stringify(current.requestPlan) === JSON.stringify(requestPlan) &&
+        JSON.stringify(current.requestSnapshot) === JSON.stringify(requestPlan.snapshot) &&
+        retryKeys?.length === 2 &&
+        retryKeys[0]?.key === current.idempotencyKey;
+
+      current.status = 'failed';
+      current.error = jobError(code);
+      delete current.progress;
+      if (!canRetry || authority === null || retryKeys === undefined || current.target.kind !== 'shot') {
+        return true;
+      }
+
+      const idempotencyKey = retryKeys[1]!.key;
+      const nextJobId = createStudioAutomaticVideoRetryJobId({
+        authorizationId: current.authorizationId,
+        itemId: current.authorizationItemId,
+        idempotencyKey,
+      });
+      if (ownValueV2(project.jobs, nextJobId) !== undefined) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio automatic video retry identity collision');
+      }
+      const shot = ownValueV2(project.shots, current.target.shotId);
+      if (shot === undefined || !shot.jobIds.includes(current.id) || shot.jobIds.includes(nextJobId)) {
+        throw new CreativeStudioStoreError('storage_error', 'Studio automatic video retry owner is unavailable');
+      }
+      const capturedAt = now();
+      const retry: StudioJobV2 = {
+        id: nextJobId,
+        projectId: current.projectId,
+        target: structuredClone(current.target),
+        status: 'queued_local',
+        provider: { ...current.provider },
+        idempotencyKey,
+        providerJobId: null,
+        remoteStartedAt: null,
+        cancellationPolicy: current.cancellationPolicy,
+        outputAssetIds: [],
+        purpose: current.purpose,
+        authorizationId: current.authorizationId,
+        authorizationItemId: current.authorizationItemId,
+        composition: structuredClone(current.composition),
+        requestPlan: structuredClone(current.requestPlan),
+        requestSnapshot: structuredClone(current.requestSnapshot),
+        spendReceipt: null,
+        outputAssetIdsByRole: { primary: null, poster: null },
+        error: null,
+        retryOfJobId: current.id,
+        retryReason: 'provider_failure',
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        createdAt: capturedAt,
+        updatedAt: capturedAt,
+      };
+      defineOwnValueV2(project.jobs, retry.id, retry);
+      shot.jobIds.push(retry.id);
+      retryJobId = retry.id;
+      retryWasCreated = true;
+      return true;
+    });
+    if (failedJob.status === 'failed' && failedJob.error?.code === code) {
+      console.warn(formatStudioJobLog('failed', { jobId, projectId, purpose: failedJob.purpose, code, providerJobId }));
+    }
+    if (retryWasCreated && retryJobId !== null) {
+      await dispatchAuthorizedJobsV2({ projectId, jobIds: [retryJobId] }).catch((error: unknown): void => {
+        console.warn(
+          formatStudioJobLog('automatic_video_retry_queued', {
+            projectId,
+            jobId: retryJobId,
+            code: error instanceof Error ? error.name : 'unknown',
+          })
+        );
+      });
+    }
+    return { failedJob, retryJobId };
+  };
+
   const transitionRemoteFailureV2 = async (
     projectId: string,
     jobId: string,
@@ -1294,11 +1421,10 @@ export const createStudioJobManager = (deps: StudioJobManagerDeps): StudioJobMan
       await transitionRemoteFailureV2(context.projectId, context.jobId, providerJobId, 'failed', 'unknown');
       return 'terminal';
     }
-    await transitionRemoteFailureV2(
+    await failRemoteVideoAndQueueRetryV2(
       context.projectId,
       context.jobId,
       providerJobId,
-      'failed',
       snapshotFailureCode(snapshot)
     );
     return 'terminal';

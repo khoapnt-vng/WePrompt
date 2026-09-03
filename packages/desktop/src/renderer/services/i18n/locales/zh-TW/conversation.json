@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "與 Creative Director 一起檢查起始幀",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "空白鍵播放 · 方向鍵定位 · [ ] 切換接點 · L 循環"
         },
         "directorRequestHint": "請 Creative Director 提供經審核的重新拆分方案。",
+        "directorFrameReviewHint": "請檢查 Shot {{shotId}} 繼承的精確條件幀，並提出一個感知該幀的 Shooting script：從畫面已有內容開始，再展開動作。不要生成媒體、請求報價、授權支出或花費。",
         "recovery": {
           "cancelAndReviewRejoin": "取消並審核重新銜接",
           "cancelAndReviewRejoinTitle": "取消已授權工作並審核重新銜接？",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "確認前請檢查繼承的精確起始幀和 Shooting script。僅當首次供應商嘗試明確失敗時，才會預留一次自動重試。首次嘗試費用為 {{lower}}；確認的最高費用為 {{upper}}。",
         "purpose": {
           "board_still": "分鏡",
           "reference_image": "參考影像"

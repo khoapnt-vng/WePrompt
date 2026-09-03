@@ -1398,6 +1398,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Startbild mit Director prüfen",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1518,6 +1519,7 @@
           "keyboardGuidance": "Leertaste spielt · Pfeile suchen · [ ] Schnitte · L wiederholt"
         },
         "directorRequestHint": "Bitte den Creative Director um einen geprüften Vorschlag zur Neuaufteilung.",
+        "directorFrameReviewHint": "Prüfe das exakte übernommene Konditionierungsbild für Shot {{shotId}} und schlage ein bildbezogenes Shooting script vor, das mit dem bereits Gezeigten beginnt und dann in Bewegung übergeht. Erzeuge keine Medien, fordere kein Angebot an, autorisiere keine Ausgaben und gib nichts aus.",
         "recovery": {
           "cancelAndReviewRejoin": "Abbrechen und Wiederverbindung prüfen",
           "cancelAndReviewRejoinTitle": "Autorisierte Arbeit abbrechen und Wiederverbindung prüfen?",
@@ -1544,6 +1546,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "Prüfe vor der Bestätigung das exakte übernommene Startbild und das Shooting script. Ein automatischer Wiederholungsversuch wird nur reserviert, wenn der erste Anbieter-Versuch eindeutig fehlschlägt. Die ersten Versuche kosten {{lower}}; der bestätigte Höchstbetrag ist {{upper}}.",
         "purpose": {
           "board_still": "Board-Panel",
           "reference_image": "Referenzbild"

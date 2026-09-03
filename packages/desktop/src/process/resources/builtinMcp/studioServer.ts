@@ -1660,7 +1660,7 @@ export function registerStudioToolsV2(
     'studio_get_conditioning_frame',
     {
       description:
-        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.',
+        "Read the exact current predecessor frame inherited by one active chained Shot. Use it before proposing or revising any currently conditioned chained Shot, including before that Shot's first generation; never propose a downstream Shooting script before its exact frame is available. The Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation, ask the person to review the visible frame manually, and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.",
       inputSchema: studioGetConditioningFrameInputSchemaV2,
     },
     createStudioGetConditioningFrameHandlerV2(config)

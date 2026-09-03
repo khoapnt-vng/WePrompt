@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "与 Creative Director 一起审查起始帧",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "空格键播放 · 方向键定位 · [ ] 切换接点 · L 循环"
         },
         "directorRequestHint": "请 Creative Director 提供经审核的重新拆分方案。",
+        "directorFrameReviewHint": "请检查 Shot {{shotId}} 继承的精确条件帧，并提出一个感知该帧的 Shooting script：从画面已有内容开始，再展开动作。不要生成媒体、请求报价、授权支出或花费。",
         "recovery": {
           "cancelAndReviewRejoin": "取消并审核重新衔接",
           "cancelAndReviewRejoinTitle": "取消已授权工作并审核重新衔接？",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "确认前请审查继承的精确起始帧和 Shooting script。仅当首次提供商尝试明确失败时，才会预留一次自动重试。首次尝试费用为 {{lower}}；确认的最高费用为 {{upper}}。",
         "purpose": {
           "board_still": "分镜",
           "reference_image": "参考图像"

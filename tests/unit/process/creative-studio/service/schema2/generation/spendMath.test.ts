@@ -25,6 +25,24 @@ const resolvedPlan = (durationSeconds = 8): StudioGenerationRequestPlan => ({
   },
 });
 
+const resolvedPredecessorPlan = (durationSeconds = 8): StudioGenerationRequestPlan => ({
+  kind: 'resolved',
+  snapshot: {
+    prompt: 'Begin on the inherited wide frame, then move toward the subject.',
+    aspectRatio: '16:9',
+    resolution: '1080p',
+    durationSeconds,
+    referenceInputs: [],
+    conditioningInput: {
+      kind: 'predecessor_frame',
+      predecessorShotId: 'shot_0',
+      takeAssetId: 'take_0',
+      frameAssetId: 'frame_0',
+      endpointSeconds: 7,
+    },
+  },
+});
+
 const makeItem = (overrides: Partial<StudioQuotedGeneration> = {}): StudioQuotedGeneration => ({
   id: 'item_1',
   shotId: 'shot_1',
@@ -108,6 +126,19 @@ describe('calculateStudioQuotedGenerationAmounts', () => {
         makeItem({ purpose: 'seed_still', generationCount: 2, rateUnit: 'generation' })
       )
     ).toBeNull();
+  });
+
+  it('prices one resolved predecessor-frame video plus one bounded provider-failure contingency', () => {
+    expect(
+      calculateStudioQuotedGenerationAmounts(
+        makeItem({
+          generationCount: 2,
+          requestPlan: resolvedPredecessorPlan(),
+        })
+      )
+    ).toEqual({ oneGenerationMinorUnits: 200, requestedTotalMinorUnits: 400 });
+
+    expect(calculateStudioQuotedGenerationAmounts(makeItem({ generationCount: 2 }))).toBeNull();
   });
 
   it.each([

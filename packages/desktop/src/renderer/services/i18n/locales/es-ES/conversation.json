@@ -1398,6 +1398,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Revisar fotograma inicial con Director",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1518,6 +1519,7 @@
           "keyboardGuidance": "Espacio reproduce · Flechas buscan · [ ] uniones · L repite"
         },
         "directorRequestHint": "Pide al Director creativo una propuesta revisada para volver a dividir.",
+        "directorFrameReviewHint": "Inspecciona el fotograma de condicionamiento heredado exacto del Shot {{shotId}} y propón un Shooting script consciente del fotograma que empiece con lo que ya muestra y después avance con movimiento. No generes contenido, solicites presupuesto, autorices gastos ni gastes.",
         "recovery": {
           "cancelAndReviewRejoin": "Cancelar y revisar la reconexión",
           "cancelAndReviewRejoinTitle": "¿Cancelar el trabajo autorizado y revisar la reconexión?",
@@ -1544,6 +1546,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "Revisa el fotograma inicial heredado exacto y el Shooting script antes de confirmar. Se reserva un reintento automático solo si el primer intento del proveedor falla de forma inequívoca. Los primeros intentos cuestan {{lower}}; el máximo confirmado es {{upper}}.",
         "purpose": {
           "board_still": "Panel del Board",
           "reference_image": "Imagen de referencia"

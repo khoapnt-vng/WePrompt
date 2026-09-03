@@ -52,6 +52,7 @@ import {
   createStudioResolvedGenerationRequestPlan,
   deriveStudioInstructionProfileV2,
   resolveStudioReferenceBindingV2,
+  studioGenerationCountIsValidV2,
   studioGenerationTargetKey,
 } from '../generation';
 import { studioBoardAuthorizationScopeIsValidV2 } from './authorization';
@@ -428,16 +429,12 @@ const deriveExpectedCascadePairs = (
     const shot = ownValue(project.shots, baseShotId);
     if (location === undefined || beat === undefined || shot === undefined) fail('inactive_shot');
 
-    const firstCascadeIndex = baseChoice.purpose === 'seed_still' ? location.shotIndex : location.shotIndex + 1;
-    for (let shotIndex = firstCascadeIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      const downstreamId = beat.shotOrder[shotIndex]!;
-      const downstream = ownValue(project.shots, downstreamId);
-      if (downstream === undefined) fail('invalid_prepare_request');
-      if (shotIndex > location.shotIndex && downstream.chainBreak === 'hard_cut') break;
-      if (hasInFlightItem(project, { kind: 'shot', shotId: downstreamId }, 'video_take')) break;
-      const pairKey = `${downstreamId}\0video_take`;
-      expected.set(pairKey, { shotId: downstreamId, purpose: 'video_take' });
-    }
+    // A seed and its same-Shot video share one reviewed opening image. The next Shot would inherit
+    // a frame that does not exist yet, so quoting it here would freeze a prompt authored blind to
+    // that frame. Stop at that boundary and let the next quote use the extracted exact frame.
+    if (baseChoice.purpose !== 'seed_still') continue;
+    if (hasInFlightItem(project, { kind: 'shot', shotId: baseShotId }, 'video_take')) continue;
+    expected.set(`${baseShotId}\0video_take`, { shotId: baseShotId, purpose: 'video_take' });
   }
   return [...expected.values()].toSorted((left, right) =>
     comparePrepareChoices(
@@ -821,11 +818,17 @@ const deriveUnpricedItems = (
         });
       }
     }
+    const generationCount =
+      choice.purpose === 'video_take' &&
+      requestPlan.kind === 'resolved' &&
+      requestPlan.snapshot.conditioningInput?.kind === 'predecessor_frame'
+        ? 2
+        : 1;
     result.push({
       target: { kind: 'shot', shotId },
       purpose: choice.purpose,
       routeId,
-      generationCount: 1,
+      generationCount,
       requestPlan,
     });
     earlierItemIds.set(
@@ -1357,7 +1360,8 @@ const validateDependency = (
     shot?.chainBreak !== 'none' ||
     upstream.target.kind !== 'shot' ||
     upstream.target.shotId !== dependency.predecessorShotId ||
-    upstream.purpose !== 'video_take'
+    upstream.purpose !== 'video_take' ||
+    upstream.generationCount !== 1
   ) {
     fail('invalid_dependency');
   }
@@ -1412,7 +1416,7 @@ export const createStudioSubmissionQuoteCoreV2 = (
         draft.purpose !== 'board_still' &&
         draft.purpose !== 'video_take' &&
         draft.purpose !== 'reference_image') ||
-      (draft.generationCount !== 1 && !(draft.generationCount === 2 && draft.purpose === 'reference_image'))
+      !studioGenerationCountIsValidV2(draft)
     ) {
       return fail('invalid_quote');
     }

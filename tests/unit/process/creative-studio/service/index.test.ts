@@ -6908,6 +6908,110 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
+  it('prices and confirms a resolved predecessor-frame video with one reserved retry', async () => {
+    const project = makeContinuityProject('none');
+    const take: StudioAssetV2 = {
+      id: 'take_sequential_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_sequential_1.mp4' },
+      byteSize: 100,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 10,
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    const frame: StudioAssetV2 = {
+      id: 'frame_sequential_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'conditioningFrames', fileName: 'frame_sequential_1.png' },
+      byteSize: 25,
+      sha256: 'd'.repeat(64),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    Object.assign(project.assets, { [take.id]: take, [frame.id]: frame });
+    project.shots.clip_1!.assetIds.push(take.id, frame.id);
+    project.shots.clip_1!.videoAssetId = take.id;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: take.durationSeconds!,
+    });
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: take.durationSeconds!,
+      frameAssetId: frame.id,
+      status: 'ready',
+      errorCode: null,
+      attemptCount: 1,
+    };
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [shotChoiceV2('clip_2', 'video_take')],
+      cascadeChoices: [],
+    });
+
+    expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly).toMatchObject({
+      lowerMinorUnits: 25,
+      upperMinorUnits: 50,
+      baseItems: [
+        {
+          target: { kind: 'shot', shotId: 'clip_2' },
+          purpose: 'video_take',
+          generationCount: 2,
+          conditioningAssetId: frame.id,
+          oneGenerationMinorUnits: 25,
+          requestedTotalMinorUnits: 50,
+        },
+      ],
+      cascadeItems: [],
+    });
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+
+    const committed = harness.getProject();
+    const authorization = committed.spendAuthorizations.find((candidate) => candidate.id === prepared.baseOnly.id)!;
+    const [item] = authorization.baseItems;
+    expect(item).toMatchObject({ purpose: 'video_take', generationCount: 2 });
+    expect(authorization.idempotencyKeys.filter((entry) => entry.itemId === item!.id)).toHaveLength(2);
+    const jobs = Object.values(committed.jobs).filter((job) => job.authorizationId === authorization.id);
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        target: { kind: 'shot', shotId: 'clip_2' },
+        status: 'queued_local',
+        requestSnapshot: expect.objectContaining({
+          conditioningInput: expect.objectContaining({
+            kind: 'predecessor_frame',
+            predecessorShotId: 'clip_1',
+            takeAssetId: take.id,
+            frameAssetId: frame.id,
+          }),
+        }),
+      }),
+    ]);
+    expect(harness.submitShots).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      jobIds: [jobs[0]!.id],
+    });
+  });
+
   it('projects exact-one quote rows and preserves their totals and budget in durable authority', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -7366,7 +7470,9 @@ describe('CreativeStudioServiceV2', () => {
 
   it('cancels one authorized seed wait, persists downstream terminalization, and requotes an exact trim-aware rejoin', async () => {
     let { project, take, seed: importedCandidate } = makeRejoinProject();
+    project.shots.clip_2!.chainBreak = 'none';
     project.shots.clip_2!.seedStillId = null;
+    project.shots.clip_2!.dismissedSeedStillIds = [importedCandidate.id];
     importedCandidate = project.assets[importedCandidate.id]!;
     importedCandidate.managedAsset = { collection: 'imports', fileName: 'seed_rejoin_import.png' };
     importedCandidate.sha256 = 'e'.repeat(64);
@@ -7404,20 +7510,22 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [shotChoiceV2('clip_2', 'seed_still')],
-      cascadeChoices: [shotChoiceV2('clip_2', 'video_take'), shotChoiceV2('clip_3', 'video_take')],
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: true },
     });
-    expect(prepared.withCascade).not.toBeNull();
+    expect(prepared.withCascade).toBeNull();
+    const initialQuote = prepared.baseOnly;
     await harness.service.confirmSubmission({
       projectId: project.id,
-      quoteId: prepared.withCascade!.id,
+      quoteId: initialQuote.id,
       expectedRevision: project.revision,
     });
 
     const authorized = harness.getProject();
     const seedJob = Object.values(authorized.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'seed_still' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_2'
@@ -7471,14 +7579,14 @@ describe('CreativeStudioServiceV2', () => {
     const cancelled = harness.getProject();
     const cancelledShotJob = Object.values(cancelled.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'video_take' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_2'
     )!;
     const downstreamJob = Object.values(cancelled.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'video_take' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_3'
@@ -7550,7 +7658,7 @@ describe('CreativeStudioServiceV2', () => {
       (item) => item.purpose === 'video_take' && item.target.kind === 'shot' && item.target.shotId === 'clip_2'
     );
     if (rejoinShotItem === undefined) throw new Error(`missing rejoin item: ${JSON.stringify(rejoin)}`);
-    expect(rejoinQuote.id).not.toBe(prepared.withCascade!.id);
+    expect(rejoinQuote.id).not.toBe(initialQuote.id);
     expect(rejoinQuote.projectRevision).toBe(cancelled.revision);
     expect(rejoinShotItem).toMatchObject({ purpose: 'video_take', generationCount: 1 });
     expect(rejoinItems).toEqual(

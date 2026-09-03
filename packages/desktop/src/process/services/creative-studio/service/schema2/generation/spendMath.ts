@@ -26,6 +26,21 @@ type StudioQuotedGenerationForSpend = Pick<
   'purpose' | 'generationCount' | 'requestPlan' | 'rateUnit' | 'rateMinorUnits'
 >;
 
+type StudioGenerationCountAuthority = Pick<StudioQuotedGeneration, 'purpose' | 'generationCount' | 'requestPlan'>;
+
+/**
+ * Two attempts are reserved only where the product has an explicit bounded recovery contract.
+ * Chained video qualifies only after its exact predecessor frame is already frozen into the quote;
+ * deferred and seed-conditioned video must remain single-attempt work.
+ */
+export const studioGenerationCountIsValidV2 = (item: StudioGenerationCountAuthority): boolean =>
+  item.generationCount === 1 ||
+  (item.generationCount === 2 &&
+    (item.purpose === 'reference_image' ||
+      (item.purpose === 'video_take' &&
+        item.requestPlan.kind === 'resolved' &&
+        item.requestPlan.snapshot.conditioningInput?.kind === 'predecessor_frame')));
+
 const checkedMultiply = (left: number, right: number): number | null => {
   if (!Number.isSafeInteger(left) || !Number.isSafeInteger(right)) return null;
   const result = left * right;
@@ -45,9 +60,7 @@ const requestDuration = (plan: StudioGenerationRequestPlan): number =>
 export const calculateStudioQuotedGenerationAmounts = (
   item: StudioQuotedGenerationForSpend
 ): StudioQuotedGenerationAmounts | null => {
-  const generationCountIsValid =
-    item.generationCount === 1 || (item.purpose === 'reference_image' && item.generationCount === 2);
-  if (!Number.isSafeInteger(item.rateMinorUnits) || item.rateMinorUnits <= 0 || !generationCountIsValid) {
+  if (!Number.isSafeInteger(item.rateMinorUnits) || item.rateMinorUnits <= 0 || !studioGenerationCountIsValidV2(item)) {
     return null;
   }
 

@@ -56,6 +56,8 @@ import {
   calculateStudioQuotedGenerationAmounts,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  studioAutomaticVideoRetryFailureCodeIsEligibleV2,
+  studioGenerationCountIsValidV2,
   studioGenerationTargetKey,
   STUDIO_BOARD_REQUEST_DURATION_SECONDS,
 } from './generation';
@@ -1222,7 +1224,7 @@ const validateQuotedItem = (value: unknown, projectId: string, projectRevision: 
   const plan = value.requestPlan as Record<string, unknown>;
   const target = value.target as StudioQuotedGeneration['target'];
   if ((value.purpose === 'reference_image') !== (target.kind === 'reference')) return false;
-  if (value.generationCount !== 1 && value.purpose !== 'reference_image') return false;
+  if (!studioGenerationCountIsValidV2(value as unknown as StudioQuotedGeneration)) return false;
   if (value.purpose === 'seed_still' || value.purpose === 'reference_image') {
     if (
       value.rateUnit !== 'generation' ||
@@ -2267,6 +2269,7 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
       } else {
         if (
           upstream.purpose !== 'video_take' ||
+          upstream.generationCount !== 1 ||
           upstream.target.kind !== 'shot' ||
           upstream.target.shotId !== dependency.predecessorShotId ||
           item.target.kind !== 'shot' ||
@@ -2453,10 +2456,19 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     ) {
       return false;
     }
+    const boundedUnbilledVideoFailure =
+      job.status === 'failed' &&
+      job.error?.code === 'no_output' &&
+      job.providerJobId !== null &&
+      job.spendReceipt === null &&
+      link.item.purpose === 'video_take' &&
+      link.item.generationCount === 2;
     const receiptRequired =
       job.status === 'succeeded' ||
       (job.status === 'failed' &&
-        (job.error?.code === 'no_output' || variationGridFailure || job.error?.code === 'download_failed'));
+        ((job.error?.code === 'no_output' && !boundedUnbilledVideoFailure) ||
+          variationGridFailure ||
+          job.error?.code === 'download_failed'));
     const receiptAllowed = receiptRequired || job.status === 'running';
     if (
       (receiptRequired && job.spendReceipt === null) ||
@@ -2479,16 +2491,37 @@ export const validateStudioProjectV2 = (value: unknown): value is StudioProjectV
     }
     if (jobsByAttempt.slice(jobs.length).some((job) => job !== undefined)) return false;
     if (link.item.generationCount === 2) {
-      if (link.item.purpose !== 'reference_image' || link.item.target.kind !== 'reference') return false;
       const secondAttempt = jobsByAttempt[1];
-      const firstAttemptGridFailed =
-        firstAttempt.status === 'failed' && firstAttempt.error?.code === 'seed_still_variation_grid';
-      if (
-        (firstAttemptGridFailed && secondAttempt === undefined) ||
-        (!firstAttemptGridFailed && secondAttempt !== undefined) ||
-        (secondAttempt !== undefined &&
-          (secondAttempt.retryOfJobId !== firstAttempt.id || secondAttempt.retryReason !== 'variation_grid'))
-      ) {
+      if (link.item.purpose === 'reference_image' && link.item.target.kind === 'reference') {
+        const firstAttemptGridFailed =
+          firstAttempt.status === 'failed' && firstAttempt.error?.code === 'seed_still_variation_grid';
+        if (
+          (firstAttemptGridFailed && secondAttempt === undefined) ||
+          (!firstAttemptGridFailed && secondAttempt !== undefined) ||
+          (secondAttempt !== undefined &&
+            (secondAttempt.retryOfJobId !== firstAttempt.id || secondAttempt.retryReason !== 'variation_grid'))
+        ) {
+          return false;
+        }
+      } else if (link.item.purpose === 'video_take' && link.item.target.kind === 'shot') {
+        const firstAttemptMayRetry =
+          firstAttempt.status === 'failed' &&
+          firstAttempt.providerJobId !== null &&
+          firstAttempt.spendReceipt === null &&
+          firstAttempt.error !== null &&
+          firstAttempt.error.code !== 'dependency_failed' &&
+          studioAutomaticVideoRetryFailureCodeIsEligibleV2(firstAttempt.error.code);
+        if (
+          (firstAttemptMayRetry && secondAttempt === undefined) ||
+          (!firstAttemptMayRetry && secondAttempt !== undefined) ||
+          (secondAttempt !== undefined &&
+            (secondAttempt.retryOfJobId !== firstAttempt.id ||
+              secondAttempt.retryReason !== 'provider_failure' ||
+              secondAttempt.duplicateChargeAcknowledged))
+        ) {
+          return false;
+        }
+      } else {
         return false;
       }
     }

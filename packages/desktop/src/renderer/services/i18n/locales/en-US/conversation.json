@@ -1792,6 +1792,7 @@
           "story": "Story · The narrative purpose and progression for this Beat"
         },
         "directorRequestHint": "Ask the Creative Director for a reviewed re-split proposal.",
+        "directorFrameReviewHint": "Inspect the exact inherited conditioning frame for Shot {{shotId}} and propose a frame-aware Shooting script that begins from what the frame already shows, then moves. Do not generate media, request a quote, authorize spend, or spend.",
         "common": {
           "cancel": "Cancel",
           "keepWaiting": "Keep waiting",
@@ -1950,6 +1951,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Review start frame with Director",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -2352,6 +2354,7 @@
       "gate": {
         "title": "Review generation",
         "reviewBeforeSpend": "Preparing an estimate is free. Only the explicit Confirm action can submit paid work.",
+        "predecessorVideoRetry": "Review the exact inherited start frame and Shooting script before confirming. One automatic retry is reserved only if the first provider attempt fails unambiguously. First attempts cost {{lower}}; the confirmed maximum is {{upper}}.",
         "requestedShots": "{{count}} shots selected",
         "requestedShots_one": "{{count}} shot selected",
         "requestedShots_other": "{{count}} shots selected",

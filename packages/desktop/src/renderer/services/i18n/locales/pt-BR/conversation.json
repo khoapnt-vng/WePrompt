@@ -1403,6 +1403,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Revisar quadro inicial com o Director",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1523,6 +1524,7 @@
           "keyboardGuidance": "Espaço reproduz · Setas buscam · [ ] junções · L repete"
         },
         "directorRequestHint": "Peça ao Diretor Criativo uma proposta revisada para redistribuir os Shots.",
+        "directorFrameReviewHint": "Inspecione o quadro de condicionamento herdado exato do Shot {{shotId}} e proponha um Shooting script ciente do quadro, começando pelo que ele já mostra e depois criando movimento. Não gere mídia, solicite orçamento, autorize gastos nem gaste.",
         "recovery": {
           "cancelAndReviewRejoin": "Cancelar e revisar reconexão",
           "cancelAndReviewRejoinTitle": "Cancelar o trabalho autorizado e revisar a reconexão?",
@@ -1549,6 +1551,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "Revise o quadro inicial herdado exato e o Shooting script antes de confirmar. Uma nova tentativa automática fica reservada somente se a primeira tentativa do provedor falhar de forma inequívoca. As primeiras tentativas custam {{lower}}; o máximo confirmado é {{upper}}.",
         "purpose": {
           "board_still": "Painel do Board",
           "reference_image": "Imagem de referência"

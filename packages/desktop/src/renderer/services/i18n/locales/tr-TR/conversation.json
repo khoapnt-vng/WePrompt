@@ -1399,6 +1399,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Başlangıç karesini Director ile incele",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1519,6 +1520,7 @@
           "keyboardGuidance": "Boşluk oynatır · Oklar arar · [ ] birleşimler · L döngü"
         },
         "directorRequestHint": "Yaratıcı Yönetmenden incelenmiş bir yeniden bölme önerisi isteyin.",
+        "directorFrameReviewHint": "Shot {{shotId}} için devralınan kesin koşullandırma karesini inceleyin ve karede zaten görünenlerden başlayıp ardından harekete geçen, kareye duyarlı bir Shooting script önerin. Medya üretmeyin, fiyat teklifi istemeyin, harcamaya izin vermeyin veya harcama yapmayın.",
         "recovery": {
           "cancelAndReviewRejoin": "İptal et ve yeniden bağlanmayı incele",
           "cancelAndReviewRejoinTitle": "Yetkilendirilmiş iş iptal edilip yeniden bağlanma incelensin mi?",
@@ -1545,6 +1547,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "Onaylamadan önce devralınan kesin başlangıç karesini ve Shooting script'i inceleyin. Yalnızca ilk sağlayıcı denemesi kesin biçimde başarısız olursa bir otomatik yeniden deneme ayrılır. İlk denemelerin maliyeti {{lower}}; onaylanan üst sınır {{upper}}.",
         "purpose": {
           "board_still": "Pano paneli",
           "reference_image": "Referans görüntüsü"

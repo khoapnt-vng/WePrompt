@@ -533,19 +533,18 @@ describe('schema-2 Studio estimates', () => {
     }
   );
 
-  it('refuses a canonical ordinary cascade when an implicit downstream Shot has a blank Shooting script', () => {
+  it('does not preflight an unquoted downstream Shooting script during the first sequential seed step', () => {
     const project = makeDerivationProject();
     project.shots.shot_3!.shootingScript = '\t';
 
-    expect(() =>
-      deriveStudioSubmissionQuoteGraphV2({
-        project,
-        request: prepareRequest([choice('shot_1', 'seed_still')], []),
-        resolveRoute: () => {
-          throw new Error('route composition must not run');
-        },
-      })
-    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+    const options = deriveStudioSubmissionQuoteCoresV2({
+      project,
+      request: prepareRequest([choice('shot_1', 'seed_still')], []),
+      rateCard: createStudioRateCardV2([imageRate, videoRate]),
+    });
+
+    expect(options.request.cascadeChoices).toEqual([choice('shot_1', 'video_take')]);
+    expect(options.withCascade?.cascadeItems).toHaveLength(1);
   });
 
   it('refuses an entire Board batch when any selected Shot has a blank Shooting script', () => {
@@ -1110,12 +1109,9 @@ describe('schema-2 Studio estimates', () => {
     ).toThrow(expect.objectContaining({ code: 'in_flight' }));
   });
 
-  it('derives byte-identical base rows and the complete downstream symbolic graph', () => {
+  it('derives an ordinary video frontier as one terminal base row', () => {
     const project = makeDerivationProject();
-    const request = prepareRequest(
-      [choice('shot_1', 'video_take')],
-      [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const request = prepareRequest([choice('shot_1', 'video_take')], []);
 
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
@@ -1124,60 +1120,30 @@ describe('schema-2 Studio estimates', () => {
     });
 
     expect(options.request).toEqual(request);
-    expect(options.withCascade?.baseItems).toEqual(options.baseOnly.baseItems);
+    expect(options.withCascade).toBeNull();
     expect(options.baseOnly.cascadeItems).toEqual([]);
-    expect(
-      options.withCascade?.cascadeItems.map(({ target, requestPlan }) => [
-        target.kind === 'shot' ? target.shotId : target.referenceId,
-        requestPlan,
-      ])
-    ).toEqual([
-      [
-        'shot_2',
-        expect.objectContaining({
-          kind: 'after_take_selection',
-          dependency: {
-            kind: 'authorized_predecessor',
-            predecessorShotId: 'shot_1',
-            upstreamItemId: createStudioQuotedGenerationId({
-              projectId: project.id,
-              projectRevision: project.revision,
-              target: { kind: 'shot', shotId: 'shot_1' },
-              purpose: 'video_take',
-            }),
-          },
+    expect(options.baseOnly.baseItems).toEqual([
+      expect.objectContaining({
+        target: { kind: 'shot', shotId: 'shot_1' },
+        purpose: 'video_take',
+        generationCount: 1,
+        requestPlan: expect.objectContaining({
+          kind: 'resolved',
+          snapshot: expect.objectContaining({
+            conditioningInput: { kind: 'seed_still', assetId: 'seed_1' },
+          }),
         }),
-      ],
-      [
-        'shot_3',
-        expect.objectContaining({
-          kind: 'after_take_selection',
-          dependency: {
-            kind: 'authorized_predecessor',
-            predecessorShotId: 'shot_2',
-            upstreamItemId: createStudioQuotedGenerationId({
-              projectId: project.id,
-              projectRevision: project.revision,
-              target: { kind: 'shot', shotId: 'shot_2' },
-              purpose: 'video_take',
-            }),
-          },
-        }),
-      ],
+      }),
     ]);
     expect(options.baseOnly.lowerMinorUnits).toBe(56);
     expect(options.baseOnly.upperMinorUnits).toBe(56);
-    expect(options.withCascade).toMatchObject({ lowerMinorUnits: 168, upperMinorUnits: 168 });
   });
 
   it('derives a same-shot video barrier after a reviewed head seed', () => {
     const project = makeDerivationProject();
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
-      request: prepareRequest(
-        [choice('shot_1', 'seed_still')],
-        [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-      ),
+      request: prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]),
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
     });
 
@@ -1191,12 +1157,10 @@ describe('schema-2 Studio estimates', () => {
         },
       })
     );
-    expect(
-      options.withCascade?.cascadeItems.slice(1).every((item) => item.requestPlan.kind === 'after_take_selection')
-    ).toBe(true);
+    expect(options.withCascade?.cascadeItems).toHaveLength(1);
   });
 
-  it('derives the canonical same-shot and downstream cascade when an ordinary seed request leaves it empty', () => {
+  it('stops an ordinary seed quote before the first unresolved predecessor-frame boundary', () => {
     const project = makeDerivationProject();
     const options = deriveStudioSubmissionQuoteCoresV2({
       project,
@@ -1204,24 +1168,16 @@ describe('schema-2 Studio estimates', () => {
       rateCard: createStudioRateCardV2([imageRate, videoRate]),
     });
 
-    expect(options.request.cascadeChoices).toEqual([
-      choice('shot_1', 'video_take'),
-      choice('shot_2', 'video_take'),
-      choice('shot_3', 'video_take'),
-    ]);
+    expect(options.request.cascadeChoices).toEqual([choice('shot_1', 'video_take')]);
     expect(
       options.withCascade?.cascadeItems.map(({ target, generationCount }) => [
         target.kind === 'shot' ? target.shotId : target.referenceId,
         generationCount,
       ])
-    ).toEqual([
-      ['shot_1', 1],
-      ['shot_2', 1],
-      ['shot_3', 1],
-    ]);
+    ).toEqual([['shot_1', 1]]);
   });
 
-  it('derives only eligible downstream video choices across hard-cut and in-flight boundaries', () => {
+  it('keeps ordinary video frontiers terminal across hard-cut and in-flight boundaries', () => {
     const project = makeDerivationProject();
     project.beats.beat_1!.shotOrder.push('shot_4', 'shot_5');
     project.shots.shot_4 = makeShot('shot_4');
@@ -1251,16 +1207,15 @@ describe('schema-2 Studio estimates', () => {
       rateCard: createStudioRateCardV2([videoRate]),
     });
 
-    expect(beforeBarrier.request.cascadeChoices).toEqual([choice('shot_2', 'video_take')]);
-    expect(afterHardCut.request.cascadeChoices).toEqual([choice('shot_5', 'video_take')]);
+    expect(beforeBarrier.request.cascadeChoices).toEqual([]);
+    expect(afterHardCut.request.cascadeChoices).toEqual([]);
+    expect(beforeBarrier.withCascade).toBeNull();
+    expect(afterHardCut.withCascade).toBeNull();
   });
 
   it('keeps an exact seed base quote when only its cascade route or rate is unavailable', () => {
     const project = makeDerivationProject();
-    const request = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const request = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     const available = deriveStudioSubmissionQuoteCoresV2({
       project,
       request,
@@ -1292,10 +1247,7 @@ describe('schema-2 Studio estimates', () => {
     expect(() =>
       deriveStudioSubmissionQuoteCoresV2({
         project,
-        request: prepareRequest(
-          [choice('shot_1', 'seed_still')],
-          [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        ),
+        request: prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]),
         rateCard: createStudioRateCardV2([imageRate, videoRate]),
       })
     ).toThrow(expect.objectContaining({ code: 'missing_route' }));
@@ -1355,6 +1307,8 @@ describe('schema-2 Studio estimates', () => {
         }),
       })
     );
+    expect(options.baseOnly.baseItems[0]?.generationCount).toBe(2);
+    expect(options.baseOnly).toMatchObject({ lowerMinorUnits: 56, upperMinorUnits: 112 });
   });
 
   it('freezes multiple approved characters and exactly one background in canonical reference order', () => {
@@ -1739,20 +1693,17 @@ describe('schema-2 Studio estimates', () => {
     );
   });
 
-  it('stops cascade closure at hard cuts and at an external in-flight barrier', () => {
+  it('rejects forged predecessor continuations and keeps an in-flight video frontier terminal', () => {
     const hardCut = makeDerivationProject();
     hardCut.shots.shot_3!.chainBreak = 'hard_cut';
     const rateCard = createStudioRateCardV2([videoRate]);
-    const hardCutOptions = deriveStudioSubmissionQuoteCoresV2({
-      project: hardCut,
-      request: prepareRequest([choice('shot_1', 'video_take')], [choice('shot_2', 'video_take')]),
-      rateCard,
-    });
-    expect(
-      hardCutOptions.withCascade?.cascadeItems.map(({ target }) =>
-        target.kind === 'shot' ? target.shotId : target.referenceId
-      )
-    ).toEqual(['shot_2']);
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project: hardCut,
+        request: prepareRequest([choice('shot_1', 'video_take')], [choice('shot_2', 'video_take')]),
+        rateCard,
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     const inFlight = makeDerivationProject();
     inFlight.jobs.external_job = {
@@ -1760,6 +1711,13 @@ describe('schema-2 Studio estimates', () => {
       purpose: 'video_take',
       status: 'queued_remote',
     } as StudioProjectV2['jobs'][string];
+    expect(() =>
+      deriveStudioSubmissionQuoteCoresV2({
+        project: inFlight,
+        request: prepareRequest([choice('shot_1', 'video_take')], [choice('shot_2', 'video_take')]),
+        rateCard,
+      })
+    ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
     const inFlightOptions = deriveStudioSubmissionQuoteCoresV2({
       project: inFlight,
       request: prepareRequest([choice('shot_1', 'video_take')], []),
@@ -1774,94 +1732,57 @@ describe('schema-2 Studio estimates', () => {
     const derive = (request: unknown) => deriveStudioSubmissionQuoteCoresV2({ project, request, rateCard });
 
     expect(() =>
-      derive(
-        prepareRequest(
-          [{ ...choice('shot_1', 'video_take'), generationCount: 0 } as never],
-          [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        )
-      )
+      derive(prepareRequest([{ ...choice('shot_1', 'video_take'), generationCount: 0 } as never], []))
     ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
     expect(() =>
-      derive(
-        prepareRequest(
-          [{ ...choice('shot_1', 'video_take'), generationCount: 1 } as never],
-          [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        )
-      )
+      derive(prepareRequest([{ ...choice('shot_1', 'video_take'), generationCount: 1 } as never], []))
     ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
     expect(() =>
-      derive(
-        prepareRequest(
-          [{ ...choice('shot_1', 'video_take'), referenceAssetId: 'brief_ref' } as never],
-          [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        )
-      )
+      derive(prepareRequest([{ ...choice('shot_1', 'video_take'), referenceAssetId: 'brief_ref' } as never], []))
     ).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     project.shots.shot_1!.seedStillId = null;
     project.shots.shot_1!.assetIds = [];
     delete project.assets.seed_1;
-    expect(() =>
-      derive(
-        prepareRequest(
-          [choice('shot_1', 'video_take')],
-          [choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-        )
-      )
-    ).toThrow(expect.objectContaining({ code: 'missing_conditioning' }));
+    expect(() => derive(prepareRequest([choice('shot_1', 'video_take')], []))).toThrow(
+      expect.objectContaining({ code: 'missing_conditioning' })
+    );
 
     const request = prepareRequest(
       [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
+      [choice('shot_1', 'video_take')]
     ) as StudioPrepareSubmissionRequestV2 & { unexpected?: boolean };
     request.unexpected = true;
     expect(() => derive(request)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const accessor = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const accessor = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     Object.defineProperty(accessor, 'projectId', { enumerable: true, get: () => 'project_1' });
     expect(() => derive(accessor)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     expect(() => derive(null)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const inherited = Object.create(
-      prepareRequest(
-        [choice('shot_1', 'seed_still')],
-        [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-      )
-    );
+    const inherited = Object.create(prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]));
     expect(() => derive(inherited)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     const symbolKeyed = prepareRequest(
       [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
+      [choice('shot_1', 'video_take')]
     ) as StudioPrepareSubmissionRequestV2 & { [key: symbol]: unknown };
     delete (symbolKeyed as Partial<StudioPrepareSubmissionRequestV2>).cascadeChoices;
     symbolKeyed[Symbol('cascadeChoices')] = [];
     expect(() => derive(symbolKeyed)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const nullArrayPrototype = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const nullArrayPrototype = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     Object.setPrototypeOf(nullArrayPrototype.baseChoices, null);
     expect(() => derive(nullArrayPrototype)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const sparseChoices = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const sparseChoices = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     const sparseBaseChoices: StudioPrepareSubmissionRequestV2['baseChoices'] = [];
     sparseBaseChoices.length = 1;
     sparseChoices.baseChoices = sparseBaseChoices;
     expect(() => derive(sparseChoices)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const hiddenChoice = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const hiddenChoice = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     Object.defineProperty(hiddenChoice.baseChoices, 0, {
       value: hiddenChoice.baseChoices[0],
       enumerable: false,
@@ -1870,19 +1791,13 @@ describe('schema-2 Studio estimates', () => {
     });
     expect(() => derive(hiddenChoice)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
-    const inheritedChoice = prepareRequest(
-      [choice('shot_1', 'seed_still')],
-      [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-    );
+    const inheritedChoice = prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')]);
     inheritedChoice.baseChoices[0] = Object.create(inheritedChoice.baseChoices[0]);
     expect(() => derive(inheritedChoice)).toThrow(expect.objectContaining({ code: 'invalid_prepare_request' }));
 
     const nullPrototypeRequest = Object.assign(
       Object.create(null),
-      prepareRequest(
-        [choice('shot_1', 'seed_still')],
-        [choice('shot_1', 'video_take'), choice('shot_2', 'video_take'), choice('shot_3', 'video_take')]
-      )
+      prepareRequest([choice('shot_1', 'seed_still')], [choice('shot_1', 'video_take')])
     );
     expect(
       deriveStudioSubmissionQuoteCoresV2({ project: makeDerivationProject(), request: nullPrototypeRequest, rateCard })

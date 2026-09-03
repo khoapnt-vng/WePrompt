@@ -1636,6 +1636,60 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
+  it('admits exactly one unbilled retry for a resolved predecessor-frame video', () => {
+    const project = makeProject();
+    project.beats.beat_1!.shotOrder.push('shot_2');
+    project.shots.shot_2 = makeShot('shot_2');
+    const take = addSucceededVideoTake(project, 'shot_1', 'take_predecessor');
+    const frameAssetId = addReadyFrame(project, take.id, take.durationSeconds!);
+    const item = makeItem(
+      project.revision,
+      'shot_2',
+      'video_take',
+      videoPlan({
+        kind: 'predecessor_frame',
+        predecessorShotId: 'shot_1',
+        takeAssetId: take.id,
+        frameAssetId,
+        endpointSeconds: take.durationSeconds!,
+      }),
+      2
+    );
+    const authorization = makeAuthorization('auth_bounded_video_retry', project.revision, [item]);
+    const first = makeJob('job_video_first', authorization, item);
+    addAuthorizationWithJobs(project, authorization, [first]);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    first.status = 'failed';
+    first.error = { code: 'no_output', messageKey: 'noOutput' };
+    expect(validateStudioProjectV2(project)).toBe(false);
+
+    first.providerJobId = 'remote_video_first';
+    first.remoteStartedAt = timestamp;
+    first.error = { code: 'unknown', messageKey: 'unknown' };
+    expect(validateStudioProjectV2(project)).toBe(false);
+
+    const retry = makeJob('job_video_retry', authorization, item, {
+      idempotencyKey: authorization.idempotencyKeys[1]!.key,
+      retryOfJobId: first.id,
+      retryReason: 'provider_failure',
+    });
+    project.jobs[retry.id] = retry;
+    project.shots.shot_2!.jobIds.push(retry.id);
+    expect(validateStudioProjectV2(project)).toBe(true);
+
+    retry.duplicateChargeAcknowledged = true;
+    retry.duplicateChargeAcknowledgedAt = confirmedAt;
+    expect(validateStudioProjectV2(project)).toBe(false);
+    retry.duplicateChargeAcknowledged = false;
+    retry.duplicateChargeAcknowledgedAt = null;
+
+    first.error = { code: 'no_output', messageKey: 'noOutput' };
+    expect(validateStudioProjectV2(project)).toBe(true);
+    first.error = { code: 'invalid_request', messageKey: 'invalidRequest' };
+    expect(validateStudioProjectV2(project)).toBe(false);
+  });
+
   it('admits exactly one bounded reference-grid retry under the original quote authority', () => {
     const project = makeProject();
     const referenceId = 'ref_background';

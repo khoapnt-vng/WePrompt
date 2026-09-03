@@ -5,11 +5,23 @@
  */
 
 import { createHash } from 'node:crypto';
-import type { StudioGenerationTargetV2, StudioQuotedGeneration } from '@/common/types/project/creativeStudioTypes';
+import type {
+  StudioGenerationTargetV2,
+  StudioJobErrorCode,
+  StudioQuotedGeneration,
+} from '@/common/types/project/creativeStudioTypes';
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
 const QUOTED_GENERATION_ID_NAMESPACE = 'creative-studio/quoted-generation/v2';
 const AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE = 'creative-studio/automatic-reference-retry-job/v2';
+const AUTOMATIC_VIDEO_RETRY_JOB_ID_NAMESPACE = 'creative-studio/automatic-video-retry-job/v2';
+const AUTOMATIC_VIDEO_RETRY_FAILURE_CODES: ReadonlySet<StudioJobErrorCode> = new Set([
+  'rate_limited',
+  'provider_unavailable',
+  'timeout',
+  'no_output',
+  'unknown',
+]);
 
 export type StudioQuotedGenerationIdentityInput = {
   projectId: string;
@@ -27,6 +39,10 @@ export const studioGenerationTargetKey = (target: StudioGenerationTargetV2): str
   assertSafeId(id, target.kind === 'shot' ? 'shotId' : 'referenceId');
   return `${target.kind}:${id}`;
 };
+
+/** Exact stochastic terminal causes that may consume a video's pre-authorized second attempt. */
+export const studioAutomaticVideoRetryFailureCodeIsEligibleV2 = (code: StudioJobErrorCode): boolean =>
+  AUTOMATIC_VIDEO_RETRY_FAILURE_CODES.has(code);
 
 /** Returns the deterministic identity of one quoted target/purpose pair at one project revision. */
 export const createStudioQuotedGenerationId = (input: StudioQuotedGenerationIdentityInput): string => {
@@ -67,6 +83,27 @@ export const createStudioAutomaticReferenceRetryJobId = (input: {
   assertSafeId(input.idempotencyKey, 'idempotencyKey');
   const canonical = [
     AUTOMATIC_REFERENCE_RETRY_JOB_ID_NAMESPACE,
+    input.authorizationId,
+    input.itemId,
+    input.idempotencyKey,
+  ].join('\0');
+  return `job_${createHash('sha256').update(canonical, 'utf8').digest('hex')}`;
+};
+
+/**
+ * Returns the deterministic identity for the one provider-failure retry reserved by a video item.
+ * A distinct namespace preserves every reference-retry identity already derived by schema 5.
+ */
+export const createStudioAutomaticVideoRetryJobId = (input: {
+  authorizationId: string;
+  itemId: string;
+  idempotencyKey: string;
+}): string => {
+  assertSafeId(input.authorizationId, 'authorizationId');
+  assertSafeId(input.itemId, 'itemId');
+  assertSafeId(input.idempotencyKey, 'idempotencyKey');
+  const canonical = [
+    AUTOMATIC_VIDEO_RETRY_JOB_ID_NAMESPACE,
     input.authorizationId,
     input.itemId,
     input.idempotencyKey,

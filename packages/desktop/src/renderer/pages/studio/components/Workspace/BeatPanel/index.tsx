@@ -94,6 +94,7 @@ export type BeatPanelActions = {
   reviewSeedStill: (shotId: string) => void;
   reviewContinuity: (shotId: string, hardCut: boolean) => void;
   reviewReferences: (shotId: string) => void;
+  reviewConditioningFrame: (shotId: string) => void;
   resolveGenerationBlock: (shotId: string, block: StudioGenerationBlockV2) => void;
   retryGenerationJob: (jobId: string, acknowledgePossibleDuplicateCharge: boolean) => Promise<boolean>;
   cancelGenerationJob: (jobId: string) => Promise<boolean>;
@@ -606,6 +607,12 @@ const ShotCard: React.FC<ShotCardProps> = ({
     latestAttemptFailed: composerLatestAttemptFailed,
   } = deriveWorkspaceShotStatus(shot, conditioningFailure !== undefined);
   const effectiveFrame = shot.firstFrames.find((frame) => frame.effectiveSeed) ?? null;
+  const conditioningFrameReady =
+    chainState === 'continuous' &&
+    effectiveFrame?.origin === 'inherited' &&
+    shot.frameBoundary?.status === 'on_disk' &&
+    shot.frameBoundary.dependentShotId === shot.id &&
+    shot.frameBoundary.frameAssetId === effectiveFrame.assetId;
   const effectiveFrameUrl =
     effectiveFrame === null ? null : createManagedStudioAssetUrl(projectId, effectiveFrame.assetId);
   const referenceCount =
@@ -757,16 +764,27 @@ const ShotCard: React.FC<ShotCardProps> = ({
         <span>
           {t(`${KEY_ROOT}.composer.framesSet`, { count: (effectiveFrame === null ? 0 : 1) + referenceCount })}
         </span>
-        <Button
-          disabled={disabled || !shot.segmentHead || shot.seedAuthorizationLock !== null}
-          onClick={() => {
-            setFirstFramePickerOpen(true);
-            void actions.importSeedStill(shot.id);
-          }}
-          size='mini'
-        >
-          {t(`${KEY_ROOT}.firstFrames.import`)}
-        </Button>
+        {conditioningFrameReady ? (
+          <Button
+            data-conditioning-frame-director-review
+            onClick={() => actions.reviewConditioningFrame(shot.id)}
+            size='mini'
+            type='primary'
+          >
+            {t(`${KEY_ROOT}.composer.reviewStartFrameWithDirector`)}
+          </Button>
+        ) : (
+          <Button
+            disabled={disabled || !shot.segmentHead || shot.seedAuthorizationLock !== null}
+            onClick={() => {
+              setFirstFramePickerOpen(true);
+              void actions.importSeedStill(shot.id);
+            }}
+            size='mini'
+          >
+            {t(`${KEY_ROOT}.firstFrames.import`)}
+          </Button>
+        )}
       </div>
 
       <div className={styles.frameSlots}>

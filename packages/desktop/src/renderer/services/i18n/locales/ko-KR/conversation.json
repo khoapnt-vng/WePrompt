@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Director와 시작 프레임 검토",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "스페이스바 재생 · 화살표 탐색 · [ ] 연결점 · L 반복"
         },
         "directorRequestHint": "크리에이티브 디렉터에게 검토된 재분할 제안을 요청하세요.",
+        "directorFrameReviewHint": "Shot {{shotId}}가 상속한 정확한 컨디셔닝 프레임을 확인하고, 프레임에 이미 보이는 내용에서 시작해 움직임으로 이어지는 프레임 인식 Shooting script를 제안하세요. 미디어를 생성하거나 견적을 요청하거나 지출을 승인하거나 비용을 사용하지 마세요.",
         "recovery": {
           "cancelAndReviewRejoin": "취소하고 다시 연결 검토",
           "cancelAndReviewRejoinTitle": "승인된 작업을 취소하고 다시 연결을 검토할까요?",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "확정하기 전에 상속된 정확한 시작 프레임과 Shooting script를 검토하세요. 첫 제공자 시도가 명확하게 실패한 경우에만 자동 재시도 1회가 예약됩니다. 첫 시도 비용은 {{lower}}, 확정된 최대 비용은 {{upper}}입니다.",
         "purpose": {
           "board_still": "보드 패널",
           "reference_image": "참조 이미지"

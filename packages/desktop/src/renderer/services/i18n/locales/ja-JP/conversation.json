@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "開始フレームを Creative Director と確認",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "スペースで再生 · 矢印でシーク · [ ] でつなぎ目 · L でループ"
         },
         "directorRequestHint": "Creative Director に、レビュー付きの再分割案を依頼してください。",
+        "directorFrameReviewHint": "Shot {{shotId}} が継承した正確なコンディショニングフレームを確認し、フレームにすでに写っている内容から始めて動きへつなげる Shooting script を提案してください。メディアの生成、見積もりの要求、支出の承認、支出は行わないでください。",
         "recovery": {
           "cancelAndReviewRejoin": "キャンセルして再接続を確認",
           "cancelAndReviewRejoinTitle": "承認済み作業をキャンセルして再接続を確認しますか？",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "確定する前に、継承した正確な開始フレームと Shooting script を確認してください。最初のプロバイダー試行が明確に失敗した場合に限り、自動再試行1回分が予約されます。最初の試行費用は {{lower}}、確定する上限は {{upper}} です。",
         "purpose": {
           "board_still": "ボードパネル",
           "reference_image": "リファレンス画像"

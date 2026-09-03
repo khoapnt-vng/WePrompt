@@ -691,9 +691,9 @@ const StudioProjectPage: React.FC<{
     [refetchRoutes]
   );
   /**
-   * The bar's Render action. Submits the largest bounded film-order batch the chain permits. Each
-   * selected frontier authorizes its exact downstream cascade, which advances unattended once the
-   * segment seed is fixed; a later click is needed only for work outside the request cap or recovery.
+   * The bar's Render action. Submits the largest bounded set of currently reviewable frontiers. An
+   * ordinary frontier stops before the next unresolved predecessor-frame boundary; once that exact
+   * frame exists, the person reviews its frame-aware script and confirms the next Shot separately.
    */
   const renderFilm = useCallback((): void => {
     const current = projectRef.current;
@@ -1477,6 +1477,48 @@ const StudioProjectPage: React.FC<{
     [activeView, projectId, setActionErrorMessageKey, t]
   );
 
+  const focusDirectorForConditioningFrame = useCallback(
+    (shotId: string): void => {
+      const current = projectRef.current;
+      const currentProjection = projectionRef.current;
+      if (
+        current === null ||
+        currentProjection === null ||
+        current.id !== projectId ||
+        current.id !== currentProjection.projectId ||
+        current.revision !== currentProjection.projectRevision ||
+        !currentProjection.chainStatusReady
+      ) {
+        return;
+      }
+      const matches = currentProjection.activeBeats.flatMap((beat) => beat.shots.filter((shot) => shot.id === shotId));
+      const matchedShot = matches[0];
+      const inheritedFrames =
+        matchedShot?.firstFrames.filter((frame) => frame.effectiveSeed && frame.origin === 'inherited') ?? [];
+      if (
+        matches.length !== 1 ||
+        matchedShot === undefined ||
+        matchedShot.segmentHead ||
+        matchedShot.frameBoundary?.status !== 'on_disk' ||
+        matchedShot.frameBoundary.dependentShotId !== shotId ||
+        inheritedFrames.length !== 1 ||
+        inheritedFrames[0]!.assetId !== matchedShot.frameBoundary.frameAssetId
+      ) {
+        return;
+      }
+      const revealed = workspaceShellRef.current?.revealDirector({ projectId, view: activeView }) ?? false;
+      if (!revealed) return;
+      directorDraftRequestSequenceRef.current += 1;
+      setDirectorDraftRequest({
+        requestId: directorDraftRequestSequenceRef.current,
+        projectId,
+        prompt: t('conversation.creativeStudio.workspace.beatPanel.directorFrameReviewHint', { shotId }),
+      });
+      setActionErrorMessageKey(null);
+    },
+    [activeView, projectId, setActionErrorMessageKey, t]
+  );
+
   const openContinuityReview = useCallback(
     (shotId: string, hardCut: boolean): void => {
       const current = projectRef.current;
@@ -1998,6 +2040,7 @@ const StudioProjectPage: React.FC<{
       },
       reviewContinuity: openContinuityReview,
       reviewReferences: (shotId) => openReferenceFocus({ shotIds: [shotId] }),
+      reviewConditioningFrame: focusDirectorForConditioningFrame,
       resolveGenerationBlock: (shotId, block: StudioGenerationBlockV2) => {
         if (block.code === 'reference_binding') {
           openReferenceFocus({ shotIds: [shotId] });
@@ -2056,6 +2099,7 @@ const StudioProjectPage: React.FC<{
       beatPanelReviewBlockedMessageKey,
       cancelAndQueueRejoinReview,
       currentGenerationCapability,
+      focusDirectorForConditioningFrame,
       focusDirectorForReviewedRequest,
       mutations,
       navigate,
