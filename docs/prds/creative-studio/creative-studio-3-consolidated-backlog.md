@@ -3,7 +3,7 @@
 Current as of 2026-09-04. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**127 bugs filed · 123 closed · 4 open** — 2 P1, 2 P2, 0 P3.
+**127 bugs filed · 124 closed · 3 open** — 1 P1, 2 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
@@ -16,12 +16,11 @@ BUG-206 is the same incident as BUG-207, and non-reproducing BUG-209 remains out
 
 ## 1. Open bugs
 
-| Bug         | Priority | State           | Remaining gate                                                                                                                                                                                      |
-| ----------- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **BUG-144** | P1       | Owner-deferred  | Approve and package distributable LGPL-compatible ffmpeg/ffprobe binaries; finish provenance, signing, notices and legal review; separately give found-but-unsupported builds accurate remediation. |
-| **BUG-165** | P1       | Partially fixed | Choose the frame-aware generation workflow, retry authorization/pricing model and non-vision Director fallback.                                                                                     |
-| **BUG-163** | P2       | Code fixed      | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                                                                             |
-| **BUG-166** | P2       | Code fixed      | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                                                                         |
+| Bug         | Priority | State          | Remaining gate                                                                                                                                                                                      |
+| ----------- | -------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **BUG-144** | P1       | Owner-deferred | Approve and package distributable LGPL-compatible ffmpeg/ffprobe binaries; finish provenance, signing, notices and legal review; separately give found-but-unsupported builds accurate remediation. |
+| **BUG-163** | P2       | Code fixed     | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                                                                             |
+| **BUG-166** | P2       | Code fixed     | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                                                                         |
 
 There is no actionable open P3 queue.
 
@@ -33,24 +32,6 @@ still ships no binaries, so its main distribution gate remains deferred by the o
 through application code alone. Separately, the truly missing-binary path is actionable, but a pair
 that is found and fails the capability probe is still misreported as missing; that copy split remains
 bounded code work and does not solve the distribution gate.
-
-### BUG-165 — product and spending decision
-
-Exact trim-aware predecessor-frame inspection is present in `fd1a37023`, but a first-run cascade
-freezes downstream prompts before those frames exist. A second video attempt also requires its own
-authorized idempotency key; the existing reference-image model presents that honestly as an `X–2X`
-range and confirms against the upper bound.
-
-The smallest sound completion is sequential and frame-aware:
-
-1. Stop a new quote at the first unresolved predecessor-frame boundary.
-2. After the upstream take succeeds, extract and inspect its trim-aware final frame.
-3. Review and accept a frame-aware Shot rewrite, then prepare a fresh downstream quote.
-4. Reserve two attempts only for a resolved predecessor-frame video, display `X–2X`, and retry once
-   only after an unequivocal terminal remote failure with no receipt.
-
-Keeping one-click whole-Beat cascades is a substantially larger lifecycle and cancellation redesign,
-and still cannot safely rewrite an already-authorized prompt.
 
 ### BUG-163 and BUG-166 — live closure only
 
@@ -77,6 +58,10 @@ above are run with suitable fixtures.
   renderer, spend and live Director authority; BUG-207 surfaces the required human seed pin without
   changing BUG-115's contract; BUG-208 gives malformed requests, media, composition, storage and
   missing artifacts distinct safe outcomes.
+- **Frame-aware chained generation:** BUG-165 makes ordinary Film generation sequential at unresolved
+  predecessor-frame boundaries, adds exact-frame Director review, presents resolved chained video as
+  `X–2X`, and authorizes exactly one receipt-free remote-failure retry without changing legacy,
+  continuity-change or Board-promotion graphs.
 
 The current backports preserve the corrected versions of the historical fixes: BUG-176 lifts each
 Shot tile rather than the entire Shot grid above the card overlay, and BUG-177 includes the viewer
@@ -100,6 +85,14 @@ Creative Studio coverage gate passes 672 files and 10,689 tests with 25 skipped 
 85.25% branches, 91.56% functions and 91.25% lines. TypeScript, repository formatting, translation
 validation and lint pass; lint retains 1,324 pre-existing warnings and zero errors. Independent reviews
 found and then cleared the zero-capacity Director bypass and four export-classification/privacy edges.
+
+Chained-generation commit `d5736033e` closes BUG-165. The focused BUG-165 run passes 792 tests; the
+repository and Creative Studio coverage runs each pass 672 files and 10,702 tests with 25 skipped.
+Coverage is 87.93% statements, 85.29% branches, 91.56% functions and 91.24% lines. TypeScript,
+formatting, translation validation and lint pass with 1,321 repository warnings and zero errors. An
+independent adversarial review found no remaining authorization, deadlock, exactly-once, reload,
+cancellation-race or special-workflow issue after remote-attempt validation was hardened. No paid
+provider generation was run during this code pass.
 
 ## 3. Planned product work outside the bug count
 
