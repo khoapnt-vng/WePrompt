@@ -4,121 +4,143 @@
 re-checked against `codex/creative-studio-4-phase-6` (Wave 1).
 **Method:** 24 agents across two adversarial passes — capability traces through nine layers,
 five independent sweep lenses, skeptic verification of every trace, and a completeness critic.
-Claims below are **[verified]** (re-read directly) or **[audit]** (agent-reported with
-file:line, not all independently re-read).
+Claims are **[verified]** (re-read directly) or **[audit]** (agent-reported with file:line, not
+all independently re-read).
 
-This audit was commissioned to check whether video's silent narrowing had happened to sound,
-References and export. It had — and to far more than those three.
-
----
-
-## The finding
-
-**CS4 is not a narrowed version of the old Studio. It is a different, much smaller product.**
-
-The shipped Pilot is a flat, append-only grid of independent photographs. No sequence, no
-editing, no deletion, no reordering, no undo beyond rename, no audio, no video, no project
-settings, and a Director reduced to five tools.
-
-**49 distinct capabilities** were measured as present in the shipped Board/Cut Studio and absent
-from the Pilot. They fall into three classes that need different responses.
+Commissioned to check whether video's silent narrowing had also happened to sound, References
+and export. It had — and to more than those three.
 
 ---
 
-## Class 1 — Deliberately out of scope
+## The finding, sized honestly
 
-Documented decisions for Pilot 1. Not defects; the plan said so.
+**CS4 is not a narrowed version of the old Studio. It is a different, smaller product** — a
+flat, append-only grid of independent photographs.
 
-Video and moving image · sound and the music bed · film export and the editor folder · Beats
-and Shots as narrative structure · the four-view workspace (References, Table, Board, Cut) ·
-storyboard panels · trim and hard-cut control.
+**Roughly 22 distinct capability families** were present in the shipped Board/Cut Studio and are
+absent from the Pilot.
 
-`docs/prds/creative-studio/creative-studio-4-canvas-design.md:36` — *"No video, film, Assembly,
-sound, reference workflow, or ffmpeg dependency belongs to Pilot 1"* — with sound and video
-named in the same sentence, at :44, :436 and :508. **[audit]**
+> **A correction to this document's first revision**, which said 49. That figure came from
+> deduplicating five sweep lenses by name string, and the lenses described the same capabilities
+> in different words — References appeared three times, deletion four, proposal review four,
+> audio three. 49 counts descriptions, not capabilities. It also conflated the Director's tool
+> surface with the product's feature surface; those are separated below.
 
-> A correction to an earlier claim of mine: I wrote that sound's removal was documented where
-> video's was not. That is false. They were excluded together, with equal explicitness. What
-> separates them is prior machinery — video had a live rate-card kind, live adapters and a real
-> generation purpose; sound had none.
+**Almost none of this is a rebuild.** Where a genuine rebuild is needed, the old implementation
+survives as dead code and can be read — the ffmpeg audio mix is still at
+`service/filmExporter.ts:1182`, the reference workflow at
+`renderer/pages/studio/StudioPage/referenceViewAdapter.ts`.
 
 ---
 
-## Class 2 — Shipped but unreachable *(the dangerous class)*
+## Cost tiers — the decision-useful cut
 
-Code that exists, is live, is on the mounted path, and has **no entry point**. Nobody decided
-these. They fell out of the cutover the way video did, and no gate catches them.
+| Tier | Families | What the work actually is |
+|---|---|---|
+| **A — built, needs connecting** | 3 | An IPC field, a composer input, an env flag. Currently pure sunk waste. |
+| **B — small additions to an existing spine** | 8 | Mutation-union member + handler + control. The pattern is established. |
+| **C — medium** | 4 | Real features, no new subsystems. |
+| **D — large, and deliberately deferred** | 7 | The "what is CS4" question. Decisions already written down. |
 
-### Project rules — every layer live, no way to set one **[audit, critic-verified]**
+### Tier A — built, live, unreachable *(the only emergency)*
 
-`set_rules` is a live member of the schema-6 mutation union
-(`creativeStudioTypes.ts:2064`), admitted by the live IPC validator
+**1. Project rules.** The most consequential single finding. `set_rules` is a live member of the
+schema-6 mutation union (`creativeStudioTypes.ts:2064`), admitted by the live IPC validator
 (`payloadSchemas.ts:1189`, enforced at `common/adapter/main.ts:97`), with a real handler on the
 mounted path (`schema2/mutations/pieceCatalogV3.ts:405-416`). Rules **materially change paid
-output** — `pilot/prepare.ts:269` and `pilot/confirmation.ts:230` pass `project.rules` into
-composition, which renders them into the provider prompt at `schema2/generation/composition.ts:564`.
+output**: `pilot/prepare.ts:269` and `pilot/confirmation.ts:230` pass `project.rules` into
+composition, which renders them into the provider prompt at
+`schema2/generation/composition.ts:564`.
 
 But `rules: []` is hardcoded at project birth (`schema2/factories.ts:122`), `set_rules` has
-**zero renderer call sites**, and no Director tool produces it. So `inputs.rules.length` is
-provably always `0` in production, and the prompt branch that consumes rules is dead at runtime
-inside a live function.
+**zero renderer call sites**, and no Director tool emits it. `inputs.rules.length` is provably
+always `0` in production — the prompt branch consuming rules is dead at runtime inside a live
+function. **[audit, critic-verified]**
 
-A user cannot write "always shot on 35mm" or a forbidden-terms guardrail. The feature is built,
-paid for, and unreachable.
+This is worse than missing. Anyone reading `composition.ts:564` sees guardrails being rendered
+into the prompt and reasonably concludes they work. No test would notice.
 
-### Reference conditioning — nine layers live, blocked at the tenth
+**2. Reference conditioning.** Live on eight of nine layers including a shipping reference
+picker (`PilotCanvas.tsx:1379-1415`); every renderer *create* call is refused because the IPC
+schema omits `referencePieceIds`. Detail in `creative-studio-4-wave-2-scope.md` §0. **[verified]**
 
-Covered in `creative-studio-4-wave-2-scope.md` §0. Live on eight of nine layers including a
-shipping reference picker in `PilotCanvas.tsx:1379-1415`; every renderer *create* call is
-rejected because the IPC schema omits `referencePieceIds`. **[verified]**
+Unresolved alongside it: conditioning capacity is **fail-closed to one hardcoded
+provider+model tuple** (`common/utils/imageModelAllowlist.ts:69-74`). The admission check is
+correct; the admitted set is one. **[audit]**
 
-Related, and unresolved: conditioning capacity is **fail-closed to a single hardcoded
-provider+model tuple** in production (`common/utils/imageModelAllowlist.ts:69-74`). The
-admission check is correct; the admitted set is one. **[audit]**
+**3. Per-Piece export.** Wired end to end, but every command short-circuits unless
+`AIONUI_ENABLE_CREATIVE_STUDIO === '1'`. Reveal-in-Finder opens the app's internal store root
+rather than the user's chosen destination. Eight orphaned export IPC channels remain declared at
+`ipcBridge.ts:1432-1457` with no provider, two still invoked by a surviving renderer hook.
+**[audit]**
 
-### Per-Piece export — behind an off-by-default flag
-
-Fully wired end to end, but every export command short-circuits unless
-`AIONUI_ENABLE_CREATIVE_STUDIO === '1'`. Also: reveal-in-Finder opens the app's internal store
-root rather than the user's chosen destination. And eight orphaned export IPC channels remain
-declared at `ipcBridge.ts:1432-1457` with no provider, two of them still invoked by a surviving
-renderer hook. **[audit]**
-
----
-
-## Class 3 — Simply absent
-
-Nobody wrote these down as out of scope, and nothing implements them.
+### Tier B — small additions
 
 | Capability | Evidence |
 |---|---|
-| **A Piece can never be deleted, parked or reordered** | No `delete`/`reorder` in the live six-member mutation union (`creativeStudioTypes.ts:2061-2066`); they exist only in dead V2 vocabulary |
-| **A Piece is write-once** | Once it holds an asset, every further generation path on it is categorically refused — no regenerate, no iterate |
-| **The brief is write-once** | Only reachable writer is `PilotLibrary.tsx:179 createProjectV3`; yet the brief is prepended to every paid generation |
-| **A project cannot be renamed** | `edit_project` has zero renderer callers; the canvas header prints the name as static text |
-| **Undo works only for rename** | `pieceCatalogV3.ts:437` builds an undo entry only `if (renameBefore !== null)`; the UI literally says `canvas.actions.undoRename` |
-| **No project settings** | No aspect ratio, resolution, target duration or style at project level |
-| **No model/route choice** | The user cannot see or pin which model renders their work |
-| **No batch authorization** | Every image is its own priced request and its own confirmation click |
-| **No full-screen viewing** | A 1080p result is viewable only at grid-tile size |
-| **No project thumbnails** | The library is a text list |
-| **No export history** | A one-shot banner; dismiss it and the record is gone |
+| Delete / park / reorder a Piece | Absent from the live six-member mutation union (`creativeStudioTypes.ts:2061-2066`); exists only in dead V2 vocabulary |
+| In-place revision — a Piece is write-once | Once it holds an asset, every further generation path on it is refused |
+| Edit the brief | Only reachable writer is `PilotLibrary.tsx:179 createProjectV3` — yet the brief is prepended to every paid generation |
+| Rename a project | `edit_project` has zero renderer callers; the canvas header prints the name as static text |
+| Undo beyond rename | `pieceCatalogV3.ts:437` builds an entry only `if (renameBefore !== null)`; the UI says `canvas.actions.undoRename` |
+| Full-size image viewing | A 1080p result is viewable only at grid-tile size |
+| Project thumbnails | The library is a text list |
+| Export history | A one-shot banner; dismiss it and the record is gone |
 
 **The undo narrowing contradicts a standing ruling.** The CS2 transition plan requires director
-edits to be undoable from phase 1. Shipped undo covers rename only — while `i18n-keys.d.ts`
-still carries undo labels for `set_brief`, `set_rules`, `set_spend_policy` and `edit_project`,
-which is the residue of the intent. **[audit]**
+edits to be undoable from phase 1. `i18n-keys.d.ts` still carries undo labels for `set_brief`,
+`set_rules`, `set_spend_policy` and `edit_project` — the residue of that intent. **[audit]**
 
-### The Director lost most of its job
+### Tier C — medium
 
-Five tools ship (`get_project_status`, `prepare_photo`, `rename_piece`, `get_command_status`,
-and Wave 1's `propose_board`). The dead `studioServer.ts` declares seven more. **[verified]**
+Project-level settings (aspect ratio, resolution, target duration, style) · model/route choice,
+including any way to bind a video provider connection · batch and ranged spend authorization,
+replacing one-confirmation-per-image · cancelling a queued dependent cascade in one action.
 
-The Director **cannot see any image** — it cannot critique the photograph it just made. It
-cannot revise an existing Piece ("same photo, but make the jacket red" is inexpressible). It
-cannot retry a failure. It has no visibility into models, routes or price. And proposal
-review — propose a change, user accepts or rejects a diff — no longer exists on the shipped
-path.
+### Tier D — large, deliberately deferred
+
+Video (generation, timing in persistence, playback, poster frames, per-second pricing) · audio
+(bed, attach/detach, shot analysis, export mix) · Beats and Shots as narrative structure · the
+four-view workspace (References, Table, Board, Cut) · storyboard panels · trim and hard-cut
+control · film, editor-folder and script export.
+
+`docs/prds/creative-studio/creative-studio-4-canvas-design.md:36` — *"No video, film, Assembly,
+sound, reference workflow, or ffmpeg dependency belongs to Pilot 1"* — repeated at :44, :436 and
+:508. **[audit]**
+
+> Sound and video are named in the **same sentences** there. An earlier claim of mine, that
+> sound's removal was documented where video's was not, is false. What separates them is prior
+> machinery: video had a live rate-card kind, live adapters and a real generation purpose; sound
+> had none.
+
+---
+
+## The Director's tool surface — a separate count
+
+Not part of the 22 families above; this is the assistant's authority, and it overlaps the tiers.
+
+Five tools ship. `scripts/build-mcp-servers.js:52` builds `builtin-mcp-studio.js` from
+`pilotStudioServer.ts`, so that file is what ships; `studioServer.ts` is dead, surviving only in
+the coverage config. **[verified]**
+
+**Shipping:** `get_project_status`, `prepare_photo`, `rename_piece`, `get_command_status`, and
+Wave 1's `propose_board`.
+
+**Declared in the dead server, absent from the Pilot:**
+
+| Lost tool | What the Director can no longer do |
+|---|---|
+| `studio_request_reference_images` | ask for references |
+| `studio_apply_edits` | edit existing work |
+| `studio_apply_free_fix` | retry without charging |
+| `studio_get_conditioning_frame` | use a frame as conditioning |
+| `studio_list_routes` | see or choose a model route |
+| `studio_propose_paid_recovery` | offer a paid recovery after failure |
+| `studio_get_proposal` | read back a proposal |
+
+Two behavioural losses beyond the tool list: the Director **cannot see any image**, so it cannot
+critique the photograph it just made; and proposal review — propose a change, user accepts or
+rejects a diff — no longer exists on the shipped path.
 
 ---
 
@@ -127,36 +149,38 @@ path.
 **The over-engineering worry was aimed at the wrong risk.** CS4 is not over-built. It is
 under-scoped relative to what it replaced, and the gap was never measured until now.
 
-**Class 2 is the actionable emergency.** Three features are built, live and unreachable. That is
-pure waste already paid for, and each is small to connect: an IPC field, a composer input, an
-env flag. Nothing about Class 2 requires a wave.
+**Tier A is the emergency, and it is small.** Three features are built, live and unreachable —
+already-paid-for waste, each closable with an IPC field, a composer input, or a flag. Nothing
+here needs a wave.
 
-**Class 1 is a product decision, not a bug list.** Those capabilities were deliberately deferred.
-The question is whether Pilot 1 was ever meant to become the product, or to prove one.
+**Tier B is the credibility risk.** "You cannot delete a photo you generated" and "you cannot
+fix a typo in your brief" are not roadmap items; they are what a pilot user hits in the first
+ten minutes.
 
-**Class 3 is the credibility risk.** "You cannot delete a photo you generated" and "you cannot
-fix a typo in your brief" are not roadmap items — they are the things a pilot user hits in the
-first ten minutes.
+**Tier D is a product decision, not a bug list.** Those capabilities were deliberately deferred.
+The open question is whether Pilot 1 was meant to *prove* a product or *become* one.
 
 ### Recommended order
 
-1. **Fix the reference-conditioning IPC omission.** It blocks new-Piece creation from the UI today.
-2. **Connect or delete the rules feature.** It is rendered into every paid prompt and always empty.
-3. **Decide Class 3 minimums before pilot users touch it** — at minimum: delete a Piece, edit the
-   brief, rename a project, view an image full-size.
-4. **Then** decide Class 1 scope, which is the real "what is CS4" question.
+1. **Fix the reference-conditioning IPC omission** — it blocks new-Piece creation from the UI today.
+2. **Connect or delete the rules feature** — it is in every paid prompt and provably always empty.
+3. **Set a Tier B floor before pilot users arrive**: delete a Piece, edit the brief, rename a
+   project, view an image full-size.
+4. **Then** decide Tier D scope, which is the real "what is CS4" question.
 
 ---
 
 ## Method note
 
-The three defects this audit corrected in its own first pass are worth recording, because they
-are the failure modes of auditing this codebase:
+Four failure modes, each paid for once during this audit:
 
 1. **Counting literals measures nothing.** A count of `'image'` literals was simultaneously too
    high (16 of 17 in one file were already-video-safe branching) and too low (~10 real hardcodes
-   in that same file went uncounted).
+   in the same file went uncounted).
 2. **Dead code looks alive.** `v2Service.ts` is 4,506 fully-featured lines that run nowhere.
    Prove reachability — a registration, a mount, a build entry point — before citing anything.
 3. **Trace the vertical slice.** Nine layers each looked locally reasonable while the tenth
    silently rejected every call.
+4. **Deduplicate by concept, not by wording.** Independent lenses name the same capability
+   differently; counting their outputs inflated this document's own headline by more than
+   double, in the direction of alarm.
