@@ -1,34 +1,38 @@
 # Creative Studio 3 — consolidated backlog
 
-Current as of 2026-09-03. Counts are derived from
+Current as of 2026-09-04. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**123 bugs filed · 119 closed · 4 open** — 2 P1, 2 P2, 0 P3.
+**127 bugs filed · 123 closed · 4 open** — 2 P1, 2 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
 BUG-202 records a live late-CS3 scalability failure and the bounded recovery behavior that keeps it
-closed without importing the absent audio-analysis feature slice.
+closed without importing the absent audio-analysis feature slice. BUG-204, BUG-205, BUG-207 and
+BUG-208 reconcile Claude's follow-up findings against the recovery's actual contracts; proposed
+BUG-206 is the same incident as BUG-207, and non-reproducing BUG-209 remains outside the bug count.
 
 ---
 
 ## 1. Open bugs
 
-| Bug         | Priority | State           | Remaining gate                                                                                                                             |
-| ----------- | -------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| **BUG-144** | P1       | Owner-deferred  | Approve, source and package distributable LGPL-compatible ffmpeg/ffprobe binaries; complete provenance, signing, notices and legal review. |
-| **BUG-165** | P1       | Partially fixed | Choose the frame-aware generation workflow, retry authorization/pricing model and non-vision Director fallback.                            |
-| **BUG-163** | P2       | Code fixed      | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                    |
-| **BUG-166** | P2       | Code fixed      | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                |
+| Bug         | Priority | State           | Remaining gate                                                                                                                                                                                      |
+| ----------- | -------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **BUG-144** | P1       | Owner-deferred  | Approve and package distributable LGPL-compatible ffmpeg/ffprobe binaries; finish provenance, signing, notices and legal review; separately give found-but-unsupported builds accurate remediation. |
+| **BUG-165** | P1       | Partially fixed | Choose the frame-aware generation workflow, retry authorization/pricing model and non-vision Director fallback.                                                                                     |
+| **BUG-163** | P2       | Code fixed      | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                                                                             |
+| **BUG-166** | P2       | Code fixed      | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                                                                         |
 
 There is no actionable open P3 queue.
 
-### BUG-144 — distribution decision
+### BUG-144 — distribution decision and capability copy
 
 The resolver already supports an atomic bundled pair under
 `resourcesPath/bundled-ffmpeg/<platform>-<arch>`, with environment and `PATH` fallbacks. The product
-still ships no binaries. This cannot close through application code alone and remains deferred by the
-owner.
+still ships no binaries, so its main distribution gate remains deferred by the owner and cannot close
+through application code alone. Separately, the truly missing-binary path is actionable, but a pair
+that is found and fails the capability probe is still misreported as missing; that copy split remains
+bounded code work and does not solve the distribution gate.
 
 ### BUG-165 — product and spending decision
 
@@ -53,7 +57,7 @@ and still cannot safely rewrite an already-authorized prompt.
 The recovery behavior is covered on the current branch: Director recovery passes nine targeted cases
 and its full 85-test file; poster capture covers flat-frame refusal, failure-specific retries, renderer
 and Main single-flight behavior, and idempotent duplicate persistence. The four affected UI suites pass
-439 tests together. The repository's fake MP4 is uniformly black, so it correctly exercises rejection
+456 tests together. The repository's fake MP4 is uniformly black, so it correctly exercises rejection
 but cannot prove positive poster persistence. These entries stay open until the two Electron scenarios
 above are run with suitable fixtures.
 
@@ -68,6 +72,11 @@ above are run with suitable fixtures.
 - **Large-project preview scalability:** BUG-202 preserves active Beat/Cut playback through operational
   refreshes, bounds Board poster probing to one visible fair lease, suspends background probes during
   focused review, and releases hidden or detached media work completely.
+- **Follow-up correctness and usability:** BUG-204 makes scripted-only Shot deletion reviewable while
+  retaining every paid/derived dependency guard; BUG-205 blocks zero-capacity reference work through
+  renderer, spend and live Director authority; BUG-207 surfaces the required human seed pin without
+  changing BUG-115's contract; BUG-208 gives malformed requests, media, composition, storage and
+  missing artifacts distinct safe outcomes.
 
 The current backports preserve the corrected versions of the historical fixes: BUG-176 lifts each
 Shot tile rather than the entire Shot grid above the card overlay, and BUG-177 includes the viewer
@@ -85,6 +94,13 @@ pass 350 tests, and the repository run passes 672 files and 10,647 tests with 25
 repository formatting, translation validation and lint pass; two independent read-only reviews found
 no remaining correctness, lifecycle, race or usability issue.
 
+Correctness commit `ffd58170a` closes BUG-204, BUG-205, BUG-207 and BUG-208. The final affected run
+passes 15 files and 1,312 tests, including the real Director/reference lifecycle integration. The
+Creative Studio coverage gate passes 672 files and 10,689 tests with 25 skipped at 87.92% statements,
+85.25% branches, 91.56% functions and 91.25% lines. TypeScript, repository formatting, translation
+validation and lint pass; lint retains 1,324 pre-existing warnings and zero errors. Independent reviews
+found and then cleared the zero-capacity Director bypass and four export-classification/privacy edges.
+
 ## 3. Planned product work outside the bug count
 
 - **Sound:** make review audio audible, identify routes that cannot produce sound, include sound in
@@ -96,3 +112,5 @@ no remaining correctness, lifecycle, race or usability issue.
 - **Beat track:** the design decisions exist, but the work still needs slicing before implementation.
 
 These plans are product work, not open defects, and must not be included in the bug totals above.
+The proposed BUG-209 describes the absent audio-analysis implementation and is therefore represented by
+the Sound constraint above rather than counted as a defect on this recovery.
