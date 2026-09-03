@@ -1,3 +1,28 @@
+/* Publish the project's ratio once for every non-portalled workspace view. */
+.root {
+  --studio-frame-aspect-ratio: 16 / 9;
+}
+
+.root[data-aspect-ratio='16:9'] {
+  --studio-frame-aspect-ratio: 16 / 9;
+}
+
+.root[data-aspect-ratio='9:16'] {
+  --studio-frame-aspect-ratio: 9 / 16;
+}
+
+.root[data-aspect-ratio='1:1'] {
+  --studio-frame-aspect-ratio: 1 / 1;
+}
+
+.root[data-aspect-ratio='4:3'] {
+  --studio-frame-aspect-ratio: 4 / 3;
+}
+
+.root[data-aspect-ratio='3:4'] {
+  --studio-frame-aspect-ratio: 3 / 4;
+}
+
 .root {
   display: grid;
   gap: 16px;

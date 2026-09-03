@@ -270,7 +270,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
                     alt={t('conversation.creativeStudio.workspace.referenceWorkflow.previewAlt', {
                       label: reference?.label ?? t('conversation.creativeStudio.workspace.views.references'),
                     })}
-                    className='h-48px w-72px rd-4px object-cover'
+                    className='h-48px w-72px rd-4px object-contain'
                     key={assetId}
                     src={createManagedStudioAssetUrl(project.id, assetId)}
                   />

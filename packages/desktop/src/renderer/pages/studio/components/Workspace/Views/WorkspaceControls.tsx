@@ -487,7 +487,12 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
   };
 
   return (
-    <div className={styles.root} data-studio-workspace-controls data-active-view={activeView}>
+    <div
+      className={styles.root}
+      data-active-view={activeView}
+      data-aspect-ratio={project.aspectRatio}
+      data-studio-workspace-controls
+    >
       {activeView === 'references' ? (
         <ReferencesView
           actions={
@@ -588,6 +593,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
       {openBeat === null ? null : (
         <BeatPanel
           actions={panelActions}
+          aspectRatio={project.aspectRatio}
           beat={openBeat}
           beatIds={projection.activeBeatIds}
           beatIndex={openBeatIndex}

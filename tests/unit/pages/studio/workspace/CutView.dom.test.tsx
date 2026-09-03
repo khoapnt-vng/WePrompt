@@ -1646,7 +1646,7 @@ describe('the truthful Cut player and transport', () => {
     expect(source).not.toMatch(/<audio\b/);
     expect(css).toMatch(/\.hero\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*2fr\)\s+minmax\(0,\s*1fr\)/s);
     expect(css).toMatch(/\.hero\s*\{[^}]*gap:\s*13px/s);
-    expect(css).toMatch(/\.preview\s*\{[^}]*aspect-ratio:\s*16\s*\/\s*9/s);
+    expect(css).toMatch(/\.preview\s*\{[^}]*aspect-ratio:\s*var\(--studio-frame-aspect-ratio, 16 \/ 9\)/s);
     expect(css).toMatch(/\.previewMedia\s*\{[^}]*object-fit:\s*contain/s);
     expect(css).toMatch(
       /\.prewarmMedia\s*\{[^}]*position:\s*absolute[^}]*inline-size:\s*1px[^}]*block-size:\s*1px[^}]*clip-path:\s*inset\(50%\)/s

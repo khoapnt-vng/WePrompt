@@ -13,6 +13,7 @@ import {
   STUDIO_MAX_SHOT_SECONDS,
   STUDIO_MIN_SHOT_SECONDS,
   type StudioEditableShotChanges,
+  type StudioAspectRatio,
   type StudioGenerationBlockV2,
   type StudioRendererParkBlockerCodeV2,
   type StudioRendererParkEligibilityV2,
@@ -104,6 +105,8 @@ export type BeatPanelActions = {
 
 export type BeatPanelProps = {
   projectId: string;
+  /** Republished on this panel's root because the Modal portals out of the workspace subtree. */
+  aspectRatio: StudioAspectRatio;
   beat: WorkspaceBeatProjection;
   beatIds: readonly string[];
   beatIndex: number;
@@ -1136,6 +1139,7 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection,
 /** Human Beat/Shot authoring and recovery surface. Native authority stays in semantic parent callbacks. */
 export const BeatPanel: React.FC<BeatPanelProps> = ({
   projectId,
+  aspectRatio,
   beat,
   beatIds,
   beatIndex,
@@ -1509,7 +1513,11 @@ export const BeatPanel: React.FC<BeatPanelProps> = ({
       unmountOnExit={false}
       visible
     >
-      <section aria-label={t(`${KEY_ROOT}.label`, { title: beatTitle })} className={styles.root}>
+      <section
+        aria-label={t(`${KEY_ROOT}.label`, { title: beatTitle })}
+        className={styles.root}
+        data-aspect-ratio={aspectRatio}
+      >
         <header className={styles.panelHeader} data-panel-header>
           <div>
             <p className={styles.eyebrow}>

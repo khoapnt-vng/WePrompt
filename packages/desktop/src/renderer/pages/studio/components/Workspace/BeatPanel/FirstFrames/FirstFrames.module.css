@@ -103,11 +103,16 @@
 .frameMedia {
   position: relative;
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   inline-size: 132px;
   block-size: 74px;
-  place-items: center;
+  place-items: stretch;
   overflow: hidden;
   background: var(--color-fill-3);
+}
+
+.frameMedia > span {
+  place-self: center;
 }
 
 .frameMedia img,
@@ -118,7 +123,9 @@
   display: block;
   inline-size: 100%;
   block-size: 100%;
-  object-fit: cover;
+  min-inline-size: 0;
+  min-block-size: 0;
+  object-fit: contain;
 }
 
 .frameOpenSurface {
@@ -287,6 +294,7 @@
 
 .viewerMedia {
   display: grid;
+  grid-template-rows: minmax(0, 1fr);
   min-inline-size: 0;
   min-block-size: 0;
   block-size: 100%;

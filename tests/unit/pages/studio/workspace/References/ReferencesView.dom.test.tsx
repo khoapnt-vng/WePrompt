@@ -670,7 +670,7 @@ describe('the schema-5 References workspace', () => {
     expect(actions.openBindings).toHaveBeenCalledOnce();
   });
 
-  it('keeps the canonical picture on a light matte without cropping and crops only take thumbnails', () => {
+  it('sizes the canonical picture and its takes from the project ratio, cropping neither', () => {
     const css = readFileSync(
       resolve(
         process.cwd(),
@@ -681,11 +681,24 @@ describe('the schema-5 References workspace', () => {
 
     expect(css).toMatch(/\.root\s*\{[^}]*inline-size:\s*min\(100%, 1000px\)/s);
     expect(css).toMatch(
-      /\.pictureBand\s*\{[^}]*block-size:\s*156px[^}]*background:\s*var\(--studio-reference-matte\)/s
+      /\.pictureBand\s*\{[^}]*aspect-ratio:\s*var\(--studio-reference-aspect-ratio, 16 \/ 9\)[^}]*background:\s*var\(--studio-reference-matte\)/s
     );
     expect(css).toMatch(/--studio-reference-matte:\s*rgb\(239 231 216\)/s);
+    expect(css).not.toMatch(/\.pictureBand\s*\{[^}]*block-size:\s*156px/s);
+    expect(css).toMatch(/\.pictureBand\s*\{[^}]*grid-template-rows:\s*minmax\(0, 1fr\)/s);
+    expect(css).toMatch(/\.pictureBand\s*\{[^}]*place-items:\s*stretch/s);
     expect(css).toMatch(/\.pictureBand img\s*\{[^}]*object-fit:\s*contain/s);
-    expect(css).toMatch(/\.take img\s*\{[^}]*object-fit:\s*cover/s);
+    expect(css).toMatch(/\.take img\s*\{[^}]*object-fit:\s*contain/s);
+    expect(css).toMatch(/\.take img\s*\{[^}]*aspect-ratio:\s*var\(--studio-reference-aspect-ratio, 16 \/ 9\)/s);
+    for (const ratio of ['16:9', '9:16', '1:1', '4:3', '3:4']) {
+      const [width, height] = ratio.split(':');
+      expect(css).toMatch(
+        new RegExp(
+          `\\.root\\[data-aspect-ratio='${ratio}'\\]\\s*\\{[^}]*--studio-reference-aspect-ratio:\\s*${width} / ${height}`,
+          's'
+        )
+      );
+    }
     expect(css).toMatch(/\.removalBlocker span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
   });
 

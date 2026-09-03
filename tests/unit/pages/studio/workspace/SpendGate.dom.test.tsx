@@ -1655,6 +1655,33 @@ describe('Board spend gate draft', () => {
 describe('WorkspaceControls', () => {
   beforeEach(() => window.sessionStorage.clear());
 
+  it('publishes the current project aspect ratio and updates it after a project refresh', () => {
+    const portrait = { ...makeProject(), aspectRatio: '9:16' as const };
+    const open = vi.fn();
+    const result = render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={open} project={portrait} />);
+
+    expect(result.container.querySelector('[data-studio-workspace-controls]')).toHaveAttribute(
+      'data-aspect-ratio',
+      '9:16'
+    );
+
+    const square = { ...portrait, revision: portrait.revision + 1, aspectRatio: '1:1' as const };
+    result.rerender(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={open} project={square} />);
+    expect(result.container.querySelector('[data-studio-workspace-controls]')).toHaveAttribute(
+      'data-aspect-ratio',
+      '1:1'
+    );
+  });
+
+  it('passes the project ratio into the Beat panel portal', () => {
+    const portrait = { ...makeProject(), aspectRatio: '9:16' as const };
+    render(<ControlsHarness routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={portrait} />);
+
+    openFirstBeatPanel();
+
+    expect(document.querySelector('section[data-aspect-ratio="9:16"]')).not.toBeNull();
+  });
+
   it('builds only an exact unlocked Table Beat reorder operation', () => {
     const exact = {
       activeBeatIds: ['beat_1', 'beat_2'],

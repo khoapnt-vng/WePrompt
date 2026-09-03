@@ -790,6 +790,7 @@ const panelProps = (
   overrides: Partial<BeatPanelProps> = {}
 ): BeatPanelProps => ({
   projectId: 'project_1',
+  aspectRatio: '16:9',
   beat,
   beatIds: projection.activeBeatIds,
   beatIndex: projection.activeBeats.findIndex((row) => row.id === beat.id),
@@ -1792,6 +1793,22 @@ describe('BeatPanel', () => {
     modalConfirm.mockReset();
     modalConfirm.mockImplementation(() => ({ close: vi.fn(), update: vi.fn() }));
     vi.stubGlobal('ResizeObserver', NoopResizeObserver);
+  });
+
+  it('publishes and refreshes its ratio inside the portalled modal subtree', () => {
+    const beat = makeBeat();
+    const drafts = makeDrafts();
+    const actions = makeActions();
+    const portraitProps = {
+      ...panelProps(beat, drafts, actions),
+      aspectRatio: '9:16' as const,
+    };
+    const result = render(<BeatPanel {...portraitProps} />);
+
+    expect(document.querySelector('section[data-aspect-ratio="9:16"]')).not.toBeNull();
+
+    result.rerender(<BeatPanel {...portraitProps} aspectRatio='1:1' />);
+    expect(document.querySelector('section[data-aspect-ratio="1:1"]')).not.toBeNull();
   });
 
   it.each([
