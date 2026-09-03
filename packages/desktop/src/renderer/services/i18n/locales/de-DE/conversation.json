@@ -1231,7 +1231,7 @@
         }
       },
       "proposals": {
-        "proposalId": "Vorschlags-ID",
+        "unlabelledItem": "Unbenanntes Element",
         "mutationCount": "{{count}} vorgeschlagene Änderungen",
         "mutationCount_one": "{{count}} vorgeschlagene Änderung",
         "mutationCount_other": "{{count}} vorgeschlagene Änderungen",
@@ -1276,11 +1276,11 @@
         "saveAndRequestUpdated": "Speichern und aktualisierten Vorschlag vorbereiten",
         "reviewRuleDrafts": "Regelentwürfe prüfen",
         "reviewRuleDraftsFirst": "Prüfe oder verwirf den lokalen Regelentwurf, bevor du diesen Regelvorschlag annimmst.",
-        "reproposalPrompt": "Bitte prüfe Vorschlag {{proposalId}} mit studio_get_proposal, rufe dann read_storyboard auf und erstelle einen neuen Vorschlag für die aktuelle Revision. Wende den ursprünglichen Vorschlag nicht an und basiere ihn nicht stillschweigend neu.",
+        "reproposalPrompt": "Erstelle eine aktualisierte Fassung des von mir ausgewählten Vorschlags. Verwende {{proposalId}} nur zur internen Zuordnung und erwähne weder diese Referenz noch technische Schritte in deiner Antwort.",
         "chatDecisionBusy": "Eine andere geprüfte Aktion läuft noch.",
         "chatDirty": "Speichere oder verwirf die Entwürfe, die mit diesem Vorschlag kollidieren, bevor du ihn annimmst.",
         "chatNoPending": "Es gibt keinen ausstehenden Regievorschlag.",
-        "chatMultiplePending": "Mehrere aktuelle Regievorschläge sind bereit. Verwende /approve PROPOSAL_ID oder /reject PROPOSAL_ID mit der vollständigen ID.",
+        "chatMultiplePending": "Mehrere Regievorschläge sind bereit. Verwende die Aktionsschaltflächen beim gewünschten Vorschlag.",
         "chatProposalNotFound": "Genau dieser Vorschlag ist nicht mehr ausstehend.",
         "chatUnavailable": "Derzeit ist kein ausstehender Regievorschlag bereit. Prüfe ihn auf seiner Karte oder fordere einen aktualisierten Vorschlag an.",
         "chatStale": "Dieser Vorschlag entspricht nicht mehr der aktuellen Projektversion.",

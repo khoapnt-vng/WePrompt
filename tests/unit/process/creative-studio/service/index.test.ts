@@ -8916,7 +8916,9 @@ describe('Studio MCP schema-2 server', () => {
             properties?: Record<string, { const?: string; additionalProperties?: boolean }>;
           }>
         | undefined;
-      const proposalSchema = tools.find((tool) => tool.name === 'propose_storyboard')?.inputSchema;
+      const storyboardProposalTool = tools.find((tool) => tool.name === 'propose_storyboard');
+      const briefRuleProposalTool = tools.find((tool) => tool.name === 'propose_brief_rule');
+      const proposalSchema = storyboardProposalTool?.inputSchema;
       const proposalOperationItems = proposalSchema?.properties?.operations as
         | { items?: Record<string, unknown> }
         | undefined;
@@ -8943,6 +8945,17 @@ describe('Studio MCP schema-2 server', () => {
         'studio_request_reference_images',
       ]);
       expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
+      for (const proposalTool of [storyboardProposalTool, briefRuleProposalTool]) {
+        expect(proposalTool?.outputSchema).toMatchObject({
+          type: 'object',
+          additionalProperties: false,
+          required: ['proposalId', 'usage'],
+          properties: {
+            proposalId: { type: 'string' },
+            usage: { type: 'string', const: 'tool_input_only' },
+          },
+        });
+      }
       expect(conditioningFrameTool?.inputSchema).toMatchObject({
         type: 'object',
         additionalProperties: false,
@@ -9152,6 +9165,8 @@ describe('Studio MCP schema-2 server', () => {
       expect(studioGetProposalInputSchemaV2.safeParse({ proposalId: 'proposal_exact' }).success).toBe(true);
       expect(proposalTool?.description).toMatch(/never authors the project, generates, authorizes, or spends/i);
       expect(proposalTool?.description).toMatch(/never silently rebase, apply, or replace/i);
+      expect(proposalTool?.description).toMatch(/tool input only/i);
+      expect(proposalTool?.description).toMatch(/never repeat.*user-facing reply/i);
       const commandStatus = tools.find((tool) => tool.name === 'studio_get_command_status');
       expect(commandStatus?.description).toMatch(/durable.*mutation or read-query status/i);
       expect(commandStatus?.description).not.toMatch(/schema-5/i);
@@ -9171,6 +9186,64 @@ describe('Studio MCP schema-2 server', () => {
       expect(referenceValidator({ referenceIds: [], unknown: true })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
+    }
+  });
+
+  it('keeps exact proposal IDs in structured output across the real MCP protocol', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-proposal-output-'));
+    const { pendingDir } = await createSidecarFamilyV2(projectDir, 'proposals');
+    const { pendingDir: referencePendingDir } = await createSidecarFamilyV2(projectDir, 'reference-requests');
+    const project = makeSchema2ServiceProject();
+    await writeStudioProjectFilesV2(projectDir, project);
+    const harness = await createStudioMcpProtocolHarnessV2({
+      projectId: project.id,
+      projectDir,
+      pendingDir,
+      referencePendingDir,
+    });
+
+    try {
+      const storyboardResult = await harness.client.callTool({
+        name: 'propose_storyboard',
+        arguments: {
+          base_revision: project.revision,
+          operations: [{ kind: 'set_brief', brief: 'A protocol-level proposal.' }],
+        },
+      });
+      const storyboardOutput = storyboardResult.structuredContent as Record<string, unknown>;
+      expect(storyboardResult).not.toHaveProperty('isError');
+      expect(storyboardOutput).toMatchObject({ proposalId: expect.any(String), usage: 'tool_input_only' });
+      expect(storyboardResult.content[0]).toMatchObject({
+        type: 'text',
+        text: expect.stringMatching(/saved and waiting for review/i),
+      });
+      expect(JSON.stringify(storyboardResult.content)).not.toContain(storyboardOutput.proposalId);
+
+      const ruleResult = await harness.client.callTool({
+        name: 'propose_brief_rule',
+        arguments: {
+          base_revision: project.revision,
+          text: 'Keep the palette warm.',
+          forbidden_terms: [],
+        },
+      });
+      const ruleOutput = ruleResult.structuredContent as Record<string, unknown>;
+      expect(ruleResult).not.toHaveProperty('isError');
+      expect(ruleOutput).toMatchObject({ proposalId: expect.any(String), usage: 'tool_input_only' });
+      expect(ruleResult.content[0]).toMatchObject({
+        type: 'text',
+        text: expect.stringMatching(/saved and waiting for review/i),
+      });
+      expect(JSON.stringify(ruleResult.content)).not.toContain(ruleOutput.proposalId);
+      expect(ruleOutput.proposalId).not.toBe(storyboardOutput.proposalId);
+
+      const proposalFiles = (await readdir(pendingDir)).filter((name) => name.endsWith('.json'));
+      expect(proposalFiles.toSorted()).toEqual(
+        [`${String(storyboardOutput.proposalId)}.json`, `${String(ruleOutput.proposalId)}.json`].toSorted()
+      );
+    } finally {
+      await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
@@ -11605,7 +11678,11 @@ describe('Studio MCP schema-2 server', () => {
         operations: endCardBatch('none'),
       });
       expect(accepted.isError).toBeUndefined();
-      expect(accepted.content[0].text).toMatch(/recorded for user review/i);
+      const proposalFile = (await readdir(pendingDir)).find((name) => name.endsWith('.json'));
+      const proposalId = proposalFile!.slice(0, -'.json'.length);
+      expect(accepted.content[0].text).toMatch(/saved and waiting for review/i);
+      expect(accepted.content[0].text).not.toContain(proposalId);
+      expect(accepted.structuredContent).toEqual({ proposalId, usage: 'tool_input_only' });
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
@@ -11690,7 +11767,11 @@ describe('Studio MCP schema-2 server', () => {
       operations: [{ kind: 'set_brief', brief: 'Proposed only' }],
     });
     expect(proposed.isError).toBeUndefined();
-    expect(proposed.content[0].text).toMatch(/recorded for user review/i);
+    const storyboardProposalFile = (await readdir(pendingDir)).find((name) => name.endsWith('.json'));
+    const storyboardProposalId = storyboardProposalFile!.slice(0, -'.json'.length);
+    expect(proposed.content[0].text).toMatch(/saved and waiting for review/i);
+    expect(proposed.content[0].text).not.toContain(storyboardProposalId);
+    expect(proposed.structuredContent).toEqual({ proposalId: storyboardProposalId, usage: 'tool_input_only' });
     await expect(
       createProposeStoryboardHandlerV2(config)({
         base_revision: project.revision - 1,
@@ -11715,9 +11796,20 @@ describe('Studio MCP schema-2 server', () => {
     ).resolves.toMatchObject({
       isError: true,
     });
-    await expect(
-      ruleHandler({ base_revision: project.revision, text: 'Keep the palette warm.', forbidden_terms: [] })
-    ).resolves.not.toHaveProperty('isError');
+    const beforeRuleFiles = new Set(await readdir(pendingDir));
+    const proposedRule = await ruleHandler({
+      base_revision: project.revision,
+      text: 'Keep the palette warm.',
+      forbidden_terms: [],
+    });
+    expect(proposedRule).not.toHaveProperty('isError');
+    const ruleProposalFile = (await readdir(pendingDir)).find(
+      (name) => name.endsWith('.json') && !beforeRuleFiles.has(name)
+    );
+    const ruleProposalId = ruleProposalFile!.slice(0, -'.json'.length);
+    expect(proposedRule.content[0].text).toMatch(/saved and waiting for review/i);
+    expect(proposedRule.content[0].text).not.toContain(ruleProposalId);
+    expect(proposedRule.structuredContent).toEqual({ proposalId: ruleProposalId, usage: 'tool_input_only' });
     await expect(
       ruleHandler({ base_revision: project.revision, text: 'No competitor logos.', forbidden_terms: ['competitor'] })
     ).resolves.not.toHaveProperty('isError');

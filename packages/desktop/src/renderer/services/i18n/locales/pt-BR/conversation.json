@@ -1236,7 +1236,7 @@
         }
       },
       "proposals": {
-        "proposalId": "ID da proposta",
+        "unlabelledItem": "Item sem nome",
         "mutationCount": "{{count}} edições propostas",
         "mutationCount_one": "{{count}} edição proposta",
         "mutationCount_other": "{{count}} edições propostas",
@@ -1281,11 +1281,11 @@
         "saveAndRequestUpdated": "Salvar e preparar proposta atualizada",
         "reviewRuleDrafts": "Revisar rascunhos de regras",
         "reviewRuleDraftsFirst": "Revise ou descarte o rascunho de regra local antes de aceitar esta proposta de regra.",
-        "reproposalPrompt": "Inspecione a proposta {{proposalId}} com studio_get_proposal, depois chame read_storyboard e redija uma nova proposta para a revisão atual. Não aplique nem faça rebase silencioso da proposta original.",
+        "reproposalPrompt": "Prepare uma versão atualizada da proposta que selecionei. Use {{proposalId}} apenas para identificá-la internamente e não mencione essa referência nem etapas técnicas na resposta.",
         "chatDecisionBusy": "Outra ação revisada ainda está em andamento.",
         "chatDirty": "Salve ou redefina os rascunhos que entram em conflito com esta proposta antes de aprová-la.",
         "chatNoPending": "Não há proposta pendente do Diretor para processar.",
-        "chatMultiplePending": "Há mais de uma proposta atual do Diretor pronta. Use /approve PROPOSAL_ID ou /reject PROPOSAL_ID com o ID completo.",
+        "chatMultiplePending": "Há mais de uma proposta do Diretor pronta. Use os botões de ação na proposta desejada.",
         "chatProposalNotFound": "Essa proposta exata não está mais pendente.",
         "chatUnavailable": "Nenhuma proposta pendente do Diretor está pronta agora. Use o cartão para revisá-la ou solicitar uma proposta atualizada.",
         "chatStale": "Esta proposta não corresponde mais à revisão atual do projeto.",

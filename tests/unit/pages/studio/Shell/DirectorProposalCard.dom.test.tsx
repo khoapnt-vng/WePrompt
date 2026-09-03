@@ -228,15 +228,12 @@ describe('DirectorProposalCard semantic review', () => {
     expect(screen.getByTestId('studio-proposal-semantic-review')).toBeVisible();
   });
 
-  it('renders the complete proposal ID as labelled, selectable code with bidirectional isolation', () => {
-    renderCard();
+  it('keeps the proposal routing ID out of visible card copy', () => {
+    const { container } = renderCard();
 
-    const id = screen.getByText('proposal_1');
-    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.proposalId')).toBeVisible();
-    expect(id.tagName).toBe('BDI');
-    expect(id).toHaveAttribute('dir', 'auto');
-    expect(id.parentElement?.tagName).toBe('CODE');
-    expect(screen.getByTestId('studio-proposal-proposal_1')).toHaveTextContent('proposal_1');
+    expect(container).not.toHaveTextContent('proposal_1');
+    expect(screen.queryByText('conversation.creativeStudio.workspace.proposals.proposalId')).not.toBeInTheDocument();
+    expect(screen.getByTestId('studio-proposal-proposal_1')).toBeVisible();
   });
 
   it('shows full main-derived Brief, Story, and Shooting script text with human subject/field labels', () => {
@@ -304,7 +301,35 @@ describe('DirectorProposalCard semantic review', () => {
 
     expect(container.querySelector('[data-review-value-id="beat_reunion"]')).toHaveTextContent('Reunion');
     expect(container).not.toHaveTextContent('beat_reunion');
-    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).not.toBeNull();
+    expect(container.querySelector('[data-review-value-id="beat_reunion"]')).not.toHaveAttribute('title');
+  });
+
+  it('uses a neutral label when a reordered item cannot be resolved', () => {
+    const groups = reviewGroups();
+    groups.unshift({
+      change: 'reordered',
+      subject: {
+        kind: 'project',
+        id: 'project_1',
+        title: 'Night market film',
+        position: null,
+        ownerBeatId: null,
+        ownerBeatTitle: null,
+      },
+      fields: [
+        {
+          key: 'order',
+          before: { kind: 'text_list', values: [] },
+          after: { kind: 'text_list', values: ['missing_beat'] },
+        },
+      ],
+    });
+    const { container } = renderCard(proposal({ status: 'ready', groups }));
+    openReview();
+
+    expect(screen.getByText('conversation.creativeStudio.workspace.proposals.unlabelledItem')).toBeVisible();
+    expect(container).not.toHaveTextContent('missing_beat');
+    expect(container.querySelector('[data-review-value-id="missing_beat"]')).not.toHaveAttribute('title');
   });
 
   it('shows forbidden terms in the exact pinned-rule review', () => {
@@ -374,8 +399,8 @@ describe('DirectorProposalCard semantic review', () => {
     ).toBeDisabled();
   });
 
-  it('falls back to the subject id when a refusal has neither a position nor a title', () => {
-    renderCard(
+  it('uses a neutral subject label when a refusal has neither a position nor a title', () => {
+    const { container } = renderCard(
       proposal({
         status: 'unavailable',
         groups: [],
@@ -400,9 +425,11 @@ describe('DirectorProposalCard semantic review', () => {
       })
     );
 
-    expect(screen.getByTitle('invitation')).toHaveTextContent(
-      'conversation.creativeStudio.workspace.proposals.subject.beat · invitation'
-    );
+    const subject = container.querySelector('[data-subject-id="invitation"]');
+    expect(subject).toHaveTextContent('conversation.creativeStudio.workspace.proposals.subject.beat');
+    expect(subject).not.toHaveTextContent('invitation');
+    expect(subject).not.toHaveAttribute('title');
+    expect(screen.queryByTitle('invitation')).not.toBeInTheDocument();
   });
 
   it('honors an independent dirty-draft acceptance blocker without hiding review text', () => {
@@ -653,6 +680,7 @@ describe('DirectorProposalCard semantic review', () => {
     expect(screen.getAllByText('conversation.creativeStudio.workspace.proposals.emptyAuthoredField')).toHaveLength(1);
     expect(screen.queryByText(/beat_edge/)).not.toBeInTheDocument();
     expect(document.querySelector('[data-owner-beat-id="beat_edge"]')).not.toBeNull();
+    expect(document.querySelector('[data-owner-beat-id="beat_edge"]')).not.toHaveAttribute('title');
     expect(screen.getByRole('alert')).toHaveTextContent('workspace.errors.storage');
 
     rerender(

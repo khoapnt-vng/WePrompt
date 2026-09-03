@@ -903,7 +903,7 @@ const expectedLeaves = [
   'library.composer.submit',
   'library.composer.empty',
   'proposals.title',
-  'proposals.proposalId',
+  'proposals.unlabelledItem',
   'proposals.ownerBeat',
   'proposals.before',
   'proposals.after',
@@ -1378,7 +1378,7 @@ const localizedWorkspaceKeys = [
   ...localizedShotStatusKeys,
   ...localizedShotComposerKeys,
   ...localizedReferencesPanelKeys,
-  'proposals.proposalId',
+  'proposals.unlabelledItem',
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
@@ -1676,16 +1676,31 @@ describe('Creative Studio workspace translations', () => {
     }
   });
 
-  it('labels re-proposal as preparing an editable draft and exposes the proposal ID', () => {
+  it('labels proposal actions in plain language without teaching ID commands', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'proposals.proposalId': 'Proposal ID',
+      'proposals.unlabelledItem': 'Unlabelled item',
       'proposals.requestUpdated': 'Prepare updated proposal',
       'proposals.saveAndRequestUpdated': 'Save and prepare updated proposal',
+      'proposals.reproposalPrompt':
+        'Prepare an updated version of the proposal I selected. Use {{proposalId}} only to identify it internally, and do not mention this reference or any technical steps in your reply.',
+      'proposals.chatMultiplePending':
+        'More than one Director proposal is ready. Use the action buttons on the proposal you mean.',
       'proposals.authorityUnavailable':
         'Proposal authority could not be verified. The proposal remains pending and its actions are unavailable.',
     });
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const localized = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      expect(localized['proposals.chatMultiplePending'], locale).not.toMatch(
+        /PROPOSAL_ID|\/approve|\/reject|accept|reject/iu
+      );
+      expect(localized['proposals.reproposalPrompt'], locale).toMatch(/\{\{proposalId\}\}/u);
+      expect(localized['proposals.reproposalPrompt'], locale).not.toMatch(
+        /studio_get_proposal|read_storyboard|rebase|revision/iu
+      );
+    }
   });
 
   it('localizes the collapsed terminal-proposal disclosure in all twelve locales', () => {

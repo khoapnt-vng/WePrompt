@@ -68,16 +68,10 @@ const fieldLabelKey = (key: StudioProposalReviewFieldKeyV2): string =>
 const ReviewSubject: React.FC<{ subject: StudioProposalReviewSubjectV2 }> = ({ subject }) => {
   const { t } = useTranslation();
   return (
-    <bdi
-      data-owner-beat-id={subject.ownerBeatId ?? undefined}
-      data-subject-id={subject.id}
-      dir='auto'
-      title={subject.id}
-    >
+    <bdi data-owner-beat-id={subject.ownerBeatId ?? undefined} data-subject-id={subject.id} dir='auto'>
       {t(`conversation.creativeStudio.workspace.proposals.subject.${subject.kind}`)}
       {subject.position === null ? null : ` ${subject.position}`}
       {subject.title === null || subject.title.length === 0 ? null : ` · ${subject.title}`}
-      {subject.position === null && (subject.title === null || subject.title.length === 0) ? ` · ${subject.id}` : null}
       {subject.ownerBeatTitle === null || subject.ownerBeatTitle.length === 0
         ? null
         : ` · ${t('conversation.creativeStudio.workspace.proposals.ownerBeat')} · ${subject.ownerBeatTitle}`}
@@ -117,7 +111,7 @@ const ReviewValue: React.FC<{
       <ol>
         {value.values.map((entry, index) => (
           <li key={`${index}:${entry}`}>
-            <bdi data-review-value-id={entry} dir='auto' title={entry}>
+            <bdi data-review-value-id={entry} dir='auto'>
               {resolveTextEntry(entry)}
             </bdi>
           </li>
@@ -127,7 +121,7 @@ const ReviewValue: React.FC<{
   }
   if (value.kind === 'placement') {
     return (
-      <span data-owner-beat-id={value.ownerBeatId ?? undefined} title={value.ownerBeatId ?? undefined}>
+      <span data-owner-beat-id={value.ownerBeatId ?? undefined}>
         {t(`conversation.creativeStudio.workspace.proposals.placementValue.${value.value}`)}
         {value.position === null ? null : ` ${value.position}`}
         {value.ownerBeatTitle === null || value.ownerBeatTitle.length === 0 ? null : ` · ${value.ownerBeatTitle}`}
@@ -244,7 +238,8 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
             }`;
     if (label !== null) reviewLabels.set(subject.id, label);
   }
-  const resolveTextEntry = (entry: string): string => reviewLabels.get(entry) ?? entry;
+  const resolveTextEntry = (entry: string): string =>
+    reviewLabels.get(entry) ?? t('conversation.creativeStudio.workspace.proposals.unlabelledItem');
 
   return (
     <Card
@@ -253,12 +248,6 @@ export const DirectorProposalCard: React.FC<DirectorProposalCardProps> = ({
       data-testid={`studio-proposal-${proposal.id}`}
       title={t('conversation.creativeStudio.workspace.proposals.title')}
     >
-      <p>
-        <span>{t('conversation.creativeStudio.workspace.proposals.proposalId')}</span>:{' '}
-        <code>
-          <bdi dir='auto'>{proposal.id}</bdi>
-        </code>
-      </p>
       <p>{t('conversation.creativeStudio.workspace.proposals.revision', { revision: proposal.baseRevision })}</p>
       {authorityState === 'refreshing' ? (
         <p role='status'>{t('conversation.creativeStudio.workspace.proposals.refreshing')}</p>
