@@ -485,6 +485,10 @@ const request = {
   resolution: '720p' as const,
   durationSeconds: 8,
   rules: [{ id: 'no-likenesses', text: 'No real likenesses', predicate: null }],
+  imageRouteId: 'img-1',
+  videoRouteId: 'vid-1',
+  // Null means no first frame, so a seed still is priced and its cascade carries the take.
+  firstFrameAssetId: null,
 };
 
 const happyPath = (): void => {
@@ -1663,15 +1667,51 @@ Destructure both, and replace every `setSentence(` call with `onSentenceChange(`
 
 - [ ] **Step 2: Own the state and mount the entry surface in `StudioLibrary`**
 
-Add `const [sentence, setSentence] = useState('');` and a `clipWindow` fetch. Pass
-`sentence`/`onSentenceChange` to `Composer`. Then replace the `projectsBlock` JSX (the
-`projects.length > 0 ? (...) : null` block) with `<StudioEntry>`, handing the existing projects
-markup in as the `projects` prop so there is one implementation of the listing:
+Add `const [sentence, setSentence] = useState('');` and one `list-routes` fetch that captures **both**
+the display clip window and the route ids, because `set_routes` needs the ids and a fresh project has
+neither:
+
+```tsx
+const [routes, setRoutes] = useState<{
+  clipWindow: StudioClipWindow | null;
+  imageRouteId: string | null;
+  videoRouteId: string | null;
+}>({ clipWindow: null, imageRouteId: null, videoRouteId: null });
+
+useEffect(() => {
+  let cancelled = false;
+  void (async () => {
+    try {
+      const result = await ipcBridge.creativeStudio.listRoutes.invoke({});
+      if (cancelled || !result.ok) return;
+      setRoutes({
+        clipWindow: resolveEngineClipWindow(result.data),
+        imageRouteId: result.data.image.selectedRoute?.choiceId ?? result.data.image.options[0]?.choiceId ?? null,
+        videoRouteId: result.data.video.selectedRoute?.choiceId ?? result.data.video.options[0]?.choiceId ?? null,
+      });
+    } catch {
+      // Advisory only: the brief states the window as unknown and pricing refuses a null route.
+    }
+  })();
+  return () => {
+    cancelled = true;
+  };
+}, []);
+```
+
+Read the catalogue's actual field names before copying this — match `StudioRouteCatalog` rather than
+trusting the shape above.
+
+Pass `sentence`/`onSentenceChange` to `Composer` and `routes` down to `StudioEntry`. Then replace the
+`projectsBlock` JSX (the `projects.length > 0 ? (...) : null` block) with `<StudioEntry>`, handing the
+existing projects markup in as the `projects` prop so there is one implementation of the listing:
 
 ```tsx
 <StudioEntry
   disabled={mutationBusy || deleteCandidate !== null}
-  clipWindow={clipWindow}
+  clipWindow={routes.clipWindow}
+  imageRouteId={routes.imageRouteId}
+  videoRouteId={routes.videoRouteId}
   initialTab='templates'
   projects={projectsMarkup}
   onFillComposer={setSentence}
