@@ -5,9 +5,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { resolveEngineClipWindow } from '@renderer/pages/studio/studioClipWindow';
+import { resolveEngineClipWindow } from '@/common/types/project/studioClipWindow';
 
-const entry = (min: number, max: number, id: string) => ({
+const entry = (min: number, max: number, id: string, supportedDurationSeconds?: number[]) => ({
   choiceId: id,
   providerId: 'p',
   providerName: 'P',
@@ -20,6 +20,7 @@ const entry = (min: number, max: number, id: string) => ({
     resolutions: ['720p' as const],
     minDurationSeconds: min,
     maxDurationSeconds: max,
+    ...(supportedDurationSeconds === undefined ? {} : { supportedDurationSeconds }),
     supportsFirstFrame: true,
     maxConditioningImages: 1,
     silentOutput: false,
@@ -56,5 +57,34 @@ describe('resolveEngineClipWindow', () => {
   /** A reversed range would read as a rule no clip can satisfy. */
   it('reports unknown when the connected engines share no overlap', () => {
     expect(resolveEngineClipWindow(catalog(null, [entry(2, 3, 'a'), entry(10, 15, 'b')]) as never)).toBeNull();
+  });
+
+  /** A length only one engine admits is not safe while the project may still bind to the other. */
+  it('intersects the exact lengths when every connected engine declares them', () => {
+    expect(
+      resolveEngineClipWindow(catalog(null, [entry(4, 12, 'a', [4, 8, 12]), entry(4, 10, 'b', [4, 8, 10])]) as never)
+    ).toEqual({ minDurationSeconds: 4, maxDurationSeconds: 10, supportedDurationSeconds: [4, 8] });
+  });
+
+  it('carries the exact lengths of the route the project already selected', () => {
+    expect(resolveEngineClipWindow(catalog(entry(5, 10, 'a', [5, 10]), [entry(4, 15, 'b')]) as never)).toEqual({
+      minDurationSeconds: 5,
+      maxDurationSeconds: 10,
+      supportedDurationSeconds: [5, 10],
+    });
+  });
+
+  /** A continuous engine renders anything in its range, so narrowing to a ladder would refuse work it accepts. */
+  it('reports no exact lengths when any connected engine is continuous', () => {
+    expect(resolveEngineClipWindow(catalog(null, [entry(4, 12, 'a', [4, 8, 12]), entry(4, 10, 'b')]) as never)).toEqual(
+      { minDurationSeconds: 4, maxDurationSeconds: 10 }
+    );
+  });
+
+  /** Overlapping ranges are not overlapping offers: no single length both engines would render. */
+  it('reports unknown when the connected engines admit no length in common', () => {
+    expect(
+      resolveEngineClipWindow(catalog(null, [entry(4, 8, 'a', [4, 8]), entry(5, 10, 'b', [5, 10])]) as never)
+    ).toBeNull();
   });
 });

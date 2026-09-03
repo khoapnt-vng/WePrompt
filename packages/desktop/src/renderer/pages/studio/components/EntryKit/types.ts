@@ -10,7 +10,7 @@ import {
   type StudioAspectRatio,
   type StudioResolution,
 } from '@/common/types/project/creativeStudioTypes';
-import type { StudioClipWindow } from '@renderer/pages/studio/studioClipWindow';
+import type { StudioClipWindow } from '@/common/types/project/studioClipWindow';
 
 /** Two seconds is fine enough to feel like a choice without listing lengths nobody distinguishes. */
 const DURATION_STEP_SECONDS = 2;
@@ -30,13 +30,24 @@ const DURATION_STEP_SECONDS = 2;
  *
  * Null when the two ranges do not overlap at all — the right answer for an engine whose whole
  * range sits outside what the store accepts, since there is no length that both would honour.
+ *
+ * A discrete engine's ladder is narrowed the same way, and for the same reason: a rung the store
+ * would refuse is not offerable however happily the engine would render it. Null again when no rung
+ * survives, because "somewhere in 4..15" is not an offer when the engine only renders 2s and 16s.
  */
 const resolveOfferableWindow = (clipWindow: StudioClipWindow | null): StudioClipWindow | null => {
   if (clipWindow === null) return null;
   const minDurationSeconds = Math.max(STUDIO_MIN_SHOT_SECONDS, clipWindow.minDurationSeconds);
   const maxDurationSeconds = Math.min(STUDIO_MAX_SHOT_SECONDS, clipWindow.maxDurationSeconds);
   if (minDurationSeconds > maxDurationSeconds) return null;
-  return { minDurationSeconds, maxDurationSeconds };
+
+  const declared = clipWindow.supportedDurationSeconds;
+  if (!Array.isArray(declared)) return { minDurationSeconds, maxDurationSeconds };
+  const supportedDurationSeconds = [...new Set(declared)]
+    .filter((seconds) => Number.isInteger(seconds) && seconds >= minDurationSeconds && seconds <= maxDurationSeconds)
+    .toSorted((left, right) => left - right);
+  if (supportedDurationSeconds.length === 0) return null;
+  return { minDurationSeconds, maxDurationSeconds, supportedDurationSeconds };
 };
 
 /**
@@ -48,6 +59,11 @@ const resolveOfferableWindow = (clipWindow: StudioClipWindow | null): StudioClip
  *
  * The maximum is always the last entry even when the step overshoots it, because the longest clip
  * available is the one people reach for and it must never be unreachable.
+ *
+ * Stepping is only correct for an engine that renders anything in its range. An engine that
+ * declares its exact lengths refuses everything between them, so its ladder is offered verbatim —
+ * the step would otherwise put lengths on screen that price fine and then fail at generation, which
+ * is a charge for a take nobody can use.
  *
  * An empty list rather than a fallback ladder for an absent, reversed, or nonsensical window: with
  * no engine connected there is no length we can promise, and a list of guesses is indistinguishable
@@ -63,7 +79,8 @@ export const studioShortDurations = (clipWindow: StudioClipWindow | null): numbe
   // recognisably nonsensical instead of being rescued into the store's range by the clamp.
   const offerable = resolveOfferableWindow(clipWindow);
   if (offerable === null) return [];
-  const { minDurationSeconds: min, maxDurationSeconds: max } = offerable;
+  const { minDurationSeconds: min, maxDurationSeconds: max, supportedDurationSeconds } = offerable;
+  if (supportedDurationSeconds !== undefined) return supportedDurationSeconds;
 
   const durations: number[] = [];
   for (let seconds = min; seconds <= max; seconds += DURATION_STEP_SECONDS) durations.push(seconds);
@@ -83,13 +100,25 @@ export const studioShortDurations = (clipWindow: StudioClipWindow | null): numbe
  * store refuses is no more usable than one the engine refuses, and returning it here would push the
  * rejection out to the IPC boundary where it reads as a bug rather than a limit.
  *
+ * For an engine that declares its exact lengths this snaps to the nearest *rung*, not merely into
+ * the range: a length that sits between two rungs is inside the window and still refused. Ties go to
+ * the shorter rung, because clip price scales with length and the person did not ask for either one
+ * — given no reason to prefer, prefer the cheaper.
+ *
  * Null when nothing is connected, or when the engine and store ranges do not overlap, so callers
  * surface that rather than silently proceeding with an unvetted number.
  */
 export const clampToClipWindow = (seconds: number, clipWindow: StudioClipWindow | null): number | null => {
   const offerable = resolveOfferableWindow(clipWindow);
   if (offerable === null) return null;
-  return Math.min(Math.max(seconds, offerable.minDurationSeconds), offerable.maxDurationSeconds);
+  const { supportedDurationSeconds } = offerable;
+  if (supportedDurationSeconds === undefined) {
+    return Math.min(Math.max(seconds, offerable.minDurationSeconds), offerable.maxDurationSeconds);
+  }
+  // Ascending rungs plus a strict `<` keeps the first of two equidistant rungs — the shorter one.
+  return supportedDurationSeconds.reduce((nearest, rung) =>
+    Math.abs(rung - seconds) < Math.abs(nearest - seconds) ? rung : nearest
+  );
 };
 
 /**

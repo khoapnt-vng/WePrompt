@@ -45,6 +45,25 @@ describe('studioShortDurations', () => {
   it('offers nothing when the engine range sits entirely outside what the store accepts', () => {
     expect(studioShortDurations({ minDurationSeconds: 1, maxDurationSeconds: 3 })).toEqual([]);
   });
+
+  /** An engine with a fixed ladder refuses everything between its rungs, so stepping would mis-sell. */
+  it('offers exactly the lengths a discrete engine admits, not a step across its range', () => {
+    expect(
+      studioShortDurations({ minDurationSeconds: 4, maxDurationSeconds: 12, supportedDurationSeconds: [4, 5, 9, 12] })
+    ).toEqual([4, 5, 9, 12]);
+  });
+
+  it('drops the rungs the store would refuse, keeping the rest of the ladder', () => {
+    expect(
+      studioShortDurations({ minDurationSeconds: 2, maxDurationSeconds: 20, supportedDurationSeconds: [2, 8, 12, 20] })
+    ).toEqual([8, 12]);
+  });
+
+  it('offers nothing when every rung a discrete engine admits sits outside the store range', () => {
+    expect(
+      studioShortDurations({ minDurationSeconds: 2, maxDurationSeconds: 16, supportedDurationSeconds: [2, 16] })
+    ).toEqual([]);
+  });
 });
 
 describe('clampToClipWindow', () => {
@@ -70,5 +89,25 @@ describe('clampToClipWindow', () => {
 
   it('lowers to the store ceiling rather than the higher engine maximum', () => {
     expect(clampToClipWindow(20, { minDurationSeconds: 4, maxDurationSeconds: 20 })).toBe(15);
+  });
+
+  /** Inside the range is not the same as offerable: a discrete engine refuses everything off its ladder. */
+  it('snaps to the nearest rung a discrete engine admits', () => {
+    const window = { minDurationSeconds: 5, maxDurationSeconds: 10, supportedDurationSeconds: [5, 10] };
+    expect(clampToClipWindow(7, window)).toBe(5);
+    expect(clampToClipWindow(8, window)).toBe(10);
+  });
+
+  /** Equidistant rungs cost different amounts, and the cheaper one is the one nobody has to approve twice. */
+  it('resolves a tie between two rungs to the shorter, cheaper one', () => {
+    expect(
+      clampToClipWindow(7.5, { minDurationSeconds: 5, maxDurationSeconds: 10, supportedDurationSeconds: [5, 10] })
+    ).toBe(5);
+  });
+
+  it('returns null when no rung a discrete engine admits is also storable', () => {
+    expect(
+      clampToClipWindow(8, { minDurationSeconds: 2, maxDurationSeconds: 16, supportedDurationSeconds: [2, 16] })
+    ).toBeNull();
   });
 });

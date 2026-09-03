@@ -5,7 +5,7 @@
  */
 
 import type { StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
-import type { StudioClipWindow } from '@renderer/pages/studio/studioClipWindow';
+import type { StudioClipWindow } from '@/common/types/project/studioClipWindow';
 import type {
   StudioAudioPreference,
   StudioMediaSource,
