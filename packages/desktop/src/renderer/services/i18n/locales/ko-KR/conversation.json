@@ -1020,10 +1020,6 @@
       },
       "table": {
         "reorder": {
-          "label": "{{title}} 순서 변경 작업",
-          "dragHandle": "{{position}}번째 {{title}} 순서 변경",
-          "moveEarlier": "{{title}} 앞쪽으로 이동",
-          "moveLater": "{{title}} 뒤쪽으로 이동",
           "announcement": "{{title}}을(를) {{from}}번째에서 {{to}}번째로 이동했습니다(전체 {{total}}개).",
           "failed": "Beat 순서가 변경되지 않았습니다."
         },
@@ -1064,7 +1060,8 @@
             "failed": "실패",
             "cancelled": "취소됨"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "상태를 불러올 수 없음",

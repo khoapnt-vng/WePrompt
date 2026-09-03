@@ -245,7 +245,7 @@ const settleJournalRows = (rows: JournalRow[], isActive: boolean): JournalRow[] 
   }
 
   return rows.map((row, index) => {
-    if (!isActive && row.status === 'pending') {
+    if (!isActive && (row.status === 'pending' || row.status === 'running')) {
       return row.kind === 'tool'
         ? { ...row, status: 'canceled', step: { ...row.step, status: 'canceled' } }
         : { ...row, status: 'canceled' };

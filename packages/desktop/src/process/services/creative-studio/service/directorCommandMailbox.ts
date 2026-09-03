@@ -47,7 +47,12 @@ import { CreativeStudioStoreError, type CreativeStudioStore } from '@process/ser
 export type StudioDirectorPendingReadV2 = StudioDirectorCommandParseResultV2;
 export type StudioDirectorReceiptReadV2 = StudioDirectorSidecarParseResultV2<StudioDirectorCommandReceiptV2>;
 
-export type StudioDirectorCommandRef = { projectId: string; commandId: string };
+export type StudioDirectorCommandRef = {
+  projectId: string;
+  commandId: string;
+  /** The startup snapshot skipped this project, so this command must receive restart handling. */
+  startedBeforeProcessor?: true;
+};
 
 export type StudioDirectorCommandPage = {
   items: StudioDirectorCommandRef[];
@@ -529,6 +534,8 @@ const createStudioDirectorCommandMailboxInternal = (
   };
 
   const sessions = new Map<CursorMethod, CursorSession>();
+  const deferredSnapshotProjects = new Set<string>();
+  const deliveredSnapshotProjects = new Set<string>();
   const cursorOperations = new Map<CursorMethod, Promise<void>>();
   const slotCleanupOperations = new Map<string, Promise<void>>();
   const indeterminateReceiptPublications = new Set<string>();
@@ -642,10 +649,24 @@ const createStudioDirectorCommandMailboxInternal = (
   }): Promise<StudioDirectorCommandPage> => {
     return runCursorMethod(input.method, async () => {
       requireLimit(input.limit);
+      if (input.method === 'snapshotPendingPage' && input.cursor === null) {
+        deferredSnapshotProjects.clear();
+        deliveredSnapshotProjects.clear();
+      }
+      // A subsequent live page is the acknowledgement that the processor finished enqueueing the
+      // prior page. Until then, watcher events for a recovered project must still take the sweep.
+      if (input.method === 'listPendingPage') deliveredSnapshotProjects.clear();
       let session: CursorSession | undefined;
       try {
         session = await sessionFor(input.method, input.cursor);
         const items: StudioDirectorCommandRef[] = [];
+        const deliveredDeferredProjects = new Set<string>();
+        const commitDeliveredDeferredProjects = (): void => {
+          for (const projectId of deliveredDeferredProjects) {
+            deferredSnapshotProjects.delete(projectId);
+            deliveredSnapshotProjects.add(projectId);
+          }
+        };
         let work = 0;
         while (work < input.limit) {
           if (session.ledger !== null) {
@@ -657,6 +678,7 @@ const createStudioDirectorCommandMailboxInternal = (
               entry = await ledger.directory.read();
             } catch (error) {
               if (!input.tolerateProjectErrors) throw error;
+              if (input.method === 'snapshotPendingPage') deferredSnapshotProjects.add(ledger.projectId);
               // eslint-disable-next-line no-await-in-loop
               await closeLedger(session);
               safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
@@ -665,12 +687,21 @@ const createStudioDirectorCommandMailboxInternal = (
             if (entry === null) {
               // eslint-disable-next-line no-await-in-loop
               await closeLedger(session);
+              if (input.method === 'listPendingPage' && deferredSnapshotProjects.has(ledger.projectId)) {
+                deliveredDeferredProjects.add(ledger.projectId);
+              }
               continue;
             }
             if (!entry.name.endsWith('.json')) continue;
             const commandId = entry.name.slice(0, -'.json'.length);
             if (!isSafeStudioDirectorId(commandId)) continue;
-            items.push({ projectId: ledger.projectId, commandId });
+            items.push({
+              projectId: ledger.projectId,
+              commandId,
+              ...(input.method === 'listPendingPage' && deferredSnapshotProjects.has(ledger.projectId)
+                ? { startedBeforeProcessor: true as const }
+                : {}),
+            });
             continue;
           }
 
@@ -680,6 +711,7 @@ const createStudioDirectorCommandMailboxInternal = (
           if (projectEntry === null) {
             // eslint-disable-next-line no-await-in-loop
             await closeSession(session);
+            commitDeliveredDeferredProjects();
             return { items, nextCursor: null };
           }
           if (!projectEntry.isDirectory() || !isSafeStudioDirectorId(projectEntry.name)) continue;
@@ -689,12 +721,23 @@ const createStudioDirectorCommandMailboxInternal = (
             // eslint-disable-next-line no-await-in-loop
             directories = await directoriesFor(projectEntry.name, input.createIfWhollyAbsent);
           } catch (error) {
-            if (isUnsupportedProject(error)) continue;
+            if (isUnsupportedProject(error)) {
+              if (input.method === 'listPendingPage' && deferredSnapshotProjects.has(projectEntry.name)) {
+                deliveredDeferredProjects.add(projectEntry.name);
+              }
+              continue;
+            }
             if (!input.tolerateProjectErrors) throw error;
+            if (input.method === 'snapshotPendingPage') deferredSnapshotProjects.add(projectEntry.name);
             safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
             continue;
           }
-          if (directories === null) continue;
+          if (directories === null) {
+            if (input.method === 'listPendingPage' && deferredSnapshotProjects.has(projectEntry.name)) {
+              deliveredDeferredProjects.add(projectEntry.name);
+            }
+            continue;
+          }
           try {
             // A buffer of one keeps native directory materialization bounded with the raw-read budget.
             // eslint-disable-next-line no-await-in-loop
@@ -702,9 +745,11 @@ const createStudioDirectorCommandMailboxInternal = (
             session.ledger = { directory, projectId: projectEntry.name };
           } catch (error) {
             if (!input.tolerateProjectErrors) throw error;
+            if (input.method === 'snapshotPendingPage') deferredSnapshotProjects.add(projectEntry.name);
             safeLog('[CreativeStudio] Director command receipt maintenance skipped unsafe storage');
           }
         }
+        commitDeliveredDeferredProjects();
         return { items, nextCursor: session.token };
       } catch (error) {
         if (session !== undefined) await closeSessionAfterFailure(session);
@@ -1277,7 +1322,18 @@ const createStudioDirectorCommandMailboxInternal = (
         cursor,
         limit,
         directory: 'pending',
-        tolerateProjectErrors: false,
+        /*
+         * Skip a project whose ledger cannot be read, as the two sibling sweeps already do
+         * (listPendingPage and pruneReceiptsPage both pass true). This snapshot is the Director
+         * processor's pre-start sweep and start() runs it before its own try block, so throwing
+         * here rejected activation and activate()'s catch degraded the whole runtime graph — one
+         * unreadable project took Creative Studio down for every project in the profile.
+         *
+         * Skipped projects remain marked until listPendingPage completes one clean traversal of
+         * their ledger. Commands found during that recovery baseline are tagged for the processor's
+         * restart path, preserving the no-replay invariant without taking healthy projects down.
+         */
+        tolerateProjectErrors: true,
         createIfWhollyAbsent: true,
       });
     },
@@ -2007,10 +2063,16 @@ const createStudioDirectorCommandMailboxInternal = (
       let closed = false;
       let watcher: { close(): void };
       const forwardSupportedChange = (projectId: string, commandId?: string): void => {
+        const requiresRecoverySweep =
+          deferredSnapshotProjects.has(projectId) || deliveredSnapshotProjects.has(projectId);
         void deps
           .getVerifiedProjectDirectory(projectId)
           .then((projectDirectory) => {
-            if (!closed && projectDirectory !== null) trigger(projectId, commandId);
+            if (!closed && projectDirectory !== null) {
+              // A command restored after its project was absent from the startup snapshot must
+              // enter through the tagged recovery sweep, never the live command fast path.
+              trigger(projectId, requiresRecoverySweep ? undefined : commandId);
+            }
           })
           .catch((error: unknown) => {
             if (!closed && !isUnsupportedProject(error)) {

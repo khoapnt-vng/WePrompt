@@ -1020,10 +1020,6 @@
       },
       "table": {
         "reorder": {
-          "label": "重新排序 {{title}} 的操作",
-          "dragHandle": "重新排序位於第 {{position}} 位的 {{title}}",
-          "moveEarlier": "將 {{title}} 前移",
-          "moveLater": "將 {{title}} 後移",
           "announcement": "已將 {{title}} 從第 {{from}} 位移至第 {{to}} 位（共 {{total}} 位）。",
           "failed": "Beat 順序未變更。"
         },
@@ -1064,7 +1060,8 @@
             "failed": "失敗",
             "cancelled": "已取消"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "狀態無法使用",

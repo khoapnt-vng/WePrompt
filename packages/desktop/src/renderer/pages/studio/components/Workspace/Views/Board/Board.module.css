@@ -22,7 +22,7 @@
   margin: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 20px;
+  font-size: 13.5px;
   overflow-wrap: anywhere;
 }
 
@@ -58,6 +58,7 @@
 }
 
 .beatCard {
+  position: relative;
   display: grid;
   align-content: start;
 }
@@ -158,12 +159,16 @@
   padding: 0;
   color: var(--text-primary);
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: 15px;
   font-weight: var(--fw-semibold);
   line-height: 1.35;
   overflow-wrap: anywhere;
   text-align: start;
   white-space: normal;
+}
+
+.beatTitle:global(.arco-btn-text) {
+  position: static;
 }
 
 .beatTitle:global(.arco-btn-text),
@@ -175,6 +180,22 @@
   color: var(--text-primary);
   background-color: transparent;
   box-shadow: none;
+}
+
+.beatTitle::after {
+  content: '';
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+}
+
+/* Interior controls keep their own targets above the card-filling overlay. Lift the tiles, not
+   their container: lifting .shotGrid blanketed the card's empty space and left the overlay
+   reachable only in the header strip. */
+.beatPanelActions,
+.shotTile {
+  position: relative;
+  z-index: 1;
 }
 
 .beatTitle > span:not(.srOnly) {

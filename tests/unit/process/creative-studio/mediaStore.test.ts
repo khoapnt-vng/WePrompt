@@ -2261,6 +2261,16 @@ describe('createStudioMediaStore schema 2 final lifecycle', { timeout: MEDIA_STO
       mediaKind: 'image',
       managedAsset: { collection: 'thumbnails' },
     });
+    let duplicateBodyConsumed = false;
+    const duplicate = await media.persistCapturedPosterV2({
+      ...capturedInput,
+      body: (async function* () {
+        duplicateBodyConsumed = true;
+        yield png;
+      })(),
+    });
+    expect(duplicate).toEqual(poster);
+    expect(duplicateBodyConsumed).toBe(false);
     const loaded = await store.getProjectV2(project.id);
     expect(loaded).toMatchObject({
       status: 'supported',
@@ -2271,9 +2281,54 @@ describe('createStudioMediaStore schema 2 final lifecycle', { timeout: MEDIA_STO
             outputAssetIdsByRole: { primary: 'take_captured', poster: 'poster_captured' },
           },
         },
-        shots: { shot_1: { videoAssetId: 'take_captured', supersededVideoAssetIds: [] } },
+        shots: {
+          shot_1: {
+            videoAssetId: 'take_captured',
+            supersededVideoAssetIds: [],
+            assetIds: ['seed_v2', 'take_captured', 'poster_captured'],
+          },
+        },
       },
     });
+  });
+
+  it('shares one Main-process write for concurrent renderer captures of the same video', async () => {
+    const { store, project } = await makeStoreV2({ purpose: 'video_take' });
+    const media = createStudioMediaStore({
+      store,
+      createId: idSequence('take_captured', 'poster_captured'),
+      probeVideoDurationSecondsV2: async () => 10,
+    });
+    await media.persistProviderOutputForJobV2({
+      projectId: project.id,
+      shotId: 'shot_1',
+      jobId: 'job_1',
+      mediaKind: 'video',
+      declaredMimeType: 'video/mp4',
+      body: Readable.from([mp4]),
+    });
+    const input = {
+      projectId: project.id,
+      shotId: 'shot_1',
+      videoAssetId: 'take_captured',
+      width: 1,
+      height: 1,
+      declaredByteSize: png.length,
+    };
+
+    const first = media.persistCapturedPosterV2({ ...input, body: Readable.from([png]) });
+    const second = media.persistCapturedPosterV2({ ...input, body: Readable.from([png]) });
+
+    expect(second).toBe(first);
+    await expect(Promise.all([first, second])).resolves.toEqual([
+      expect.objectContaining({ id: 'poster_captured' }),
+      expect.objectContaining({ id: 'poster_captured' }),
+    ]);
+    const loaded = await store.getProjectV2(project.id);
+    if (loaded.status !== 'supported') throw new Error('Expected supported project');
+    expect(loaded.project.jobs.job_1?.outputAssetIdsByRole.poster).toBe('poster_captured');
+    expect(loaded.project.jobs.job_1?.outputAssetIds).toEqual(['take_captured', 'poster_captured']);
+    expect(loaded.project.shots.shot_1?.assetIds).toEqual(['seed_v2', 'take_captured', 'poster_captured']);
   });
 
   it('imports a human seed candidate without pinning, selecting, authorizing, or spending', async () => {

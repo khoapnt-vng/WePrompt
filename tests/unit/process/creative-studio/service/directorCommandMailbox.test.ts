@@ -305,6 +305,172 @@ describe('Studio Director schema-2 command mailbox', () => {
     });
   });
 
+  it('skips a project whose pending ledger cannot be read rather than failing the sweep for every project', async () => {
+    /*
+     * The blast radius is the point. snapshotPendingPage is the Director processor's pre-start
+     * sweep, and start() runs it outside its own try block, so a rejection here reached activate()
+     * and degraded the whole runtime graph — one unreadable project stopped Creative Studio for
+     * every project in the profile. Asserting only that the call resolves would not catch a
+     * regression that skipped everything.
+     */
+    const healthyStore = createCreativeStudioStore({
+      rootDir,
+      now: () => NOW,
+      createId: () => 'project_v2_healthy',
+    });
+    const healthyId = (await healthyStore.createProjectV2(makeInputV2('Healthy schema-2'))).id;
+    await mailbox.ensure(healthyId);
+    await nodeFs.writeFile(
+      path.join(commandDirectories(rootDir, healthyId).pending, 'command_visible.json'),
+      JSON.stringify(makeCommandV2(healthyId, 'command_visible'))
+    );
+
+    await mailbox.ensure(projectId);
+
+    // Make the project's pending ledger unreadable, exactly as corrupt storage would.
+    const brokenPending = commandDirectories(rootDir, projectId).pending;
+    await nodeFs.rm(brokenPending, { recursive: true, force: true });
+    await nodeFs.writeFile(brokenPending, 'not a directory', 'utf8');
+
+    const page = await mailbox.snapshotPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+
+    expect(page.items).toContainEqual({ projectId: healthyId, commandId: 'command_visible' });
+    expect(page.items.every((item) => item.projectId !== projectId)).toBe(true);
+
+    await nodeFs.rm(brokenPending, { force: true });
+    await nodeFs.mkdir(brokenPending);
+    await nodeFs.writeFile(
+      path.join(brokenPending, 'command_recovered.json'),
+      JSON.stringify(makeCommandV2(projectId, 'command_recovered'))
+    );
+    const recovered = await mailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+    expect(recovered.items).toContainEqual({
+      projectId,
+      commandId: 'command_recovered',
+      startedBeforeProcessor: true,
+    });
+
+    const steadyState = await mailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+    expect(steadyState.items).toContainEqual({ projectId, commandId: 'command_recovered' });
+    expect(steadyState.items.some((item) => item.startedBeforeProcessor)).toBe(false);
+  });
+
+  it('retains restart provenance when a recovered pending page fails before delivery', async () => {
+    const recoveredPending = commandDirectories(rootDir, projectId).pending;
+    const canonicalRecoveredPending = commandDirectories(await nodeFs.realpath(rootDir), projectId).pending;
+    let failRecoveredClose = true;
+    const failingFs = new Proxy(nodeFs, {
+      get(realFs, property, receiver) {
+        if (property !== 'opendir') return Reflect.get(realFs, property, receiver);
+        return async (...args: Parameters<typeof nodeFs.opendir>) => {
+          const directory = await nodeFs.opendir(...args);
+          if (String(args[0]) !== canonicalRecoveredPending) return directory;
+          return new Proxy(directory, {
+            get(realDirectory, directoryProperty) {
+              if (directoryProperty === 'close') {
+                return async () => {
+                  await realDirectory.close();
+                  if (failRecoveredClose) {
+                    failRecoveredClose = false;
+                    throw new Error('injected recovered-ledger close failure');
+                  }
+                };
+              }
+              const value = Reflect.get(realDirectory, directoryProperty, realDirectory) as unknown;
+              return typeof value === 'function' ? value.bind(realDirectory) : value;
+            },
+          });
+        };
+      },
+    }) as typeof nodeFs;
+    const recoveryMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      fs: failingFs,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+    });
+    try {
+      await recoveryMailbox.ensure(projectId);
+      await nodeFs.rm(recoveredPending, { recursive: true, force: true });
+      await nodeFs.writeFile(recoveredPending, 'not a directory', 'utf8');
+      await expect(
+        recoveryMailbox.snapshotPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS)
+      ).resolves.toMatchObject({ items: [] });
+
+      await nodeFs.rm(recoveredPending);
+      await nodeFs.mkdir(recoveredPending);
+      await nodeFs.writeFile(
+        path.join(recoveredPending, 'command_recovered.json'),
+        JSON.stringify(makeCommandV2(projectId, 'command_recovered'))
+      );
+
+      await expect(
+        recoveryMailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS)
+      ).rejects.toMatchObject({ code: 'storage_error' });
+      await expect(
+        recoveryMailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS)
+      ).resolves.toMatchObject({
+        items: [{ projectId, commandId: 'command_recovered', startedBeforeProcessor: true }],
+      });
+    } finally {
+      await recoveryMailbox.dispose();
+    }
+  });
+
+  it('routes watcher events for a recovered startup project through the tagged sweep', async () => {
+    let onChange: ((relativeFile: string) => void) | null = null;
+    const watchingMailbox = createStudioDirectorCommandMailboxV2({
+      rootDir,
+      store,
+      now: () => NOW,
+      waitMs: WAIT_MS,
+      watchCommandTree: (input) => {
+        onChange = input.onChange;
+        return { close: vi.fn() };
+      },
+    });
+    const recoveredPending = commandDirectories(rootDir, projectId).pending;
+    try {
+      await watchingMailbox.ensure(projectId);
+      await nodeFs.rm(recoveredPending, { recursive: true, force: true });
+      await nodeFs.writeFile(recoveredPending, 'not a directory', 'utf8');
+      await watchingMailbox.snapshotPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+
+      await nodeFs.rm(recoveredPending);
+      await nodeFs.mkdir(recoveredPending);
+      await nodeFs.writeFile(
+        path.join(recoveredPending, 'command_recovered.json'),
+        JSON.stringify(makeCommandV2(projectId, 'command_recovered'))
+      );
+      const trigger = vi.fn();
+      const stop = await watchingMailbox.watch(trigger);
+      const relativeCommand = path.join(projectId, 'commands', 'pending', 'command_recovered.json');
+      if (onChange === null) throw new Error('Missing command-tree watcher callback');
+
+      onChange(relativeCommand);
+      await vi.waitFor(() => expect(trigger).toHaveBeenLastCalledWith(projectId, undefined));
+
+      const recovered = await watchingMailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+      expect(recovered.items).toContainEqual({
+        projectId,
+        commandId: 'command_recovered',
+        startedBeforeProcessor: true,
+      });
+      trigger.mockClear();
+      onChange(relativeCommand);
+      await vi.waitFor(() => expect(trigger).toHaveBeenLastCalledWith(projectId, undefined));
+
+      await watchingMailbox.listPendingPage(null, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
+      trigger.mockClear();
+      onChange(relativeCommand);
+      await vi.waitFor(() => expect(trigger).toHaveBeenLastCalledWith(projectId, 'command_recovered'));
+      stop();
+    } finally {
+      await watchingMailbox.dispose();
+    }
+  });
+
   it('rejects malformed identities, traversal bounds, cursors, and maintenance timestamps', async () => {
     const invalidPayload = { code: 'invalid_payload' };
     await expect(mailbox.ensure('../project')).rejects.toMatchObject(invalidPayload);

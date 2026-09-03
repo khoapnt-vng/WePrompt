@@ -14,7 +14,11 @@ import type {
   StudioProjectStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST } from '@/common/types/project/creativeStudioTypes';
-import { captureStudioVideoPoster } from '../../BeatPanel/FirstFrames';
+import {
+  captureStudioVideoPoster,
+  scheduleStudioPosterCaptureRetry,
+  type StudioPosterCaptureResult,
+} from '../../BeatPanel/FirstFrames';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
 import type { WorkspaceBoardPanelProjection, WorkspaceProjection } from '../../workspaceProjection';
@@ -182,6 +186,7 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
   const assetUrl = media === null ? null : createManagedStudioAssetUrl(projectId, media.assetId);
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
   const capturedRef = useRef(new Set<string>());
+  const captureRetriesRef = useRef(new Set<string>());
   const showMedia = media !== null && assetUrl !== null && failedUrl !== assetUrl;
 
   useEffect(() => setFailedUrl(null), [assetUrl]);
@@ -192,24 +197,26 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
    * decodes a tile's video leaves an image behind, so later visits paint from a still rather than
    * from dozens of concurrent video elements.
    */
-  const capturePoster = async (video: HTMLVideoElement): Promise<boolean> => {
-    if (media === null || media.kind !== 'video') return true;
+  const capturePoster = async (video: HTMLVideoElement): Promise<StudioPosterCaptureResult> => {
+    if (media === null || media.kind !== 'video') return 'settled';
     const captureKey = `${projectId}:${shotId}:${media.assetId}`;
-    if (capturedRef.current.has(captureKey)) return true;
+    if (capturedRef.current.has(captureKey)) return 'settled';
     const captured = captureStudioVideoPoster(video);
-    if (captured === null) return false;
+    if (captured === null) return 'frame_unavailable';
     capturedRef.current.add(captureKey);
-    const persisted = await onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured });
+    const persisted = await onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured }).catch(() => false);
     if (!persisted) capturedRef.current.delete(captureKey);
-    return true;
+    return persisted ? 'settled' : 'persistence_failed';
   };
 
   const scheduleCapture = (video: HTMLVideoElement): void => {
-    void capturePoster(video).then((settled) => {
-      if (settled) return;
-      video.requestVideoFrameCallback?.(() => {
-        if (video.isConnected) void capturePoster(video);
-      });
+    void capturePoster(video).then((result) => {
+      if (result === 'settled') return;
+      if (media === null || media.kind !== 'video') return;
+      const captureKey = `${projectId}:${shotId}:${media.assetId}`;
+      scheduleStudioPosterCaptureRetry(video, captureKey, captureRetriesRef.current, result, () =>
+        capturePoster(video)
+      );
     });
   };
 

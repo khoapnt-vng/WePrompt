@@ -1026,10 +1026,6 @@
       },
       "table": {
         "reorder": {
-          "label": "Ações para reordenar {{title}}",
-          "dragHandle": "Reordenar {{title}} na posição {{position}}",
-          "moveEarlier": "Mover {{title}} para antes",
-          "moveLater": "Mover {{title}} para depois",
           "announcement": "{{title}} foi movido da posição {{from}} para {{to}} de {{total}}.",
           "failed": "A ordem dos Beats não foi alterada."
         },
@@ -1070,7 +1066,8 @@
             "failed": "Falhou",
             "cancelled": "Cancelado"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "Status indisponível",

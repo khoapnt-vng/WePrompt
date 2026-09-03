@@ -39,6 +39,7 @@ import {
 } from '@process/services/creative-studio/service/directorCommandService';
 import {
   createStudioDirectorCommandMailboxV2,
+  type StudioDirectorCommandRef,
   type StudioDirectorCommandMailboxV2,
 } from '@process/services/creative-studio/service/directorCommandMailbox';
 import { createStudioDirectorCommandServiceV2 } from '@process/services/creative-studio/service/directorCommandService';
@@ -113,7 +114,7 @@ const publishRealPendingV2 = async (input: {
 
 const keyOf = (projectId: string, commandId: string): string => `${projectId}/${commandId}`;
 
-const page = (items: Array<{ projectId: string; commandId: string }>, nextCursor: string | null = null) => ({
+const page = (items: StudioDirectorCommandRef[], nextCursor: string | null = null) => ({
   items,
   nextCursor,
 });
@@ -1611,6 +1612,22 @@ describe('Studio Director schema-2 command processor', () => {
       await harness.processor.stop();
     }
   );
+
+  it('never replays a command recovered after the startup snapshot skipped its project', async () => {
+    const ref = { projectId: 'project_v2', commandId: 'command_v2', startedBeforeProcessor: true as const };
+    const harness = createHarnessV2();
+    const command = makeCommandV2(ref.projectId, ref.commandId);
+    harness.projects.set(ref.projectId, makeProjectV2(ref.projectId, command.expectedRevision));
+    harness.pendings.set(keyOf(ref.projectId, ref.commandId), { status: 'valid', record: command });
+    vi.mocked(harness.mailbox.listPendingPage).mockResolvedValueOnce(page([ref]));
+
+    await harness.processor.start();
+    const receipt = await waitForReceiptV2(harness);
+
+    expect(receipt).toMatchObject({ status: 'expired', reasonCode: 'expired_after_restart' });
+    expect(harness.serviceApply).not.toHaveBeenCalled();
+    await harness.processor.stop();
+  });
 });
 
 describe('Studio Director schema-2 real mailbox terminal cleanup', () => {

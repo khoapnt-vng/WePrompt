@@ -1021,10 +1021,6 @@
       },
       "table": {
         "reorder": {
-          "label": "Aktionen zum Neuordnen von {{title}}",
-          "dragHandle": "{{title}} an Position {{position}} neu anordnen",
-          "moveEarlier": "{{title}} nach vorn verschieben",
-          "moveLater": "{{title}} nach hinten verschieben",
           "announcement": "{{title}} wurde von Position {{from}} auf {{to}} von {{total}} verschoben.",
           "failed": "Die Beat-Reihenfolge wurde nicht geändert."
         },
@@ -1065,7 +1061,8 @@
             "failed": "Fehlgeschlagen",
             "cancelled": "Abgebrochen"
           }
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "project": {
         "statusUnavailable": "Status nicht verfügbar",

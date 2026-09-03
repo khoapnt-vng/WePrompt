@@ -688,7 +688,12 @@ export const createStudioDirectorCommandProcessorV2 = (
   const runPendingSweep = async (): Promise<void> => {
     const page = await deps.mailbox.listPendingPage(pendingCursor, STUDIO_DIRECTOR_COMMAND_MAX_SWEEP_RECORDS);
     pendingCursor = page.nextCursor;
-    await Promise.all(page.items.map(({ projectId, commandId }) => enqueueProject(projectId, commandId)));
+    await Promise.all(
+      page.items.map(({ projectId, commandId, startedBeforeProcessor }) => {
+        if (startedBeforeProcessor) preStart.add(stateKey(projectId, commandId));
+        return enqueueProject(projectId, commandId);
+      })
+    );
   };
 
   const runMaintenance = async (): Promise<void> => {

@@ -42,6 +42,15 @@ describe('buildTurnClose', () => {
     expect(buildTurnClose(recap({ status: 'failed', completed: 0, failed: 2 }))!.tone).toBe('attention');
   });
 
+  it.each(['completed', 'recovered', 'partial', 'failed', 'canceled'] as const)(
+    'selects the matching localized family for %s journal evidence',
+    (status) => {
+      expect(buildTurnClose(recap({ status }))!.key).toMatch(
+        new RegExp(`^messages\\.toolActivity\\.close\\.${status}\\.v\\d$`)
+      );
+    }
+  );
+
   it('is deterministic: same recap shape yields the same variant', () => {
     const a = buildTurnClose(recap({ status: 'completed', total: 4 }));
     const b = buildTurnClose(recap({ status: 'completed', total: 4 }));

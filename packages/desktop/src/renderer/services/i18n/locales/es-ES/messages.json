@@ -145,24 +145,24 @@
     },
     "close": {
       "completed": {
-        "v1": "Listo, todo ha salido según lo previsto. Dime qué te gustaría hacer a continuación.",
-        "v2": "Esto ya está terminado y funcionando. Dime por dónde quieres seguir a partir de aquí.",
-        "v3": "Hecho: todo ha encajado. Estoy listo para lo siguiente cuando tú lo estés."
+        "v1": "Con esto termina mi respuesta. Estoy preparado para tu próxima petición.",
+        "v2": "Mi respuesta acaba aquí. Estoy listo para lo que quieras pedir a continuación.",
+        "v3": "Hasta aquí llega mi respuesta. Estoy a tu disposición para tu siguiente solicitud."
       },
       "recovered": {
-        "v1": "Hecho: un paso necesitó un segundo intento, pero ya está todo resuelto.",
-        "v2": "Terminado: hizo falta un breve reintento por el camino, pero todo está en su sitio."
+        "v1": "Esta respuesta ha terminado. La sección Detalles técnicos registra un error anterior seguido de la finalización de una actividad.",
+        "v2": "Mi respuesta termina aquí. La sección Detalles técnicos muestra una actividad que se completó después de un error anterior."
       },
       "partial": {
-        "v1": "He hecho casi todo. Un par de cosas aún necesitan otra pasada; tienes los detalles justo abajo.",
-        "v2": "Buen avance: la mayor parte está hecha, aunque algo todavía necesita otro intento. Encontrarás los detalles abajo."
+        "v1": "Esta respuesta ha terminado. La sección Detalles técnicos contiene tanto actividades completadas como errores notificados.",
+        "v2": "Mi respuesta termina aquí. La sección Detalles técnicos muestra una combinación de actividades completadas y fallidas."
       },
       "failed": {
-        "v1": "No he podido terminar esto. Tienes los detalles abajo y puedes pedirme que lo intente de nuevo cuando quieras.",
-        "v2": "Esto no ha salido adelante. Echa un vistazo a los detalles de abajo o simplemente dime que lo intente otra vez."
+        "v1": "Esta respuesta ha terminado. La sección Detalles técnicos contiene una actividad en la que se notificó un error.",
+        "v2": "Mi respuesta termina aquí. La sección Detalles técnicos muestra uno o más errores notificados."
       },
       "canceled": {
-        "v1": "Me he detenido aquí. Dime si quieres que lo retome."
+        "v1": "Esta respuesta ha terminado. La sección Detalles técnicos contiene una actividad cuya finalización no se notificó."
       }
     },
     "attempt": "(intento {{n}})",

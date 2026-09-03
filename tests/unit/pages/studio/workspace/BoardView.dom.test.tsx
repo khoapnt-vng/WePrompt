@@ -801,7 +801,7 @@ describe('BoardView', () => {
     expect(boardCss).not.toMatch(/nth-child/);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*color:\s*var\(--text-primary\)/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-family:\s*var\(--font-display\)/s);
-    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*13px/s);
+    expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-size:\s*15px/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*font-weight:\s*var\(--fw-semibold\)/s);
     expect(boardCss).toMatch(/\.beatTitle\s*\{[^}]*composes:\s*inkTextAction/s);
     expect(boardCss).toMatch(
@@ -1427,6 +1427,107 @@ describe('BoardView', () => {
       fireEvent.loadedData(video);
       await waitFor(() => expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1));
     } finally {
+      restoreCanvas();
+    }
+  });
+
+  it('retries a failed Board persistence without waiting for another media event', async () => {
+    vi.useFakeTimers();
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', {
+              currentPicture: {
+                assetId: 'video_first',
+                posterAssetId: null,
+                sourceDurationSeconds: 4,
+                createdAt: '2026-08-28T00:00:00.000Z',
+                prompt: 'First Shot',
+                promptChanged: false,
+                firstFrameChanged: false,
+              },
+            }),
+          ],
+        }),
+      ]);
+      render(<BoardView {...boardProps(projection)} actions={actions} />);
+      const video = screen.getByLabelText('Current Shot video') as HTMLVideoElement;
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
+      Object.defineProperty(video, 'requestVideoFrameCallback', { configurable: true, value: undefined });
+
+      fireEvent.loadedData(video);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      restoreCanvas();
+    }
+  });
+
+  it('uses the persistence timer even when a paused video exposes a frame callback', async () => {
+    vi.useFakeTimers();
+    const restoreCanvas = stubCanvasCapture();
+    const presented: Array<() => void> = [];
+    try {
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', {
+              currentPicture: {
+                assetId: 'video_first',
+                posterAssetId: null,
+                sourceDurationSeconds: 4,
+                createdAt: '2026-08-28T00:00:00.000Z',
+                prompt: 'First Shot',
+                promptChanged: false,
+                firstFrameChanged: false,
+              },
+            }),
+          ],
+        }),
+      ]);
+      render(<BoardView {...boardProps(projection)} actions={actions} />);
+      const video = screen.getByLabelText('Current Shot video') as HTMLVideoElement;
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
+      Object.defineProperty(video, 'requestVideoFrameCallback', {
+        configurable: true,
+        value: (callback: () => void) => presented.push(callback),
+      });
+
+      fireEvent.loadedData(video);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+      expect(presented).toHaveLength(0);
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
       restoreCanvas();
     }
   });

@@ -407,6 +407,7 @@ const StudioProjectPage: React.FC<{
   const referencesAutoOpenedRef = useRef<string | null>(null);
   const inactiveWorkspaceDraftDirtyCount = countStoredWorkspaceDrafts(projectId);
   const workspaceShellRef = useRef<WorkspaceShellHandle | null>(null);
+  const posterCaptureInFlightRef = useRef(new Map<string, Promise<boolean>>());
   const workspacePendingRef = useRef(false);
   const projectRef = useRef<StudioRendererProjectV2 | null>(project);
   projectRef.current = project;
@@ -1803,14 +1804,11 @@ const StudioProjectPage: React.FC<{
       persistCapturedPoster: async (input) => {
         const current = projectRef.current;
         const currentProjection = projectionRef.current;
-        if (
-          current === null ||
-          currentProjection === null ||
-          current.id !== currentProjection.projectId ||
-          current.revision !== currentProjection.projectRevision
-        ) {
-          return false;
-        }
+        if (current === null || currentProjection === null || current.id !== currentProjection.projectId) return false;
+        const captureKey = `${current.id}\u0000${input.shotId}\u0000${input.videoAssetId}`;
+        const existing = posterCaptureInFlightRef.current.get(captureKey);
+        if (existing !== undefined) return existing;
+        if (current.revision !== currentProjection.projectRevision) return false;
         const matches = currentProjection.activeBeats.flatMap((beat) =>
           beat.shots.filter(
             (shot) =>
@@ -1820,17 +1818,25 @@ const StudioProjectPage: React.FC<{
           )
         );
         if (matches.length !== 1) return false;
-        try {
-          const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
-            projectId: current.id,
-            ...input,
-          });
-          if (result.ok === false) return false;
-          const refreshed = await refetchProjectWorkspace();
-          return refreshed?.id === current.id && refreshed.revision >= current.revision;
-        } catch {
-          return false;
-        }
+        const flight = (async (): Promise<boolean> => {
+          try {
+            const result = await ipcBridge.creativeStudio.persistCapturedPoster.invoke({
+              projectId: current.id,
+              ...input,
+            });
+            if (result.ok === false) return false;
+            const refreshed = await refetchProjectWorkspace();
+            return refreshed?.id === current.id && refreshed.revision >= current.revision;
+          } catch {
+            return false;
+          }
+        })().finally(() => {
+          if (posterCaptureInFlightRef.current.get(captureKey) === flight) {
+            posterCaptureInFlightRef.current.delete(captureKey);
+          }
+        });
+        posterCaptureInFlightRef.current.set(captureKey, flight);
+        return flight;
       },
       parkShot: async (shotId, onCommitted) =>
         runWorkspaceCommit(

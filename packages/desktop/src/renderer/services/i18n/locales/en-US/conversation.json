@@ -1433,10 +1433,6 @@
       },
       "table": {
         "reorder": {
-          "label": "Actions for {{title}}",
-          "dragHandle": "Reorder {{title}} at position {{position}}",
-          "moveEarlier": "Move {{title}} earlier",
-          "moveLater": "Move {{title}} later",
           "announcement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
           "failed": "Beat order was not changed."
         },
@@ -1498,7 +1494,8 @@
           "ready": "Ready",
           "draft": "Draft",
           "needsAttention": "Needs attention"
-        }
+        },
+        "shotPosition": "{{beat}}.{{shot}}"
       },
       "board": {
         "controls": {

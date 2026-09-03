@@ -1599,6 +1599,7 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     });
   const conditioningFrameExtractor = deps.conditioningFrameExtractor ?? extractConditioningFrame;
   const conditioningFrameFlights = new Map<string, Promise<StudioFrameExtraction>>();
+  const capturedPosterFlights = new Map<string, Promise<StudioAssetV2>>();
   const limits: StudioMediaLimits = { ...STUDIO_MEDIA_LIMITS, ...deps.limits };
   if (Object.values(limits).some((limit) => !Number.isSafeInteger(limit) || limit < 1)) {
     throw new CreativeStudioMediaError('storage_error');
@@ -4084,7 +4085,11 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
   const validateCapturedPosterLineageV2 = (
     project: StudioProjectV2,
     input: CapturedPosterMetadataV2
-  ): { shot: StudioProjectV2['shots'][string]; job: StudioProjectV2['jobs'][string] } => {
+  ): {
+    shot: StudioProjectV2['shots'][string];
+    job: StudioProjectV2['jobs'][string];
+    existingPoster: StudioAssetV2 | null;
+  } => {
     const shot = ownRecordValue(project.shots, input.shotId);
     const video = ownRecordValue(project.assets, input.videoAssetId);
     if (!shot || !video) throw new CreativeStudioMediaError('not_found');
@@ -4111,10 +4116,30 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
         : [];
     });
     if (producers.length !== 1) throw new CreativeStudioMediaError('job_inactive');
-    return { shot, job: producers[0]! };
+    const job = producers[0]!;
+    const posterId = job.outputAssetIdsByRole.poster;
+    if (posterId === null) return { shot, job, existingPoster: null };
+    const existingPoster = ownRecordValue(project.assets, posterId);
+    if (
+      existingPoster === undefined ||
+      existingPoster.projectId !== input.projectId ||
+      existingPoster.shotId !== input.shotId ||
+      existingPoster.mediaKind !== 'image' ||
+      existingPoster.managedAsset.collection !== 'thumbnails' ||
+      existingPoster.producerJobId !== job.id ||
+      !job.outputAssetIds.includes(posterId) ||
+      !shot.assetIds.includes(posterId)
+    ) {
+      throw new CreativeStudioMediaError('job_inactive');
+    }
+    return { shot, job, existingPoster };
   };
 
-  const prepareCapturedPosterWriteV2 = async (input: CapturedPosterMetadataV2): Promise<ManagedWritePlanV2> => {
+  type CapturedPosterWritePlanV2 =
+    | { status: 'existing'; asset: StudioAssetV2 }
+    | { status: 'write'; plan: ManagedWritePlanV2 };
+
+  const prepareCapturedPosterWriteV2 = async (input: CapturedPosterMetadataV2): Promise<CapturedPosterWritePlanV2> => {
     if (
       !SAFE_ID.test(input.projectId) ||
       !SAFE_ID.test(input.shotId) ||
@@ -4129,15 +4154,19 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       throw new CreativeStudioMediaError('invalid_media');
     }
     const { projectDir, project, authority } = await loadProviderOutputContextV2(input.projectId);
-    validateCapturedPosterLineageV2(project, input);
+    const { existingPoster } = validateCapturedPosterLineageV2(project, input);
+    if (existingPoster !== null) return { status: 'existing', asset: existingPoster };
     return {
-      projectDir,
-      project,
-      authority,
-      capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
-      collection: 'thumbnails',
-      rejectVariationGrid: false,
-      detectRepeatedSubjects: false,
+      status: 'write',
+      plan: {
+        projectDir,
+        project,
+        authority,
+        capacity: await planWriteCapacity(project, projectDir, limits.imageOutputMaxBytes, input.declaredByteSize),
+        collection: 'thumbnails',
+        rejectVariationGrid: false,
+        detectRepeatedSubjects: false,
+      },
     };
   };
 
@@ -4507,7 +4536,8 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
       input.projectId,
       posterAsset,
       (current) => {
-        const { shot, job } = validateCapturedPosterLineageV2(current, input);
+        const { shot, job, existingPoster } = validateCapturedPosterLineageV2(current, input);
+        if (existingPoster !== null) throw new CreativeStudioMediaError('job_inactive');
         if (
           posterAsset.projectId !== current.id ||
           posterAsset.shotId !== shot.id ||
@@ -4533,12 +4563,24 @@ export const createStudioMediaStore = (deps: StudioMediaStoreDeps): StudioMediaS
     );
   };
 
-  const persistCapturedPosterV2 = async (input: PersistCapturedPosterInputV2): Promise<StudioAssetV2> => {
-    const plan = await prepareCapturedPosterWriteV2(input);
+  const persistCapturedPosterOnceV2 = async (input: PersistCapturedPosterInputV2): Promise<StudioAssetV2> => {
+    const prepared = await prepareCapturedPosterWriteV2(input);
+    if (prepared.status === 'existing') return structuredClone(prepared.asset);
     const normalized = { ...input, mediaKind: 'image' as const, declaredMimeType: 'image/png' as const };
-    return persistManagedOutputWithPlanV2(normalized, plan, (asset, authorizeManagedFile) =>
+    return persistManagedOutputWithPlanV2(normalized, prepared.plan, (asset, authorizeManagedFile) =>
       commitCapturedPosterV2(input, asset, authorizeManagedFile)
     );
+  };
+
+  const persistCapturedPosterV2 = (input: PersistCapturedPosterInputV2): Promise<StudioAssetV2> => {
+    const key = `${input.projectId}\u0000${input.shotId}\u0000${input.videoAssetId}`;
+    const existing = capturedPosterFlights.get(key);
+    if (existing !== undefined) return existing;
+    const flight = persistCapturedPosterOnceV2(input).finally(() => {
+      if (capturedPosterFlights.get(key) === flight) capturedPosterFlights.delete(key);
+    });
+    capturedPosterFlights.set(key, flight);
+    return flight;
   };
 
   /** Pipes the single SSRF-safe downloader into the same managed `.part` persistence path without buffering media. */

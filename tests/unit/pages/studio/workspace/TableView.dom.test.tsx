@@ -114,6 +114,9 @@ vi.mock('react-i18next', () => ({
         const count = Number(values?.count ?? 0);
         return `${count} ${count === 1 ? 'shot' : 'shots'}`;
       }
+      if (key === 'conversation.creativeStudio.workspace.table.shotPosition') {
+        return `${String(values?.beat)}.${String(values?.shot)}`;
+      }
       if (key === 'conversation.creativeStudio.workspace.table.actualDuration') {
         return `${String(Math.round(Number(values?.seconds)))}s`;
       }
@@ -979,7 +982,7 @@ describe('TableView', () => {
     expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
   });
 
-  it('owns exact whole-order Beat reordering with keyboard, buttons, drag, focus, and announcements', async () => {
+  it('owns exact whole-order Beat reordering from the position cell, with focus and announcements', async () => {
     const authoringActions = makeAuthoringActions();
     const beats = [makeBeat('a'), makeBeat('b'), makeBeat('c')];
     const result = render(
@@ -992,34 +995,24 @@ describe('TableView', () => {
       />
     );
 
-    const reorderButtons = screen.getAllByRole('button', { name: /(?:move|reorder) Beat/i });
-    expect(reorderButtons.every((button) => button.tabIndex === -1)).toBe(true);
     const firstPositionCell = cellAt(rowForBeat('a'), 0);
     act(() => firstPositionCell.focus());
-    fireEvent.keyDown(firstPositionCell, { key: 'Enter' });
-    expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat a at position 1' }), { key: 'Escape' });
-    expect(firstPositionCell).toHaveFocus();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat a later' }));
+    fireEvent.keyDown(firstPositionCell, { key: 'ArrowDown', altKey: true });
     await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus());
     expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Moved Beat a from 1 to 2 of 3.');
 
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Reorder Beat c at position 3' }), { key: 'Home' });
-    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['c', 'a', 'b']));
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat c at position 3' })).toHaveFocus());
+    // Focus must NOT jump to the destination index while the old order is still rendered.
+    expect(cellAt(rowForBeat('b'), 0)).not.toHaveFocus();
 
-    const transfer = new Map<string, string>();
-    const dataTransfer = {
-      effectAllowed: 'none',
-      setData: (format: string, value: string) => transfer.set(format, value),
-      getData: (format: string) => transfer.get(format) ?? '',
-    };
-    fireEvent.dragStart(screen.getByRole('button', { name: 'Reorder Beat a at position 1' }), { dataTransfer });
-    fireEvent.dragOver(rowForBeat('c'), { dataTransfer });
-    fireEvent.drop(rowForBeat('c'), { dataTransfer });
+    const lastPositionCell = cellAt(rowForBeat('c'), 0);
+    act(() => lastPositionCell.focus());
+    fireEvent.keyDown(lastPositionCell, { key: 'Home', altKey: true });
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['c', 'a', 'b']));
+
+    fireEvent.keyDown(firstPositionCell, { key: 'End', altKey: true });
     await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'c', 'a']));
+
+    // Reordering is whole-order and applied by the owner, so the rendered order is unchanged here.
     expect(
       Array.from(screen.getByRole('grid').querySelectorAll('[data-beat-id]')).map((row) =>
         row.getAttribute('data-beat-id')
@@ -1027,14 +1020,51 @@ describe('TableView', () => {
     ).toEqual(['a', 'b', 'c']);
   });
 
-  it('qualifies reorder controls by film position when Beat titles repeat', () => {
+  it('distinguishes a Shot row from a Beat row by indent and by number', async () => {
+    const user = userEvent.setup();
+    const beats = [makeBeat('multi', { title: 'Opening', shots: [makeShot('shot_1'), makeShot('shot_2')] })];
+    render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
+    // Shot sub-rows exist only while the Beat is expanded; that is where the two levels collide.
+    await user.click(screen.getByRole('button', { name: 'Open Board panels for Opening' }));
+
+    // BUG-173: Beats number 01, 02 and Shots restarted at 01, 02 at the same left edge, so an
+    // expanded table showed two different 01s with nothing but the text to tell them apart.
+    expect(screen.getByText('01')).toBeVisible();
+    expect(screen.getByText('1.1')).toBeVisible();
+    expect(screen.getByText('1.2')).toBeVisible();
+
+    expect(tableCss).toMatch(/\.shotRow \.shotCell\[data-grid-column='0'\]\s*\{[^}]*padding-inline-start:\s*32px/s);
+  });
+
+  it('moves focus with the Beat once the new order arrives, not to the destination index', async () => {
+    /*
+     * The owner applies the whole order, so the rendered order changes on a later render. Focusing
+     * cellRefs[destination] inside the reorder's `finally` ran before that flush and landed on
+     * whichever Beat still occupied the row, then travelled with it to the wrong place.
+     */
+    const authoringActions = makeAuthoringActions();
+    const beats = [makeBeat('a'), makeBeat('b'), makeBeat('c')];
+    const props = { authoringActions, selectedBeatId: null, onSelectBeat: vi.fn() };
+    const result = render(<TableView {...tableBoardProps(beats)} {...props} beats={beats} />);
+
+    const cell = cellAt(rowForBeat('a'), 0);
+    act(() => cell.focus());
+    fireEvent.keyDown(cell, { key: 'ArrowDown', altKey: true });
+    await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenLastCalledWith(['b', 'a', 'c']));
+    expect(cellAt(rowForBeat('b'), 0)).not.toHaveFocus();
+
+    const reordered = [beats[1]!, beats[0]!, beats[2]!];
+    result.rerender(<TableView {...tableBoardProps(reordered)} {...props} beats={reordered} />);
+    await waitFor(() => expect(cellAt(rowForBeat('a'), 0)).toHaveFocus());
+  });
+
+  it('carries no per-row move controls, so the position column is the position', () => {
     const beats = [makeBeat('first', { title: 'Repeat' }), makeBeat('second', { title: 'Repeat' })];
     render(<TableView {...tableBoardProps(beats)} beats={beats} selectedBeatId={null} onSelectBeat={vi.fn()} />);
 
-    expect(screen.getByRole('group', { name: 'Reorder 1. Repeat' })).toBeVisible();
-    expect(screen.getByRole('group', { name: 'Reorder 2. Repeat' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Move 1. Repeat later' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Move 2. Repeat earlier' })).toBeVisible();
+    // BUG-174: 28 move buttons on a six-Beat project occupied the Table's scarcest column.
+    expect(screen.queryAllByRole('button', { name: /(?:move|reorder) /i })).toEqual([]);
+    expect(screen.queryAllByRole('group', { name: /reorder/i })).toEqual([]);
   });
 
   it('announces the localized untitled Beat fallback after a reorder', async () => {
@@ -1050,7 +1080,9 @@ describe('TableView', () => {
       />
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Untitled Beat 1 later' }));
+    const blankPositionCell = cellAt(rowForBeat('blank'), 0);
+    act(() => blankPositionCell.focus());
+    fireEvent.keyDown(blankPositionCell, { key: 'ArrowDown', altKey: true });
     await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenCalledWith(['named', 'blank']));
     expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent(
       'Moved Untitled Beat 1 from 1 to 2 of 2.'
@@ -1076,25 +1108,22 @@ describe('TableView', () => {
       />
     );
 
-    const moveLater = screen.getByRole('button', { name: 'Move 1. Beat a later' });
-    fireEvent.click(moveLater);
-    fireEvent.click(moveLater);
+    const positionCell = cellAt(rowForBeat('a'), 0);
+    act(() => positionCell.focus());
+    fireEvent.keyDown(positionCell, { key: 'ArrowDown', altKey: true });
+    fireEvent.keyDown(positionCell, { key: 'ArrowDown', altKey: true });
+    // Single-flight: the second press while one is in flight must not reach the owner.
     expect(authoringActions.reorderBeats).toHaveBeenCalledTimes(1);
-    expect(
-      screen
-        .getAllByRole('button', { name: /(?:move|reorder) Beat/i })
-        .every((button) => button.hasAttribute('disabled'))
-    ).toBe(true);
 
     finish(false);
     await waitFor(() =>
       expect(result.container.querySelector('[aria-live="polite"]')).toHaveTextContent('Beat order was not changed.')
     );
-    expect(screen.getByRole('button', { name: 'Reorder Beat a at position 1' })).toHaveFocus();
     const firstFailureAnnouncement = result.container.querySelector('[aria-live="polite"]')?.firstElementChild;
 
     vi.mocked(authoringActions.reorderBeats).mockResolvedValueOnce(false);
-    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat a later' }));
+    act(() => cellAt(rowForBeat('a'), 0).focus());
+    fireEvent.keyDown(cellAt(rowForBeat('a'), 0), { key: 'ArrowDown', altKey: true });
     await waitFor(() => expect(authoringActions.reorderBeats).toHaveBeenCalledTimes(2));
     await waitFor(() =>
       expect(result.container.querySelector('[aria-live="polite"]')?.firstElementChild).not.toBe(
@@ -1113,11 +1142,11 @@ describe('TableView', () => {
         onSelectBeat={vi.fn()}
       />
     );
-    expect(
-      screen
-        .getAllByRole('button', { name: /(?:move|reorder) Beat/i })
-        .every((button) => button.hasAttribute('disabled'))
-    ).toBe(true);
+    // Workspace authority locks reordering: the surviving route must fail closed too.
+    const callsBeforeLock = vi.mocked(authoringActions.reorderBeats).mock.calls.length;
+    act(() => cellAt(rowForBeat('a'), 0).focus());
+    fireEvent.keyDown(cellAt(rowForBeat('a'), 0), { key: 'ArrowDown', altKey: true });
+    expect(authoringActions.reorderBeats).toHaveBeenCalledTimes(callsBeforeLock);
   });
 
   it('keeps roving ArrowDown navigation on Beat cells while an inline detail row is open', async () => {
@@ -1198,9 +1227,7 @@ describe('TableView', () => {
     const empty = rowForBeat('empty');
     fireEvent.click(within(multi).getByText('01'));
     expect(onOpenBeat).toHaveBeenLastCalledWith('multi');
-    fireEvent.click(screen.getByRole('button', { name: 'Move 1. Beat multi later' }));
     expect(onOpenBeat).toHaveBeenCalledTimes(1);
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Reorder Beat multi at position 1' })).toHaveFocus());
 
     act(() => cellAt(multi, 3).focus());
     await user.keyboard('{ArrowDown}{Enter}');

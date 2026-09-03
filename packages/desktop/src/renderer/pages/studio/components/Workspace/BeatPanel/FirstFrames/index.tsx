@@ -23,6 +23,9 @@ import type {
 import styles from './FirstFrames.module.css';
 
 const KEY_ROOT = 'conversation.creativeStudio.workspace.beatPanel.firstFrames';
+const POSTER_CAPTURE_RETRY_FALLBACK_MS = 250;
+export type StudioPosterCaptureResult = 'settled' | 'frame_unavailable' | 'persistence_failed';
+type StudioPosterCaptureFailure = Exclude<StudioPosterCaptureResult, 'settled'>;
 
 export type FirstFramesStatus = 'notReady' | 'ready' | 'rendering' | 'rendered';
 
@@ -126,6 +129,44 @@ export const captureStudioVideoPoster = (
   }
 };
 
+export const scheduleStudioPosterCaptureRetry = (
+  video: HTMLVideoElement,
+  captureKey: string,
+  scheduled: Set<string>,
+  failure: StudioPosterCaptureFailure,
+  retry: () => Promise<StudioPosterCaptureResult>
+): void => {
+  if (!video.isConnected || scheduled.has(captureKey)) return;
+  scheduled.add(captureKey);
+  let finished = false;
+  const finish = (): void => {
+    if (finished) return;
+    finished = true;
+    scheduled.delete(captureKey);
+  };
+  const runRetry = (retryPersistenceFailure: boolean): void => {
+    if (finished) return;
+    if (!video.isConnected) {
+      finish();
+      return;
+    }
+    void retry().then((result) => {
+      if (result === 'persistence_failed' && retryPersistenceFailure) {
+        window.setTimeout(() => runRetry(false), POSTER_CAPTURE_RETRY_FALLBACK_MS);
+      } else {
+        finish();
+      }
+    }, finish);
+  };
+  if (failure === 'frame_unavailable' && typeof video.requestVideoFrameCallback === 'function') {
+    // Only an unreadable/flat draw needs presentation. A persistence failure already had a good
+    // frame, and paused videos are not guaranteed to issue another presentation callback.
+    video.requestVideoFrameCallback(() => runRetry(true));
+    return;
+  }
+  window.setTimeout(() => runRetry(failure === 'frame_unavailable'), POSTER_CAPTURE_RETRY_FALLBACK_MS);
+};
+
 export const FirstFrames: React.FC<FirstFramesProps> = ({
   actions,
   disabled,
@@ -148,6 +189,7 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   const [importing, setImporting] = useState(false);
   const [working, setWorking] = useState(false);
   const posterCapturesRef = useRef(new Set<string>());
+  const posterCaptureRetriesRef = useRef(new Set<string>());
   // Workspace projection is authoritative. Empty fallbacks keep a stale renderer
   // snapshot fail-closed while Main refreshes it after a schema cutover.
   const frames = shot.firstFrames ?? [];
@@ -223,19 +265,21 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   const persistPoster = async (
     video: HTMLVideoElement,
     picture: WorkspaceCurrentPictureProjection
-  ): Promise<boolean> => {
+  ): Promise<StudioPosterCaptureResult> => {
     const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
-    if (posterCapturesRef.current.has(captureKey)) return true;
+    if (posterCapturesRef.current.has(captureKey)) return 'settled';
     const captured = captureStudioVideoPoster(video);
-    if (captured === null) return false;
+    if (captured === null) return 'frame_unavailable';
     posterCapturesRef.current.add(captureKey);
-    const persisted = await actions.persistCapturedPoster({
-      shotId: shot.id,
-      videoAssetId: picture.assetId,
-      ...captured,
-    });
+    const persisted = await actions
+      .persistCapturedPoster({
+        shotId: shot.id,
+        videoAssetId: picture.assetId,
+        ...captured,
+      })
+      .catch(() => false);
     if (!persisted) posterCapturesRef.current.delete(captureKey);
-    return true;
+    return persisted ? 'settled' : 'persistence_failed';
   };
 
   /*
@@ -243,11 +287,12 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
    * blank, retry when the browser reports that a frame has actually been presented.
    */
   const scheduleCapture = (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): void => {
-    void persistPoster(video, picture).then((settled) => {
-      if (settled) return;
-      video.requestVideoFrameCallback?.(() => {
-        if (video.isConnected) void persistPoster(video, picture);
-      });
+    void persistPoster(video, picture).then((result) => {
+      if (result === 'settled') return;
+      const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
+      scheduleStudioPosterCaptureRetry(video, captureKey, posterCaptureRetriesRef.current, result, () =>
+        persistPoster(video, picture)
+      );
     });
   };
 
@@ -506,6 +551,10 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
       <Modal
         className={styles.viewerModal}
         footer={null}
+        // The Beat panel is itself a Modal, so a translucent mask here stacks a second scrim and
+        // leaves the panel half-lit, half-legible and wholly inert behind the viewer (BUG-177).
+        // An opaque mask covers it completely, so exactly one scrim reads.
+        maskStyle={{ background: 'var(--color-bg-1)', opacity: 1 }}
         onCancel={() => setViewer(null)}
         title={null}
         unmountOnExit

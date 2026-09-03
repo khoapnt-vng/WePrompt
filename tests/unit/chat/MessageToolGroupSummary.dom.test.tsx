@@ -898,7 +898,7 @@ describe('MessageToolGroupSummary plain-language activity', () => {
     ).toBeInTheDocument();
   });
 
-  it('settles every pending or running row in an inactive summary', () => {
+  it('marks every unfinished row canceled when a summary becomes inactive', () => {
     render(
       <MessageToolGroupSummary
         isActive={false}
@@ -928,11 +928,30 @@ describe('MessageToolGroupSummary plain-language activity', () => {
 
     const details = within(expandTechnicalDetails());
     expect(details.getByText('Queued work').closest('[data-status]')).toHaveAttribute('data-status', 'canceled');
-    expect(details.getByText('Active work').closest('[data-status]')).toHaveAttribute('data-status', 'completed');
-    expect(details.getByText('messages.toolActivity.categories.verify.done')).toBeInTheDocument();
+    expect(details.getByText('Active work').closest('[data-status]')).toHaveAttribute('data-status', 'canceled');
+    expect(details.getByText('messages.toolActivity.status.stopped').closest('[data-status]')).toHaveAttribute(
+      'data-status',
+      'canceled'
+    );
   });
 
-  it('switches an unsafe plan fallback to done narration when the summary settles', () => {
+  it('never reports completion when inactive running rows have no terminal evidence', () => {
+    render(
+      <MessageToolGroupSummary
+        isActive={false}
+        messages={
+          [
+            commandStep('in_progress', 'verify-1', 'bun run test'),
+            commandStep('in_progress', 'verify-2', 'bun run typecheck'),
+          ] as WorkJournalSourceMessage[]
+        }
+      />
+    );
+
+    expect(screen.getByText(/^messages\.toolActivity\.close\.canceled\.v\d$/)).toBeInTheDocument();
+  });
+
+  it('keeps an unfinished unsafe plan fallback non-successful when the summary settles', () => {
     render(
       <MessageToolGroupSummary
         isActive={false}
@@ -953,13 +972,12 @@ describe('MessageToolGroupSummary plain-language activity', () => {
       />
     );
 
-    expect(screen.queryByText('messages.toolActivity.generic.done')).not.toBeInTheDocument();
     const row = within(expandTechnicalDetails())
-      .getByText('messages.toolActivity.generic.done')
+      .getByText('messages.toolActivity.generic.running')
       .closest('[data-status]');
-    expect(row).toHaveAttribute('data-status', 'completed');
-    expect(row?.querySelector('[data-status-icon="completed"]')).toBeInTheDocument();
-    expect(screen.queryByText('messages.toolActivity.generic.running')).not.toBeInTheDocument();
+    expect(row).toHaveAttribute('data-status', 'canceled');
+    expect(row?.querySelector('[data-status-icon="completed"]')).not.toBeInTheDocument();
+    expect(screen.queryByText('messages.toolActivity.generic.done')).not.toBeInTheDocument();
   });
 
   it('renders plan, thinking, and tool rows in source order', () => {
@@ -1110,13 +1128,13 @@ describe('MessageToolGroupSummary plain-language activity', () => {
     expect(screen.queryByText(/^messages\.toolActivity\.close\.partial\.v\d$/)).not.toBeInTheDocument();
   });
 
-  it('does not claim recovery when a separate in-progress call is synthetically settled', () => {
+  it('does not claim completion when a separate call never reports a terminal state', () => {
     render(<MessageToolGroupSummary messages={[acpStep('failed', 't1'), acpStep('in_progress', 't2')]} />);
 
-    expect(screen.getByText(/^messages\.toolActivity\.close\.partial\.v\d$/)).toBeInTheDocument();
+    expect(screen.getByText(/^messages\.toolActivity\.close\.failed\.v\d$/)).toBeInTheDocument();
     expect(screen.queryByText('messages.toolActivity.tools.render_report.failedTitle')).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: 'common.technical_details' }));
-    expect(screen.getByText('messages.toolActivity.tools.render_report.done')).toBeInTheDocument();
+    expect(screen.getByText('messages.toolActivity.status.stopped')).toBeInTheDocument();
     expect(screen.getAllByText('forge-reports_render_report')).toHaveLength(2);
     expect(screen.queryByText(/messages\.toolActivity\.status\.recovered/)).not.toBeInTheDocument();
   });
@@ -1564,9 +1582,9 @@ describe('MessageToolGroupSummary narration-first journal', () => {
     expect(details.getByText('Verify authentication')).toBeInTheDocument();
   });
 
-  it('renders a warm close and none of the retired count/headline copy', () => {
+  it('renders a neutral response close and none of the retired count/headline copy', () => {
     render(<MessageToolGroupSummary messages={[planMessage()]} isActive={false} />);
-    expect(screen.getByText(/done|finished|came together/i)).toBeInTheDocument();
+    expect(screen.getByText(/concludes my response|my response ends|end of my response/i)).toBeInTheDocument();
     expect(screen.queryByText(/Work completed/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/This turn covered/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Completed: \d+ of \d+/i)).not.toBeInTheDocument();
@@ -1582,7 +1600,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
       content: { entries: [{ content: 'Enable the Google Drive API', status: 'in_progress' }] },
     } as unknown as WorkJournalSourceMessage;
     render(<MessageToolGroupSummary messages={[active]} isActive={true} />);
-    expect(screen.queryByText(/done|finished|came together/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/concludes my response|my response ends|end of my response/i)).not.toBeInTheDocument();
   });
 
   it('offers Technical Details for plan narration without raw tool calls', () => {
@@ -1602,7 +1620,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
       content: { entries: [{ content: 'Enable the Google Drive API', status: 'completed' }] },
     } as unknown as WorkJournalSourceMessage;
     render(<MessageToolGroupSummary messages={[singleActionWithSubject]} isActive={false} />);
-    expect(screen.getByText(/done|finished|came together/i)).toBeInTheDocument();
+    expect(screen.getByText(/concludes my response|my response ends|end of my response/i)).toBeInTheDocument();
   });
 
   it('keeps a failed tool turn failed when safe-subject thinking is present', () => {
@@ -1615,8 +1633,8 @@ describe('MessageToolGroupSummary narration-first journal', () => {
       />
     );
 
-    expect(screen.getByText(/wasn't able to finish|didn't go through/i)).toHaveClass('text-warning');
-    expect(screen.queryByText(/got most of this done|Good progress/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/reported an error|reported errors/i)).toHaveClass('text-warning');
+    expect(screen.queryByText(/both completed activity|mix of completed and failed activity/i)).not.toBeInTheDocument();
   });
 
   it('keeps one successful tool trivial when thinking is present', () => {
@@ -1629,7 +1647,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
       />
     );
 
-    expect(screen.queryByText(/done|finished|came together/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/concludes my response|my response ends|end of my response/i)).not.toBeInTheDocument();
   });
 
   it('keeps the completed close for multiple successful tools when thinking is present', () => {
@@ -1642,7 +1660,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
       />
     );
 
-    expect(screen.getByText(/done|finished|came together/i)).toBeInTheDocument();
+    expect(screen.getByText(/concludes my response|my response ends|end of my response/i)).toBeInTheDocument();
   });
 
   it('does not show the red failure banner for a recovered step', () => {
@@ -1666,7 +1684,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
     expect(screen.queryByText(/error details are available below/i)).not.toBeInTheDocument();
   });
 
-  it('renders the amber warm close with the text-warning class for a fully failed turn', () => {
+  it('renders the factual journal close with the text-warning class for a fully failed turn', () => {
     // A tool_group whose single call errored: normalizeToolGroupStatus maps
     // status 'Error' to the 'error' NormalizedToolStatus (see
     // packages/desktop/src/common/chat/normalizeToolCall.ts), which makes
@@ -1688,12 +1706,12 @@ describe('MessageToolGroupSummary narration-first journal', () => {
     } as unknown as WorkJournalSourceMessage;
     render(<MessageToolGroupSummary messages={[failedTurn]} isActive={false} />);
 
-    const close = screen.getByText(/wasn't able to finish|didn't go through/i);
+    const close = screen.getByText(/reported an error|reported errors/i);
     expect(close).toBeInTheDocument();
     expect(close).toHaveClass('text-warning');
   });
 
-  it('renders the amber warm close with the text-warning class for a partial turn', () => {
+  it('renders the factual journal close with the text-warning class for a partial turn', () => {
     // One completed call plus one errored call in the same tool_group: failed > 0
     // and completed > 0 makes buildTurnWorkRecap report status 'partial', so
     // buildTurnClose renders a close.partial.* line with tone 'attention'.
@@ -1718,7 +1736,7 @@ describe('MessageToolGroupSummary narration-first journal', () => {
     } as unknown as WorkJournalSourceMessage;
     render(<MessageToolGroupSummary messages={[partialTurn]} isActive={false} />);
 
-    const close = screen.getByText(/got most of this done|Good progress/i);
+    const close = screen.getByText(/both completed activity|mix of completed and failed activity/i);
     expect(close).toBeInTheDocument();
     expect(close).toHaveClass('text-warning');
   });

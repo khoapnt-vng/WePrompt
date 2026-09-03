@@ -2522,7 +2522,54 @@ describe('BeatPanel', () => {
     toDataUrl.mockRestore();
   });
 
-  it('refuses a flat decoded frame and retries after the video presents a picture', async () => {
+  it('retries Beat-panel poster persistence after a shared capture leader fails', async () => {
+    vi.useFakeTimers();
+    const drawImage = vi.fn();
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(pixelContext(drawImage, 'varied'));
+    const toDataUrl = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,cG9zdGVy');
+    try {
+      const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current', 8) });
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+      openFirstFramePicker(container, shot.id);
+      const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
+      if (video === null) throw new Error('Missing posterless current picture');
+      const presented = vi.fn();
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+      Object.defineProperty(video, 'requestVideoFrameCallback', {
+        configurable: true,
+        value: presented,
+      });
+
+      fireEvent.loadedData(video);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+      expect(presented).not.toHaveBeenCalled();
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      getContext.mockRestore();
+      toDataUrl.mockRestore();
+    }
+  });
+
+  it('waits for a picture, then retries a failed persistence on the timer', async () => {
+    vi.useFakeTimers();
     const drawImage = vi.fn();
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, 'getContext')
@@ -2531,37 +2578,54 @@ describe('BeatPanel', () => {
     const toDataUrl = vi
       .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
       .mockReturnValue('data:image/png;base64,cG9zdGVy');
-    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current', 8) });
-    const actions = makeActions();
-    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
-    openFirstFramePicker(container, shot.id);
-    const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
-    if (video === null) throw new Error('Missing posterless current picture');
-    const presented: Array<() => void> = [];
-    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
-    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
-    Object.defineProperty(video, 'requestVideoFrameCallback', {
-      configurable: true,
-      value: (callback: () => void) => presented.push(callback),
-    });
+    try {
+      const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current', 8) });
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+      const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+      openFirstFramePicker(container, shot.id);
+      const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
+      if (video === null) throw new Error('Missing posterless current picture');
+      const presented: Array<() => void> = [];
+      Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+      Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+      Object.defineProperty(video, 'requestVideoFrameCallback', {
+        configurable: true,
+        value: (callback: () => void) => presented.push(callback),
+      });
 
-    fireEvent.loadedData(video);
-    await waitFor(() => expect(presented).toHaveLength(1));
-    expect(actions.persistCapturedPoster).not.toHaveBeenCalled();
+      fireEvent.loadedData(video);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(presented).toHaveLength(1);
+      expect(actions.persistCapturedPoster).not.toHaveBeenCalled();
 
-    presented[0]!();
-    await waitFor(() =>
+      presented[0]!();
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
       expect(actions.persistCapturedPoster).toHaveBeenCalledWith({
         shotId: 'shot_1',
         videoAssetId: 'video_current',
         dataUrl: 'data:image/png;base64,cG9zdGVy',
         width: 1280,
         height: 720,
-      })
-    );
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
 
-    getContext.mockRestore();
-    toDataUrl.mockRestore();
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+      getContext.mockRestore();
+      toDataUrl.mockRestore();
+    }
   });
 
   it('shows current-picture staleness in the single-picture viewer without retained history controls', () => {

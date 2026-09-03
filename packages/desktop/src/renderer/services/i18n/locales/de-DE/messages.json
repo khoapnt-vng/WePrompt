@@ -145,24 +145,24 @@
     },
     "close": {
       "completed": {
-        "v1": "Alles erledigt – alles ist wie geplant durchgelaufen. Sagen Sie mir einfach, was als Nächstes kommen soll.",
-        "v2": "Das ist fertig und funktioniert. Sagen Sie mir gern, wie es von hier aus weitergehen soll.",
-        "v3": "Fertig – alles ist zusammengekommen. Ich bin bereit für den nächsten Schritt, sobald Sie es sind."
+        "v1": "Damit endet meine Antwort. Ich bin bereit für Ihre nächste Anfrage.",
+        "v2": "Meine Antwort endet hier. Ich bin bereit für Ihre nächste Frage oder Aufgabe.",
+        "v3": "Das war meine Antwort. Ich bin bereit, wenn Sie Ihre nächste Anfrage stellen möchten."
       },
       "recovered": {
-        "v1": "Fertig – ein Schritt brauchte einen zweiten Anlauf, aber jetzt passt alles.",
-        "v2": "Abgeschlossen – zwischendurch war ein kurzer neuer Versuch nötig, aber jetzt steht alles."
+        "v1": "Diese Antwort ist beendet. Unter „Technische Details“ ist verzeichnet, dass auf einen früheren Fehler eine Abschlussmeldung folgte.",
+        "v2": "Meine Antwort endet hier. Unter „Technische Details“ wird eine Aktivität angezeigt, die nach einem früheren Fehler abgeschlossen wurde."
       },
       "partial": {
-        "v1": "Das meiste davon habe ich geschafft. Ein paar Dinge brauchen noch einen weiteren Durchgang – die Details finden Sie direkt unten.",
-        "v2": "Gute Fortschritte – das meiste ist erledigt, ein kleiner Teil braucht aber noch einen Anlauf. Die Einzelheiten finden Sie unten."
+        "v1": "Diese Antwort ist beendet. Unter „Technische Details“ sind sowohl abgeschlossene Aktivitäten als auch gemeldete Fehler aufgeführt.",
+        "v2": "Meine Antwort endet hier. Unter „Technische Details“ wird eine Mischung aus abgeschlossenen und fehlgeschlagenen Aktivitäten angezeigt."
       },
       "failed": {
-        "v1": "Diese Aufgabe konnte ich nicht abschließen. Die Details finden Sie unten, und Sie können mich jederzeit bitten, es erneut zu versuchen.",
-        "v2": "Das hat nicht geklappt. Werfen Sie einen Blick auf die Details unten oder sagen Sie mir einfach, dass ich es noch einmal versuchen soll."
+        "v1": "Diese Antwort ist beendet. Unter „Technische Details“ ist eine Aktivität aufgeführt, bei der ein Fehler gemeldet wurde.",
+        "v2": "Meine Antwort endet hier. Unter „Technische Details“ werden ein oder mehrere gemeldete Fehler angezeigt."
       },
       "canceled": {
-        "v1": "Hier gestoppt. Sagen Sie mir Bescheid, wenn ich weitermachen soll."
+        "v1": "Diese Antwort ist beendet. Unter „Technische Details“ ist eine Aktivität aufgeführt, für die kein Abschluss gemeldet wurde."
       }
     },
     "attempt": "(Versuch {{n}})",

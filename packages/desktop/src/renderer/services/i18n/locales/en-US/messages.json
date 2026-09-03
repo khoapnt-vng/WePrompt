@@ -145,24 +145,24 @@
     },
     "close": {
       "completed": {
-        "v1": "All done — everything went through as planned. Tell me what you'd like to do next.",
-        "v2": "That's finished and working. Let me know where you'd like to go from here.",
-        "v3": "Done — it all came together. I'm ready for the next thing whenever you are."
+        "v1": "That concludes my response. I'm ready for your next request.",
+        "v2": "My response ends here. I'm ready whenever you'd like to make another request.",
+        "v3": "This is the end of my response. I'm ready to hear what you'd like next."
       },
       "recovered": {
-        "v1": "Done — one step needed a second try, but it's all sorted now.",
-        "v2": "Finished — it took a quick retry along the way, but everything's in place."
+        "v1": "This response has ended. Technical Details records an earlier error followed by completion.",
+        "v2": "My response ends here. Technical Details shows activity that completed after an earlier error."
       },
       "partial": {
-        "v1": "I got most of this done. A couple of things still need another pass — the details are just below.",
-        "v2": "Good progress — most of it is done, though a bit still needs another go. You'll find the specifics below."
+        "v1": "This response has ended. Technical Details contains both completed activity and reported errors.",
+        "v2": "My response ends here. Technical Details shows a mix of completed and failed activity."
       },
       "failed": {
-        "v1": "I wasn't able to finish this one. The details are below, and you can ask me to try again whenever you're ready.",
-        "v2": "This didn't go through. Take a look at the details below, or just tell me to give it another try."
+        "v1": "This response has ended. Technical Details contains activity that reported an error.",
+        "v2": "My response ends here. Technical Details shows one or more reported errors."
       },
       "canceled": {
-        "v1": "Stopped here. Let me know if you'd like me to pick it back up."
+        "v1": "This response has ended. Technical Details contains activity that did not report completion."
       }
     },
     "attempt": "(attempt {{n}})",

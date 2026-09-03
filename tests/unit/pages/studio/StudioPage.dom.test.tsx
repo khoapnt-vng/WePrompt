@@ -7822,6 +7822,89 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1);
   });
 
+  it('shares one poster-persistence flight between the Board and Beat Panel', async () => {
+    const authority = projectWithRecovery();
+    const pendingCapture = deferred<ReturnType<typeof ok>>();
+    mockSupportedProject(authority);
+    mocks.bridge.persistCapturedPoster.invoke.mockReturnValueOnce(pendingCapture.promise);
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const board = capturedBoardActions();
+    const capture = {
+      shotId: 'upstream_take',
+      videoAssetId: 'take_asset',
+      dataUrl: 'data:image/png;base64,cG9zdGVy',
+      width: 1280,
+      height: 720,
+    };
+
+    let boardCapture!: Promise<boolean>;
+    act(() => {
+      boardCapture = board.persistCapturedPoster(capture);
+    });
+    await waitFor(() => expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1));
+
+    let beatPanelCapture!: Promise<boolean>;
+    act(() => {
+      beatPanelCapture = actions.persistCapturedPoster(capture);
+    });
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      pendingCapture.resolve(ok(recoveryAsset('captured_poster', 'upstream_take', 'image')));
+      await expect(boardCapture).resolves.toBe(true);
+      await expect(beatPanelCapture).resolves.toBe(true);
+    });
+  });
+
+  it('lets every poster-persistence follower retry after a shared leader fails', async () => {
+    const authority = projectWithRecovery();
+    const pendingCapture = deferred<{
+      ok: false;
+      error: { code: 'storage_error'; messageKey: 'native.posterFailed' };
+    }>();
+    mockSupportedProject(authority);
+    mocks.bridge.persistCapturedPoster.invoke
+      .mockReturnValueOnce(pendingCapture.promise)
+      .mockResolvedValueOnce(ok(recoveryAsset('captured_poster', 'upstream_take', 'image')));
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+    const actions = capturedBeatPanelActions();
+    const board = capturedBoardActions();
+    const capture = {
+      shotId: 'upstream_take',
+      videoAssetId: 'take_asset',
+      dataUrl: 'data:image/png;base64,cG9zdGVy',
+      width: 1280,
+      height: 720,
+    };
+
+    let boardCapture!: Promise<boolean>;
+    let beatPanelCapture!: Promise<boolean>;
+    act(() => {
+      boardCapture = board.persistCapturedPoster(capture);
+      beatPanelCapture = actions.persistCapturedPoster(capture);
+    });
+    await waitFor(() => expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(1));
+
+    await act(async () => {
+      pendingCapture.resolve({
+        ok: false,
+        error: { code: 'storage_error', messageKey: 'native.posterFailed' },
+      });
+      await expect(boardCapture).resolves.toBe(false);
+      await expect(beatPanelCapture).resolves.toBe(false);
+    });
+
+    await expect(invokeStudioAction(() => actions.persistCapturedPoster(capture))).resolves.toBe(true);
+    expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledTimes(2);
+  });
+
   it('rejects malformed reviewed choice graphs at the captured Beat Panel boundary', async () => {
     mockSupportedProject(projectWithHandoffShot());
     renderStudio();

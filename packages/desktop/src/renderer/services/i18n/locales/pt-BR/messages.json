@@ -145,24 +145,24 @@
     },
     "close": {
       "completed": {
-        "v1": "Tudo pronto — deu tudo certo, como planejado. Me diga o que você gostaria de fazer agora.",
-        "v2": "Isso já está concluído e funcionando. Me diga por onde você quer seguir a partir daqui.",
-        "v3": "Pronto — tudo se encaixou. Estou à disposição para o próximo passo quando você quiser."
+        "v1": "Com isso, encerro minha resposta. Estou à disposição para o seu próximo pedido.",
+        "v2": "Minha resposta termina aqui. Estou à disposição para o que você quiser pedir em seguida.",
+        "v3": "Esta resposta termina por aqui. Pode enviar sua próxima solicitação quando quiser; estou à disposição."
       },
       "recovered": {
-        "v1": "Pronto — uma etapa precisou de uma segunda tentativa, mas agora está tudo certo.",
-        "v2": "Concluído — foi preciso um retorno rápido no meio do caminho, mas agora está tudo no lugar."
+        "v1": "Esta resposta terminou. A seção Detalhes Técnicos registra um erro anterior seguido pela conclusão de uma atividade.",
+        "v2": "Minha resposta termina aqui. A seção Detalhes Técnicos mostra uma atividade concluída após um erro anterior."
       },
       "partial": {
-        "v1": "Fiz a maior parte disso. Algumas coisas ainda precisam de mais uma passada — os detalhes estão logo abaixo.",
-        "v2": "Bom avanço — a maior parte está feita, embora um pouco ainda precise de outra tentativa. Você encontra os detalhes abaixo."
+        "v1": "Esta resposta terminou. A seção Detalhes Técnicos contém tanto atividades concluídas quanto erros reportados.",
+        "v2": "Minha resposta termina aqui. A seção Detalhes Técnicos mostra uma combinação de atividades concluídas e atividades com falha."
       },
       "failed": {
-        "v1": "Não consegui concluir esta. Os detalhes estão abaixo e você pode me pedir para tentar de novo quando quiser.",
-        "v2": "Isso não deu certo. Dê uma olhada nos detalhes abaixo ou é só me dizer para tentar mais uma vez."
+        "v1": "Esta resposta terminou. A seção Detalhes Técnicos contém uma atividade na qual foi reportado um erro.",
+        "v2": "Minha resposta termina aqui. A seção Detalhes Técnicos mostra um ou mais erros reportados."
       },
       "canceled": {
-        "v1": "Parei por aqui. Me avise se quiser que eu retome."
+        "v1": "Esta resposta terminou. A seção Detalhes Técnicos contém uma atividade cuja conclusão não foi reportada."
       }
     },
     "attempt": "(tentativa {{n}})",
