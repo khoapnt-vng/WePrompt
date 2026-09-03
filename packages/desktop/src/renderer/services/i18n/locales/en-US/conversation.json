@@ -1171,6 +1171,7 @@
       "mutationRefused": "This change cannot be applied to the project in its current state. Review the project and try again.",
       "pricingRefused": "The estimate was refused before submission. Nothing was submitted.",
       "projectNotFound": "The Creative Studio project no longer exists.",
+      "exportArtifactNotFound": "That export is no longer available. Reload the export history before trying again.",
       "storyboardExists": "This project already has a storyboard. Confirm replacement before drafting again.",
       "staleProject": "The project changed elsewhere. Refresh it before retrying.",
       "staleExportCatalog": "The export catalog changed. Refresh the export history before retrying.",
@@ -2445,6 +2446,7 @@
             "invalidDependency": "The continuation dependency is no longer valid. Refresh the project and prepare again.",
             "invalidPrepareRequest": "The generation selection could not be prepared safely. Review it and prepare again.",
             "invalidReference": "A selected reference is no longer valid for this generation. Choose another reference and prepare again.",
+            "referenceCapacityUnavailable": "The selected image engine cannot use canonical reference images. Choose an image engine with at least one reference slot before generating references.",
             "missingShootingScript": "Write this Shot’s Shooting script before generating media.",
             "missingConditioning": "A video has no eligible first frame or predecessor frame. Add the required image, then prepare again.",
             "unsafeTotal": "The estimate total could not be represented safely. Reduce the selection; nothing was submitted."

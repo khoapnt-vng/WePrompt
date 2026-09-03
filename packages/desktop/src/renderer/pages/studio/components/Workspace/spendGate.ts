@@ -385,7 +385,13 @@ export const spendGateRouteIssue = (
   catalog: StudioRouteCatalogV2,
   draft: SpendGateDraft
 ): SpendGateRouteIssue | null => {
-  if ('referenceIds' in draft) return catalog.image.status === 'ready' ? null : 'image';
+  if ('referenceIds' in draft) {
+    return catalog.image.status === 'ready' &&
+      catalog.image.selectedRoute !== null &&
+      catalog.image.selectedRoute.constraints.maxConditioningImages > 0
+      ? null
+      : 'image';
+  }
   const choices = [...draft.baseChoices, ...draft.cascadeChoices];
   const continuityChange = spendGateContinuityChange(draft);
   const boardPromotion = spendGateBoardPromotion(draft);

@@ -25,7 +25,10 @@ import {
   type StudioQuotedGeneration,
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
-import { createStudioDirectorCommandWriterV2 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
+import {
+  createStudioDirectorCommandWriterV2,
+  type StudioDirectorToolQueryResultV2,
+} from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { registerStudioToolsV2 } from '@process/resources/builtinMcp/studioServer';
 import {
   createStudioDirectorCommandMailboxV2,
@@ -80,6 +83,52 @@ const fileExists = async (file: string): Promise<boolean> => {
 const idSequence = (ids: string[]): (() => string) => {
   let index = 0;
   return () => ids[index++] ?? `generated_${index}`;
+};
+
+const referenceCapableRoutesReceiptV2 = (projectId: string): StudioDirectorToolQueryResultV2 => {
+  const imageRoute = {
+    choiceId: 'choice_aaaaaaaaaaaaaaaaaaaaaaaa',
+    providerId: 'provider_current',
+    providerName: 'Current image provider',
+    model: 'image-current',
+    integrationLabelKey: 'imageApi' as const,
+    health: 'available' as const,
+    kind: 'image' as const,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['720p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      maxConditioningImages: 1,
+      silentOutput: true,
+    },
+  };
+  return {
+    schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+    commandId: 'query_reference_capacity',
+    projectId,
+    decidedAt: '2026-08-17T00:00:00.000Z',
+    status: 'answered',
+    query: { kind: 'list_routes' },
+    result: {
+      image: {
+        status: 'ready',
+        selected: { choiceId: imageRoute.choiceId, providerId: imageRoute.providerId, model: imageRoute.model },
+        selectedRoute: imageRoute,
+        selectionIssue: null,
+        options: [imageRoute],
+      },
+      video: {
+        status: 'setup_required',
+        selected: null,
+        selectedRoute: null,
+        selectionIssue: null,
+        options: [],
+      },
+      catalogVersion: '0123456789abcdef',
+    },
+  };
 };
 
 const refusedJobRecoveryStatusV2 = (
@@ -860,12 +909,16 @@ describe('Studio Director schema-2 real-boundary lifecycle', () => {
     const service = createService(store);
     const referencePaths = await store.resolveReferenceRequestPathsV2(project.id);
     const server = new McpServer({ name: 'studio-v2-reference-integration', version: '2.0.0' });
-    registerStudioToolsV2(server, {
-      projectId: project.id,
-      projectDir: referencePaths.projectDir,
-      pendingDir: path.join(referencePaths.projectDir, 'proposals', 'pending'),
-      referencePendingDir: referencePaths.pendingDir,
-    });
+    registerStudioToolsV2(
+      server,
+      {
+        projectId: project.id,
+        projectDir: referencePaths.projectDir,
+        pendingDir: path.join(referencePaths.projectDir, 'proposals', 'pending'),
+        referencePendingDir: referencePaths.pendingDir,
+      },
+      { readCurrentRoutes: vi.fn(async () => referenceCapableRoutesReceiptV2(project.id)) }
+    );
     const client = new Client({ name: 'studio-v2-reference-integration-client', version: '2.0.0' });
     const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
     await server.connect(serverTransport);

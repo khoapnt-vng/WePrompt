@@ -1017,6 +1017,15 @@ const generationBlockForItem = (
     requiresFirstFrame: item.purpose === 'video_take',
   });
   if (capabilityBlock !== null) return capabilityBlock;
+  if (item.target.kind === 'reference' && route.constraints.maxConditioningImages < 1) {
+    return {
+      code: 'reference_binding',
+      role: 'image',
+      reason: 'capacity_exceeded',
+      selectedCount: 1,
+      limit: route.constraints.maxConditioningImages,
+    };
+  }
   if (item.target.kind === 'shot' && item.purpose !== 'video_take') {
     const binding = resolveStudioReferenceBindingV2({
       project,
@@ -1580,7 +1589,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   const failedFilmTerminal = (projectId: string, renderId: string, error: unknown): TerminalFilmRenderV2 => {
     if (error instanceof StudioFilmExportErrorV2) {
       if (error.code === 'cancelled') return { projectId, renderId, outcome: 'cancelled' };
-      if (error.code === 'invalid_project' || error.code === 'invalid_media') {
+      if (error.code === 'invalid_media') {
         return { projectId, renderId, outcome: 'failed', reason: 'invalid_media' };
       }
       if (error.code === 'ffmpeg_unavailable' || error.code === 'unsupported_capabilities') {
@@ -1727,6 +1736,24 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
   // prepare/confirm boundary still rediscover providers before authorizing work.
   const currentGenerationRoutes = async (): Promise<StudioGenerationRouteCatalog> =>
     generationRoutesSnapshot ?? refreshGenerationRoutes();
+  const exportFailureDiagnostic = (error: unknown): { code: string; detail?: string } => {
+    if (error instanceof StudioFilmExportErrorV2) {
+      return {
+        code: error.code,
+        ...(error.detail === 'film_deadline_elapsed' ? { detail: error.detail } : {}),
+      };
+    }
+    if (error instanceof StudioEditorFolderErrorV2) {
+      return { code: 'composition_failed', detail: error.code };
+    }
+    if (error instanceof StudioExportCatalogErrorV2) {
+      return { code: 'catalog_failed', detail: error.code };
+    }
+    if (error instanceof CreativeStudioStoreError || error instanceof CreativeStudioServiceError) {
+      return { code: error.code };
+    }
+    return { code: 'unknown' };
+  };
   const rethrowExportFailure = (error: unknown): never => {
     if (error instanceof StudioExportCatalogErrorV2) {
       if (error.code === 'stale_catalog_revision') {
@@ -1735,13 +1762,16 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       if (error.code === 'stale_project_revision') {
         throw new CreativeStudioStoreError('stale_project', 'Studio export project has changed');
       }
-      if (error.code === 'invalid_create_plan' || error.code === 'artifact_not_found') {
-        throw invalid('Invalid Studio export request');
+      if (error.code === 'invalid_create_plan') {
+        throw new CreativeStudioServiceError('render_failed');
+      }
+      if (error.code === 'artifact_not_found') {
+        throw new CreativeStudioServiceError('artifact_not_found');
       }
       throw new CreativeStudioStoreError('storage_error', 'Studio export storage is unavailable');
     }
     if (error instanceof StudioEditorFolderErrorV2) {
-      throw invalid(`Invalid Studio editor-folder export: ${error.code}`);
+      throw new CreativeStudioServiceError('render_failed');
     }
     if (error instanceof StudioFilmExportErrorV2) {
       if (error.code === 'ffmpeg_unavailable') throw new CreativeStudioServiceError('ffmpeg_unavailable');
@@ -1749,9 +1779,12 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         throw new CreativeStudioServiceError('unsupported_capabilities');
       }
       if (error.code === 'cancelled') throw new CreativeStudioServiceError('cancelled');
-      if (error.code === 'invalid_project' || error.code === 'invalid_media') {
-        throw invalid(`Invalid Studio film export: ${error.code}`);
+      if (error.code === 'invalid_media') {
+        throw new CreativeStudioServiceError('invalid_media');
       }
+      throw new CreativeStudioServiceError('render_failed');
+    }
+    if (error instanceof CreativeStudioStoreError && error.code === 'invalid_payload') {
       throw new CreativeStudioServiceError('render_failed');
     }
     throw error;
@@ -2926,7 +2959,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
               const sourceAssets = requiredAssetIds.map((assetId) => {
                 const canonical = ownValue(project.assets, assetId);
                 if (canonical === undefined) {
-                  throw new CreativeStudioStoreError('storage_error', 'Studio film source is unavailable');
+                  throw new StudioFilmExportErrorV2('invalid_media');
                 }
                 return structuredClone(canonical);
               });
@@ -2947,7 +2980,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
               const resolved = await deps.mediaStore.resolveAssetV2(project.id, sourceAsset.id);
               assertFilmJobActive(controller.signal);
               if (resolved === null || !sameFilmSourceAsset(resolved.asset, sourceAsset)) {
-                throw new CreativeStudioStoreError('storage_error', 'Studio film source is unavailable');
+                throw new StudioFilmExportErrorV2('invalid_media');
               }
               sources.push({ asset: sourceAsset, openVerifiedStream: resolved.openVerifiedStream });
             }
@@ -3089,13 +3122,13 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
           return projectStudioRendererExportCatalogV2(catalog);
         });
       } catch (error) {
-        if (input.shape === 'film' && error instanceof StudioFilmExportErrorV2) {
+        if (input.shape === 'film') {
+          const diagnostic = exportFailureDiagnostic(error);
           console.warn(
             formatStudioJobLog('film_export_failed', {
               projectId: input.projectId,
               renderId: input.renderId,
-              code: error.code,
-              detail: error.detail,
+              ...diagnostic,
             })
           );
         }

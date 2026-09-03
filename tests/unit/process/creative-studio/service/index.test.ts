@@ -19,6 +19,7 @@ import { AjvJsonSchemaValidator } from '@modelcontextprotocol/sdk/validation/ajv
 import { describe, expect, it, vi } from 'vitest';
 import {
   STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
   STUDIO_EXPORT_SCHEMA_VERSION_V2,
   STUDIO_MUTATION_BATCH_SCHEMA_VERSION,
@@ -42,8 +43,10 @@ import {
   type StudioProposalRecordV2,
   type StudioProposalV2,
   type StudioReferenceRequestV2,
+  type StudioRouteCatalogV2,
   type StudioQuotedGeneration,
 } from '@/common/types/project/creativeStudioTypes';
+import type { StudioDirectorToolQueryResultV2 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
 import { STUDIO_RULE_LIMITS } from '@/common/types/project/creativeStudioRules';
 import type { IProvider } from '@/common/config/storage';
@@ -87,6 +90,7 @@ import {
 } from '@process/services/creative-studio/service/schema2/pricing/preparedSubmissionCache';
 import {
   StudioExportCatalogErrorV2,
+  StudioEditorFolderErrorV2,
   type StudioExportCatalogStoreV2,
 } from '@process/services/creative-studio/service/schema2/exports';
 import {
@@ -1723,6 +1727,158 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['invalid_project', 'render_failed', 'render_failed'],
+    ['invalid_media', 'invalid_media', 'invalid_media'],
+  ] as const)(
+    'reports Film exporter %s failures as %s without leaking diagnostic detail',
+    async (exporterCode, serviceCode, terminalReason) => {
+      const project = makeSchema2ServiceProject();
+      const render = vi.fn<StudioFilmExporterV2['render']>(async () => {
+        throw new StudioFilmExportErrorV2(
+          exporterCode,
+          'ffprobe /Users/alice/private.mov api_key=top-secret\nprompt=private-request'
+        );
+      });
+      const harness = makeHarness(project, {
+        filmExporter: {
+          capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+          render,
+          dispose: vi.fn(),
+        },
+      });
+      const request = {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expectedCatalogRevision: 1,
+        shape: 'film' as const,
+        renderId: `film_run_${exporterCode}`,
+        transition: { kind: 'cut' as const },
+        trimTails: false,
+      };
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      try {
+        await expect(harness.service.createExport(request)).rejects.toMatchObject({ code: serviceCode });
+        await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+          status: 'terminal',
+          result: {
+            projectId: project.id,
+            renderId: request.renderId,
+            outcome: 'failed',
+            reason: terminalReason,
+          },
+        });
+        expect(render).toHaveBeenCalledOnce();
+        expect(warn).toHaveBeenCalledWith(
+          `[CreativeStudio] film_export_failed projectId=${project.id} renderId=${request.renderId} code=${exporterCode}`
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    }
+  );
+
+  it('reports an internal Film composition failure as render_failed with a bounded diagnostic', async () => {
+    const project = makeSchema2ServiceProject();
+    const render = vi.fn<StudioFilmExporterV2['render']>(async () => {
+      throw new StudioEditorFolderErrorV2('invalid_media');
+    });
+    const harness = makeHarness(project, {
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_composition_failure',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await expect(harness.service.createExport(request)).rejects.toMatchObject({ code: 'render_failed' });
+      await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+        status: 'terminal',
+        result: {
+          projectId: project.id,
+          renderId: request.renderId,
+          outcome: 'failed',
+          reason: 'render_failed',
+        },
+      });
+      expect(render).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(
+        `[CreativeStudio] film_export_failed projectId=${project.id} renderId=${request.renderId} code=composition_failed detail=invalid_media`
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it('reports an internal Film catalog plan failure as render_failed and cleans up the render', async () => {
+    const project = makeSchema2ServiceProject();
+    const cleanup = vi.fn(async () => undefined);
+    const render = vi.fn<StudioFilmExporterV2['render']>(async () => ({
+      facts: {} as never,
+      byteSize: 4,
+      sha256: 'd'.repeat(64),
+      openVerifiedStream: async () => Readable.from([Buffer.from('film')]),
+      cleanup,
+    }));
+    const create = vi.fn<StudioExportCatalogStoreV2['create']>(async () => {
+      throw new StudioExportCatalogErrorV2('invalid_create_plan');
+    });
+    const exportCatalogStore = {
+      ...makeHarness().exportCatalogStore,
+      create,
+    };
+    const harness = makeHarness(project, {
+      exportCatalogStore,
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_catalog_failure',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      await expect(harness.service.createExport(request)).rejects.toMatchObject({ code: 'render_failed' });
+      await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+        status: 'terminal',
+        result: {
+          projectId: project.id,
+          renderId: request.renderId,
+          outcome: 'failed',
+          reason: 'render_failed',
+        },
+      });
+      expect(create).toHaveBeenCalledOnce();
+      expect(cleanup).toHaveBeenCalledOnce();
+      expect(warn).toHaveBeenCalledWith(
+        `[CreativeStudio] film_export_failed projectId=${project.id} renderId=${request.renderId} code=catalog_failed detail=invalid_create_plan`
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
   it('reports unavailable Film capability and idle/not-found lifecycle without creating work', async () => {
     const project = makeSchema2ServiceProject();
     const filmExporter: StudioFilmExporterV2 = {
@@ -1787,6 +1943,96 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.resolveAssetV2).not.toHaveBeenCalled();
     expect(render).not.toHaveBeenCalled();
     expect(exportCatalogStore.create).not.toHaveBeenCalled();
+  });
+
+  it.each(['missing_project_asset', 'missing_managed_asset', 'mismatched_canonical_asset'] as const)(
+    'classifies a %s selected Film source as invalid media before rendering',
+    async (failure) => {
+      const project = makeSchema2ServiceProject();
+      addGeneratedVideosForMcpV2(project, 1);
+      const take = project.assets.take_01!;
+      const resolveAssetV2 = vi.fn<StudioMediaStore['resolveAssetV2']>(async () => {
+        if (failure === 'missing_managed_asset') return null;
+        return {
+          asset: { ...take, sha256: 'b'.repeat(64) },
+          openVerifiedStream: async () => Readable.from([Buffer.alloc(take.byteSize)]),
+        };
+      });
+      if (failure === 'missing_project_asset') delete project.assets[take.id];
+      const render = vi.fn<StudioFilmExporterV2['render']>();
+      const harness = makeHarness(project, {
+        resolveAssetV2,
+        filmExporter: {
+          capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+          render,
+          dispose: vi.fn(),
+        },
+      });
+      const request = {
+        projectId: project.id,
+        expectedRevision: project.revision,
+        expectedCatalogRevision: 1,
+        shape: 'film' as const,
+        renderId: `film_run_${failure}`,
+        transition: { kind: 'cut' as const },
+        trimTails: false,
+      };
+
+      await expect(harness.service.createExport(request)).rejects.toMatchObject({ code: 'invalid_media' });
+      await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+        status: 'terminal',
+        result: {
+          projectId: project.id,
+          renderId: request.renderId,
+          outcome: 'failed',
+          reason: 'invalid_media',
+        },
+      });
+      if (failure === 'missing_project_asset') expect(resolveAssetV2).not.toHaveBeenCalled();
+      else expect(resolveAssetV2).toHaveBeenCalledOnce();
+      expect(render).not.toHaveBeenCalled();
+      expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
+    }
+  );
+
+  it('preserves a genuine Film media-store failure as storage_error', async () => {
+    const project = makeSchema2ServiceProject();
+    addGeneratedVideosForMcpV2(project, 1);
+    const resolveAssetV2 = vi.fn<StudioMediaStore['resolveAssetV2']>(async () => {
+      throw new CreativeStudioStoreError('storage_error', 'private media-store detail');
+    });
+    const render = vi.fn<StudioFilmExporterV2['render']>();
+    const harness = makeHarness(project, {
+      resolveAssetV2,
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render,
+        dispose: vi.fn(),
+      },
+    });
+    const request = {
+      projectId: project.id,
+      expectedRevision: project.revision,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_media_store_failure',
+      transition: { kind: 'cut' as const },
+      trimTails: false,
+    };
+
+    await expect(harness.service.createExport(request)).rejects.toMatchObject({ code: 'storage_error' });
+    await expect(harness.service.getFilmExportStatus({ projectId: project.id })).resolves.toEqual({
+      status: 'terminal',
+      result: {
+        projectId: project.id,
+        renderId: request.renderId,
+        outcome: 'failed',
+        reason: 'render_failed',
+      },
+    });
+    expect(resolveAssetV2).toHaveBeenCalledOnce();
+    expect(render).not.toHaveBeenCalled();
+    expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
   });
 
   it('reports and cancels one bounded active film render without publishing', async () => {
@@ -2456,7 +2702,7 @@ describe('CreativeStudioServiceV2', () => {
         shape: 'still',
         shotId: 'clip_1',
       })
-    ).rejects.toMatchObject({ code: 'invalid_payload' });
+    ).rejects.toMatchObject({ code: 'render_failed' });
 
     expect(resolveAssetWithProjectAuthorityV2).not.toHaveBeenCalled();
     expect(harness.exportCatalogStore.create).not.toHaveBeenCalled();
@@ -2465,8 +2711,8 @@ describe('CreativeStudioServiceV2', () => {
   it.each([
     ['stale_catalog_revision', 'stale_export_catalog'],
     ['stale_project_revision', 'stale_project'],
-    ['invalid_create_plan', 'invalid_payload'],
-    ['artifact_not_found', 'invalid_payload'],
+    ['invalid_create_plan', 'render_failed'],
+    ['artifact_not_found', 'artifact_not_found'],
     ['storage_error', 'storage_error'],
   ] as const)('normalizes export-catalog %s failures to %s', async (catalogCode, serviceCode) => {
     const harness = makeHarness();
@@ -2546,7 +2792,30 @@ describe('CreativeStudioServiceV2', () => {
     expect(revealPath).not.toHaveBeenCalled();
   });
 
+  it('preserves a missing export artifact without invoking the reveal callback', async () => {
+    const resolveRevealPath = vi.fn<StudioExportCatalogStoreV2['resolveRevealPath']>(async () => {
+      throw new StudioExportCatalogErrorV2('artifact_not_found');
+    });
+    const harness = makeHarness(undefined, {
+      exportCatalogStore: {
+        ...makeHarness().exportCatalogStore,
+        resolveRevealPath,
+      },
+    });
+    const revealPath = vi.fn();
+
+    await expect(
+      harness.service.revealExport(
+        { projectId: 'project_v2', expectedCatalogRevision: 1, artifactId: 'export_missing' },
+        revealPath
+      )
+    ).rejects.toMatchObject({ code: 'artifact_not_found' });
+    expect(resolveRevealPath).toHaveBeenCalledOnce();
+    expect(revealPath).not.toHaveBeenCalled();
+  });
+
   it('rejects malformed export requests before catalog or paid work', async () => {
+    const renderFilm = vi.fn<StudioFilmExporterV2['render']>();
     const exportCatalogStore = {
       list: vi.fn(),
       create: vi.fn(),
@@ -2554,7 +2823,14 @@ describe('CreativeStudioServiceV2', () => {
       copy: vi.fn(),
       resolveRevealPath: vi.fn(),
     } as unknown as StudioExportCatalogStoreV2;
-    const harness = makeHarness(undefined, { exportCatalogStore });
+    const harness = makeHarness(undefined, {
+      exportCatalogStore,
+      filmExporter: {
+        capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
+        render: renderFilm,
+        dispose: vi.fn(),
+      },
+    });
     const attempts: Array<() => Promise<unknown>> = [
       () => harness.service.createExport(null as never),
       () =>
@@ -2578,6 +2854,36 @@ describe('CreativeStudioServiceV2', () => {
           expectedRevision: 2,
           expectedCatalogRevision: 1,
           shape: 'still',
+        } as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'film',
+          transition: { kind: 'cut' },
+          trimTails: false,
+        } as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'film',
+          renderId: 'film_run_extra',
+          transition: { kind: 'cut' },
+          trimTails: false,
+          outputPath: '/private/film.mp4',
+        } as never),
+      () =>
+        harness.service.createExport({
+          projectId: 'project_v2',
+          expectedRevision: 2,
+          expectedCatalogRevision: 1,
+          shape: 'film',
+          renderId: 'film_run_bad_transition',
+          transition: { kind: 'cut', seconds: 0.35 },
+          trimTails: false,
         } as never),
       () => harness.service.listExports({ projectId: 'project_v2', extra: true } as never),
       () => harness.service.listExports({ projectId: '../project' }),
@@ -2610,6 +2916,10 @@ describe('CreativeStudioServiceV2', () => {
     expect(exportCatalogStore.repair).not.toHaveBeenCalled();
     expect(exportCatalogStore.copy).not.toHaveBeenCalled();
     expect(exportCatalogStore.resolveRevealPath).not.toHaveBeenCalled();
+    expect(renderFilm).not.toHaveBeenCalled();
+    await expect(harness.service.getFilmExportStatus({ projectId: 'project_v2' })).resolves.toEqual({
+      status: 'idle',
+    });
     expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
@@ -3190,6 +3500,74 @@ describe('CreativeStudioServiceV2', () => {
         expectedRevision: project.revision,
       })
     ).rejects.toMatchObject({ code: 'quote_not_found' });
+  });
+
+  it('refuses project-reference preparation before pricing when the selected image route has no reference slot', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const preparedSubmissionCache = new StudioPreparedSubmissionCacheV2();
+    const admit = vi.spyOn(preparedSubmissionCache, 'admit');
+    const harness = makeHarness(project, { preparedSubmissionCache });
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...structuredClone(imageRoute),
+          constraints: { ...structuredClone(imageRoute.constraints), maxConditioningImages: 0 },
+        },
+        structuredClone(videoRoute),
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_reference_capacity_zero',
+    });
+    const before = harness.getProject();
+
+    await expect(
+      harness.service.prepareProjectReferences({
+        projectId: project.id,
+        expectedRevision: project.revision,
+        referenceIds: ['ref_background'],
+      })
+    ).rejects.toMatchObject({ code: 'reference_capacity_unavailable' });
+
+    expect(harness.loadRateCard).not.toHaveBeenCalled();
+    expect(admit).not.toHaveBeenCalled();
+    expect(harness.getProject()).toEqual(before);
+    expect(harness.submitShots).not.toHaveBeenCalled();
+  });
+
+  it('revalidates project-reference capacity at confirmation before any durable spend', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    const prepared = await harness.service.prepareProjectReferences({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      referenceIds: ['ref_background'],
+    });
+    const before = harness.getProject();
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...structuredClone(imageRoute),
+          constraints: { ...structuredClone(imageRoute.constraints), maxConditioningImages: 0 },
+        },
+        structuredClone(videoRoute),
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_reference_capacity_removed',
+    });
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).rejects.toMatchObject({ code: 'reference_capacity_unavailable' });
+
+    expect(harness.loadRateCard).toHaveBeenCalledTimes(1);
+    expect(harness.getProject()).toEqual(before);
+    expect(harness.submitShots).not.toHaveBeenCalled();
   });
 
   it('regenerates an approved reference after every shot stops using it', async () => {
@@ -3996,6 +4374,44 @@ describe('CreativeStudioServiceV2', () => {
 
     expect(capability.supportedItems).toEqual([referenceCapabilityV2('ref_background')]);
     expect(capability.blocks).toEqual([]);
+  });
+
+  it('blocks project-reference capability when the selected image route has no conditioning slot', async () => {
+    const project = makeSchema2ServiceProject();
+    project.imageRouteId = imageRoute.choiceId;
+    const harness = makeHarness(project);
+    harness.providerResolver.listGenerationRoutes.mockResolvedValueOnce({
+      routes: [
+        {
+          ...structuredClone(imageRoute),
+          constraints: { ...structuredClone(imageRoute.constraints), maxConditioningImages: 0 },
+        },
+        structuredClone(videoRoute),
+      ],
+      diagnostics: [],
+      generationCatalogVersion: 'catalog_reference_capability_zero',
+    });
+    const item = referenceCapabilityV2('ref_background');
+
+    const capability = await harness.service.getGenerationCapability({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      items: [item],
+    });
+
+    expect(capability.supportedItems).toEqual([]);
+    expect(capability.blocks).toEqual([
+      {
+        block: {
+          code: 'reference_binding',
+          role: 'image',
+          reason: 'capacity_exceeded',
+          selectedCount: 1,
+          limit: 0,
+        },
+        items: [item],
+      },
+    ]);
   });
 
   it.each([
@@ -7897,6 +8313,58 @@ const writeMcpConditioningFrameFixtureV2 = async (
   await writeFile(path.join(projectDir, 'conditioningFrames', `${fixture.frameAssetId}.png`), diskFrameBytes);
 };
 
+const studioMcpRouteCatalogV2 = (maxConditioningImages: number): StudioRouteCatalogV2 => {
+  const selectedRoute = {
+    choiceId: 'choice_aaaaaaaaaaaaaaaaaaaaaaaa',
+    providerId: 'provider_current',
+    providerName: 'Current image provider',
+    model: 'image-current',
+    integrationLabelKey: 'imageApi' as const,
+    health: 'available' as const,
+    kind: 'image' as const,
+    constraints: {
+      aspectRatios: ['16:9' as const],
+      resolutions: ['1080p' as const],
+      minDurationSeconds: 1,
+      maxDurationSeconds: 60,
+      supportsFirstFrame: true,
+      maxConditioningImages,
+      silentOutput: true,
+    },
+  };
+  return {
+    image: {
+      status: 'ready',
+      selected: {
+        choiceId: selectedRoute.choiceId,
+        providerId: selectedRoute.providerId,
+        model: selectedRoute.model,
+      },
+      selectedRoute,
+      selectionIssue: null,
+      options: [selectedRoute],
+    },
+    video: {
+      status: 'setup_required',
+      selected: null,
+      selectedRoute: null,
+      selectionIssue: null,
+      options: [],
+    },
+    catalogVersion: maxConditioningImages.toString(16).padStart(16, '0'),
+  };
+};
+
+const answeredStudioMcpRoutesV2 = (maxConditioningImages: number): StudioDirectorToolQueryResultV2 => ({
+  schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+  commandId: `query_reference_capacity_${maxConditioningImages}`,
+  projectId: 'project_v2',
+  decidedAt: '2026-08-17T00:00:00.000Z',
+  status: 'answered',
+  query: { kind: 'list_routes' },
+  result: studioMcpRouteCatalogV2(maxConditioningImages),
+});
+
 describe('Studio MCP schema-2 server', () => {
   it('parses explicit and defaulted sidecar paths without coupling route-catalog state to project schema', () => {
     const required = {
@@ -8933,6 +9401,18 @@ describe('Studio MCP schema-2 server', () => {
       }).success
     ).toBe(true);
     expect(
+      studioApplyEditsInputSchemaV2.safeParse({
+        expectedRevision: 7,
+        operations: [{ kind: 'delete_shot', shotId: 'clip_1' }],
+      }).success
+    ).toBe(false);
+    expect(
+      studioProposeStoryboardInputSchemaV2.safeParse({
+        base_revision: 7,
+        operations: [{ kind: 'delete_shot', shotId: 'clip_1' }],
+      }).success
+    ).toBe(true);
+    expect(
       studioProposeStoryboardInputSchemaV2.safeParse({
         base_revision: 7,
         operations: [
@@ -9095,6 +9575,189 @@ describe('Studio MCP schema-2 server', () => {
       expect(createId).not.toHaveBeenCalled();
       expect(writerFsAccess).not.toHaveBeenCalled();
       await expect(nodeFs.readdir(projectDir)).resolves.toEqual([]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    {
+      name: 'reference plan',
+      operation: {
+        kind: 'set_reference_plan',
+        references: [{ kind: 'character', label: 'Ming', prompt: 'Ming character sheet.' }],
+      },
+    },
+    {
+      name: 'reference-plan amendment',
+      operation: {
+        kind: 'amend_reference_plan',
+        additions: [{ kind: 'background', label: 'Atrium', prompt: 'Warm glass atrium.' }],
+      },
+    },
+    {
+      name: 'character reference binding',
+      operation: {
+        kind: 'set_shot_reference_binding',
+        shotId: 'clip_1',
+        characterReferenceIds: ['ref_ming'],
+        backgroundReferenceId: null,
+      },
+    },
+    {
+      name: 'background reference binding',
+      operation: {
+        kind: 'set_shot_reference_binding',
+        shotId: 'clip_1',
+        characterReferenceIds: [],
+        backgroundReferenceId: 'ref_atrium',
+      },
+    },
+  ] satisfies Array<{ name: string; operation: StudioMutationOperationV2 }>)(
+    'rejects a $name atomically when the current image route has zero reference capacity',
+    async ({ operation }) => {
+      const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-zero-reference-capacity-'));
+      const writerFsAccess = vi.fn(() => {
+        throw new Error('zero-capacity reference rejection must not reach writer IO');
+      });
+      const readCurrentRoutes = vi.fn(async () => answeredStudioMcpRoutesV2(0));
+      try {
+        const result = await createStudioApplyEditsHandlerV2(
+          {
+            projectId: 'project_v2',
+            projectDir,
+            pendingDir: path.join(projectDir, 'proposals', 'pending'),
+            referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+            routeCatalog: studioMcpRouteCatalogV2(1),
+          },
+          { fs: new Proxy(nodeFs, { get: writerFsAccess }), readCurrentRoutes }
+        )({
+          expectedRevision: 7,
+          operations: [{ kind: 'set_brief', brief: 'This whole batch must remain atomic.' }, operation],
+        });
+
+        expect(result.isError).toBe(true);
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({ code: 'reference_capacity_unavailable' });
+        expect(readCurrentRoutes).toHaveBeenCalledOnce();
+        expect(writerFsAccess).not.toHaveBeenCalled();
+        await expect(readdir(projectDir)).resolves.toEqual([]);
+      } finally {
+        await rm(projectDir, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it.each([
+    ['absent receipt', undefined],
+    ['malformed receipt', { status: 'answered', query: { kind: 'list_routes' }, result: { image: {} } }],
+    [
+      'unselected route',
+      {
+        ...answeredStudioMcpRoutesV2(1),
+        result: {
+          ...studioMcpRouteCatalogV2(1),
+          image: {
+            status: 'selection_required',
+            selected: null,
+            selectedRoute: null,
+            selectionIssue: null,
+            options: studioMcpRouteCatalogV2(1).image.options,
+          },
+        },
+      },
+    ],
+  ] as const)('fails closed for %s current route authority', async (_name, routeResult) => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-unknown-reference-capacity-'));
+    const writerFsAccess = vi.fn(() => {
+      throw new Error('unknown-capacity reference rejection must not reach writer IO');
+    });
+    try {
+      const result = await createStudioApplyEditsHandlerV2(
+        {
+          projectId: 'project_v2',
+          projectDir,
+          pendingDir: path.join(projectDir, 'proposals', 'pending'),
+          referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+        },
+        {
+          fs: new Proxy(nodeFs, { get: writerFsAccess }),
+          readCurrentRoutes: vi.fn(async () => routeResult as never),
+        }
+      )({
+        expectedRevision: 7,
+        operations: [{ kind: 'set_reference_plan', references: [] }],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ code: 'reference_capacity_unavailable' });
+      expect(writerFsAccess).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('lets empty binding clears and unrelated direct edits bypass unavailable route authority', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-reference-clear-'));
+    const readCurrentRoutes = vi.fn(async () => {
+      throw new Error('route inventory must not be read for reference-free direct edits');
+    });
+    const handler = createStudioApplyEditsHandlerV2(
+      {
+        projectId: 'project_v2',
+        projectDir,
+        pendingDir: path.join(projectDir, 'proposals', 'pending'),
+        referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+      },
+      { readCurrentRoutes }
+    );
+    try {
+      for (const operation of [
+        {
+          kind: 'set_shot_reference_binding' as const,
+          shotId: 'clip_1',
+          characterReferenceIds: [],
+          backgroundReferenceId: null,
+        },
+        { kind: 'set_brief' as const, brief: 'Reference-free work remains available.' },
+      ]) {
+        // The missing project makes the real writer return immediately after this boundary lets the operation through.
+        // eslint-disable-next-line no-await-in-loop
+        const result = await handler({ expectedRevision: 7, operations: [operation] });
+        expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+      }
+      expect(readCurrentRoutes).not.toHaveBeenCalled();
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('lets positive current reference capacity reach the direct command writer', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-server-v2-positive-reference-capacity-'));
+    const readCurrentRoutes = vi.fn(async () => answeredStudioMcpRoutesV2(1));
+    try {
+      const result = await createStudioApplyEditsHandlerV2(
+        {
+          projectId: 'project_v2',
+          projectDir,
+          pendingDir: path.join(projectDir, 'proposals', 'pending'),
+          referencePendingDir: path.join(projectDir, 'reference-requests', 'pending'),
+          routeCatalog: studioMcpRouteCatalogV2(0),
+        },
+        { readCurrentRoutes }
+      )({
+        expectedRevision: 7,
+        operations: [
+          {
+            kind: 'set_shot_reference_binding',
+            shotId: 'clip_1',
+            characterReferenceIds: ['ref_ming'],
+            backgroundReferenceId: null,
+          },
+        ],
+      });
+
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ status: 'storage_error' });
+      expect(readCurrentRoutes).toHaveBeenCalledOnce();
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
@@ -10840,6 +11503,38 @@ describe('Studio MCP schema-2 server', () => {
     }
   });
 
+  it('rejects a reference-image request against fresh zero-capacity authority without publishing sidecars', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-zero-capacity-reference-request-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
+    const project = makeSchema2ServiceProject();
+    await writeStudioProjectFilesV2(projectDir, project);
+    const readCurrentRoutes = vi.fn(async () => answeredStudioMcpRoutesV2(0));
+
+    try {
+      const result = await createRequestReferenceImagesHandlerV2(
+        {
+          projectId: project.id,
+          projectDir,
+          pendingDir,
+          referencePendingDir,
+          routeCatalog: studioMcpRouteCatalogV2(1),
+        },
+        { readCurrentRoutes }
+      )({ referenceIds: ['ref_background'] });
+
+      expect(result.isError).toBe(true);
+      expect(JSON.parse(result.content[0]!.text)).toMatchObject({ code: 'reference_capacity_unavailable' });
+      expect(readCurrentRoutes).toHaveBeenCalledOnce();
+      await expect(readdir(referencePendingDir)).resolves.toEqual([]);
+      await expect(readdir(path.join(projectDir, 'reference-requests', 'slots'))).resolves.toEqual([]);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
+    }
+  });
+
   it('covers V2 proposal, rule, reference, and unavailable handler outcomes without spending', async () => {
     const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-handler-outcomes-'));
     const pendingDir = path.join(projectDir, 'proposals', 'pending');
@@ -10919,7 +11614,9 @@ describe('Studio MCP schema-2 server', () => {
       ruleHandler({ base_revision: project.revision, text: 'No competitor logos.', forbidden_terms: ['competitor'] })
     ).resolves.not.toHaveProperty('isError');
 
-    const referenceHandler = createRequestReferenceImagesHandlerV2(config);
+    const referenceHandler = createRequestReferenceImagesHandlerV2(config, {
+      readCurrentRoutes: vi.fn(async () => answeredStudioMcpRoutesV2(1)),
+    });
     for (const input of [
       { referenceIds: null as unknown as string[] },
       { referenceIds: [] },

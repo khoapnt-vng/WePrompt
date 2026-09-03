@@ -203,7 +203,6 @@ export type StudioDirectorOperationV2 = Extract<
     kind:
       | 'set_brief'
       | 'reorder_beats'
-      | 'delete_shot'
       | 'reorder_shots'
       | 'reorder_bin'
       | 'set_reference_plan'
@@ -687,6 +686,7 @@ export const STUDIO_PRICING_REFUSAL_REASONS_V2 = [
   'invalid_dependency',
   'invalid_prepare_request',
   'invalid_reference',
+  'reference_capacity_unavailable',
   'missing_shooting_script',
   'missing_conditioning',
   'unsafe_total',
@@ -1719,7 +1719,7 @@ export const STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2 = Object.freeze({
   add_binned_beat: 'proposal',
   add_shot: 'proposal',
   edit_shot: 'proposal',
-  delete_shot: 'direct',
+  delete_shot: 'proposal',
   park_shot: 'operation_not_permitted',
   restore_shot: 'operation_not_permitted',
   reorder_shots: 'direct',
@@ -2432,6 +2432,8 @@ export const isStudioMutationReasonV2 = (value: unknown): value is StudioMutatio
 export type StudioCommandErrorCode =
   | 'feature_disabled'
   | 'invalid_payload'
+  | 'invalid_media'
+  | 'artifact_not_found'
   | 'pricing_refused'
   | 'not_found'
   | 'stale_project'

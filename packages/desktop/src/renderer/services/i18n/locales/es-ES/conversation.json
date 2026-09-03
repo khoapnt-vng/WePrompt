@@ -1613,6 +1613,7 @@
             "invalidDependency": "La dependencia de continuación ya no es válida. Actualiza el proyecto y vuelve a preparar.",
             "invalidPrepareRequest": "No se pudo preparar la selección de generación de forma segura. Revísala y vuelve a preparar.",
             "invalidReference": "Una referencia seleccionada ya no es válida para esta generación. Elige otra referencia.",
+            "referenceCapacityUnavailable": "El motor de imagen seleccionado no puede usar imágenes de referencia canónicas. Elige un motor con al menos un espacio de referencia antes de generarlas.",
             "missingShootingScript": "Escribe el guion de rodaje de este Shot antes de generar contenido.",
             "missingConditioning": "Una toma de vídeo no tiene un primer fotograma ni un fotograma predecesor válido. Añade o selecciona la imagen necesaria.",
             "unsafeTotal": "No se pudo representar de forma segura el total de la estimación. Reduce la selección; no se envió nada."
@@ -2185,6 +2186,7 @@
       "mutationRefused": "Este cambio no se puede aplicar al proyecto en su estado actual. Revisa el proyecto e inténtalo de nuevo.",
       "pricingRefused": "La estimación se rechazó antes del envío. No se envió nada.",
       "projectNotFound": "El proyecto de Creative Studio ya no existe.",
+      "exportArtifactNotFound": "Esta exportación ya no está disponible. Vuelve a cargar el historial de exportaciones antes de intentarlo de nuevo.",
       "storyboardExists": "Este proyecto ya tiene un guion gráfico. Confirma que deseas sustituirlo antes de crear otro borrador.",
       "staleProject": "El proyecto se ha modificado en otro lugar. Actualízalo antes de reintentarlo.",
       "staleExportCatalog": "El catálogo de exportación cambió. Actualiza el historial de exportaciones antes de reintentarlo.",

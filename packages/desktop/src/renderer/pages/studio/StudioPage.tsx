@@ -2444,13 +2444,11 @@ const StudioProjectPage: React.FC<{
             ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleAuthority'
             : result.error.code === 'stale_export_catalog'
               ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog'
-              : result.error.code === 'invalid_payload'
-                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.invalidMedia'
-                : result.error.code === 'storage_error'
-                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
-                  : result.error.code === 'busy'
-                    ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
-                    : result.error.messageKey;
+              : result.error.code === 'render_failed' || result.error.code === 'storage_error'
+                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable'
+                : result.error.code === 'busy'
+                  ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.busy'
+                  : result.error.messageKey;
         return { ok: false as const, messageKey };
       }
       installExportCatalog(result.data);
@@ -2485,7 +2483,15 @@ const StudioProjectPage: React.FC<{
           expectedCatalogRevision: catalog.revision,
           artifactId,
         });
-        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        if (result.ok === false) {
+          return {
+            ok: false as const,
+            messageKey:
+              result.error.code === 'artifact_not_found'
+                ? 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable'
+                : result.error.messageKey,
+          };
+        }
         return { ok: true as const };
       });
       return (
@@ -2532,7 +2538,7 @@ const StudioProjectPage: React.FC<{
                     ? 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'
                     : result.error.code === 'cancelled'
                       ? 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'
-                      : result.error.code === 'invalid_payload'
+                      : result.error.code === 'invalid_media'
                         ? 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'
                         : result.error.code === 'busy'
                           ? 'conversation.creativeStudio.workspace.filmExport.errors.busy'
@@ -2607,7 +2613,15 @@ const StudioProjectPage: React.FC<{
           expectedCatalogRevision: catalog.revision,
           artifactId,
         });
-        if (result.ok === false) return { ok: false as const, messageKey: result.error.messageKey };
+        if (result.ok === false) {
+          return {
+            ok: false as const,
+            messageKey:
+              result.error.code === 'artifact_not_found'
+                ? 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable'
+                : result.error.messageKey,
+          };
+        }
         return { ok: true as const };
       });
       return (

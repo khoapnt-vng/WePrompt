@@ -1271,6 +1271,40 @@ describe('spend gate draft graph', () => {
     ).toBeNull();
   });
 
+  it('requires a positive selected image-route reference capacity before opening a reference spend gate', () => {
+    const referenceDraft: SpendGateDraft = {
+      projectId: 'project_1',
+      expectedRevision: 3,
+      referenceIds: ['reference_ming'],
+    };
+    const selectedCatalog = (maxConditioningImages: number): StudioRouteCatalogV2 => {
+      const catalog = routeCatalog('ready', 'unavailable');
+      catalog.image.selected = { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' };
+      catalog.image.selectedRoute = {
+        choiceId: 'route_image',
+        providerId: 'provider_safe',
+        providerName: 'Safe image provider',
+        model: 'model_safe',
+        integrationLabelKey: 'imageApi',
+        health: 'available',
+        kind: 'image',
+        constraints: {
+          aspectRatios: ['16:9'],
+          resolutions: ['720p'],
+          minDurationSeconds: 1,
+          maxDurationSeconds: 60,
+          supportsFirstFrame: false,
+          maxConditioningImages,
+          silentOutput: true,
+        },
+      };
+      return catalog;
+    };
+
+    expect(spendGateRouteIssue(selectedCatalog(0), referenceDraft)).toBe('image');
+    expect(spendGateRouteIssue(selectedCatalog(1), referenceDraft)).toBeNull();
+  });
+
   it('formats maximum safe integer cents without rounding them through a float', () => {
     expect(formatMinorUnits(Number.MAX_SAFE_INTEGER, 'USD', 'en-US')).toBe('$90,071,992,547,409.91');
   });
@@ -3293,6 +3327,7 @@ describe('SpendGateModal', () => {
   it.each([
     ['missing_conditioning', 'missingConditioning'],
     ['missing_shooting_script', 'missingShootingScript'],
+    ['reference_capacity_unavailable', 'referenceCapacityUnavailable'],
   ] as const)('renders structured pricing refusal %s without retrying or confirming', async (reason, key) => {
     mocks.prepare.mockResolvedValue({
       ok: false,

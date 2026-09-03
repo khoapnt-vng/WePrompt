@@ -1053,7 +1053,7 @@ describe('initCreativeStudioBridge', () => {
     });
   });
 
-  it.each(['missing_conditioning', 'missing_shooting_script'] as const)(
+  it.each(['missing_conditioning', 'missing_shooting_script', 'reference_capacity_unavailable'] as const)(
     'returns only the allowlisted structured pricing refusal %s without internal diagnostics',
     async (reason) => {
       const refusal = Object.assign(new StudioPricingErrorV2(reason), {
@@ -1289,6 +1289,47 @@ describe('initCreativeStudioBridge', () => {
     });
     expect(service.createExport).toHaveBeenCalledWith(createInput);
     expect(service.listExports).toHaveBeenCalledWith({ projectId: 'project_1' });
+  });
+
+  it('forwards the exact seven-field Film request without reshaping it', async () => {
+    const catalog = { revision: 2, artifacts: [] };
+    vi.mocked(service.createExport).mockResolvedValueOnce(catalog);
+    initCreativeStudioBridge(dependencies);
+    const input = {
+      projectId: 'project_1',
+      expectedRevision: 7,
+      expectedCatalogRevision: 1,
+      shape: 'film' as const,
+      renderId: 'film_run_1',
+      transition: { kind: 'dissolve' as const, seconds: 0.35 },
+      trimTails: true,
+    };
+
+    await expect(registeredHandler('createExport')(input as never)).resolves.toEqual({ ok: true, data: catalog });
+    expect(service.createExport).toHaveBeenCalledExactlyOnceWith(input);
+  });
+
+  it('preserves Film media failures as distinct from malformed requests', async () => {
+    vi.mocked(service.createExport).mockRejectedValueOnce(new CreativeStudioServiceError('invalid_media'));
+    initCreativeStudioBridge(dependencies);
+
+    await expect(
+      registeredHandler('createExport')({
+        projectId: 'project_1',
+        expectedRevision: 7,
+        expectedCatalogRevision: 1,
+        shape: 'film',
+        renderId: 'film_run_invalid_media',
+        transition: { kind: 'cut' },
+        trimTails: false,
+      } as never)
+    ).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'invalid_media',
+        messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia',
+      },
+    });
   });
 
   it('routes film capability, progress, cancellation, and renderer-safe artifact facts', async () => {
@@ -1595,6 +1636,21 @@ describe('initCreativeStudioBridge', () => {
     expect(dependencies.revealExportPath).toHaveBeenCalledWith('/private/managed/exports/export_1');
     expect(service.copyExport).toHaveBeenCalledWith(input, expect.any(Function));
     expect(service.revealExport).toHaveBeenCalledWith(input, expect.any(Function));
+  });
+
+  it('preserves a missing export artifact as a distinct safe command failure', async () => {
+    vi.mocked(service.revealExport).mockRejectedValueOnce(new CreativeStudioServiceError('artifact_not_found'));
+    initCreativeStudioBridge(dependencies);
+    const input = { projectId: 'project_1', expectedCatalogRevision: 2, artifactId: 'export_missing' };
+
+    await expect(registeredHandler('revealExport')(input as never)).resolves.toEqual({
+      ok: false,
+      error: {
+        code: 'artifact_not_found',
+        messageKey: 'conversation.creativeStudio.errors.exportArtifactNotFound',
+      },
+    });
+    expect(dependencies.revealExportPath).not.toHaveBeenCalled();
   });
 
   it('rejects hostile export service envelopes rather than leaking extra authority', async () => {

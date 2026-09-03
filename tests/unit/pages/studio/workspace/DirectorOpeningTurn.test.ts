@@ -300,6 +300,13 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/free-text acknowledgement performs no UI action/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/choosing a different current image are human-only/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/once for\s+each active Shot/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/read_storyboard[\s\S]*studio_list_routes for current route authority/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/maxConditioningImages is greater[\s\S]*than zero/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /If it is zero, do not create or amend a reference plan, request reference images, or save a[\s\S]*non-empty Shot reference binding/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/choose a capable image route or continue reference-free/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Never infer support from a model name/i);
   });
 
   it('answers in the language the person writes in, since the rules themselves are English', () => {

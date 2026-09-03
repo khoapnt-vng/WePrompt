@@ -51,6 +51,8 @@ import { BrowserWindow, dialog, shell } from 'electron';
 const errorMessageKeys: Record<Exclude<StudioCommandErrorCode, 'connection_validation_failed'>, string> = {
   feature_disabled: 'conversation.creativeStudio.errors.featureDisabled',
   invalid_payload: 'conversation.creativeStudio.errors.invalidPayload',
+  invalid_media: 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia',
+  artifact_not_found: 'conversation.creativeStudio.errors.exportArtifactNotFound',
   pricing_refused: 'conversation.creativeStudio.errors.pricingRefused',
   not_found: 'conversation.creativeStudio.errors.projectNotFound',
   stale_project: 'conversation.creativeStudio.errors.staleProject',

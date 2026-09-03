@@ -316,6 +316,8 @@ const pricingRefusalMessageKeys: Record<StudioPricingRefusalReasonV2, string> = 
   invalid_dependency: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidDependency',
   invalid_prepare_request: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidPrepareRequest',
   invalid_reference: 'conversation.creativeStudio.workspace.gate.errors.pricing.invalidReference',
+  reference_capacity_unavailable:
+    'conversation.creativeStudio.workspace.gate.errors.pricing.referenceCapacityUnavailable',
   missing_shooting_script: 'conversation.creativeStudio.workspace.gate.errors.pricing.missingShootingScript',
   missing_conditioning: 'conversation.creativeStudio.workspace.gate.errors.pricing.missingConditioning',
   unsafe_total: 'conversation.creativeStudio.workspace.gate.errors.pricing.unsafeTotal',

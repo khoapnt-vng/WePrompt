@@ -7082,15 +7082,31 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
         ok: false,
         error: { code: 'stale_export_catalog', messageKey: 'native.exportFailed' },
       })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'invalid_payload', messageKey: 'native.exportFailed' },
+      })
+      .mockResolvedValueOnce({
+        ok: false,
+        error: { code: 'render_failed', messageKey: 'native.exportFailed' },
+      })
       .mockResolvedValueOnce(ok({ revision: 3, artifacts: [{ ...artifact, sourceRevision: 99 }] }));
     mocks.bridge.copyExport.invoke.mockResolvedValue({
       ok: false,
       error: { code: 'storage_error', messageKey: 'native.copyFailed' },
     });
-    mocks.bridge.revealExport.invoke.mockResolvedValue({
-      ok: false,
-      error: { code: 'storage_error', messageKey: 'native.revealFailed' },
-    });
+    mocks.bridge.revealExport.invoke
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'artifact_not_found',
+          messageKey: 'conversation.creativeStudio.errors.exportArtifactNotFound',
+        },
+      })
+      .mockResolvedValue({
+        ok: false,
+        error: { code: 'storage_error', messageKey: 'native.revealFailed' },
+      });
 
     renderStudio('/studio/project_1/cut');
     await screen.findByRole('heading', { name: 'Launch film' });
@@ -7107,7 +7123,19 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       ok: false,
       messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.staleCatalog',
     });
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: false,
+      messageKey: 'native.exportFailed',
+    });
+    await expect(invokeStudioAction(projectMenu.createEditorFolder)).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.mediaUnavailable',
+    });
     await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('missing_export'))).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
+    });
+    await expect(invokeStudioAction(() => projectMenu.revealEditorFolder('export_1'))).resolves.toEqual({
       ok: false,
       messageKey: 'conversation.creativeStudio.workspace.editorFolderExport.errors.artifactUnavailable',
     });
@@ -7150,6 +7178,15 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     const publishedCatalog: StudioRendererExportCatalogV2 = { revision: 2, artifacts: [filmArtifact] };
     mocks.bridge.listExports.invoke.mockReset().mockResolvedValue(ok(initialCatalog));
     mocks.bridge.createExport.invoke.mockResolvedValueOnce(ok(publishedCatalog));
+    mocks.bridge.revealExport.invoke
+      .mockResolvedValueOnce({
+        ok: false,
+        error: {
+          code: 'artifact_not_found',
+          messageKey: 'conversation.creativeStudio.errors.exportArtifactNotFound',
+        },
+      })
+      .mockResolvedValueOnce(ok({ status: 'revealed' as const }));
     mocks.bridge.cancelFilmExport.invoke
       .mockResolvedValueOnce(ok({ status: 'cancellation_refused' as const }))
       .mockResolvedValueOnce(ok({ status: 'cancelled' as const }))
@@ -7225,6 +7262,10 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       ok: false,
       messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
     });
+    await expect(menu.revealFilm(filmArtifact.id)).resolves.toEqual({
+      ok: false,
+      messageKey: 'conversation.creativeStudio.workspace.filmExport.errors.artifactUnavailable',
+    });
     await expect(menu.revealFilm(filmArtifact.id)).resolves.toEqual({ ok: true });
     expect(mocks.bridge.revealExport.invoke).toHaveBeenLastCalledWith({
       projectId: 'project_1',
@@ -7243,7 +7284,8 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     ['render_failed', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
     ['storage_error', 'conversation.creativeStudio.workspace.filmExport.errors.renderFailed'],
     ['cancelled', 'conversation.creativeStudio.workspace.filmExport.errors.cancelled'],
-    ['invalid_payload', 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'],
+    ['invalid_media', 'conversation.creativeStudio.workspace.filmExport.errors.invalidMedia'],
+    ['invalid_payload', 'native.untrustedFilmFailure'],
     ['busy', 'conversation.creativeStudio.workspace.filmExport.errors.busy'],
   ] as const)('maps %s Film export failures to bounded renderer copy', async (code, messageKey) => {
     mocks.bridge.createExport.invoke.mockResolvedValueOnce({

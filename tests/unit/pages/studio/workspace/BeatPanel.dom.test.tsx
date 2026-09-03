@@ -3598,12 +3598,14 @@ describe('BeatPanel', () => {
   });
 
   it('keeps generic confirmed cancellation for a first-Shot seed lock that cannot rejoin', async () => {
+    const authorized = makeSeedStill('image_authorized');
     const locked = makeShot('shot_1', 0, {
       seedAuthorizationLock: {
         compatibleAssetIds: ['image_authorized'],
         canCancelWaiting: true,
         waitingReason: 'choose_seed',
       },
+      seedStills: [authorized],
       segmentHead: true,
     });
     const beat = makeBeat('beat_1', [locked]);
@@ -3620,6 +3622,11 @@ describe('BeatPanel', () => {
       <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }))} />
     );
 
+    const continueWithSeed = screen.getByRole('button', { name: 'Pin as first frame · Shot 1' });
+    expect(continueWithSeed).toBeEnabled();
+    fireEvent.click(continueWithSeed);
+    expect(actions.setSeedStill).toHaveBeenCalledWith(locked.id, 'image_authorized');
+
     expect(screen.queryByRole('button', { name: 'Cancel and review rejoin' })).toBeNull();
     const genericCancel = screen.getByRole('button', { name: 'Cancel waiting' });
     fireEvent.click(genericCancel);
@@ -3629,6 +3636,168 @@ describe('BeatPanel', () => {
     fireEvent.click(within(confirmation).getByRole('button', { name: 'Confirm cancel waiting' }));
     await waitFor(() => expect(actions.cancelWaiting).toHaveBeenCalledWith(locked.id));
     expect(actions.cancelAndReviewRejoin).not.toHaveBeenCalled();
+  });
+
+  it('offers seed continuation only for one exact ready authority and suppresses duplicate activation', async () => {
+    let finishSelection: ((value: boolean) => void) | undefined;
+    const setSeedStill = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finishSelection = resolve;
+        })
+    );
+    const authorized = makeSeedStill('image_authorized');
+    const locked = makeShot('shot_1', 0, {
+      seedAuthorizationLock: {
+        compatibleAssetIds: [authorized.assetId],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      seedStills: [authorized],
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [locked]);
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: locked.id,
+      upstreamShotId: locked.id,
+      eligiblePrimaryAssetIds: [authorized.assetId],
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    const actions = makeActions({ setSeedStill });
+    const { rerender } = render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: [row] }))} />
+    );
+
+    const continueWithSeed = screen.getByRole('button', { name: 'Pin as first frame · Shot 1' });
+    fireEvent.click(continueWithSeed);
+    fireEvent.click(continueWithSeed);
+    expect(setSeedStill).toHaveBeenCalledTimes(1);
+    expect(setSeedStill).toHaveBeenCalledWith(locked.id, authorized.assetId);
+    expect(continueWithSeed).toBeDisabled();
+
+    await act(async () => finishSelection?.(true));
+    expect(continueWithSeed).toBeEnabled();
+
+    const unsafeProjection = makeProjection([beat], { cascadeProgress: [row, { ...row }] });
+    rerender(<BeatPanel {...panelProps(beat, makeDrafts(), actions, unsafeProjection)} />);
+    expect(screen.queryByRole('button', { name: 'Pin as first frame · Shot 1' })).toBeNull();
+  });
+
+  it.each([
+    { name: 'no eligible seed', rowAssets: [] as string[], lockAssets: [] as string[], statusReady: true },
+    {
+      name: 'multiple eligible seeds',
+      rowAssets: ['image_authorized', 'image_alternate'],
+      lockAssets: ['image_authorized', 'image_alternate'],
+      statusReady: true,
+    },
+    {
+      name: 'a mismatched authority lock',
+      rowAssets: ['image_authorized'],
+      lockAssets: ['image_alternate'],
+      statusReady: true,
+    },
+    {
+      name: 'a pending authority projection',
+      rowAssets: ['image_authorized'],
+      lockAssets: ['image_authorized'],
+      statusReady: false,
+    },
+  ])('does not offer seed continuation for $name', ({ lockAssets, rowAssets, statusReady }) => {
+    const authorized = makeSeedStill('image_authorized');
+    const alternate = makeSeedStill('image_alternate');
+    const locked = makeShot('shot_1', 0, {
+      seedAuthorizationLock: {
+        compatibleAssetIds: lockAssets,
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      seedAuthorityStatusReady: statusReady,
+      seedStills: [authorized, alternate],
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [locked]);
+    const row: StudioCascadeProgressV2 = {
+      dependentShotId: locked.id,
+      upstreamShotId: locked.id,
+      eligiblePrimaryAssetIds: rowAssets,
+      canRetryConditioningFrame: false,
+      canCancelWaiting: true,
+      waitingReason: 'choose_seed',
+    };
+    const actions = makeActions();
+
+    render(
+      <BeatPanel
+        {...panelProps(
+          beat,
+          makeDrafts(),
+          actions,
+          makeProjection([beat], { cascadeProgress: [row], workspaceStatusReady: statusReady })
+        )}
+      />
+    );
+
+    expect(screen.queryByRole('button', { name: 'Pin as first frame · Shot 1' })).toBeNull();
+    expect(actions.setSeedStill).not.toHaveBeenCalled();
+  });
+
+  it('labels simultaneous seed continuations with their exact Shot and dispatches each authority', async () => {
+    const firstSeed = makeSeedStill('image_first');
+    const secondSeed = makeSeedStill('image_second');
+    const firstShot = makeShot('shot_1', 0, {
+      seedAuthorizationLock: {
+        compatibleAssetIds: [firstSeed.assetId],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      seedStills: [firstSeed],
+      segmentHead: true,
+    });
+    const secondShot = makeShot('shot_2', 1, {
+      chainBreak: 'hard_cut',
+      seedAuthorizationLock: {
+        compatibleAssetIds: [secondSeed.assetId],
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      seedStills: [secondSeed],
+      segmentHead: true,
+    });
+    const beat = makeBeat('beat_1', [firstShot, secondShot]);
+    const rows: StudioCascadeProgressV2[] = [
+      {
+        dependentShotId: firstShot.id,
+        upstreamShotId: firstShot.id,
+        eligiblePrimaryAssetIds: [firstSeed.assetId],
+        canRetryConditioningFrame: false,
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+      {
+        dependentShotId: secondShot.id,
+        upstreamShotId: secondShot.id,
+        eligiblePrimaryAssetIds: [secondSeed.assetId],
+        canRetryConditioningFrame: false,
+        canCancelWaiting: true,
+        waitingReason: 'choose_seed',
+      },
+    ];
+    const actions = makeActions();
+
+    render(
+      <BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat], { cascadeProgress: rows }))} />
+    );
+
+    const firstAction = screen.getByRole('button', { name: 'Pin as first frame · Shot 1' });
+    const secondAction = screen.getByRole('button', { name: 'Pin as first frame · Shot 2' });
+    await act(async () => fireEvent.click(firstAction));
+    expect(actions.setSeedStill).toHaveBeenNthCalledWith(1, firstShot.id, firstSeed.assetId);
+    await waitFor(() => expect(secondAction).toBeEnabled());
+    await act(async () => fireEvent.click(secondAction));
+    expect(actions.setSeedStill).toHaveBeenNthCalledWith(2, secondShot.id, secondSeed.assetId);
   });
 
   it('fails the bounded cancel-and-rejoin action closed while quote review is blocked', () => {

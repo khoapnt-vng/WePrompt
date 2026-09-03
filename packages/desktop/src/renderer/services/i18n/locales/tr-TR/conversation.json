@@ -1614,6 +1614,7 @@
             "invalidDependency": "Devam bağımlılığı artık geçerli değil. Projeyi yenileyip yeniden hazırlayın.",
             "invalidPrepareRequest": "Üretim seçimi güvenli biçimde hazırlanamadı. Seçimi gözden geçirip yeniden hazırlayın.",
             "invalidReference": "Seçili bir referans artık bu üretim için geçerli değil. Başka bir referans seçin.",
+            "referenceCapacityUnavailable": "Seçili görüntü motoru kanonik referans görüntülerini kullanamıyor. Referans üretmeden önce en az bir referans yuvası olan bir görüntü motoru seçin.",
             "missingShootingScript": "Medya oluşturmadan önce bu Shot'ın çekim senaryosunu yazın.",
             "missingConditioning": "Bir video çekimi için uygun ilk kare veya önceki kare yok. Gerekli görseli ekleyin ya da seçin.",
             "unsafeTotal": "Tahmin toplamı güvenli biçimde gösterilemedi. Seçimi azaltın; hiçbir şey gönderilmedi."
@@ -2170,6 +2171,7 @@
       "mutationRefused": "Bu değişiklik projenin mevcut durumuna uygulanamaz. Projeyi gözden geçirip tekrar deneyin.",
       "pricingRefused": "Tahmin gönderimden önce reddedildi. Hiçbir şey gönderilmedi.",
       "projectNotFound": "Creative Studio projesi artık mevcut değil.",
+      "exportArtifactNotFound": "Bu dışa aktarma artık kullanılamıyor. Yeniden denemeden önce dışa aktarma geçmişini yeniden yükleyin.",
       "storyboardExists": "Bu projede zaten bir storyboard var. Yeniden taslak oluşturmadan önce değiştirmeyi onaylayın.",
       "staleProject": "Proje başka bir yerde değiştirildi. Tekrar denemeden önce yenileyin.",
       "staleExportCatalog": "Dışa aktarım kataloğu değişti. Tekrar denemeden önce dışa aktarım geçmişini yenileyin.",

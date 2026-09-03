@@ -1048,6 +1048,8 @@ type RecoveryProps = Pick<BeatPanelProps, 'actions' | 'beat' | 'pending' | 'proj
 
 const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection, reviewBlocked }) => {
   const { t } = useTranslation();
+  const selectingSeedRef = useRef<string | null>(null);
+  const [selectingSeedShotId, setSelectingSeedShotId] = useState<string | null>(null);
   const shotIds = new Set(beat.shots.map((shot) => shot.id));
   const rows = projection.cascadeProgress.filter((row) => shotIds.has(row.dependentShotId));
   const standaloneFailures = projection.conditioningFailures.filter(
@@ -1055,6 +1057,17 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection,
       shotIds.has(failure.dependentShotId) &&
       !rows.some((row) => row.dependentShotId === failure.dependentShotId && row.canRetryConditioningFrame)
   );
+  const selectAuthorizedSeed = async (shotId: string, assetId: string): Promise<void> => {
+    if (pending || selectingSeedRef.current !== null) return;
+    selectingSeedRef.current = shotId;
+    setSelectingSeedShotId(shotId);
+    try {
+      await actions.setSeedStill(shotId, assetId);
+    } finally {
+      if (selectingSeedRef.current === shotId) selectingSeedRef.current = null;
+      setSelectingSeedShotId((current) => (current === shotId ? null : current));
+    }
+  };
   if (rows.length === 0 && standaloneFailures.length === 0) return null;
   return (
     <section aria-label={t(`${KEY_ROOT}.recovery.label`)} className={styles.recovery}>
@@ -1064,6 +1077,20 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection,
         const shot = shotIndex < 0 ? undefined : beat.shots[shotIndex];
         const isAuthorizedSeedChoice =
           row.waitingReason === 'choose_seed' && row.upstreamShotId === row.dependentShotId;
+        const rowSeedAssetId = row.eligiblePrimaryAssetIds.length === 1 ? row.eligiblePrimaryAssetIds[0]! : null;
+        const seedAuthorizationLock = shot?.seedAuthorizationLock;
+        const authorizedSeedAssetId =
+          projection.workspaceStatusReady &&
+          isAuthorizedSeedChoice &&
+          rows.filter((candidate) => candidate.dependentShotId === row.dependentShotId).length === 1 &&
+          shot?.segmentHead === true &&
+          shot.seedAuthorityStatusReady &&
+          seedAuthorizationLock?.waitingReason === 'choose_seed' &&
+          seedAuthorizationLock.compatibleAssetIds.length === 1 &&
+          seedAuthorizationLock.compatibleAssetIds[0] === rowSeedAssetId &&
+          shot.seedStills.some((frame) => frame.assetId === rowSeedAssetId)
+            ? rowSeedAssetId
+            : null;
         const canStructurallyRejoin = shotIndex > 0 && shot?.chainBreak === 'hard_cut';
         const canCancelAndReviewRejoin =
           row.canCancelWaiting &&
@@ -1077,11 +1104,32 @@ const Recovery: React.FC<RecoveryProps> = ({ actions, beat, pending, projection,
             className={styles.recoveryCard}
             data-waiting-reason={row.waitingReason}
           >
-            <p>{t(`${KEY_ROOT}.recovery.reason.${row.waitingReason}`)}</p>
+            <p>
+              {shotIndex < 0 ? null : (
+                <>
+                  <strong>{t(`${KEY_ROOT}.shots.heading`, { index: shotIndex + 1 })}</strong>
+                  {' · '}
+                </>
+              )}
+              {t(`${KEY_ROOT}.recovery.reason.${row.waitingReason}`)}
+            </p>
             {row.waitingReason === 'dependency_failed' || row.waitingReason === 'cancelled' ? (
               <p className={styles.warning}>{t(`${KEY_ROOT}.recovery.freshQuoteRequired`)}</p>
             ) : null}
             <div className={styles.actions}>
+              {authorizedSeedAssetId === null ? null : (
+                <Button
+                  aria-label={`${t(`${KEY_ROOT}.firstFrames.pin`)} · ${t(`${KEY_ROOT}.shots.heading`, {
+                    index: shotIndex + 1,
+                  })}`}
+                  disabled={pending || selectingSeedShotId !== null}
+                  loading={selectingSeedShotId === row.upstreamShotId}
+                  onClick={() => void selectAuthorizedSeed(row.upstreamShotId, authorizedSeedAssetId)}
+                  type='primary'
+                >
+                  {t(`${KEY_ROOT}.firstFrames.pin`)}
+                </Button>
+              )}
               {row.canRetryConditioningFrame ? (
                 <Button disabled={pending} onClick={() => void actions.retryConditioning(row.dependentShotId)}>
                   {t(`${KEY_ROOT}.recovery.retryFree`)}

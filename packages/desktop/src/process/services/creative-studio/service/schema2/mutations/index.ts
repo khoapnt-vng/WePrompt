@@ -1030,12 +1030,12 @@ const buildUndoPatches = (tracker: UndoTracker, project: StudioProjectV2): Studi
   return patches;
 };
 
+/** Paid or derived state that cannot be discarded by an authored deletion or its inverse. */
 const shotHasDestructiveDependency = (project: StudioProjectV2, shot: StudioShot): boolean =>
   shot.assetIds.length > 0 ||
   shot.jobIds.length > 0 ||
   shot.videoAssetId !== null ||
   shot.seedStillId !== null ||
-  shot.shootingScript.length > 0 ||
   Object.values(project.frameExtractions).some((frame) => frame.shotId === shot.id) ||
   deriveStudioInboundShotReferencesV2(project, [shot.id]).length > 0;
 

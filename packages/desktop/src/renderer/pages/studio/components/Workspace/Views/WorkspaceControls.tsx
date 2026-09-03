@@ -533,6 +533,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           gateLocked={gateLocked || pending || referenceActions === undefined}
           pendingReferenceId={referencePendingId}
           aspectRatio={project.aspectRatio}
+          maxConditioningImages={referenceMaxConditioningImages}
           projectId={project.id}
           references={projectReferences}
           onFocusIntentConsumed={onReferenceFocusIntentConsumed}

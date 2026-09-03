@@ -113,6 +113,7 @@ export type StudioPricingErrorCodeV2 =
   | 'invalid_dependency'
   | 'invalid_prepare_request'
   | 'invalid_reference'
+  | 'reference_capacity_unavailable'
   | 'missing_shooting_script'
   | 'missing_route'
   | 'missing_conditioning'
@@ -1095,6 +1096,10 @@ export const deriveStudioProjectReferenceSubmissionQuoteGraphV2 = (input: {
   }
   preflightStudioProjectReferencePreparationV2({ project, request });
   const route = input.resolveRoute(project.imageRouteId!, 'reference_image');
+  // A project reference is useful only as a later Shot-conditioning input. A route that can
+  // generate an unconditioned image but admits no conditioning images must never be allowed to
+  // quote (and therefore charge for) canonical reference work that no Shot can consume.
+  if (route.maxConditioningImages < 1) return fail('reference_capacity_unavailable');
   const baseItems = request.referenceIds.map<StudioUnpricedQuotedGenerationV2>((referenceId) => {
     const reference = ownValue(project.references, referenceId)!;
     let requestPlan: StudioGenerationRequestPlan;

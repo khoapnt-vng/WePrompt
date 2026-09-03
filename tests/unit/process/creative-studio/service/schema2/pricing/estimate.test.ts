@@ -1549,6 +1549,8 @@ describe('schema-2 Studio estimates', () => {
         expectedRevision: project.revision,
         referenceIds: ['reference_ming', 'reference_mei'],
       },
+      // Capacity is per later Shot request, not a cap on how many canonical references may be authored.
+      resolveRoute: () => ({ provider: imageProvider, maxConditioningImages: 1 }),
     });
     const quote = priceStudioSubmissionQuoteGraphV2({
       project,
@@ -1590,6 +1592,23 @@ describe('schema-2 Studio estimates', () => {
         },
       })
     ).toThrow(expect.objectContaining({ code: 'invalid_reference' }));
+  });
+
+  it('refuses direct reference work when the selected image route cannot consume any reference', () => {
+    const project = makeDerivationProject();
+    const reference = project.references.reference_background!;
+
+    expect(() =>
+      deriveStudioProjectReferenceSubmissionQuoteGraphV2({
+        project,
+        request: {
+          projectId: project.id,
+          expectedRevision: project.revision,
+          referenceIds: [reference.id],
+        },
+        resolveRoute: () => ({ provider: imageProvider, maxConditioningImages: 0 }),
+      })
+    ).toThrow(expect.objectContaining({ code: 'reference_capacity_unavailable' }));
   });
 
   it('regenerates an approved reference after its prior direct job reached a terminal state', () => {

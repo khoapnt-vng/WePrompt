@@ -74,6 +74,7 @@ const renderWorkflow = (props: Partial<React.ComponentProps<typeof ReferencesVie
         aspectRatio='16:9'
         errorMessageKey={null}
         gateLocked={false}
+        maxConditioningImages={3}
         pendingReferenceId={null}
         projectId='project_1'
         references={[]}
@@ -215,6 +216,7 @@ describe('the schema-5 References workspace', () => {
         aspectRatio='16:9'
         errorMessageKey={null}
         gateLocked={false}
+        maxConditioningImages={3}
         pendingReferenceId={null}
         projectId='project_1'
         references={[
@@ -241,6 +243,7 @@ describe('the schema-5 References workspace', () => {
         aspectRatio='16:9'
         errorMessageKey={null}
         gateLocked={false}
+        maxConditioningImages={3}
         pendingReferenceId={null}
         projectId='project_1'
         references={[
@@ -298,6 +301,7 @@ describe('the schema-5 References workspace', () => {
         aspectRatio='16:9'
         errorMessageKey={null}
         gateLocked={false}
+        maxConditioningImages={3}
         pendingReferenceId={null}
         projectId='project_1'
         references={[
@@ -661,6 +665,7 @@ describe('the schema-5 References workspace', () => {
         aspectRatio='16:9'
         errorMessageKey={null}
         gateLocked={false}
+        maxConditioningImages={3}
         pendingReferenceId={null}
         projectId='project_1'
         references={[workflowReference()]}
@@ -700,6 +705,65 @@ describe('the schema-5 References workspace', () => {
       );
     }
     expect(css).toMatch(/\.removalBlocker span\s*\{[^}]*overflow-wrap:\s*anywhere/s);
+  });
+
+  it('disables paid reference generation at zero route capacity while preserving bounded recovery actions', async () => {
+    const { actions, container } = renderWorkflow({
+      maxConditioningImages: 0,
+      references: [
+        workflowReference({
+          approvedAssetId: null,
+          generatedAssetIds: [],
+          assetCreatedAt: {},
+          assetOrdinalById: {},
+          lastRunPrompt: null,
+          generationStatus: 'failed',
+          candidateJob: {
+            id: 'job_reference_ming',
+            status: 'needs_attention',
+            error: {
+              code: 'provider_unavailable',
+              messageKey: 'conversation.creativeStudio.jobs.errors.providerUnavailable',
+            },
+            canRetry: true,
+            canRetryDownload: false,
+            canCancel: true,
+          },
+        }),
+        workflowReference({
+          id: 'reference_mei',
+          label: 'Mei',
+          approvedAssetId: 'asset_mei_current',
+          generatedAssetIds: ['asset_mei_current'],
+          assetCreatedAt: { asset_mei_current: '2026-08-20T10:01:00.000Z' },
+          assetOrdinalById: { asset_mei_current: 0 },
+        }),
+      ],
+    });
+
+    expect(
+      screen.getByText('conversation.creativeStudio.workspace.gate.errors.pricing.referenceCapacityUnavailable')
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: `${PANEL_KEY}.action.generate` })).toBeDisabled();
+    const retry = screen.getByRole('button', { name: 'conversation.creativeStudio.jobs.retry' });
+    expect(retry).toBeEnabled();
+    const localAssetCard = container.querySelector<HTMLElement>('[data-reference-id="reference_mei"]');
+    expect(localAssetCard).not.toBeNull();
+    expect(within(localAssetCard!).getByRole('button', { name: `${PANEL_KEY}.action.generateAnother` })).toBeDisabled();
+    const importPhoto = within(localAssetCard!).getByRole('button', { name: `${PANEL_KEY}.importPhoto` });
+    expect(importPhoto).toBeEnabled();
+
+    fireEvent.click(retry);
+    await waitFor(() =>
+      expect(actions.retryJob).toHaveBeenCalledExactlyOnceWith('reference_ming', 'job_reference_ming', false)
+    );
+    fireEvent.click(importPhoto);
+    await waitFor(() => expect(actions.importPhoto).toHaveBeenCalledExactlyOnceWith('reference_mei'));
+    fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.jobs.cancel' }));
+    await waitFor(() =>
+      expect(actions.cancelJob).toHaveBeenCalledExactlyOnceWith('reference_ming', 'job_reference_ming')
+    );
+    expect(actions.regenerate).not.toHaveBeenCalled();
   });
 
   it('exposes exact retry and cancellation recovery while regeneration stays blocked', async () => {

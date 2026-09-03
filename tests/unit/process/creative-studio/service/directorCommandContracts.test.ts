@@ -25,7 +25,6 @@ import {
   type StudioDirectorQueryCommandRecordV2,
   type StudioDirectorCommandSlotLeaseV2,
   type StudioDirectorCommandSlotV2,
-  type StudioDirectorOperationV2,
   type StudioMutationOperationV2,
   type StudioProposalDecisionV2,
   type StudioProposalRecordV2,
@@ -292,7 +291,7 @@ const parseReceiptV2 = (value: unknown) =>
   parseStudioDirectorCommandReceiptV2({ projectId: 'project_1', commandId: 'command_1', value });
 
 describe('Studio Director V2 command contracts', () => {
-  const operations: StudioDirectorOperationV2[] = [
+  const operations: StudioMutationOperationV2[] = [
     { kind: 'set_brief', brief: '' },
     {
       kind: 'add_beat',
@@ -462,7 +461,7 @@ describe('Studio Director V2 command contracts', () => {
       add_binned_beat: 'proposal',
       add_shot: 'proposal',
       edit_shot: 'proposal',
-      delete_shot: 'direct',
+      delete_shot: 'proposal',
       park_shot: 'operation_not_permitted',
       restore_shot: 'operation_not_permitted',
       reorder_shots: 'direct',
@@ -501,6 +500,29 @@ describe('Studio Director V2 command contracts', () => {
     ]) {
       expect(classifyStudioDirectorOperationV2(unknown)).toBeNull();
     }
+  });
+
+  it('requires human review before the Director can delete a Shot', () => {
+    const operation = { kind: 'delete_shot' as const, shotId: 'clip_1' };
+    const proposal: StudioProposalRecordV2 = {
+      schemaVersion: STUDIO_PROPOSAL_SCHEMA_VERSION_V2,
+      id: 'proposal_delete_shot',
+      projectId: 'project_1',
+      status: 'pending',
+      baseRevision: 4,
+      payload: { kind: 'mutation_batch', operations: [operation] },
+      createdAt: NOW,
+      decidedAt: null,
+    };
+
+    expect(parsePendingV2(validCommandV2({ operations: [operation as never] })).status).toBe('invalid');
+    expect(
+      parseStudioProposalRecordV2({
+        projectId: proposal.projectId,
+        proposalId: proposal.id,
+        value: proposal,
+      }).status
+    ).toBe('valid');
   });
 
   it.each([

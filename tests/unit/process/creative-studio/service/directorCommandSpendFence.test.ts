@@ -189,7 +189,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
     await apply('command_reorder_shots', [
       { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_3', 'clip_1'] },
     ]);
-    await apply('command_delete_shot', [{ kind: 'delete_shot', shotId: 'clip_3' }]);
     await apply('command_reorder_bin', [
       {
         kind: 'reorder_bin',
@@ -219,9 +218,14 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       brief: 'Director-authored free edits',
       beatOrder: ['section_2', 'section_1'],
       beats: {
-        section_1: { story: 'Warm sunrise.', shotOrder: ['clip_1'] },
+        section_1: { story: 'Warm sunrise.', shotOrder: ['clip_3', 'clip_1'] },
       },
       shots: {
+        clip_3: {
+          shootingScript: '',
+          videoAssetId: null,
+          supersededVideoAssetIds: [],
+        },
         clip_1: {
           shootingScript: 'A clean product composition',
           referenceBinding: {
@@ -245,7 +249,6 @@ describe('Studio Director schema-2 dynamic spend fence', () => {
       label: 'Dai pai dong',
       approvedAssetId: null,
     });
-    expect(project.shots).not.toHaveProperty('clip_3');
     for (const boundary of Object.values(paidBoundaries)) expect(boundary).not.toHaveBeenCalled();
   });
 

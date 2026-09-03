@@ -79,6 +79,7 @@ export type ReferencesViewProps = {
   projectId: string;
   aspectRatio: StudioAspectRatio;
   references: readonly ReferenceWorkspaceItem[];
+  maxConditioningImages: number | null;
   pendingReferenceId: string | null;
   gateLocked: boolean;
   errorMessageKey: string | null;
@@ -123,6 +124,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   projectId,
   aspectRatio,
   references,
+  maxConditioningImages,
   pendingReferenceId,
   gateLocked,
   errorMessageKey,
@@ -218,6 +220,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
   const trimmedBackgroundLabel = backgroundLabel.trim();
   const trimmedBackgroundPrompt = backgroundPrompt.trim();
   const duplicateBackground = backgrounds.some((reference) => reference.label === trimmedBackgroundLabel);
+  const referenceGenerationUnavailable = maxConditioningImages === 0;
   const maySubmitBackground =
     !gateLocked &&
     !addingBackground &&
@@ -313,6 +316,7 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
         ? null
         : referencePhotoHandle(draft.label.trim(), item.kind, currentOrdinal);
     const generationDisabled =
+      referenceGenerationUnavailable ||
       gateLocked ||
       generationActive ||
       recoveryPending ||
@@ -700,6 +704,12 @@ export const ReferencesView: React.FC<ReferencesViewProps> = ({
         <span>{t(`${PANEL_ROOT}.canonicalImages`)}</span>
       </header>
       <div className={styles.panelBody}>
+        {referenceGenerationUnavailable ? (
+          <Alert
+            type='warning'
+            content={t('conversation.creativeStudio.workspace.gate.errors.pricing.referenceCapacityUnavailable')}
+          />
+        ) : null}
         <header className={styles.introduction}>
           <p>{t(`${PANEL_ROOT}.intro`)}</p>
           <div className={styles.progressBlock} aria-live='polite'>

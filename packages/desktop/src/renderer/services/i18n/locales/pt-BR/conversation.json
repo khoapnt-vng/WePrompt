@@ -1618,6 +1618,7 @@
             "invalidDependency": "A dependência da continuação não é mais válida. Atualize o projeto e prepare novamente.",
             "invalidPrepareRequest": "Não foi possível preparar a seleção de geração com segurança. Revise-a e prepare novamente.",
             "invalidReference": "Uma referência selecionada não é mais válida para esta geração. Escolha outra referência.",
+            "referenceCapacityUnavailable": "O mecanismo de imagem selecionado não pode usar imagens de referência canônicas. Escolha um mecanismo com pelo menos um espaço de referência antes de gerar referências.",
             "missingShootingScript": "Escreva o roteiro de filmagem deste Shot antes de gerar mídia.",
             "missingConditioning": "Uma tomada de vídeo não tem um primeiro quadro nem um quadro predecessor elegível. Adicione ou selecione a imagem necessária.",
             "unsafeTotal": "Não foi possível representar com segurança o total da estimativa. Reduza a seleção; nada foi enviado."
@@ -2190,6 +2191,7 @@
       "mutationRefused": "Esta alteração não pode ser aplicada ao projeto no estado atual. Revise o projeto e tente novamente.",
       "pricingRefused": "A estimativa foi recusada antes do envio. Nada foi enviado.",
       "projectNotFound": "O projeto do Creative Studio não existe mais.",
+      "exportArtifactNotFound": "Esta exportação não está mais disponível. Recarregue o histórico de exportações antes de tentar novamente.",
       "storyboardExists": "Este projeto já tem um storyboard. Confirme a substituição antes de criar outro rascunho.",
       "staleProject": "O projeto foi alterado em outro lugar. Atualize-o antes de tentar novamente.",
       "staleExportCatalog": "O catálogo de exportação mudou. Atualize o histórico de exportações antes de tentar novamente.",

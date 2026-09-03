@@ -15,6 +15,8 @@ export class CreativeStudioServiceError extends Error {
     | 'project_quarantined'
     | 'ffmpeg_unavailable'
     | 'unsupported_capabilities'
+    | 'invalid_media'
+    | 'artifact_not_found'
     | 'render_failed'
     | 'cancelled';
   readonly projectId: string | null;

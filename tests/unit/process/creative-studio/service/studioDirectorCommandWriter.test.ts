@@ -583,7 +583,6 @@ describe('Studio Director subprocess command writer', () => {
           backgroundReferenceId: null,
         },
         { kind: 'reorder_beats', beatOrder: ['section_2', 'section_1'] },
-        { kind: 'delete_shot', shotId: 'clip_old' },
         { kind: 'reorder_shots', beatId: 'section_1', shotOrder: ['clip_2', 'clip_1'] },
         { kind: 'reorder_bin', bin: [{ kind: 'beat', beatId: 'section_3', reason: 'alternate' }] },
       ],

@@ -242,7 +242,6 @@ describe('schema-5 semantic proposal review', () => {
 
   it('uses human field labels for metadata and explicit placement rows for reorder and removal', () => {
     const project = createProject();
-    project.shots.shot_ming!.shootingScript = '';
     const review = deriveStudioProposalReviewV2(
       project,
       proposal(project, [
@@ -256,6 +255,21 @@ describe('schema-5 semantic proposal review', () => {
     if (review.status !== 'ready') return;
     const fieldKeys = review.groups.flatMap((group) => group.fields.map((entry) => entry.key));
     expect(fieldKeys).toEqual(expect.arrayContaining(['boardStyle', 'targetDurationSeconds', 'placement', 'order']));
+    expect(review.groups).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          change: 'removed',
+          subject: expect.objectContaining({ kind: 'shot', id: 'shot_ming' }),
+          fields: expect.arrayContaining([
+            {
+              key: 'shootingScript',
+              before: { kind: 'text', value: 'Wide shot. Ming crosses the wet street.' },
+              after: null,
+            },
+          ]),
+        }),
+      ])
+    );
     expect(JSON.stringify(review)).not.toMatch(/edit_project|reorder_shots|delete_shot/);
   });
 

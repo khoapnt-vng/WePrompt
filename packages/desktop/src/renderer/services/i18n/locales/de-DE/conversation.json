@@ -1613,6 +1613,7 @@
             "invalidDependency": "Die Abhängigkeit der Fortsetzung ist nicht mehr gültig. Aktualisieren Sie das Projekt und bereiten Sie erneut vor.",
             "invalidPrepareRequest": "Die Generierungsauswahl konnte nicht sicher vorbereitet werden. Prüfen Sie sie und versuchen Sie es erneut.",
             "invalidReference": "Eine ausgewählte Referenz ist für diese Generierung nicht mehr gültig. Wählen Sie eine andere Referenz.",
+            "referenceCapacityUnavailable": "Die ausgewählte Bild-Engine kann keine kanonischen Referenzbilder verwenden. Wählen Sie vor der Referenzgenerierung eine Bild-Engine mit mindestens einem Referenzplatz.",
             "missingShootingScript": "Schreibe das Drehbuch für diesen Shot, bevor du Medien generierst.",
             "missingConditioning": "Für eine Videoaufnahme fehlt ein geeignetes erstes Bild oder Vorgängerbild. Fügen Sie das erforderliche Bild hinzu oder wählen Sie es aus.",
             "unsafeTotal": "Die Gesamtsumme der Schätzung konnte nicht sicher dargestellt werden. Reduzieren Sie die Auswahl; es wurde nichts übermittelt."
@@ -2169,6 +2170,7 @@
       "mutationRefused": "Diese Änderung kann im aktuellen Zustand des Projekts nicht angewendet werden. Prüfe das Projekt und versuche es erneut.",
       "pricingRefused": "Die Schätzung wurde vor der Übermittlung abgelehnt. Es wurde nichts übermittelt.",
       "projectNotFound": "Das Creative-Studio-Projekt existiert nicht mehr.",
+      "exportArtifactNotFound": "Dieser Export ist nicht mehr verfügbar. Laden Sie den Exportverlauf neu, bevor Sie es erneut versuchen.",
       "storyboardExists": "Dieses Projekt hat bereits ein Storyboard. Bestätige das Ersetzen, bevor du es erneut entwirfst.",
       "staleProject": "Das Projekt wurde an anderer Stelle geändert. Aktualisiere es vor einem erneuten Versuch.",
       "staleExportCatalog": "Der Exportkatalog wurde geändert. Aktualisiere den Exportverlauf vor einem erneuten Versuch.",

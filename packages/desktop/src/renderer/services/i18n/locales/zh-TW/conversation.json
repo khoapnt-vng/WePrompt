@@ -1612,6 +1612,7 @@
             "invalidDependency": "後續產生的相依關係已失效。請重新整理專案後再次準備估價。",
             "invalidPrepareRequest": "無法安全地準備所選產生工作。請檢查選擇後再次準備估價。",
             "invalidReference": "一個已選參考圖已不再適用於此次產生。請選擇其他參考圖。",
+            "referenceCapacityUnavailable": "所選影像引擎無法使用標準參考影像。請先選擇至少支援一個參考影像槽位的影像引擎，再產生參考影像。",
             "missingShootingScript": "產生媒體前，請先撰寫此 Shot 的拍攝腳本。",
             "missingConditioning": "一個影片鏡頭缺少可用的首幀或前序影格。請新增或選擇所需影像。",
             "unsafeTotal": "無法安全表示估價總額。請減少選擇；未提交任何內容。"
@@ -2152,6 +2153,7 @@
       "mutationRefused": "無法在專案目前狀態下套用此變更。請檢查專案後再試。",
       "pricingRefused": "估價在提交前遭拒。未提交任何內容。",
       "projectNotFound": "此創意工作室專案已不存在。",
+      "exportArtifactNotFound": "此匯出已無法使用。請重新載入匯出記錄後再試。",
       "storyboardExists": "此專案已有分鏡。再次建立草稿前請確認取代。",
       "staleProject": "專案已在其他位置變更。請重新整理後再試。",
       "staleExportCatalog": "匯出目錄已變更。請重新整理匯出記錄後再試。",

@@ -66,6 +66,7 @@ import {
   type StudioApplyEditsInputV2,
   type StudioApplyFreeFixInputV2,
   type StudioDirectorCommandWriterDeps,
+  type StudioDirectorToolQueryResultV2,
   type StudioGetCommandStatusInput,
   type StudioGetProposalDirectorInputV2,
 } from '@process/resources/builtinMcp/studioDirectorCommandWriter';
@@ -76,6 +77,7 @@ import {
 } from '@process/services/creative-studio/service/briefFile';
 import {
   classifyStudioDirectorOperationV2,
+  parseStudioDirectorCommandReceiptV2,
   type StudioDirectorOperationDispositionV2,
 } from '@process/services/creative-studio/service/directorCommandContracts';
 import {
@@ -593,7 +595,6 @@ const studioDirectorDirectMutationOperationSchemaV2 = z4.discriminatedUnion('kin
   studioMutationOperationSchemasV2.amendReferencePlan,
   studioMutationOperationSchemasV2.setShotReferenceBinding,
   studioMutationOperationSchemasV2.reorderBeats,
-  studioMutationOperationSchemasV2.deleteShot,
   studioMutationOperationSchemasV2.reorderShots,
   studioMutationOperationSchemasV2.reorderBin,
 ]);
@@ -720,6 +721,60 @@ const errorResult = (message: string): StudioToolResult => ({
 });
 
 const describeError = (error: unknown): string => String(error).replace(/^Error:\s*/, '');
+
+type StudioDirectorRouteAuthorityDepsV2 = StudioDirectorCommandWriterDeps & {
+  /** Test seam; production reads the current Main-owned route catalog through the command mailbox. */
+  readCurrentRoutes?: () => Promise<StudioDirectorToolQueryResultV2>;
+};
+
+const referenceCapacityUnavailableResultV2 = (): StudioToolResult =>
+  errorResult(
+    JSON.stringify({
+      code: 'reference_capacity_unavailable',
+      message:
+        'The current selected image route does not prove positive reference capacity; no reference change was recorded.',
+      guidance:
+        'Call studio_list_routes. Ask the user to select an image route with reference capacity, or continue without references. Empty Shot reference bindings may still be cleared.',
+    })
+  );
+
+const currentImageRouteSupportsReferencesV2 = async (
+  projectId: string,
+  readCurrentRoutes: () => Promise<StudioDirectorToolQueryResultV2>
+): Promise<boolean> => {
+  try {
+    const value: unknown = await readCurrentRoutes();
+    if (typeof value !== 'object' || value === null || !Object.hasOwn(value, 'commandId')) return false;
+    const commandId = Reflect.get(value, 'commandId') as unknown;
+    if (typeof commandId !== 'string') return false;
+    const parsed = parseStudioDirectorCommandReceiptV2({ projectId, commandId, value });
+    if (
+      parsed.status !== 'valid' ||
+      parsed.record.status !== 'answered' ||
+      parsed.record.query.kind !== 'list_routes'
+    ) {
+      return false;
+    }
+    const catalog = parsed.record.result as StudioRouteCatalogV2;
+    const selectedRoute = catalog.image.selectedRoute;
+    const capacity = selectedRoute?.constraints?.maxConditioningImages;
+    return (
+      catalog.image.status === 'ready' &&
+      selectedRoute?.kind === 'image' &&
+      typeof capacity === 'number' &&
+      Number.isSafeInteger(capacity) &&
+      capacity > 0
+    );
+  } catch {
+    return false;
+  }
+};
+
+const operationRequiresReferenceCapacityV2 = (operation: StudioMutationOperationV2): boolean =>
+  operation.kind === 'set_reference_plan' ||
+  operation.kind === 'amend_reference_plan' ||
+  (operation.kind === 'set_shot_reference_binding' &&
+    (operation.characterReferenceIds.length > 0 || operation.backgroundReferenceId !== null));
 
 type StudioApplyEditsRejectedOperationV2 = {
   index: number;
@@ -1375,8 +1430,14 @@ export function createProposeBriefRuleHandlerV2(
 }
 
 export function createRequestReferenceImagesHandlerV2(
-  config: StudioServerEnv | null
+  config: StudioServerEnv | null,
+  deps: StudioDirectorRouteAuthorityDepsV2 = {}
 ): (input: { referenceIds: string[] }) => Promise<StudioToolResult> {
+  const writer = createStudioDirectorCommandWriterV2(
+    config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
+    deps
+  );
+  const readCurrentRoutes = deps.readCurrentRoutes ?? (() => writer.listRoutes());
   return async ({ referenceIds }) => {
     if (!config) return errorResult('Creative Studio project is unavailable.');
     if (!Array.isArray(referenceIds)) return errorResult('referenceIds must be an array.');
@@ -1460,6 +1521,9 @@ export function createRequestReferenceImagesHandlerV2(
       if (alreadyRunning.length > 0) {
         return errorResult(`References already have generation in progress: ${alreadyRunning.join(', ')}`);
       }
+      if (!(await currentImageRouteSupportsReferencesV2(config.projectId, readCurrentRoutes))) {
+        return referenceCapacityUnavailableResultV2();
+      }
       await assertProjectSnapshotStatusV2(config, snapshot);
       await writeReferenceRequestRecordV2({
         pendingDir: config.referencePendingDir,
@@ -1490,7 +1554,7 @@ const commandToolResult = (value: unknown): StudioToolResult => ({
 
 export function createStudioApplyEditsHandlerV2(
   config: StudioServerEnv | null,
-  deps: StudioDirectorCommandWriterDeps = {}
+  deps: StudioDirectorRouteAuthorityDepsV2 = {}
 ): (input: StudioApplyEditsToolInputV2) => Promise<StudioToolResult> {
   const writer = createStudioDirectorCommandWriterV2(
     config === null ? null : { projectId: config.projectId, projectDir: config.projectDir },
@@ -1505,6 +1569,15 @@ export function createStudioApplyEditsHandlerV2(
     };
     if (!studioDirectorToolInputFitsDurableRecordV2(directInput)) {
       return errorResult('Command input exceeds the durable record size cap.');
+    }
+    if (
+      input.operations.some(operationRequiresReferenceCapacityV2) &&
+      !(await currentImageRouteSupportsReferencesV2(
+        config?.projectId ?? '',
+        deps.readCurrentRoutes ?? (() => writer.listRoutes())
+      ))
+    ) {
+      return referenceCapacityUnavailableResultV2();
     }
     return commandToolResult(await writer.apply(directInput));
   };
@@ -1563,7 +1636,7 @@ export function createStudioGetProposalHandlerV2(
 export function registerStudioToolsV2(
   server: Pick<McpServer, 'registerTool'>,
   config: StudioServerEnv | null,
-  writerDeps: StudioDirectorCommandWriterDeps = {}
+  writerDeps: StudioDirectorRouteAuthorityDepsV2 = {}
 ): void {
   server.registerTool(
     'studio_list_routes',
@@ -1599,7 +1672,7 @@ export function registerStudioToolsV2(
         'Request candidate images for ordered project reference ids after the reference plan is approved. Character sheets must be approved before backgrounds. This only records a request for user approval and never starts paid generation.',
       inputSchema: studioRequestReferenceImagesInputSchemaV2,
     },
-    createRequestReferenceImagesHandlerV2(config)
+    createRequestReferenceImagesHandlerV2(config, writerDeps)
   );
   server.registerTool(
     'propose_storyboard',

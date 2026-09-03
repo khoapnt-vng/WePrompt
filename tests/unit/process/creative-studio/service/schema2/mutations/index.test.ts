@@ -1008,6 +1008,117 @@ describe('schema-5 Story, Shooting script, and undo', () => {
     expect(undone.undoHistory).toEqual([]);
   });
 
+  it('deletes a dependency-free scripted Shot and restores it exactly through Undo', () => {
+    const original = makeProject();
+    original.shots.shot_1!.shootingScript = 'Wide shot. Ming crosses the rain-slick street.';
+    const shotBefore = structuredClone(original.shots.shot_1);
+    const deleted = persist(
+      apply(original, [{ kind: 'delete_shot', shotId: 'shot_1' }], 'delete_scripted_shot').project
+    );
+    const undone = apply(
+      deleted,
+      [{ kind: 'undo_last', entryId: 'delete_scripted_shot' }],
+      'undo_scripted_delete'
+    ).project;
+
+    expect({
+      deletedOrder: deleted.beats.beat_1!.shotOrder,
+      deletedShot: deleted.shots.shot_1,
+      restoredOrder: undone.beats.beat_1!.shotOrder,
+      restoredShot: undone.shots.shot_1,
+    }).toEqual({
+      deletedOrder: ['shot_2'],
+      deletedShot: undefined,
+      restoredOrder: ['shot_1', 'shot_2'],
+      restoredShot: shotBefore,
+    });
+  });
+
+  it('undoes a scripted Shot addition after the persistence revision advances', () => {
+    const added = persist(
+      apply(
+        makeProject(),
+        [
+          {
+            kind: 'add_shot',
+            beatId: 'beat_2',
+            shotId: 'shot_scripted',
+            shot: { shootingScript: 'Close shot. Mei sets down the tea.', durationSeconds: 4 },
+            beforeShotId: null,
+          },
+        ],
+        'add_scripted_shot'
+      ).project
+    );
+    const undone = apply(added, [{ kind: 'undo_last', entryId: 'add_scripted_shot' }], 'undo_scripted_add').project;
+    expect(undone.beats.beat_2!.shotOrder).toEqual([]);
+    expect(undone.shots).not.toHaveProperty('shot_scripted');
+  });
+
+  it('keeps material Shot dependencies protected from deletion', () => {
+    const withImportedAsset = makeProject();
+    withImportedAsset.shots.shot_1!.shootingScript = 'This text alone is removable.';
+    importImage(withImportedAsset, 'shot_1', 'asset_material_dependency');
+    expectReason(withImportedAsset, [{ kind: 'delete_shot', shotId: 'shot_1' }], 'dependency_blocked');
+  });
+
+  it('replaces a scripted single-Shot Beat atomically and Undo restores the original coverage', () => {
+    const original = makeProject();
+    original.beats.beat_1!.shotOrder = ['shot_1'];
+    original.beats.beat_2!.shotOrder = ['shot_2'];
+    original.shots.shot_1!.shootingScript = 'Single master. Ming enters and greets Mei.';
+    const originalShot = structuredClone(original.shots.shot_1);
+    const replaced = persist(
+      apply(
+        original,
+        [
+          { kind: 'delete_shot', shotId: 'shot_1' },
+          {
+            kind: 'apply_coverage',
+            beatId: 'beat_1',
+            shots: [
+              {
+                shotId: 'shot_replacement_wide',
+                shootingScript: 'Wide shot. Ming enters the cafe.',
+                durationSeconds: 4,
+                chainBreak: 'none',
+              },
+              {
+                shotId: 'shot_replacement_close',
+                shootingScript: 'Close shot. Mei looks up and smiles.',
+                durationSeconds: 4,
+                chainBreak: 'none',
+              },
+            ],
+            fixedShots: [],
+          },
+        ],
+        'replace_scripted_coverage'
+      ).project
+    );
+    const undone = apply(
+      replaced,
+      [{ kind: 'undo_last', entryId: 'replace_scripted_coverage' }],
+      'undo_scripted_coverage'
+    ).project;
+
+    expect({
+      replacedOrder: replaced.beats.beat_1!.shotOrder,
+      removedOriginal: replaced.shots.shot_1,
+      restoredOrder: undone.beats.beat_1!.shotOrder,
+      restoredOriginal: undone.shots.shot_1,
+      replacementWide: undone.shots.shot_replacement_wide,
+      replacementClose: undone.shots.shot_replacement_close,
+    }).toEqual({
+      replacedOrder: ['shot_replacement_wide', 'shot_replacement_close'],
+      removedOriginal: undefined,
+      restoredOrder: ['shot_1'],
+      restoredOriginal: originalShot,
+      replacementWide: undefined,
+      replacementClose: undefined,
+    });
+  });
+
   it('rolls back the whole batch when a later operation is invalid', () => {
     const project = makeProject();
     expectReason(
