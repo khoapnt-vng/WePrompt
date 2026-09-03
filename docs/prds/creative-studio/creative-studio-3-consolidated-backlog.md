@@ -3,10 +3,12 @@
 Current as of 2026-09-03. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**122 bugs filed · 118 closed · 4 open** — 2 P1, 2 P2, 0 P3.
+**123 bugs filed · 119 closed · 4 open** — 2 P1, 2 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
+BUG-202 records a live late-CS3 scalability failure and the bounded recovery behavior that keeps it
+closed without importing the absent audio-analysis feature slice.
 
 ---
 
@@ -63,6 +65,9 @@ above are run with suitable fixtures.
 - **Current backport set:** BUG-162, BUG-171, BUG-173, BUG-174, BUG-175, BUG-176 and BUG-177.
 - **Lost rollback regressions restored under fresh ids:** BUG-200 isolates unreadable project ledgers;
   BUG-201 keeps the viewer counter clear of Arco's close button.
+- **Large-project preview scalability:** BUG-202 preserves active Beat/Cut playback through operational
+  refreshes, bounds Board poster probing to one visible fair lease, suspends background probes during
+  focused review, and releases hidden or detached media work completely.
 
 The current backports preserve the corrected versions of the historical fixes: BUG-176 lifts each
 Shot tile rather than the entire Shot grid above the card overlay, and BUG-177 includes the viewer
@@ -75,10 +80,17 @@ tests. The repository run passed 672 test files and 10,633 tests with 25 skipped
 translation validation and lint also pass; lint retains the repository's 1,324 warnings and has zero
 errors.
 
+Performance commit `bc9eac0aa` closes BUG-202 for the recovery line. Its four focused workspace suites
+pass 350 tests, and the repository run passes 672 files and 10,647 tests with 25 skipped. TypeScript,
+repository formatting, translation validation and lint pass; two independent read-only reviews found
+no remaining correctness, lifecycle, race or usability issue.
+
 ## 3. Planned product work outside the bug count
 
 - **Sound:** make review audio audible, identify routes that cannot produce sound, include sound in
-  shooting scripts, and defer music-bed import until an audio import route exists.
+  shooting scripts, and defer music-bed import until an audio import route exists. Any restored Shot
+  analysis must key work to asset identity/content hash, survive unrelated project revisions, retry
+  stale reads only with a bound, and remain entirely outside the video-loading and transport gate.
 - **Progressive work area:** derive readiness from status, provide a blank work area, disable empty
   views, advance on first content, then retire the References one-time transition.
 - **Beat track:** the design decisions exist, but the work still needs slicing before implementation.
