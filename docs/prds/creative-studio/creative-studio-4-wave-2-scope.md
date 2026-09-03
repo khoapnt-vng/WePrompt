@@ -16,8 +16,14 @@
 
 ## 0. Read this first — a P0 regression, unrelated to Wave 2 scope
 
-**Every renderer `prepare-photo` call is rejected at the IPC boundary. The mounted photo
-composer is broken for all users.** **[verified]**
+**Creating a new Piece from the mounted UI is impossible — every renderer `prepare-photo`
+*create* call is rejected at the IPC boundary.** **[verified]**
+
+Scope, stated precisely: only the `create` branch is blocked. The `retry` branch carries no
+`referencePieceIds` and its five keys match the renderer exactly
+(`PilotCanvas.tsx:702-710`), so retrying an existing Piece still works. Reproduced empirically
+against the production `parseNativeBridgePayload`: no field → accepted, empty array → rejected,
+one id → rejected.
 
 `common/adapter/native/payloadSchemas.ts:1142-1154` declares the `mode: 'create'` branch of
 `'creative-studio-pilot.prepare-photo'` as `.strict()` over exactly six keys — `mode`,
@@ -27,6 +33,9 @@ A `.strict()` object rejects unknown keys.
 
 The Director path is unaffected, because `service/pilot/director/processor.ts:98` calls
 `preparePhotoV3` in-process rather than over IPC. That is why this was not noticed.
+
+This is **not** a fresh oversight: `f962f705e` is five commits behind `958478ded`, so the gap
+has been shipped and lived with.
 
 Still unfixed on Wave 1 **[verified]**: the schema on `codex/creative-studio-4-phase-6` has no
 `referencePieceIds`, and that branch's `PilotCanvas` still sends it at two sites.
@@ -108,9 +117,14 @@ produce or view one video Piece.
 
 ## 3. References — wiring, not a port, and not the video story
 
-The semantic workflow was deliberately rebuilt as bounded Piece conditioning in `f962f705e`,
-and is **live on eight of nine layers including the mounted UI** — `PilotCanvas.tsx:1379-1415`
-already ships a full reference picker. **[audit]**
+The semantic workflow was deliberately rebuilt as bounded Piece conditioning in `f962f705e`
+(five commits before the audited tip), and is **live on eight of nine layers including the
+mounted UI** — `PilotCanvas.tsx:1379-1415` already ships a full reference picker. **[audit]**
+
+**One caveat that is the closest thing here to the video narrowing**: route admission checks
+the conditioning constraint correctly, but conditioning capacity is **fail-closed to a single
+hardcoded provider+model tuple** in production (`common/utils/imageModelAllowlist.ts:69-74`).
+The wiring is right; the admitted set is one. **[audit]**
 
 The single blocker is the IPC omission in §0. It is not a References enhancement; it is a P0
 regression that breaks the whole composer.
@@ -163,9 +177,14 @@ Audio was real and live before CS4 — imported music bed, shot audio analysis, 
 playback, film-export audio mix — and was removed wholesale in `1a8db2713`. Nothing survives on
 the Pilot path. **[audit]**
 
-Unlike video, this was a **written decision, not silent narrowing**. And a *generatable* sound
-Piece never existed in any version, so that specific thing is a first-ever build rather than a
-restoration. Wave 1 added a sound addendum PRD and a designer delivery; no code.
+I previously framed this as "a written decision, unlike video". **That contrast does not
+hold**: the scope documents name sound and video in the *same sentences*, with equal
+explicitness. What actually separates them is prior machinery — video had a live rate-card
+kind, live adapters and a real generation purpose; sound had none.
+
+A *generatable* sound Piece never existed in any version, so that specific thing is a
+first-ever build rather than a restoration. Wave 1 added a sound addendum PRD and a designer
+delivery; no code.
 
 ---
 
