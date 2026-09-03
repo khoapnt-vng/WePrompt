@@ -29,9 +29,21 @@ import {
 import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOTS_PER_PROJECT,
+  type StudioPreparePhotoRequestV3,
 } from '@/common/types/project/creativeStudioTypes';
+
+const VALID_PILOT_PREPARE_PHOTO_PAYLOAD = {
+  mode: 'create',
+  projectId: 'project_1',
+  expectedAuthoringRevision: 1,
+  words: 'A lantern beside a quiet window.',
+  settings: { aspectRatio: '16:9', resolution: '1080p' },
+  suggestedHandle: null,
+  referencePieceIds: ['piece_reference_1'],
+} satisfies StudioPreparePhotoRequestV3;
 
 const VALID_PAYLOADS = {
   'restart-app': undefined,
@@ -248,14 +260,7 @@ const VALID_PAYLOADS = {
     expectedAuthoringRevision: 1,
     conversationId: 'conversation_1',
   },
-  'creative-studio-pilot.prepare-photo': {
-    mode: 'create',
-    projectId: 'project_1',
-    expectedAuthoringRevision: 1,
-    words: 'A lantern beside a quiet window.',
-    settings: { aspectRatio: '16:9', resolution: '1080p' },
-    suggestedHandle: null,
-  },
+  'creative-studio-pilot.prepare-photo': VALID_PILOT_PREPARE_PHOTO_PAYLOAD,
   'creative-studio-pilot.confirm-prepared-photo': {
     reservationId: 'reservation_1',
     quoteId: 'quote_1',
@@ -2549,6 +2554,56 @@ describe('native bridge payload schemas', () => {
 
   it.each(NATIVE_BRIDGE_PROVIDER_KEYS)('accepts the current payload shape for %s', (providerKey) => {
     expect(() => parseNativeBridgePayload(providerKey, VALID_PAYLOADS[providerKey])).not.toThrow();
+  });
+
+  it('accepts the renderer-owned Pilot photo request and enforces its conditioning bound', () => {
+    const withoutReferences: StudioPreparePhotoRequestV3 = {
+      ...VALID_PILOT_PREPARE_PHOTO_PAYLOAD,
+      referencePieceIds: [],
+    };
+    const maximum: StudioPreparePhotoRequestV3 = {
+      ...VALID_PILOT_PREPARE_PHOTO_PAYLOAD,
+      referencePieceIds: Array.from(
+        { length: STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3 },
+        (_, index) => `piece_reference_${index}`
+      ),
+    };
+
+    expect(parseNativeBridgePayload('creative-studio-pilot.prepare-photo', withoutReferences)).toEqual(
+      withoutReferences
+    );
+    expect(parseNativeBridgePayload('creative-studio-pilot.prepare-photo', maximum)).toEqual(maximum);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio-pilot.prepare-photo', {
+        ...maximum,
+        referencePieceIds: [...maximum.referencePieceIds, 'piece_reference_overflow'],
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio-pilot.prepare-photo', {
+        mode: 'create',
+        projectId: 'project_1',
+        expectedAuthoringRevision: 1,
+        words: 'Legacy transport without the required reference selection.',
+        settings: { aspectRatio: '16:9', resolution: '1080p' },
+        suggestedHandle: null,
+      })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
+  });
+
+  it('keeps the Pilot retry transport independent from create-photo references', () => {
+    const retry = {
+      mode: 'retry',
+      projectId: 'project_1',
+      expectedAuthoringRevision: 2,
+      pieceId: 'piece_1',
+      sourceJobId: 'job_1',
+    } as const;
+
+    expect(parseNativeBridgePayload('creative-studio-pilot.prepare-photo', retry)).toEqual(retry);
+    expect(() =>
+      parseNativeBridgePayload('creative-studio-pilot.prepare-photo', { ...retry, referencePieceIds: [] })
+    ).toThrow(INVALID_NATIVE_BRIDGE_PAYLOAD_MESSAGE);
   });
 
   it('reads authoring and dirty bounds from shared authorities', async () => {

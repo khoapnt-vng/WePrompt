@@ -25,6 +25,7 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
   STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3,
   STUDIO_MAX_PROJECT_REFERENCES,
   STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_MAX_REFERENCE_LABEL_LENGTH,
@@ -1150,6 +1151,7 @@ export const nativeBridgePayloadSchemas = {
           .max(16 * 1024),
         settings: studioPilotSettingsSchema,
         suggestedHandle: z.string().min(1).max(192).nullable(),
+        referencePieceIds: z.array(safeIdSchema).max(STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3),
       })
       .strict(),
     z
