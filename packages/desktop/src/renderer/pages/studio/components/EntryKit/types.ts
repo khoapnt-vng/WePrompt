@@ -140,3 +140,37 @@ export type StudioTemplate = {
    */
   firstFrameAsset: string;
 };
+
+/** Where a shot's picture comes from. `stock_and_generated` has no stock source wired yet. */
+export type StudioMediaSource = 'generated_clips' | 'generated_images' | 'stock_and_generated';
+
+export type StudioSubtitleMode = 'none' | 'any' | 'burned_in' | 'sidecar';
+
+export type StudioAudioPreference = 'best_available' | 'silent';
+
+/**
+ * The creator's answers to the Settings block on the entry screen.
+ *
+ * Every field is present, and `null` (or the `none`/default member) means "not set", rather than
+ * the key being absent. One shape to read is one fewer way for a caller to be wrong, and the
+ * composer relies on it: it distinguishes "chose nothing" from "chose this" per field, so a
+ * question nobody opened is never stated to the Director as a constraint they gave.
+ *
+ * These live with the EntryKit vocabulary rather than in
+ * `@/common/types/project/creativeStudioTypes` because nothing persists them yet — no store field,
+ * no IPC schema, no service reads them. Today they only shape what the Director is *told*. When the
+ * Settings block gains persistence, this is the type that moves to the common module, and the move
+ * is the moment the store validator and the payload schemas have to agree with it.
+ */
+export type StudioProjectSettings = {
+  mediaSource: StudioMediaSource;
+  /** Free text, e.g. "Claymation". Null when the creator did not ask for a style. */
+  generativeStyle: string | null;
+  /** BCP-47-ish label as the creator typed or picked it; the Director reads it, nothing parses it. */
+  language: string | null;
+  backgroundMusic: string | null;
+  subtitles: StudioSubtitleMode;
+  voice: string | null;
+  watermarkText: string | null;
+  audioPreference: StudioAudioPreference;
+};
