@@ -1,0 +1,28 @@
+.frame {
+  position: absolute;
+  display: block;
+  overflow: hidden;
+  inset: 0;
+}
+
+.canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/*
+ * The generator can put a bright shape anywhere, including directly under an overlaid title. The
+ * scrim is what makes the art safe to place text on without constraining what it may draw.
+ *
+ * `--studio-take-chip` is the token already defined for exactly this job — an ink scrim laid over
+ * media so a label stays legible over any frame — and it is already what the Library paints behind
+ * its take labels. Reusing it keeps the two treatments in step, and gives the scrim the theme
+ * awareness a literal black could not: the token is lighter over the cream theme and deeper over
+ * the dark one, where the surrounding surface no longer does any of the separating.
+ */
+.scrim {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent 34%, var(--studio-take-chip) 100%);
+}
