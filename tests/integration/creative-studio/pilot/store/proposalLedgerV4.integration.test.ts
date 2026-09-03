@@ -42,9 +42,11 @@ describe('schema-7 exact-path proposal ledger', () => {
     await expect(ledger.withProposalLedgerAuthorityV4('project_1', null as never)).rejects.toMatchObject({
       code: 'invalid_payload',
     });
-    await expect(ledger.withProposalTerminalAuthorityV4('project_1', '../escape', noopOperation)).rejects.toMatchObject({
-      code: 'invalid_payload',
-    });
+    await expect(ledger.withProposalTerminalAuthorityV4('project_1', '../escape', noopOperation)).rejects.toMatchObject(
+      {
+        code: 'invalid_payload',
+      }
+    );
     await expect(ledger.withProposalTerminalAuthorityV4('project_1', proposalId, null as never)).rejects.toMatchObject({
       code: 'invalid_payload',
     });
