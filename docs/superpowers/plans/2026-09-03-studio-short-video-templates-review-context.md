@@ -65,10 +65,10 @@ Ordered by how much a wrong answer costs. All paths are on
 
 | # | Claim | Read from | Breaks if wrong |
 |---|---|---|---|
-| 1 | `get-generation-capability` is an **admission** probe, not a duration-window probe: it takes `items: [{target, purpose}]` and returns `supportedItems` + `blocks`, so it needs an already-existing `shotId`. | `T:2495`, `T:2461`, `T:2472` | Plan Task 3 step ordering. I had it before the authoring batch, then corrected it. If it can be called pre-shot, the ordering can be simplified back. |
+| 1 | `get-generation-capability` is an **admission** probe taking `items: [{target, purpose}]`. **Reviewer refinement:** the ordering is right but the reason is over-broad — the probe is invoked on every route/revision refresh, and on a brand-new project the item builder yields `[]`, which passes. | `T:2495`, `T:2461`, `T:2472` | Ordering stands. |
 | 2 | Spend is quote-gated: `prepare-submission` → `{baseOnly, withCascade}`, and `confirm-submission` takes `{projectId, quoteId, expectedRevision}` — so **`quoteId` is a single-use authorization** and main rejects a replay. | `T:757`, `T:824`, `T:770` | Task 4. The entire spend guard is `confirmed.add(quoteId)`. If a quote can be confirmed twice, that guard is insufficient and needs main-side backing. |
 | 3 | Main owns shot-duration validity and rejects `add_shot` with `invalid_shot_duration`. | `STUDIO_MUTATION_REASONS_V2`, `T:2514` | The spec's claim that a stale display window costs a failed free call rather than a wrong charge. If main does not validate, the renderer must, and the stale-window defect returns. |
-| 4 | `video_take` is a real `StudioJobPurpose`, so a shot generates video directly. | `T:42` | Everything. If short video needs a different purpose or a seed-still first, the whole flow is wrong. |
+| 4 | ~~`video_take` is a real `StudioJobPurpose`, so a shot generates video directly.~~ **CORRECTED:** the purpose exists, but a take cannot generate from nothing — refused twice as `missing_conditioning` (`estimate.ts:754`, `:815`). Base on `seed_still`; the derived cascade is the same shot's take (`estimate.ts:430`). | `T:42`, `estimate.ts:410/430/502/754/815`, `generationRequest.ts:165`, `projectStatus.ts:887` | Was the load-bearing error. Now fixed in the spec and Tasks 2-3, 5. |
 | 5 | The renderer mints `beatId`/`shotId`, and main accepts `/^[A-Za-z0-9_-]{1,256}$/`, so `crypto.randomUUID()` is valid. | `T:1722`, `T:1733`, `jobManager.ts:50` | Task 2. This repo has had at least three defects where the renderer dictated an id and the backend minted its own; I believe this operation shape makes it legitimate here, but you would know. |
 
 ### Medium cost if wrong
@@ -76,8 +76,8 @@ Ordered by how much a wrong answer costs. All paths are on
 | # | Claim | Read from | Breaks if wrong |
 |---|---|---|---|
 | 6 | `set_rules: 'operation_not_permitted'` in `STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2` is the **Director's** authority map, not the renderer's — the renderer has a dedicated `set-rules` IPC. | `T:1765`, `ipcBridge.ts:1355` | Task 3's rules step, and a product argument in the spec (a template pinning rules does something the AI categorically cannot). |
-| 7 | Cut cannot be navigated to at confirm time: `studioViewReadiness` gates `cut` on `stageHasContent(status,'cut')`, and `StudioPage` runs an effect that resolves a ready view and navigates with `replace: true`. | `studioPhaseRoute.ts:55`, `StudioPage.tsx:492-498` | Task 10's hand-off. The plan navigates to the project, not to Cut. If a direct Cut route is tolerated, the payoff moment improves. |
-| 8 | A single clip needs no export: `StudioAssetV2` is a managed playable file and `create-export` is deliverable *packaging* (`film`/`still`/`script`/`editor_folder`). | `T:1151`, `T:1401` | The claim that ffmpeg leaves the happy path. If a shot's asset is not directly viewable in Cut, an export step returns. |
+| 7 | Cut cannot be navigated to at confirm time — **conclusion holds, attribution was wrong**. The `replace: true` effect runs only on first entry with no remembered choice. The real gates are a disabled Cut tab and a not-ready pane in `components/Workspace/WorkspaceShell.tsx`. And nobody is *ever* advanced to Cut: `STUDIO_VIEWS` is `['references','table','board','cut']` scanned in fixed order, so Table always wins. | `T:28`, `studioPhaseRoute.ts:64-67`, `WorkspaceShell.tsx` | Task 10 now designs the hand-off explicitly instead of delegating to the router. |
+| 8 | A single clip needs no export — **holds**. But the corollary "ffmpeg leaves the happy path" does **not**: no video take persists without a successful ffprobe duration probe, any failure becoming `invalid_media`. Accurate form: *no ffmpeg encode or mux is needed to watch one clip.* | `T:1151`, `T:1401`, `mediaStore.ts:4431` | Corrected in the spec. ffmpeg remains a hard prerequisite, and the failure lands after payment unless surfaced earlier. |
 | 9 | An empty `cascadeChoices` asks main to **derive** a cascade rather than meaning "none". | `T:762-763` | Task 3 passes `[]` and confirms `baseOnly` regardless. If empty means something else, the quote we authorize may not be the one we think. |
 | 10 | `applyAuthoringBatch` returns `{projectId, projectRevision, createdBeatIds, createdShotIds}`, and `StudioEditableBeat`/`StudioEditableShot` are `{title, story, targetSeconds}` / `{shootingScript, durationSeconds}`. | `T:1022`, `T:1599-1601` | Task 2's payloads. |
 
@@ -87,7 +87,7 @@ Ordered by how much a wrong answer costs. All paths are on
 |---|---|---|
 | 11 | `StudioRendererBudgetVerdictV2` has exactly four kinds: `no_policy`, `within_cap`, `over_cap`, `currency_mismatch`. Task 5's panel handles all four. | `T:805` |
 | 12 | The quote itemizes engine and price: `StudioRendererQuotedGenerationV2` carries `route`, `durationSeconds`, `oneGenerationMinorUnits`, `requestedTotalMinorUnits`. | `T:792` |
-| 13 | `tests/` is **not** in `tsconfig.json`'s `include`, so no test file is typechecked. | `tsconfig.json` |
+| 13 | `tests/` is not in `tsconfig.json`'s `include` — but "no test file is typechecked" **overreached**. 16 `*.test.ts` files live under `packages/desktop/src/**` and are in scope. Accurate: none of the 657 under `tests/` are typechecked; the 16 co-located ones are. | `tsconfig.json` |
 | 14 | 12 locales, `en-US` reference, and a repo test requires every referenced key in all of them. | `i18n-config.json` |
 
 ## 4. Corrections already made — do not re-derive these
@@ -107,7 +107,22 @@ Four things I got wrong and fixed. Listed so you don't spend time rediscovering 
    is why the spine builder is trivial and why `shootingScript` is the composed brief.
 4. **"Navigate to Cut on success."** Not possible at confirm time. See claim 7.
 
-## 5. Open questions where your CS3 knowledge decides
+## 5. Open questions — all four now answered by review
+
+Kept for the record; each is resolved in the spec and plan.
+
+1. **`set_routes` required?** Yes, measured: a fresh project has both route ids null and
+   `prepare-submission` returns `invalid_route` at step 5 (not a step-4 capability block). Both routes
+   are set, since a seed still is image work.
+2. **What happens between confirm and the clip?** The person stays on Table (or References). Nothing
+   advances them to Cut, ever. Designed explicitly now.
+3. **Quote expiry.** Enforced at four layers including the spend boundary. Two conventions exist;
+   this feature copies the proposal-card pattern (proactive check, formatted timestamp, *Refresh*).
+4. **`Layout.tsx` blast radius.** Zero sites would visibly move. Put `relative` on
+   `ArcoLayout.Content` rather than `.app-shell` to keep the eight sider and titlebar sites out of
+   scope entirely. Not verified by rendering.
+
+## 5b. Original open questions (superseded)
 
 1. **Does a fresh project need `set_routes` before `prepare-submission` will price it?** The plan has
    an explicit verification step (Task 3, step 4) rather than an assumption. My reading is that main

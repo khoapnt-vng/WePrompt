@@ -61,11 +61,17 @@ The i18n `_pending` register and its scripts are independent of Studio and port 
 1. `create-project` — `CreateStudioProjectInputV2` = `{ name, brief, aspectRatio,
    targetDurationSeconds, resolution }`
 2. `set-rules` — the template's rules
-3. `apply-authoring-batch` — `set_brief` + one `add_beat` + one `add_shot`
+3. `apply-authoring-batch` — `set_brief` + `set_routes` + one `add_beat` + one `add_shot`
 4. `get-generation-capability` — admission probe for the minted shot
-5. `prepare-submission` — `baseChoices` holds that single shot
+5. `prepare-submission` — `baseChoices` holds one choice for that shot
 
 Ends holding `{ baseOnly, withCascade }`. Nothing has been spent.
+
+**`set_routes` is required, measured not inferred.** A fresh project has `imageRouteId: null` and
+`videoRouteId: null`, and `prepare-submission` then returns `invalid_route`. It surfaces at step 5,
+**not** as a `no_engine` capability block at step 4. Both routes must be set, not only video, because
+a seed still is image work (`estimate.ts:742` selects `imageRouteId` for `seed_still` and
+`videoRouteId` otherwise).
 
 **Capability is an admission probe, not a window probe.**
 `StudioGenerationCapabilityRequestV2` takes `items: [{ target, purpose }]`, so it needs a shot that
@@ -83,9 +89,9 @@ already exists — which is why it follows the authoring batch rather than prece
 
 That is the whole paid phase: one call and a navigation. CS3's own views own progress from there.
 
-`prepare-submission` documents that an empty `cascadeChoices` asks main to derive a canonical
-continuation, so a `withCascade` quote may come back. We ignore it and confirm `baseOnly` — a
-single-shot video has nothing to continue.
+An empty `cascadeChoices` asks main to derive the canonical continuation. For a `seed_still` base
+that continuation is the same shot's `video_take`, which is precisely what we want, so the text-only
+path confirms `withCascade`. Only the first-frame path confirms `baseOnly`.
 
 ### The single-shot spine
 
@@ -93,7 +99,29 @@ single-shot video has nothing to continue.
 `{ shootingScript, durationSeconds }`. The renderer mints `beatId` and `shotId`, so the shot id is
 known before `apply-authoring-batch` returns — which is what `prepare-submission` needs.
 
-One beat, one shot. No merging, no section mapping, no positional beats.
+One beat, one shot — **plus a conditioning image**, which is not optional.
+
+A `video_take` cannot generate from nothing. It is refused at prepare-request validation and again at
+pricing, both `missing_conditioning` (`estimate.ts:754`, `:815`), and the plan factory throws
+outright: *"direct video requests require conditioning input"* (`generationRequest.ts:165`). CS3
+derives the purpose from exactly this fact —
+`purpose: effectiveSeedAsset(project, candidate) === null ? 'seed_still' : 'video_take'`
+(`projectStatus.ts:887`).
+
+**The cascade is the answer, and it keeps this to one authorization.** With
+`baseChoices: [{ target, purpose: 'seed_still' }]` and an empty `cascadeChoices`, main derives the
+continuation starting at *the same* shot index rather than the next one
+(`estimate.ts:430`), so the derived cascade is that shot's `video_take`. A `seed_still` is only valid
+at the head shot (`estimate.ts:410`), which for a one-shot video is the only shot. So:
+
+- **Text-only template:** base `seed_still` + derived cascade `video_take`. Confirm **`withCascade`**.
+  One prepare, one confirm, two priced generations, both shown before anything is spent.
+- **Template supplying a first frame:** any `mediaKind === 'image'` asset in `assets` or `imports`
+  makes `effectiveSeedAsset` resolve (`estimate.ts:502`), so base can be `video_take` directly and
+  `baseOnly` is confirmed. One generation, one charge.
+
+The single-*authorization* story holds either way. The single-*charge* story holds only when a first
+frame is supplied.
 
 **`shootingScript` is the composed brief** — `composeCreatorContext`'s output (tone, duration, frame,
 format, the eight settings answers, the live clip window) followed by the template's `instruction`
@@ -132,20 +160,39 @@ where a stale window silently widened a renderer-side spend allowance.
 This replaces the source popup's silent Proceed, which stated a clip count and no price. CS3 hands us
 the price, so the panel states it.
 
-An expired quote re-prepares silently, because Phase A is free. If the re-prepared range differs from
-what was displayed, the change is surfaced rather than swapped underneath the person.
+Expiry **is** enforced by CS3, at four layers including the spend boundary itself (`expired_quote`),
+with stale authorities dropped on read. So this is not a gap to fill but a convention to match, and
+CS3 has two deliberate ones:
+
+- **Proposal card** — proactive client-side check, `Intl`-formatted timestamp, `role="alert"`, and the
+  spend button relabelled to *Refresh*. Never disabled, never silently failing.
+- **Spend gate** — no client check, a raw ISO-8601 string, and a round-trip failure that silently
+  re-prepares. Written down as intentional ("handle TTL silently") and enforced by its own test.
+
+**This feature copies the proposal-card pattern**: a proactive check, a formatted timestamp, and a
+*Refresh* relabel. Phase A is free, so re-preparing costs nothing, and the gate's raw ISO display
+reads as a latent defect on its own terms rather than a model to follow.
 
 ### Reaching the Cut view
 
-Cut is addressable via `studioViewPath(projectId, 'cut')`, but `studioViewReadiness` gates it on
-`stageHasContent(status, 'cut')`, and `StudioPage` runs an effect that resolves a ready view and
-navigates with `replace: true`. So navigating to Cut at confirm time would be bounced — at that
-moment the cut stage is empty.
+**Nobody is ever advanced to Cut, before or after the clip lands.** Verified on the CS3 base:
 
-Phase B therefore navigates to the **project**, and Cut becomes reachable when the shot produces
-content. Whether the app then advances to Cut on its own depends on `resolveStudioEntryView`'s
-precedence between the remembered last view and the first ready view; that is a verification item
-below, not an assumption.
+- `STUDIO_VIEWS = ['references', 'table', 'board', 'cut']` (`T:28`) and `firstReadyStudioView`
+  returns the first ready view in that **fixed document order** (`studioPhaseRoute.ts:64-67`). Cut is
+  last, so any earlier ready view always wins.
+- What the person sees is **References** if the project has any reference, otherwise **Table** — Table
+  is ready as soon as a shot exists.
+- The queued job is invisible to routing: readiness keys on take counts, never on active jobs. So
+  between confirm and the clip existing, the routing inputs do not change at all.
+- When the clip lands nothing re-navigates, because the auto-nav effect early-returns before
+  remembering a view, so each re-resolve falls back to first-ready — still Table.
+
+The real gates on Cut are a disabled tab and a not-ready pane in
+`components/Workspace/WorkspaceShell.tsx`, not the `replace: true` effect, which runs only on first
+entry with no explicit or remembered choice.
+
+So the hand-off is designed, not delegated: **land on Table with the queued shot visible, and give an
+explicit route to Cut once a take exists.** Do not rely on the router to advance.
 
 ## What is deleted, and which review defects become moot
 
@@ -161,11 +208,17 @@ defects. The narrowed flow removes the code they lived in:
 - **`shotBudget`, `ABSOLUTE_SHOT_CEILING`, `UNKNOWN_WINDOW_BUDGET` and `submittedProjects` go.** The
   quote is the spend authority and the `quoteId` is the idempotency key. This retires the confirmed
   stale-`clipWindow` defect, whose whole consequence was falling back to a 12-shot allowance.
-- **The film export and the ffmpeg dependency leave the happy path.** A single generated clip *is*
-  the video: `StudioAssetV2` is a managed, playable file, and `create-export` turns out to be
-  deliverable packaging (`film` / `still` / `script` / `editor_folder`) rather than video production.
-  The source branch's own build report records the cut failing at the last step on a machine without
-  ffmpeg — after the shots had been paid for. That failure mode is now unreachable.
+- **The film export leaves the happy path. ffmpeg does not.** A single generated clip *is* the video:
+  `StudioAssetV2` is a managed, playable file, and `create-export` is deliverable packaging
+  (`film` / `still` / `script` / `editor_folder`) rather than video production. What leaves is the
+  film **assembly** use — `ffmpeg_unavailable` / `ffprobe_unavailable` are scoped to
+  `StudioFilmExportCapabilityV2` (`T:1354-1362`).
+
+  The accurate claim is narrower: **no ffmpeg encode or mux is needed to watch one clip.** ffmpeg
+  moves *earlier* into the path rather than out of it — no video take can be persisted without a
+  successful ffprobe duration probe, and any failure becomes `invalid_media`
+  (`mediaStore.ts:4431`). So on a machine without ffmpeg the paid take still fails to persist, which
+  is the same shape as the source branch's failure and must be surfaced before spending, not after.
 - **Partial-failure handling and cascade go.** One shot either renders or it does not.
 
 Spend safety that remains: a synchronous latch so a double click cannot reach `confirm-submission`

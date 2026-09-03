@@ -252,10 +252,27 @@ const input = {
 };
 
 describe('buildSingleShotSpine', () => {
-  it('emits exactly set_brief, add_beat and add_shot, in that order', () => {
+  it('emits set_brief, set_routes, add_beat and add_shot, in that order', () => {
     const { operations } = buildSingleShotSpine(input);
 
-    expect(operations.map((operation) => operation.kind)).toEqual(['set_brief', 'add_beat', 'add_shot']);
+    expect(operations.map((operation) => operation.kind)).toEqual([
+      'set_brief',
+      'set_routes',
+      'add_beat',
+      'add_shot',
+    ]);
+  });
+
+  /**
+   * Measured, not inferred: a fresh project has both route ids null, and `prepare-submission` then
+   * returns `invalid_route` at step 5 -- not a `no_engine` capability block at step 4. Both routes
+   * are set because `estimate.ts:742` picks `imageRouteId` for a seed still and `videoRouteId` for a
+   * take, and the text-only path needs both.
+   */
+  it('sets both routes, because a seed still is image work', () => {
+    const { operations } = buildSingleShotSpine({ ...input, imageRouteId: 'img-1', videoRouteId: 'vid-1' });
+
+    expect(operations[1]).toEqual({ kind: 'set_routes', imageRouteId: 'img-1', videoRouteId: 'vid-1' });
   });
 
   it('carries the brief verbatim', () => {
@@ -267,7 +284,7 @@ describe('buildSingleShotSpine', () => {
 
   it('gives the shot the chosen duration and the brief as its shooting script', () => {
     const { operations, shotId } = buildSingleShotSpine(input);
-    const addShot = operations[2];
+    const addShot = operations[3];
 
     expect(addShot).toEqual({
       kind: 'add_shot',
@@ -280,7 +297,7 @@ describe('buildSingleShotSpine', () => {
 
   it('gives the beat the whole duration', () => {
     const { operations, beatId } = buildSingleShotSpine(input);
-    const addBeat = operations[1];
+    const addBeat = operations[2];
 
     expect(addBeat).toEqual({
       kind: 'add_beat',
@@ -293,7 +310,7 @@ describe('buildSingleShotSpine', () => {
   it('anchors the shot to the beat it just created', () => {
     const { operations, beatId } = buildSingleShotSpine(input);
 
-    expect(operations[2]).toMatchObject({ beatId });
+    expect(operations[3]).toMatchObject({ beatId });
   });
 
   it('mints ids main will accept', () => {
@@ -330,6 +347,9 @@ export type SingleShotSpineInput = {
   /** The composed brief: creator context followed by the template's instruction, verbatim. */
   brief: string;
   durationSeconds: number;
+  /** Both required. A fresh project has neither, and `prepare-submission` answers `invalid_route`. */
+  imageRouteId: string | null;
+  videoRouteId: string | null;
 };
 
 export type SingleShotSpine = {
@@ -353,7 +373,12 @@ export type SingleShotSpine = {
  * also means the shot id is known before the batch is sent — exactly what `prepare-submission`
  * needs. `crypto.randomUUID()` satisfies main's `/^[A-Za-z0-9_-]{1,256}$/`.
  */
-export const buildSingleShotSpine = ({ brief, durationSeconds }: SingleShotSpineInput): SingleShotSpine => {
+export const buildSingleShotSpine = ({
+  brief,
+  durationSeconds,
+  imageRouteId,
+  videoRouteId,
+}: SingleShotSpineInput): SingleShotSpine => {
   const beatId = crypto.randomUUID();
   const shotId = crypto.randomUUID();
   return {
@@ -361,6 +386,9 @@ export const buildSingleShotSpine = ({ brief, durationSeconds }: SingleShotSpine
     shotId,
     operations: [
       { kind: 'set_brief', brief },
+      // Measured on the CS3 base: without these, prepare-submission returns `invalid_route`. The
+      // image route matters even for a video, because the conditioning seed still is image work.
+      { kind: 'set_routes', imageRouteId, videoRouteId },
       {
         kind: 'add_beat',
         beatId,
@@ -530,17 +558,40 @@ describe('prepareLaunch', () => {
     expect(prepareSubmission).toHaveBeenCalledWith(expect.objectContaining({ expectedRevision: 3 }));
   });
 
-  it('asks to price exactly the shot it minted, as a video take', async () => {
+  /**
+   * A `video_take` cannot generate from nothing: it is refused twice with `missing_conditioning`
+   * (`estimate.ts:754`, `:815`) and the plan factory throws "direct video requests require
+   * conditioning input". With a `seed_still` base and an empty cascade, main derives the
+   * continuation at *the same* shot index (`estimate.ts:430`), so the cascade is that shot's take.
+   */
+  it('prices a seed still whose derived cascade is the take, when no first frame exists', async () => {
     await prepareLaunch(request);
 
     const [{ baseChoices, cascadeChoices }] = prepareSubmission.mock.calls[0] as [
       { baseChoices: unknown[]; cascadeChoices: unknown[] },
     ];
     const [{ operations }] = applyAuthoringBatch.mock.calls[0] as [{ operations: { shotId?: string }[] }];
-    const mintedShotId = operations[2]!.shotId;
+    const mintedShotId = operations[3]!.shotId;
 
-    expect(baseChoices).toEqual([{ target: { kind: 'shot', shotId: mintedShotId }, purpose: 'video_take' }]);
+    expect(baseChoices).toEqual([{ target: { kind: 'shot', shotId: mintedShotId }, purpose: 'seed_still' }]);
     expect(cascadeChoices).toEqual([]);
+  });
+
+  it('returns the cascade quote on the text-only path, because that is the one that includes the take', async () => {
+    const withCascade = { ...QUOTE, id: 'quote-2' };
+    prepareSubmission.mockResolvedValue({ ok: true, data: { baseOnly: QUOTE, withCascade } });
+
+    const result = await prepareLaunch(request);
+
+    expect(result).toMatchObject({ status: 'quoted', quote: withCascade });
+  });
+
+  it('prices a take directly when the template supplied a first frame', async () => {
+    await prepareLaunch({ ...request, firstFrameAssetId: 'asset-1' });
+
+    const [{ baseChoices }] = prepareSubmission.mock.calls[0] as [{ baseChoices: { purpose: string }[] }];
+
+    expect(baseChoices[0]!.purpose).toBe('video_take');
   });
 
   it('returns the base-only quote and the revision to confirm against', async () => {
@@ -632,6 +683,11 @@ export type PrepareLaunchRequest = {
   resolution: StudioResolution;
   durationSeconds: number;
   rules: StudioBriefRuleDraft[];
+  /** Both required: a fresh project has neither and pricing answers `invalid_route`. */
+  imageRouteId: string | null;
+  videoRouteId: string | null;
+  /** An imported first frame, when the template supplies one. Null means a seed still is priced. */
+  firstFrameAssetId: string | null;
 };
 
 export type PrepareLaunchResult =
@@ -687,7 +743,12 @@ export const prepareLaunch = async (request: PrepareLaunchRequest): Promise<Prep
     if (pinned !== null && pinned.ok) revision = pinned.data.projectRevision;
   }
 
-  const spine = buildSingleShotSpine({ brief: request.brief, durationSeconds: request.durationSeconds });
+  const spine = buildSingleShotSpine({
+    brief: request.brief,
+    durationSeconds: request.durationSeconds,
+    imageRouteId: request.imageRouteId,
+    videoRouteId: request.videoRouteId,
+  });
   const authored = await attempt(() =>
     ipcBridge.creativeStudio.applyAuthoringBatch.invoke({
       projectId,
@@ -703,7 +764,16 @@ export const prepareLaunch = async (request: PrepareLaunchRequest): Promise<Prep
   }
   revision = authored.data.projectRevision;
 
-  const items = [{ target: { kind: 'shot' as const, shotId: spine.shotId }, purpose: 'video_take' as const }];
+  /*
+   * The purpose depends on whether a first frame exists, because a take cannot generate from nothing.
+   *
+   * No conditioning -> `seed_still`, and an empty `cascadeChoices` makes main derive the continuation
+   * at the SAME shot index (`estimate.ts:430`), so the cascade is this shot's take: one prepare, one
+   * confirm, two priced generations. With a first frame, `effectiveSeedAsset` resolves
+   * (`estimate.ts:502`) and the take prices directly as one charge.
+   */
+  const purpose = request.firstFrameAssetId === null ? ('seed_still' as const) : ('video_take' as const);
+  const items = [{ target: { kind: 'shot' as const, shotId: spine.shotId }, purpose }];
   const capability = await attempt(() =>
     ipcBridge.creativeStudio.getGenerationCapability.invoke({ projectId, expectedRevision: revision, items })
   );
@@ -733,7 +803,10 @@ export const prepareLaunch = async (request: PrepareLaunchRequest): Promise<Prep
     return { status: 'stopped', step: 'prepare', projectId, messageKey: prepared.error.messageKey };
   }
 
-  return { status: 'quoted', projectId, revision, quote: prepared.data.baseOnly };
+  // The cascade quote is the one that includes the take when we based on a seed still. Falling back
+  // to `baseOnly` would authorize an image and no video.
+  const quote = purpose === 'seed_still' ? (prepared.data.withCascade ?? prepared.data.baseOnly) : prepared.data.baseOnly;
+  return { status: 'quoted', projectId, revision, quote };
 };
 ```
 
@@ -1116,7 +1189,10 @@ const major = (minorUnits: number): string => (minorUnits / 100).toFixed(2);
  */
 export const ConfirmPanel: React.FC<ConfirmPanelProps> = ({ quote, onConfirm, onCancel }) => {
   const { t } = useTranslation();
-  const item = quote.baseItems[0] ?? null;
+  // Both collections, because a text-only launch prices a seed still (base) and its take (cascade).
+  // Showing only `baseItems` would state an image's price for a video.
+  const items = [...quote.baseItems, ...quote.cascadeItems];
+  const item = items[0] ?? null;
   const exact = quote.lowerMinorUnits === quote.upperMinorUnits;
 
   return (
@@ -1126,7 +1202,7 @@ export const ConfirmPanel: React.FC<ConfirmPanelProps> = ({ quote, onConfirm, on
       {item !== null ? (
         <dl className={styles.facts}>
           <dt>{t('conversation.creativeStudio.entry.confirm.engine')}</dt>
-          <dd>{item.route.model}</dd>
+          <dd>{items.map((quoted) => quoted.route.model).join(' → ')}</dd>
           <dt>{t('conversation.creativeStudio.entry.confirm.length')}</dt>
           <dd>{item.durationSeconds}s</dd>
           <dt>{t('conversation.creativeStudio.entry.confirm.price')}</dt>
@@ -1929,16 +2005,20 @@ git commit -m "feat(studio): portal the template modal below the title bar"
 
 - [ ] **Step 1: Run every gate**
 
+Run the **same recipe the push gate runs**, not a looser hand-rolled set. The gate is
+`push *ARGS: lint-strict fmt-check typecheck i18n-check test-for-push` (`justfile:342`):
+
 ```bash
-bunx tsc --noEmit
-bun run lint
-bunx oxfmt --check .
-node scripts/check-i18n.js
-bun run test
+just lint-strict
+just fmt-check
+just typecheck
+just i18n-check
+just test-for-push
 ```
 
-Expected: `tsc` clean; oxlint 0 errors; `oxfmt --check` clean (**never** run `prettier --write` — the
-gate formats with oxfmt and prettier rewrites unrelated files); `check-i18n` passes; suite green.
+Expected: all five clean. A checklist that runs `bun run lint` and `bun run test` instead goes green
+on a looser set and can still fail the real gate. **Never** run `prettier --write` — the gate formats
+with oxfmt, and prettier rewrites unrelated files.
 
 Remember `tsc` typechecks none of `tests/`, so a fake bridge drifting from the real V2 types fails
 nowhere. If a payload assertion looks odd, check it against the exported type by hand.
@@ -1962,14 +2042,32 @@ shot, and **no job and no charge**.
 
 - [ ] **Step 4: Commit any fixes and open the merge request**
 
+`AGENTS.md` is explicit: *"AI agents must not push unless explicitly asked. When pushing, use
+`just push`, never `git push`."* A bare `git push` bypasses the entire gate.
+
 ```bash
-git push -u origin feat/studio-short-templates
+just push -u ghk feat/studio-short-templates
 ```
 
-Target `codex/creative-studio-table-board-ui-design`. Self-review before pushing: a Draft flag does
-not block merging here and merges land within minutes.
+Target `codex/creative-studio-table-board-ui-design`. Judge success by exit code, not output volume —
+`just push` lints with `--quiet` and the repo carries many pre-existing warnings. Self-review before
+pushing: a Draft flag does not block merging here and merges land within minutes.
 
 ---
+
+## Before Task 8: prove the path with one template
+
+Do not port the catalogue before the pipeline works. Tasks 1-5 plus a stub gallery holding **one
+hand-authored template** exercise the whole route — routes set, spine authored, admission probed,
+quote priced, confirm authorized, clip watched — for a fraction of the work.
+
+This is promoted out of a footnote for a reason. The templates' prose becomes the `shootingScript`
+**verbatim**, and all 40 instructions are currently written as multi-section guidance. Shipping the
+catalogue as-is would feed multi-section instructions to a one-shot generator. Task 1 fixes their
+durations; the prose is untouched.
+
+So: Tasks 1-5, one template, one real generation. Then decide whether the catalogue is worth
+re-authoring at all.
 
 ## Deferred, deliberately
 
@@ -1977,6 +2075,5 @@ not block merging here and merges land within minutes.
 - `scripts/i18nPending.js` and `scripts/i18n-pending.js` differ by one hyphen.
 - Quote expiry: `expiresAt` is displayed but not yet enforced with a re-prepare. Phase A is free, so
   the fix is a re-run; it needs a small timer and its own test.
-- Re-authoring all 40 template instructions for one-shot phrasing. Task 1 fixes their durations, but
-  the prose still reads as multi-section guidance. Editorial, and it decides whether the feature is
-  worth anything.
+- Re-authoring all 40 template instructions for one-shot phrasing — gated behind the one-template
+  proof above, not merely deferred.

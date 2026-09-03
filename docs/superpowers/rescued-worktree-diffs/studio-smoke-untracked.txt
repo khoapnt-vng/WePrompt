@@ -1,0 +1,1 @@
+packages/desktop/src/renderer/pages/studio/components/Shell/StudioLayoutContext.tsx

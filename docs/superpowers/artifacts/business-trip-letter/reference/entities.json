@@ -1,0 +1,26 @@
+{
+  "consulate": "CONSULATE GENERAL OF CHINA IN HO CHI MINH CITY",
+  "letter_city": "Ho Chi Minh city",
+  "expense_clause": "During the business trip in China, all expenses shall be paid by {ENTITY_NAME}.",
+  "commit_clause": "We hereby commit that this invitation letter is true, is sent by Chinese partners, if there is any fraud, we are fully responsible to the Law.",
+  "entities": [
+    {
+      "id": "vnggames",
+      "name": "VNGGames Co., Ltd",
+      "head_office": "2nd Floor, Saigon Paragon Building, No. 3 Nguyen Luong Bang, Tan My Ward, Ho Chi Minh City, Vietnam",
+      "tel": "(84.8) 3926 3888",
+      "scope": "Online Game, Software etc.",
+      "signatory": { "name": "NGUYỄN THỊ NGUYỆT MINH", "title": "Head of Compensation & Benefits" },
+      "verified": false
+    },
+    {
+      "id": "vng-group",
+      "name": "VNG GROUP JSC",
+      "head_office": "Z06, Street No.13, Tan Thuan Ward, HCMC",
+      "tel": "(+84) 028 3962 3888",
+      "scope": "Online Game, Software etc.",
+      "signatory": { "name": "NGUYỄN THỊ NGUYỆT MINH", "title": "Head of Compensation & Benefits" },
+      "verified": false
+    }
+  ]
+}

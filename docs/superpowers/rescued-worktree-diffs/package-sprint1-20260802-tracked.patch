@@ -1,0 +1,83 @@
+diff --git a/packages/desktop/electron-builder.yml b/packages/desktop/electron-builder.yml
+index 0b3b5a07a..57a35ac48 100644
+--- a/packages/desktop/electron-builder.yml
++++ b/packages/desktop/electron-builder.yml
+@@ -115,7 +115,7 @@ extraResources:
+   - from: resources/hub
+     to: hub
+   # built-in presentation template reference decks
+-  - from: resources/presentation-templates
++  - from: packages/desktop/resources/presentation-templates
+     to: presentation-templates
+ win:
+   target:
+diff --git a/packages/shared-scripts/src/prepare-aioncore.js b/packages/shared-scripts/src/prepare-aioncore.js
+index b8649f3be..b713d23fb 100644
+--- a/packages/shared-scripts/src/prepare-aioncore.js
++++ b/packages/shared-scripts/src/prepare-aioncore.js
+@@ -484,7 +484,7 @@ function downloadFile(url, outputPath) {
+ function extractArchive(archivePath, outputDir, platform) {
+   ensureDirectory(outputDir);
+   if (platform === 'win32' || archivePath.endsWith('.zip')) {
+-    if (platform === 'win32') {
++    if (process.platform === 'win32') {
+       const ps = `Expand-Archive -LiteralPath '${archivePath.replace(/'/g, "''")}' -DestinationPath '${outputDir.replace(/'/g, "''")}' -Force`;
+       execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', ps]);
+     } else {
+diff --git a/scripts/build-with-builder.js b/scripts/build-with-builder.js
+index 3b4015195..e0e6e719a 100644
+--- a/scripts/build-with-builder.js
++++ b/scripts/build-with-builder.js
+@@ -678,6 +678,14 @@ const builderArgs = args
+   })
+   .join(' ');
+ 
++const targetPlatform = builderArgs.includes('--win')
++  ? 'win32'
++  : builderArgs.includes('--linux')
++    ? 'linux'
++    : builderArgs.includes('--mac')
++      ? 'darwin'
++      : process.platform;
++
+ // Get target architecture from electron-builder.yml
+ function getTargetArchFromConfig(platform) {
+   try {
+@@ -824,7 +832,7 @@ try {
+   writeGeneratedSentryDsnInclude(projectRoot);
+   prepareAioncore({
+     projectRoot,
+-    platform: process.platform,
++    platform: targetPlatform,
+     arch: targetArch,
+     version: resolveAioncoreVersion(projectRoot),
+   });
+diff --git a/tests/unit/releasePackagingConfig.test.ts b/tests/unit/releasePackagingConfig.test.ts
+index 5fb1c778f..156dfaa6d 100644
+--- a/tests/unit/releasePackagingConfig.test.ts
++++ b/tests/unit/releasePackagingConfig.test.ts
+@@ -167,6 +167,24 @@ describe('release packaging configuration', () => {
+     expect(macBlock).toContain('    - zip');
+   });
+ 
++  it('packages the retained PPTX and DOCX template references from their source directory', () => {
++    const config = readProjectFile('packages/desktop/electron-builder.yml');
++    const extraResourcesBlock = yamlBlock(config, 'extraResources');
++    const templateFiles = readdirSync(resolve(projectRoot, 'packages/desktop/resources/presentation-templates')).sort();
++
++    expect(extraResourcesBlock).toContain('- from: packages/desktop/resources/presentation-templates');
++    expect(templateFiles).toEqual([
++      'business-report.docx',
++      'business-review.pptx',
++      'connected-ops.pptx',
++      'decision-memo.docx',
++      'monthly-steerco.pptx',
++      'operations-guide.docx',
++      'project-kickoff.pptx',
++      'proposal-sow.docx',
++    ]);
++  });
++
+   it('does not build Windows zip artifacts', () => {
+     const config = readProjectFile('packages/desktop/electron-builder.yml');
+     const winBlock = yamlBlock(config, 'win');

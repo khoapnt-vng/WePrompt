@@ -1,0 +1,211 @@
+diff --git a/packages/desktop/src/renderer/pages/studio/StudioPage.tsx b/packages/desktop/src/renderer/pages/studio/StudioPage.tsx
+index 133b5638e..502da01b8 100644
+--- a/packages/desktop/src/renderer/pages/studio/StudioPage.tsx
++++ b/packages/desktop/src/renderer/pages/studio/StudioPage.tsx
+@@ -40,8 +40,6 @@ import {
+ import { BriefConversationProvider } from './components/Shell/BriefConversationContext';
+ import { DirectorPane } from './components/Shell/DirectorPane';
+ import { StudioShell } from './components/Shell/StudioShell';
+-import { useStudioPanes, type StudioPaneState } from './components/Shell/useStudioPanes';
+-import { useStudioLayoutMode } from './components/PhaseShell/useStudioLayoutMode';
+ import { useStoryboardEditor, useStudioJobs, useStudioModels, useStudioProject } from './hooks';
+ import styles from './StudioPage.module.css';
+ import {
+@@ -303,9 +301,6 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
+   const [transitionIssueMessageKey, setTransitionIssueMessageKey] = useState<string | null>(null);
+   const [postModalTransition, setPostModalTransition] = useState<StudioPhaseTransition | null>(null);
+   const generationReviewRefreshingRef = useRef(false);
+-  const { containerRef: shellContainerRef, layoutMode: shellLayoutMode } = useStudioLayoutMode(routeProjectId ?? '');
+-  const panes = useStudioPanes(shellLayoutMode);
+-  const [directorOverlayOpen, setDirectorOverlayOpen] = useState(false);
+   const suppressedReferenceRequestIdsRef = useRef(new Set<string>());
+   const notifiedExcludedReferenceRequestsRef = useRef<string | null>(null);
+   /**
+@@ -1103,19 +1098,11 @@ const StudioProjectShell: React.FC<{ routePhase: StudioPhase | null }> = ({ rout
+ 
+   return (
+     <section
+-      ref={shellContainerRef}
+       aria-label={t('conversation.creativeStudio.project.title')}
+       className={styles.projectShell}
+     >
+       <BriefConversationProvider project={project}>
+-        <StudioShell
+-          director={<DirectorPane />}
+-          directorState={panes.directorEffective}
+-          layoutMode={shellLayoutMode}
+-          onDirectorStateChange={panes.setDirectorPreference}
+-          directorOverlayOpen={directorOverlayOpen}
+-          onDirectorOverlayOpenChange={setDirectorOverlayOpen}
+-        >
++        <StudioShell director={<DirectorPane />} projectId={project.id}>
+           <StudioPhaseShell
+             activePhase={activePhase}
+             controller={controller}
+diff --git a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/StudioPhaseShell.tsx b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/StudioPhaseShell.tsx
+index 8138bef71..68361975f 100644
+--- a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/StudioPhaseShell.tsx
++++ b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/StudioPhaseShell.tsx
+@@ -16,6 +16,7 @@ import { StudioPhaseHeader } from './StudioPhaseHeader';
+ import { StudioPhaseNav } from './StudioPhaseNav';
+ import type { StudioPhaseControllers } from './types';
+ import { useStudioLayoutMode } from './useStudioLayoutMode';
++import { useStudioLayoutContext } from '../Shell/StudioLayoutContext';
+ import styles from './StudioPhaseShell.module.css';
+ 
+ export type StudioPhaseShellProps = {
+@@ -35,7 +36,9 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
+ }) => {
+   const { t } = useTranslation();
+   const previousPhaseRef = useRef(activePhase);
+-  const { containerRef, layoutMode } = useStudioLayoutMode(controller.project.id);
++  // The shell owns the single measurement; fall back to measuring only if rendered without it.
++  const measured = useStudioLayoutMode(controller.project.id);
++  const layoutMode = useStudioLayoutContext(measured.layoutMode);
+ 
+   useEffect(() => {
+     if (previousPhaseRef.current === activePhase) return;
+@@ -95,7 +98,7 @@ export const StudioPhaseShell: React.FC<StudioPhaseShellProps> = ({
+   })();
+ 
+   return (
+-    <div ref={containerRef} data-studio-layout-root data-layout={layoutMode} className={styles.shell}>
++    <div data-layout={layoutMode} className={styles.shell}>
+       <StudioPhaseHeader
+         project={controller.project}
+         saveState={shellSaveState}
+diff --git a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.module.css b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.module.css
+index 71af9e38f..a3f7d0151 100644
+--- a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.module.css
++++ b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.module.css
+@@ -173,3 +173,10 @@
+   align-items: stretch;
+   flex-direction: column;
+ }
++
++.briefField {
++  display: flex;
++  min-width: 0;
++  flex-direction: column;
++  gap: 6px;
++}
+diff --git a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.tsx b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.tsx
+index 568f31cf5..59eddb26b 100644
+--- a/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.tsx
++++ b/packages/desktop/src/renderer/pages/studio/components/PhaseShell/phases/brief/BriefPhase.tsx
+@@ -45,9 +45,7 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
+     aspectRatio: project.aspectRatio,
+     targetDurationSeconds: project.targetDurationSeconds,
+   };
+-  const [composerText, setComposerText] = useState(draft.brief);
+   const invalidBrief = draft.brief.length > MAX_PROJECT_BRIEF_CHARS;
+-  const invalidComposer = composerText.length > MAX_PROJECT_BRIEF_CHARS;
+   const invalidDuration =
+     !Number.isInteger(draft.targetDurationSeconds) ||
+     draft.targetDurationSeconds < 5 ||
+@@ -102,6 +100,27 @@ export const BriefPhase: React.FC<BriefPhaseProps> = ({ controller, layoutMode =
+       </div>
+ 
+       <div className={styles.content}>
++        <div className={styles.briefField}>
++          <label htmlFor='studio-brief-text' className={styles.constraintLabel}>
++            {t('conversation.creativeStudio.project.brief')}
++          </label>
++          <Input.TextArea
++            id='studio-brief-text'
++            value={draft.brief}
++            error={invalidBrief}
++            maxLength={MAX_PROJECT_BRIEF_CHARS}
++            autoSize={{ minRows: 4, maxRows: 12 }}
++            aria-label={t('conversation.creativeStudio.project.brief')}
++            onChange={(brief) => editor.updateProjectDraft({ brief })}
++            onBlur={flushIfValid}
++          />
++          {invalidBrief && (
++            <span role='alert' className={styles.fieldError}>
++              {t('conversation.creativeStudio.errors.invalidPayload')}
++            </span>
++          )}
++        </div>
++
+         <div className={styles.constraintsRow}>
+           <div className={styles.constraint}>
+             <label htmlFor='studio-brief-duration' className={styles.constraintLabel}>
+diff --git a/packages/desktop/src/renderer/pages/studio/components/Shell/StudioShell.tsx b/packages/desktop/src/renderer/pages/studio/components/Shell/StudioShell.tsx
+index 6ff135824..8523d81f5 100644
+--- a/packages/desktop/src/renderer/pages/studio/components/Shell/StudioShell.tsx
++++ b/packages/desktop/src/renderer/pages/studio/components/Shell/StudioShell.tsx
+@@ -9,19 +9,15 @@ import { Left, Right } from '@icon-park/react';
+ import React from 'react';
+ import { useTranslation } from 'react-i18next';
+ 
+-import type { StudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
++import { useStudioLayoutMode } from '../PhaseShell/useStudioLayoutMode';
++import { StudioLayoutContext } from './StudioLayoutContext';
+ import styles from './StudioShell.module.css';
+-import type { StudioPaneState } from './useStudioPanes';
++import { useStudioPanes } from './useStudioPanes';
+ 
+ export type StudioShellProps = {
+   /** The Director conversation. Rendered once here, never per phase. */
+   director: React.ReactNode;
+-  directorState: StudioPaneState;
+-  layoutMode: StudioLayoutMode;
+-  onDirectorStateChange: (value: StudioPaneState) => void;
+-  /** Transient overlay open/close below `inline`; never a preference change. */
+-  directorOverlayOpen: boolean;
+-  onDirectorOverlayOpenChange: (open: boolean) => void;
++  projectId: string;
+   children: React.ReactNode;
+ };
+ 
+@@ -39,16 +35,17 @@ export type StudioShellProps = {
+  * Opening and closing that overlay is a UI action and deliberately does not touch the persisted
+  * preference.
+  */
+-export const StudioShell: React.FC<StudioShellProps> = ({
+-  director,
+-  directorState,
+-  layoutMode,
+-  onDirectorStateChange,
+-  directorOverlayOpen,
+-  onDirectorOverlayOpenChange,
+-  children,
+-}) => {
++export const StudioShell: React.FC<StudioShellProps> = ({ director, projectId, children }) => {
+   const { t } = useTranslation();
++  // Measured here rather than by the page: the page early-returns loading and error states, so a
++  // ref attached out there is still null when the layout effect first runs, and the mode sticks at
++  // its `compact` default forever. The shell's own root always exists whenever the shell renders.
++  const { containerRef, layoutMode } = useStudioLayoutMode(projectId);
++  const { directorEffective, setDirectorPreference } = useStudioPanes(layoutMode);
++  const [directorOverlayOpen, setDirectorOverlayOpen] = React.useState(false);
++  const directorState = directorEffective;
++  const onDirectorStateChange = setDirectorPreference;
++  const onDirectorOverlayOpenChange = setDirectorOverlayOpen;
+   const overlays = layoutMode !== 'inline';
+   const collapsed = directorState === 'collapsed';
+   const label = collapsed
+@@ -73,7 +70,14 @@ export const StudioShell: React.FC<StudioShellProps> = ({
+   );
+ 
+   return (
+-    <div className={styles.shell} data-studio-shell data-layout={layoutMode}>
++    <StudioLayoutContext.Provider value={layoutMode}>
++    <div
++      ref={containerRef}
++      data-studio-layout-root
++      data-studio-shell
++      data-layout={layoutMode}
++      className={styles.shell}
++    >
+       {overlays ? (
+         // `mountOnEnter={false}` and `unmountOnExit={false}` are load-bearing, not defaults.
+         // Arco's Drawer otherwise defers mounting until first open and tears the subtree down on
+@@ -107,5 +111,6 @@ export const StudioShell: React.FC<StudioShellProps> = ({
+         {children}
+       </div>
+     </div>
++    </StudioLayoutContext.Provider>
+   );
+ };
