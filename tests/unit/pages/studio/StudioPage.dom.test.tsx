@@ -7799,7 +7799,9 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     renderStudio();
     await screen.findByRole('heading', { name: 'Launch film' });
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
     const actions = capturedBeatPanelActions();
+    const board = capturedBoardActions();
     const capture = {
       shotId: 'upstream_take',
       videoAssetId: 'take_asset',
@@ -7808,7 +7810,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       height: 720,
     };
 
-    await expect(invokeStudioAction(() => actions.persistCapturedPoster(capture))).resolves.toBe(true);
+    await expect(invokeStudioAction(() => board.persistCapturedPoster(capture))).resolves.toBe(true);
     expect(mocks.bridge.persistCapturedPoster.invoke).toHaveBeenCalledWith({
       projectId: authority.id,
       ...capture,

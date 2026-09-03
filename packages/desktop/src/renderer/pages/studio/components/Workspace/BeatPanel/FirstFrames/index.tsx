@@ -64,6 +64,37 @@ const downloadManagedAsset = (url: string, fileName: string): void => {
   document.body.removeChild(link);
 };
 
+/**
+ * A decoded video has not necessarily presented a frame yet. Drawing it at that point can produce
+ * one flat colour (normally black), and persisting that is worse than having no poster because the
+ * poster replaces the playable video everywhere. Sample roughly four thousand pixels at an odd
+ * stride and refuse a canvas whose RGBA value never differs from its first pixel.
+ */
+const carriesPicture = (context: CanvasRenderingContext2D, width: number, height: number): boolean => {
+  if (typeof context.getImageData !== 'function') return false;
+  let pixels: Uint8ClampedArray;
+  try {
+    pixels = context.getImageData(0, 0, width, height).data;
+  } catch {
+    return false;
+  }
+  const total = Math.floor(pixels.length / 4);
+  if (total === 0) return false;
+  const step = Math.max(1, Math.floor(total / 4_096)) | 1;
+  for (let index = 0; index < total; index += step) {
+    const at = index * 4;
+    if (
+      pixels[at] !== pixels[0] ||
+      pixels[at + 1] !== pixels[1] ||
+      pixels[at + 2] !== pixels[2] ||
+      pixels[at + 3] !== pixels[3]
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
 export const captureStudioVideoPoster = (
   video: Pick<HTMLVideoElement, 'videoWidth' | 'videoHeight'>,
   createCanvas: () => HTMLCanvasElement = () => document.createElement('canvas')
@@ -87,6 +118,7 @@ export const captureStudioVideoPoster = (
   if (context === null) return null;
   try {
     context.drawImage(video as CanvasImageSource, 0, 0, width, height);
+    if (!carriesPicture(context, width, height)) return null;
     const dataUrl = canvas.toDataURL('image/png');
     return dataUrl.startsWith('data:image/png;base64,') ? { dataUrl, width, height } : null;
   } catch {
@@ -188,11 +220,14 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     await actions.cancelGenerationJob(job.id);
   };
 
-  const persistPoster = async (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): Promise<void> => {
+  const persistPoster = async (
+    video: HTMLVideoElement,
+    picture: WorkspaceCurrentPictureProjection
+  ): Promise<boolean> => {
     const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
-    if (posterCapturesRef.current.has(captureKey)) return;
+    if (posterCapturesRef.current.has(captureKey)) return true;
     const captured = captureStudioVideoPoster(video);
-    if (captured === null) return;
+    if (captured === null) return false;
     posterCapturesRef.current.add(captureKey);
     const persisted = await actions.persistCapturedPoster({
       shotId: shot.id,
@@ -200,6 +235,20 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
       ...captured,
     });
     if (!persisted) posterCapturesRef.current.delete(captureKey);
+    return true;
+  };
+
+  /*
+   * loadeddata/canplay promise decoded data, not a composited frame. If the guarded capture is
+   * blank, retry when the browser reports that a frame has actually been presented.
+   */
+  const scheduleCapture = (video: HTMLVideoElement, picture: WorkspaceCurrentPictureProjection): void => {
+    void persistPoster(video, picture).then((settled) => {
+      if (settled) return;
+      video.requestVideoFrameCallback?.(() => {
+        if (video.isConnected) void persistPoster(video, picture);
+      });
+    });
   };
 
   const frameMenu = (frame: WorkspaceSeedStillProjection, index: number): React.ReactNode => {
@@ -387,8 +436,9 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
               {currentPicture.posterAssetId === null ? (
                 <video
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
-                  onCanPlay={(event) => void persistPoster(event.currentTarget, currentPicture)}
-                  onLoadedData={(event) => void persistPoster(event.currentTarget, currentPicture)}
+                  muted
+                  onCanPlay={(event) => scheduleCapture(event.currentTarget, currentPicture)}
+                  onLoadedData={(event) => scheduleCapture(event.currentTarget, currentPicture)}
                   preload='auto'
                   src={createManagedStudioAssetUrl(projectId, currentPicture.assetId) ?? undefined}
                 />

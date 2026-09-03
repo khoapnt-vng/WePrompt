@@ -691,6 +691,21 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   ...overrides,
 });
 
+const pixelContext = (drawImage: ReturnType<typeof vi.fn>, kind: 'varied' | 'flat'): CanvasRenderingContext2D => {
+  const data = new Uint8ClampedArray(4_096 * 4);
+  if (kind === 'varied') {
+    for (let index = 0; index < data.length; index += 4) {
+      data[index] = index % 251;
+      data[index + 1] = index % 241;
+      data[index + 2] = index % 239;
+      data[index + 3] = 255;
+    }
+  } else {
+    for (let index = 3; index < data.length; index += 4) data[index] = 255;
+  }
+  return { drawImage, getImageData: () => ({ data }) } as unknown as CanvasRenderingContext2D;
+};
+
 describe('BeatPanel generation recovery', () => {
   it('offers only projected job capabilities and requires duplicate-charge acknowledgement', async () => {
     const actions = makeActions();
@@ -2456,7 +2471,7 @@ describe('BeatPanel', () => {
     const drawImage = vi.fn();
     const getContext = vi
       .spyOn(HTMLCanvasElement.prototype, 'getContext')
-      .mockReturnValue({ drawImage } as unknown as CanvasRenderingContext2D);
+      .mockReturnValue(pixelContext(drawImage, 'varied'));
     const toDataUrl = vi
       .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
       .mockReturnValue('data:image/png;base64,cG9zdGVy');
@@ -2485,6 +2500,48 @@ describe('BeatPanel', () => {
     fireEvent.canPlay(video);
     expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
     expect(drawImage).toHaveBeenCalledWith(video, 0, 0, 1280, 720);
+
+    getContext.mockRestore();
+    toDataUrl.mockRestore();
+  });
+
+  it('refuses a flat decoded frame and retries after the video presents a picture', async () => {
+    const drawImage = vi.fn();
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValueOnce(pixelContext(drawImage, 'flat'))
+      .mockReturnValue(pixelContext(drawImage, 'varied'));
+    const toDataUrl = vi
+      .spyOn(HTMLCanvasElement.prototype, 'toDataURL')
+      .mockReturnValue('data:image/png;base64,cG9zdGVy');
+    const shot = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_current', 8) });
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(makeBeat('beat_1', [shot]), makeDrafts(), actions)} />);
+    openFirstFramePicker(container, shot.id);
+    const video = container.querySelector<HTMLVideoElement>('[data-current-picture] video');
+    if (video === null) throw new Error('Missing posterless current picture');
+    const presented: Array<() => void> = [];
+    Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1280 });
+    Object.defineProperty(video, 'videoHeight', { configurable: true, value: 720 });
+    Object.defineProperty(video, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: (callback: () => void) => presented.push(callback),
+    });
+
+    fireEvent.loadedData(video);
+    await waitFor(() => expect(presented).toHaveLength(1));
+    expect(actions.persistCapturedPoster).not.toHaveBeenCalled();
+
+    presented[0]!();
+    await waitFor(() =>
+      expect(actions.persistCapturedPoster).toHaveBeenCalledWith({
+        shotId: 'shot_1',
+        videoAssetId: 'video_current',
+        dataUrl: 'data:image/png;base64,cG9zdGVy',
+        width: 1280,
+        height: 720,
+      })
+    );
 
     getContext.mockRestore();
     toDataUrl.mockRestore();
