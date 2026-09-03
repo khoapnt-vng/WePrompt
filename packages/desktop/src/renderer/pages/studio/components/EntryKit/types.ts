@@ -133,15 +133,71 @@ export const STUDIO_TEMPLATE_CATEGORIES = ['game', 'product', 'internal', 'short
 export type StudioTemplateCategory = (typeof STUDIO_TEMPLATE_CATEGORIES)[number];
 
 /**
+ * The subject stated as absent, when the creator gave none.
+ *
+ * Substituted rather than omitted, because a slot dropped silently leaves the surrounding sentence
+ * reading as though no subject was ever asked for — and "no constraint" is exactly the wrong thing
+ * to tell a model that is about to spend a generation. Naming the absence makes it ask instead.
+ */
+const UNSPECIFIED_SUBJECT = 'an unspecified subject';
+
+/** The one slot a template author may write. Anything else is an authoring bug, caught by tests. */
+const SUBJECT_SLOT = '{{subject}}';
+
+/**
+ * Fills a template's `{{subject}}` slots with what the creator typed.
+ *
+ * Splits and joins rather than calling `replaceAll`, which reads `$&`, `$1` and friends in the
+ * *replacement* as back-references: a creator whose subject contains a dollar sign would otherwise
+ * see fragments of the slot pasted back into their own prose.
+ *
+ * @param text A template's `instruction` or `shootingScript`.
+ * @param subject The creator's subject, as typed; trimmed here so the prose reads correctly.
+ * @returns The text with every `{{subject}}` replaced.
+ */
+export const fillTemplateSlots = (text: string, subject: string): string => {
+  const trimmed = subject.trim();
+  return text.split(SUBJECT_SLOT).join(trimmed.length > 0 ? trimmed : UNSPECIFIED_SUBJECT);
+};
+
+/**
  * A ready-made short: everything a person does not have to decide before one clip is generated.
  *
- * The shape is deliberately data-only — no copy, no component. The human-readable name, blurb and
- * rule labels live with the localised copy so a template can be added without touching translations
- * for twelve locales, and so the same template reads correctly in every language.
+ * The card's copy and the model's prose both ship with the template, in English. That is a narrowing
+ * of the original shape, which kept every human-readable string in the localised copy: this feature
+ * ships English-only for now, `check-i18n.js` only warns on an untranslated key, and `mergeWithFallback`
+ * covers the gap. The rule *labels* still live with the copy, so what a rule asks for reads in the
+ * reader's language even while the card around it does not.
+ *
+ * `instruction` and `shootingScript` are a separate case, and would stay here even if the card were
+ * translated: they are read by the model, not the person, and AGENTS.md keeps model input beside the
+ * code that sends it, because a mistranslation there changes what the machine does rather than merely
+ * reading oddly.
  */
 export type StudioTemplate = {
   /** Stable across releases: it is persisted on the project and cited in the gallery's copy keys. */
   id: string;
+  /** The card's title. A plain English string, not an i18n key — see the note on this type. */
+  name: string;
+  /** The one line under the title. A plain English string, not an i18n key. */
+  tagline: string;
+  /**
+   * The template author's operational guidance, appended to the project brief.
+   *
+   * A model-facing English constant, **never an i18n key**: it is instruction to a machine, and a
+   * translation of it would change what gets built rather than how it reads.
+   *
+   * May contain `{{subject}}`, filled by `fillTemplateSlots` before it is sent.
+   */
+  instruction: string;
+  /**
+   * What the single shot is told to depict.
+   *
+   * A model-facing English constant, **never an i18n key**, for the same reason as `instruction`.
+   *
+   * May contain `{{subject}}`, filled by `fillTemplateSlots` before it is sent.
+   */
+  shootingScript: string;
   category: StudioTemplateCategory;
   aspectRatio: StudioAspectRatio;
   resolution: StudioResolution;
