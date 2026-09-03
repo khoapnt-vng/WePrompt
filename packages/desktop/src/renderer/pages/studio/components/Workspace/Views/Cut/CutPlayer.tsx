@@ -156,6 +156,38 @@ const pauseMedia = (media: HTMLMediaElement | null): void => {
 
 const paddedPosition = (position: number): string => String(position).padStart(2, '0');
 
+const cutPlaybackPlanToken = (sequence: CutPlaybackSequence | null): string =>
+  JSON.stringify(
+    sequence === null
+      ? null
+      : {
+          projectId: sequence.projectId,
+          durationSeconds: sequence.durationSeconds,
+          segments: sequence.segments.map((segment) =>
+            segment.kind === 'video'
+              ? {
+                  kind: segment.kind,
+                  beatId: segment.beatId,
+                  shotId: segment.shotId,
+                  assetId: segment.assetId,
+                  sourceDurationSeconds: segment.sourceDurationSeconds,
+                  sourceInSeconds: segment.sourceInSeconds,
+                  sourceOutSeconds: segment.sourceOutSeconds,
+                  durationSeconds: segment.durationSeconds,
+                  filmStartSeconds: segment.filmStartSeconds,
+                  filmEndSeconds: segment.filmEndSeconds,
+                }
+              : {
+                  kind: segment.kind,
+                  beatId: segment.beatId,
+                  durationSeconds: segment.durationSeconds,
+                  filmStartSeconds: segment.filmStartSeconds,
+                  filmEndSeconds: segment.filmEndSeconds,
+                }
+          ),
+        }
+  );
+
 const beatTitle = (segment: CutPlaybackSegment): string => segment.beatTitle.trim() || segment.beatId;
 
 const cutJoinLandingIndexes = (
@@ -180,7 +212,13 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   const { t } = useTranslation();
   const candidate = useMemo(() => buildCutPlaybackSequence(projection), [projection]);
   const sequence = candidate !== null && candidate.projectId === projectId ? candidate : null;
-  const planToken = useMemo(() => JSON.stringify({ pending, projectId, sequence }), [pending, projectId, sequence]);
+  // Pending work gates commands, while revisions and display metadata may refresh without replacing playable media.
+  const planToken = useMemo(() => cutPlaybackPlanToken(sequence), [sequence]);
+  const playbackPlanRef = useRef({ sequence, token: planToken });
+  if (playbackPlanRef.current.token !== planToken) {
+    playbackPlanRef.current = { sequence, token: planToken };
+  }
+  const playbackSequence = playbackPlanRef.current.sequence;
   const activeTokenRef = useRef(planToken);
 
   const [storedState, setStoredState] = useState<TransportState>(() => initialTransportState(planToken));
@@ -200,7 +238,11 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   const appliedPlanTokenRef = useRef(planToken);
 
   const segment = sequence?.segments[state.segmentIndex] ?? null;
-  const beatJoins = useMemo(() => (sequence === null ? [] : cutPlaybackBeatJoins(sequence)), [sequence]);
+  const playbackSegment = playbackSequence?.segments[state.segmentIndex] ?? null;
+  const beatJoins = useMemo(
+    () => (playbackSequence === null ? [] : cutPlaybackBeatJoins(playbackSequence)),
+    [playbackSequence]
+  );
 
   useLayoutEffect(() => {
     activeTokenRef.current = planToken;
@@ -407,13 +449,12 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     [failMedia, isCurrentMedia]
   );
 
-  const seekTo = useCallback(
+  const applySeek = useCallback(
     (requestedSeconds: number, loopJoinIndex?: number | null): void => {
-      const currentSequence = sequence;
+      const currentSequence = playbackSequence;
       const activeState = stateRef.current;
       if (
         currentSequence === null ||
-        pending ||
         activeState.failed ||
         activeState.token !== planToken ||
         activeTokenRef.current !== planToken
@@ -444,20 +485,28 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         slateEpoch: current.slateEpoch + 1,
       }));
     },
-    [clearPrewarm, invalidatePlayAttempt, pending, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
+    [clearPrewarm, invalidatePlayAttempt, planToken, playbackSequence, replaceCurrentState, stopMediaBoundaryWatch]
+  );
+
+  const seekTo = useCallback(
+    (requestedSeconds: number, loopJoinIndex?: number | null): void => {
+      if (pending) return;
+      applySeek(requestedSeconds, loopJoinIndex);
+    },
+    [applySeek, pending]
   );
 
   const loopRange = useCallback(
     (current: TransportState): { endSeconds: number; startSeconds: number } | null => {
-      if (sequence === null || current.loopJoinIndex === null) return null;
+      if (playbackSequence === null || current.loopJoinIndex === null) return null;
       const join = beatJoins[current.loopJoinIndex];
       if (join === undefined) return null;
       return {
         startSeconds: Math.max(0, join - 2),
-        endSeconds: Math.min(sequence.durationSeconds, join + 2),
+        endSeconds: Math.min(playbackSequence.durationSeconds, join + 2),
       };
     },
-    [beatJoins, sequence]
+    [beatJoins, playbackSequence]
   );
 
   const advanceSegment = useCallback(
@@ -477,7 +526,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       const completed = currentSequence.segments[segmentIndex];
       const activeLoop = loopRange(activeState);
       if (completed !== undefined && activeLoop !== null && completed.filmEndSeconds >= activeLoop.endSeconds) {
-        seekTo(activeLoop.startSeconds);
+        applySeek(activeLoop.startSeconds);
         return;
       }
       updateCurrentState(token, segmentIndex, (current) => {
@@ -501,7 +550,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         };
       });
     },
-    [invalidatePlayAttempt, loopRange, seekTo, stopMediaBoundaryWatch, updateCurrentState]
+    [applySeek, invalidatePlayAttempt, loopRange, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   const startMediaBoundaryWatch = useCallback(
@@ -575,7 +624,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
           stopMediaBoundaryWatch();
           pauseMedia(media);
           if (playingMediaRef.current === media) playingMediaRef.current = null;
-          seekTo(activeLoop.startSeconds);
+          applySeek(activeLoop.startSeconds);
           return;
         }
         updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, positionSeconds: nextPosition }));
@@ -584,7 +633,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
 
       schedule();
     },
-    [advanceSegment, failMedia, isCurrentMedia, loopRange, seekTo, stopMediaBoundaryWatch, updateCurrentState]
+    [advanceSegment, applySeek, failMedia, isCurrentMedia, loopRange, stopMediaBoundaryWatch, updateCurrentState]
   );
 
   useLayoutEffect(() => {
@@ -604,12 +653,11 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
 
   useEffect(() => {
     if (
-      sequence === null ||
-      segment?.kind !== 'slate' ||
+      playbackSequence === null ||
+      playbackSegment?.kind !== 'slate' ||
       !state.playing ||
       state.failed ||
-      state.buffering ||
-      pending
+      state.buffering
     ) {
       return;
     }
@@ -624,7 +672,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       startedAt,
     };
     slateClockRef.current = slateClock;
-    armPrewarm(token, segmentIndex, sequence);
+    armPrewarm(token, segmentIndex, playbackSequence);
     const timer = window.setInterval(() => {
       const activeState = stateRef.current;
       if (
@@ -638,18 +686,18 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
         return;
       }
       const elapsedSeconds = Math.max(0, (performance.now() - startedAt) / 1_000);
-      const nextPosition = Math.min(segment.filmEndSeconds, startPosition + elapsedSeconds);
+      const nextPosition = Math.min(playbackSegment.filmEndSeconds, startPosition + elapsedSeconds);
       const activeLoop = loopRange(activeState);
       if (activeLoop !== null && nextPosition >= activeLoop.endSeconds) {
         window.clearInterval(timer);
         if (slateClockRef.current === slateClock) slateClockRef.current = null;
-        seekTo(activeLoop.startSeconds);
+        applySeek(activeLoop.startSeconds);
         return;
       }
-      if (nextPosition >= segment.filmEndSeconds) {
+      if (nextPosition >= playbackSegment.filmEndSeconds) {
         window.clearInterval(timer);
         if (slateClockRef.current === slateClock) slateClockRef.current = null;
-        advanceSegment(token, segmentIndex, sequence);
+        advanceSegment(token, segmentIndex, playbackSequence);
         return;
       }
       updateCurrentState(token, segmentIndex, (current) => ({
@@ -664,12 +712,11 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   }, [
     advanceSegment,
     armPrewarm,
-    pending,
     planToken,
     loopRange,
-    seekTo,
-    segment,
-    sequence,
+    applySeek,
+    playbackSegment,
+    playbackSequence,
     state.buffering,
     state.failed,
     state.playing,
@@ -773,7 +820,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       stopMediaBoundaryWatch();
       pauseMedia(media);
       if (playingMediaRef.current === media) playingMediaRef.current = null;
-      if (sequence !== null) advanceSegment(token, segmentIndex, sequence);
+      if (playbackSequence !== null) advanceSegment(token, segmentIndex, playbackSequence);
       return;
     }
     const segmentProgress = Math.max(0, media.currentTime - videoSegment.sourceInSeconds);
@@ -783,7 +830,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       stopMediaBoundaryWatch();
       pauseMedia(media);
       if (playingMediaRef.current === media) playingMediaRef.current = null;
-      seekTo(activeLoop.startSeconds);
+      applySeek(activeLoop.startSeconds);
       return;
     }
     updateCurrentState(token, segmentIndex, (latest) => ({
@@ -812,11 +859,11 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       failMedia(token, segmentIndex, media);
       return;
     }
-    if (sequence !== null) advanceSegment(token, segmentIndex, sequence);
+    if (playbackSequence !== null) advanceSegment(token, segmentIndex, playbackSequence);
   };
 
   const togglePlayback = (): void => {
-    if (sequence === null || segment === null || pending || state.failed) return;
+    if (playbackSequence === null || playbackSegment === null || pending || state.failed) return;
     const token = planToken;
     const segmentIndex = state.segmentIndex;
     if (state.playing) {
@@ -826,18 +873,19 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       playingMediaRef.current = null;
       const slateClock = slateClockRef.current;
       const pausedPosition =
-        segment.kind === 'slate' && slateClock?.token === token && slateClock.segmentIndex === segmentIndex
+        playbackSegment.kind === 'slate' && slateClock?.token === token && slateClock.segmentIndex === segmentIndex
           ? Math.min(
-              segment.filmEndSeconds,
+              playbackSegment.filmEndSeconds,
               slateClock.startPositionSeconds + Math.max(0, (performance.now() - slateClock.startedAt) / 1_000)
             )
-          : segment.kind === 'video' &&
+          : playbackSegment.kind === 'video' &&
               !state.buffering &&
               videoRef.current !== null &&
               Number.isFinite(videoRef.current.currentTime)
             ? Math.min(
-                segment.filmEndSeconds,
-                segment.filmStartSeconds + Math.max(0, videoRef.current.currentTime - segment.sourceInSeconds)
+                playbackSegment.filmEndSeconds,
+                playbackSegment.filmStartSeconds +
+                  Math.max(0, videoRef.current.currentTime - playbackSegment.sourceInSeconds)
               )
             : state.positionSeconds;
       slateClockRef.current = null;
@@ -849,7 +897,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
       }));
       return;
     }
-    if (state.positionSeconds >= sequence.durationSeconds) {
+    if (state.positionSeconds >= playbackSequence.durationSeconds) {
       invalidatePlayAttempt();
       readyMediaRef.current = null;
       pendingMediaSeekRef.current = null;
@@ -870,7 +918,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
     }));
     const ready = readyMediaRef.current;
     if (
-      segment.kind === 'video' &&
+      playbackSegment.kind === 'video' &&
       ready?.token === token &&
       ready.segmentIndex === segmentIndex &&
       ready.media === videoRef.current
@@ -895,7 +943,7 @@ export const CutPlayer = forwardRef<CutPlayerHandle, CutPlayerProps>(function Cu
   };
 
   const toggleJoinLoop = (): void => {
-    if (beatJoins.length === 0) return;
+    if (pending || beatJoins.length === 0) return;
     const current = stateRef.current;
     if (current.loopJoinIndex !== null) {
       replaceCurrentState(planToken, (latest) => ({ ...latest, loopJoinIndex: null }));

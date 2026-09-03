@@ -571,6 +571,7 @@ export const WorkspaceControls: React.FC<WorkspaceControlsProps> = ({
           onOpenBeat={selectAndOpenBeat}
           onReviewReferenceBinding={onReviewShotReferenceBinding}
           pending={pending}
+          previewSuspended={openBeat !== null}
           projectId={project.id}
           projectStatus={projectStatus}
           projectStatusPending={projectStatusPending}

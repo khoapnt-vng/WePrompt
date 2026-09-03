@@ -7,7 +7,7 @@
 import { Button, Dropdown, Input, Menu, Modal } from '@arco-design/web-react';
 import { Copy, Delete, Download, Left, MoreOne, Pin, Plus, Right } from '@icon-park/react';
 import classNames from 'classnames';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
@@ -135,14 +135,38 @@ export const scheduleStudioPosterCaptureRetry = (
   scheduled: Set<string>,
   failure: StudioPosterCaptureFailure,
   retry: () => Promise<StudioPosterCaptureResult>
-): void => {
-  if (!video.isConnected || scheduled.has(captureKey)) return;
+): (() => void) | null => {
+  if (!video.isConnected || scheduled.has(captureKey)) return null;
   scheduled.add(captureKey);
   let finished = false;
+  let frameRequestId: number | null = null;
+  let timerId: number | null = null;
   const finish = (): void => {
     if (finished) return;
     finished = true;
     scheduled.delete(captureKey);
+  };
+  const cancel = (): void => {
+    if (finished) return;
+    if (frameRequestId !== null && typeof video.cancelVideoFrameCallback === 'function') {
+      try {
+        video.cancelVideoFrameCallback(frameRequestId);
+      } catch {
+        // A detached native video can already have discarded its callback queue.
+      }
+      frameRequestId = null;
+    }
+    if (timerId !== null) {
+      window.clearTimeout(timerId);
+      timerId = null;
+    }
+    finish();
+  };
+  const scheduleTimer = (retryPersistenceFailure: boolean): void => {
+    timerId = window.setTimeout(() => {
+      timerId = null;
+      runRetry(retryPersistenceFailure);
+    }, POSTER_CAPTURE_RETRY_FALLBACK_MS);
   };
   const runRetry = (retryPersistenceFailure: boolean): void => {
     if (finished) return;
@@ -151,8 +175,9 @@ export const scheduleStudioPosterCaptureRetry = (
       return;
     }
     void retry().then((result) => {
+      if (finished) return;
       if (result === 'persistence_failed' && retryPersistenceFailure) {
-        window.setTimeout(() => runRetry(false), POSTER_CAPTURE_RETRY_FALLBACK_MS);
+        scheduleTimer(false);
       } else {
         finish();
       }
@@ -161,10 +186,18 @@ export const scheduleStudioPosterCaptureRetry = (
   if (failure === 'frame_unavailable' && typeof video.requestVideoFrameCallback === 'function') {
     // Only an unreadable/flat draw needs presentation. A persistence failure already had a good
     // frame, and paused videos are not guaranteed to issue another presentation callback.
-    video.requestVideoFrameCallback(() => runRetry(true));
-    return;
+    try {
+      frameRequestId = video.requestVideoFrameCallback(() => {
+        frameRequestId = null;
+        runRetry(true);
+      });
+      return cancel;
+    } catch {
+      // Fall back to the bounded timer if the native callback queue rejects this detached/failed video.
+    }
   }
-  window.setTimeout(() => runRetry(failure === 'frame_unavailable'), POSTER_CAPTURE_RETRY_FALLBACK_MS);
+  scheduleTimer(failure === 'frame_unavailable');
+  return cancel;
 };
 
 export const FirstFrames: React.FC<FirstFramesProps> = ({
@@ -190,6 +223,8 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
   const [working, setWorking] = useState(false);
   const posterCapturesRef = useRef(new Set<string>());
   const posterCaptureRetriesRef = useRef(new Set<string>());
+  const posterCaptureRetryCancelByVideoRef = useRef(new WeakMap<HTMLVideoElement, () => void>());
+  const posterProbeRef = useRef<HTMLVideoElement | null>(null);
   // Workspace projection is authoritative. Empty fallbacks keep a stale renderer
   // snapshot fail-closed while Main refreshes it after a schema cutover.
   const frames = shot.firstFrames ?? [];
@@ -199,6 +234,38 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     shot.segmentHead &&
     frame.origin !== 'inherited' &&
     (shot.seedAuthorizationLock === null || shot.seedAuthorizationLock.compatibleAssetIds.includes(frame.assetId));
+  const releasePosterProbe = useCallback((video: HTMLVideoElement): void => {
+    posterCaptureRetryCancelByVideoRef.current.get(video)?.();
+    posterCaptureRetryCancelByVideoRef.current.delete(video);
+    try {
+      video.pause();
+    } catch {
+      // Detached and failed native media can reject pause; removing its source still releases the decoder.
+    }
+    video.removeAttribute('src');
+    try {
+      video.load();
+    } catch {
+      // Detached native media can reject load; its source authority is already removed.
+    }
+  }, []);
+  const setPosterProbeNode = useCallback(
+    (node: HTMLVideoElement | null): void => {
+      const previous = posterProbeRef.current;
+      if (previous === node) return;
+      if (previous !== null) releasePosterProbe(previous);
+      posterProbeRef.current = node;
+    },
+    [releasePosterProbe]
+  );
+  useEffect(
+    () => () => {
+      const video = posterProbeRef.current;
+      posterProbeRef.current = null;
+      if (video !== null) releasePosterProbe(video);
+    },
+    [releasePosterProbe]
+  );
   useEffect(() => {
     setViewer(null);
   }, [projectId, shot.id]);
@@ -290,9 +357,10 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
     void persistPoster(video, picture).then((result) => {
       if (result === 'settled') return;
       const captureKey = `${projectId}:${shot.id}:${picture.assetId}`;
-      scheduleStudioPosterCaptureRetry(video, captureKey, posterCaptureRetriesRef.current, result, () =>
+      const cancel = scheduleStudioPosterCaptureRetry(video, captureKey, posterCaptureRetriesRef.current, result, () =>
         persistPoster(video, picture)
       );
+      if (cancel !== null) posterCaptureRetryCancelByVideoRef.current.set(video, cancel);
     });
   };
 
@@ -480,6 +548,8 @@ export const FirstFrames: React.FC<FirstFramesProps> = ({
             <Button className={styles.pictureMediaButton} onClick={() => setViewer({ kind: 'picture' })} type='text'>
               {currentPicture.posterAssetId === null ? (
                 <video
+                  key={`${projectId}:${shot.id}:${currentPicture.assetId}`}
+                  ref={setPosterProbeNode}
                   aria-label={t(`${KEY_ROOT}.pictureAlt`, { shot: shotIndex + 1 })}
                   muted
                   onCanPlay={(event) => scheduleCapture(event.currentTarget, currentPicture)}

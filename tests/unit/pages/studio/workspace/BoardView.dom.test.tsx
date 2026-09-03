@@ -9,7 +9,7 @@ import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import React from 'react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   StudioProjectStatusBlockerV2,
@@ -563,6 +563,106 @@ const stubCanvasCapture = (options: { blank?: boolean } = {}): (() => void) => {
   };
 };
 
+type BoardIntersectionHarness = {
+  restore: () => void;
+  setIntersecting: (target: Element, isIntersecting: boolean) => void;
+  setIntersections: (target: Element, intersections: readonly boolean[]) => void;
+};
+
+const boardIntersectionEntry = (target: Element, isIntersecting: boolean): IntersectionObserverEntry => ({
+  boundingClientRect: target.getBoundingClientRect(),
+  intersectionRatio: isIntersecting ? 1 : 0,
+  intersectionRect: isIntersecting ? target.getBoundingClientRect() : new DOMRectReadOnly(),
+  isIntersecting,
+  rootBounds: null,
+  target,
+  time: 0,
+});
+
+const installBoardIntersectionObserver = (initiallyIntersecting: boolean | null): BoardIntersectionHarness => {
+  const original = window.IntersectionObserver;
+  const registrations = new Map<Element, { callback: IntersectionObserverCallback; observer: IntersectionObserver }>();
+
+  class BoardIntersectionObserverMock implements IntersectionObserver {
+    readonly root = null;
+    readonly rootMargin = '0px';
+    readonly thresholds = [0.01];
+
+    constructor(private readonly callback: IntersectionObserverCallback) {}
+
+    disconnect(): void {
+      for (const [target, registration] of registrations) {
+        if (registration.observer === this) registrations.delete(target);
+      }
+    }
+
+    observe(target: Element): void {
+      registrations.set(target, { callback: this.callback, observer: this });
+      if (initiallyIntersecting !== null) {
+        this.callback([boardIntersectionEntry(target, initiallyIntersecting)], this);
+      }
+    }
+
+    takeRecords(): IntersectionObserverEntry[] {
+      return [];
+    }
+
+    unobserve(target: Element): void {
+      registrations.delete(target);
+    }
+  }
+
+  window.IntersectionObserver = BoardIntersectionObserverMock;
+  globalThis.IntersectionObserver = BoardIntersectionObserverMock;
+  const setIntersections = (target: Element, intersections: readonly boolean[]): void => {
+    const registration = registrations.get(target);
+    if (registration === undefined) throw new Error('Board media is not observed');
+    registration.callback(
+      intersections.map((isIntersecting) => boardIntersectionEntry(target, isIntersecting)),
+      registration.observer
+    );
+  };
+  return {
+    restore: () => {
+      window.IntersectionObserver = original;
+      globalThis.IntersectionObserver = original;
+    },
+    setIntersecting: (target, isIntersecting) => setIntersections(target, [isIntersecting]),
+    setIntersections,
+  };
+};
+
+let restoreBoardIntersectionObserver = (): void => undefined;
+const originalBoardMediaPause = HTMLMediaElement.prototype.pause;
+const originalBoardMediaLoad = HTMLMediaElement.prototype.load;
+let boardProbePause = vi.fn<() => void>();
+let boardProbeLoad = vi.fn<() => void>();
+
+beforeEach(() => {
+  restoreBoardIntersectionObserver = installBoardIntersectionObserver(true).restore;
+  boardProbePause = vi.fn<() => void>();
+  boardProbeLoad = vi.fn<() => void>();
+  HTMLMediaElement.prototype.pause = boardProbePause;
+  HTMLMediaElement.prototype.load = boardProbeLoad;
+});
+
+afterEach(() => restoreBoardIntersectionObserver());
+
+afterAll(() => {
+  HTMLMediaElement.prototype.pause = originalBoardMediaPause;
+  HTMLMediaElement.prototype.load = originalBoardMediaLoad;
+});
+
+const posterlessCurrentPicture = (assetId: string) => ({
+  assetId,
+  posterAssetId: null,
+  sourceDurationSeconds: 4,
+  createdAt: '2026-08-28T00:00:00.000Z',
+  prompt: assetId,
+  promptChanged: false,
+  firstFrameChanged: false,
+});
+
 const cardFor = (container: HTMLElement, beatId: string): HTMLElement => {
   const card = container.querySelector<HTMLElement>(`[data-beat-id="${beatId}"]`);
   if (card === null) throw new Error(`Missing Board card ${beatId}`);
@@ -577,6 +677,7 @@ const boardProps = (
   projection,
   projectStatus: makeProjectStatus(projection),
   projectStatusPending: false,
+  previewSuspended: false,
   selectedBeatId: null,
   pending: false,
   gateLocked: false,
@@ -1383,6 +1484,433 @@ describe('BoardView', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Report restored binned-owner Shot' }));
     await waitFor(() => expect(screen.getByTestId('bin-focus-target')).toHaveFocus());
   });
+
+  it('defers offscreen video probes and admits only one visible poster capture at a time', async () => {
+    restoreBoardIntersectionObserver();
+    const intersections = installBoardIntersectionObserver(null);
+    restoreBoardIntersectionObserver = intersections.restore;
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      const actions = makeActions();
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') }),
+            makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
+            makeShot('shot_3', { currentPicture: posterlessCurrentPicture('video_third') }),
+          ],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection)} actions={actions} />);
+      const firstTile = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"]')!;
+      const secondTile = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_2"]')!;
+      const thirdTile = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_3"]')!;
+      const firstMedia = firstTile.querySelector<HTMLElement>('[data-media-kind="video"]')!;
+      const secondMedia = secondTile.querySelector<HTMLElement>('[data-media-kind="video"]')!;
+      const thirdMedia = thirdTile.querySelector<HTMLElement>('[data-media-kind="video"]')!;
+
+      expect(rendered.container.querySelectorAll('video')).toHaveLength(0);
+      expect(firstMedia).toHaveAttribute('data-video-preview-state', 'deferred');
+      expect(within(firstMedia).getByRole('img', { name: 'Current Shot video' })).toBeVisible();
+
+      act(() => {
+        intersections.setIntersecting(firstMedia, true);
+        intersections.setIntersecting(secondMedia, true);
+      });
+      await waitFor(() => expect(rendered.container.querySelectorAll('video')).toHaveLength(1));
+      expect(firstTile.querySelector('video')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_first');
+      expect(secondMedia).toHaveAttribute('data-video-preview-state', 'queued');
+      expect(thirdMedia).toHaveAttribute('data-video-preview-state', 'deferred');
+
+      // Chromium can report more than one threshold crossing together. The newest record wins, so
+      // a final leave retires the old lease and admits the already-waiting tile.
+      act(() => intersections.setIntersections(firstMedia, [true, false]));
+      await waitFor(() => {
+        expect(firstTile.querySelector('video')).toBeNull();
+        expect(secondTile.querySelector('video')).not.toBeNull();
+        expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+      });
+
+      act(() => intersections.setIntersections(firstMedia, [false, true]));
+      expect(firstMedia).toHaveAttribute('data-video-preview-state', 'queued');
+
+      // Separate leave/re-enter callbacks can still share one React batch. Their epochs must retire
+      // and requeue this tile instead of leaving an invisible active lease that wedges the gate.
+      act(() => {
+        intersections.setIntersecting(firstMedia, false);
+        intersections.setIntersecting(firstMedia, true);
+      });
+      await waitFor(() => {
+        expect(firstTile.querySelector('video')).toBeNull();
+        expect(secondTile.querySelector('video')).not.toBeNull();
+        expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+      });
+
+      const secondVideo = secondTile.querySelector('video')!;
+      Object.defineProperty(secondVideo, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(secondVideo, 'videoHeight', { configurable: true, value: 1080 });
+      fireEvent.loadedData(secondVideo);
+      await waitFor(() => {
+        expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+        expect(secondMedia).toHaveAttribute('data-video-preview-state', 'captured');
+        expect(secondTile.querySelector('video')).toBeNull();
+        expect(firstTile.querySelector('video')).not.toBeNull();
+        expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+      });
+
+      const firstVideo = firstTile.querySelector('video')!;
+      Object.defineProperty(firstVideo, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(firstVideo, 'videoHeight', { configurable: true, value: 1080 });
+      fireEvent.loadedData(firstVideo);
+      await waitFor(() => {
+        expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+        expect(firstTile.querySelector('video')).toBeNull();
+        expect(rendered.container.querySelectorAll('video')).toHaveLength(0);
+      });
+
+      act(() => intersections.setIntersecting(thirdMedia, true));
+      await waitFor(() => expect(thirdTile.querySelector('video')).not.toBeNull());
+      expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+    } finally {
+      restoreCanvas();
+    }
+  });
+
+  it('turns over a stalled Board probe so the next visible Shot cannot starve behind it', async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') }),
+            makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
+          ],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection)} />);
+      const firstTile = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"]')!;
+      const secondTile = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_2"]')!;
+      const stalledVideo = firstTile.querySelector('video')!;
+
+      expect(stalledVideo).not.toBeNull();
+      expect(secondTile.querySelector('video')).toBeNull();
+      expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+      });
+
+      expect(firstTile.querySelector('video')).toBeNull();
+      expect(firstTile.querySelector('[data-video-preview-state]')).toHaveAttribute(
+        'data-video-preview-state',
+        'queued'
+      );
+      expect(stalledVideo).not.toHaveAttribute('src');
+      expect(boardProbePause).toHaveBeenCalledTimes(1);
+      expect(boardProbeLoad).toHaveBeenCalledTimes(1);
+      expect(secondTile.querySelector('video')).not.toBeNull();
+      expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('accepts a slow valid Board video on its longer follow-up lease', async () => {
+    vi.useFakeTimers();
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      const actions = makeActions();
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') })],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection, actions)} />);
+      const media = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"] [data-media-kind="video"]')!;
+      const firstVideo = media.querySelector<HTMLVideoElement>('video')!;
+
+      await act(async () => {
+        vi.advanceTimersByTime(5_000);
+        await Promise.resolve();
+      });
+
+      const followUpVideo = media.querySelector<HTMLVideoElement>('video')!;
+      expect(followUpVideo).not.toBe(firstVideo);
+      expect(media).toHaveAttribute('data-video-preview-state', 'probing');
+      Object.defineProperties(followUpVideo, {
+        videoWidth: { configurable: true, value: 1920 },
+        videoHeight: { configurable: true, value: 1080 },
+      });
+      fireEvent.loadedData(followUpVideo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+      expect(media).toHaveAttribute('data-video-preview-state', 'captured');
+      expect(media.querySelector('video')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreCanvas();
+    }
+  });
+
+  it('stops retrying an unavailable Board video after three progressively longer leases', async () => {
+    vi.useFakeTimers();
+    try {
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') })],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection)} />);
+      const media = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"] [data-media-kind="video"]')!;
+
+      const expireLease = async (leaseMs: number): Promise<void> => {
+        expect(media.querySelector('video')).not.toBeNull();
+        await act(async () => {
+          vi.advanceTimersByTime(leaseMs);
+          await Promise.resolve();
+        });
+      };
+      await expireLease(5_000);
+      await expireLease(15_000);
+      await expireLease(30_000);
+
+      expect(media).toHaveAttribute('data-video-preview-state', 'unavailable');
+      expect(media.querySelector('video')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('can retry a frame capture after its visible probe is torn down before the frame callback', async () => {
+    restoreBoardIntersectionObserver();
+    const intersections = installBoardIntersectionObserver(null);
+    restoreBoardIntersectionObserver = intersections.restore;
+    const restoreCanvas = stubCanvasCapture({ blank: true });
+    try {
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') })],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection)} />);
+      const media = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"] [data-media-kind="video"]')!;
+
+      act(() => intersections.setIntersecting(media, true));
+      const firstVideo = await waitFor(() => {
+        const video = media.querySelector<HTMLVideoElement>('video');
+        if (video === null) throw new Error('First probe was not admitted');
+        return video;
+      });
+      const firstFrameRequest = vi.fn<NonNullable<HTMLVideoElement['requestVideoFrameCallback']>>(() => 1);
+      Object.defineProperties(firstVideo, {
+        videoWidth: { configurable: true, value: 1920 },
+        videoHeight: { configurable: true, value: 1080 },
+        requestVideoFrameCallback: { configurable: true, value: firstFrameRequest },
+      });
+      fireEvent.loadedData(firstVideo);
+      await waitFor(() => expect(firstFrameRequest).toHaveBeenCalledTimes(1));
+      const firstFrameCancel = vi.fn();
+      Object.defineProperty(firstVideo, 'cancelVideoFrameCallback', {
+        configurable: true,
+        value: firstFrameCancel,
+      });
+
+      act(() => intersections.setIntersecting(media, false));
+      expect(firstVideo).not.toHaveAttribute('src');
+      expect(firstFrameCancel).toHaveBeenCalledWith(1);
+      act(() => intersections.setIntersecting(media, true));
+      const secondVideo = await waitFor(() => {
+        const video = media.querySelector<HTMLVideoElement>('video');
+        if (video === null || video === firstVideo) throw new Error('Fresh probe was not admitted');
+        return video;
+      });
+      const secondFrameRequest = vi.fn<NonNullable<HTMLVideoElement['requestVideoFrameCallback']>>(() => 2);
+      Object.defineProperties(secondVideo, {
+        videoWidth: { configurable: true, value: 1920 },
+        videoHeight: { configurable: true, value: 1080 },
+        requestVideoFrameCallback: { configurable: true, value: secondFrameRequest },
+      });
+      fireEvent.loadedData(secondVideo);
+
+      await waitFor(() => expect(secondFrameRequest).toHaveBeenCalledTimes(1));
+    } finally {
+      restoreCanvas();
+    }
+  });
+
+  it('does not let a detached probe failure retire a fresh probe for the same video', async () => {
+    restoreBoardIntersectionObserver();
+    const intersections = installBoardIntersectionObserver(null);
+    restoreBoardIntersectionObserver = intersections.restore;
+    vi.useFakeTimers();
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      let settleRetryPersistence: ((persisted: boolean) => void) | null = null;
+      const retryPersistence = new Promise<boolean>((settle) => {
+        settleRetryPersistence = settle;
+      });
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockResolvedValueOnce(false).mockReturnValueOnce(retryPersistence);
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') })],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection, actions)} />);
+      const media = rendered.container.querySelector<HTMLElement>('[data-shot-id="shot_1"] [data-media-kind="video"]')!;
+
+      act(() => intersections.setIntersecting(media, true));
+      const firstVideo = media.querySelector<HTMLVideoElement>('video')!;
+      Object.defineProperties(firstVideo, {
+        videoWidth: { configurable: true, value: 1920 },
+        videoHeight: { configurable: true, value: 1080 },
+        requestVideoFrameCallback: { configurable: true, value: undefined },
+      });
+      fireEvent.loadedData(firstVideo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+
+      act(() => intersections.setIntersecting(media, false));
+      expect(firstVideo).not.toHaveAttribute('src');
+      act(() => intersections.setIntersecting(media, true));
+      const freshVideo = media.querySelector<HTMLVideoElement>('video')!;
+      expect(freshVideo).not.toBe(firstVideo);
+
+      await act(async () => {
+        settleRetryPersistence?.(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(media).toHaveAttribute('data-video-preview-state', 'probing');
+      expect(media.querySelector('video')).toBe(freshVideo);
+    } finally {
+      vi.useRealTimers();
+      restoreCanvas();
+    }
+  });
+
+  it('tears down Board probes while a foreground Beat is open and resumes after it closes', async () => {
+    const actions = makeActions();
+    const projection = makeProjection([
+      makeBeat('beat_1', {
+        shots: [
+          makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') }),
+          makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
+        ],
+      }),
+    ]);
+    const rendered = render(<BoardView {...boardProps(projection, actions)} />);
+    const activeProbe = rendered.container.querySelector('video')!;
+    expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+
+    rendered.rerender(<BoardView {...boardProps(projection, actions)} previewSuspended />);
+    expect(rendered.container.querySelectorAll('video')).toHaveLength(0);
+    expect(activeProbe).not.toHaveAttribute('src');
+    expect(boardProbePause).toHaveBeenCalledTimes(1);
+    expect(boardProbeLoad).toHaveBeenCalledTimes(1);
+
+    rendered.rerender(<BoardView {...boardProps(projection, actions)} previewSuspended={false} />);
+    await waitFor(() => expect(rendered.container.querySelectorAll('video')).toHaveLength(1));
+  });
+
+  it('reuses an in-flight persistence result when a visible Shot probe is remounted', async () => {
+    restoreBoardIntersectionObserver();
+    const intersections = installBoardIntersectionObserver(null);
+    restoreBoardIntersectionObserver = intersections.restore;
+    vi.useFakeTimers();
+    const restoreCanvas = stubCanvasCapture();
+    try {
+      let settleFirstPersistence: ((persisted: boolean) => void) | null = null;
+      const firstPersistence = new Promise<boolean>((settle) => {
+        settleFirstPersistence = settle;
+      });
+      const actions = makeActions();
+      actions.persistCapturedPoster.mockReset().mockReturnValueOnce(firstPersistence).mockResolvedValueOnce(true);
+      const projection = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', { currentPicture: posterlessCurrentPicture('video_first') }),
+            makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
+          ],
+        }),
+      ]);
+      const rendered = render(<BoardView {...boardProps(projection, actions)} />);
+      const firstMedia = rendered.container.querySelector<HTMLElement>(
+        '[data-shot-id="shot_1"] [data-media-kind="video"]'
+      )!;
+      const secondMedia = rendered.container.querySelector<HTMLElement>(
+        '[data-shot-id="shot_2"] [data-media-kind="video"]'
+      )!;
+
+      act(() => {
+        intersections.setIntersecting(firstMedia, true);
+        intersections.setIntersecting(secondMedia, true);
+      });
+      const originalVideo = firstMedia.querySelector('video')!;
+      Object.defineProperty(originalVideo, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(originalVideo, 'videoHeight', { configurable: true, value: 1080 });
+      fireEvent.loadedData(originalVideo);
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+
+      act(() => intersections.setIntersecting(firstMedia, false));
+      expect(originalVideo).not.toHaveAttribute('src');
+      expect(secondMedia.querySelector('video')).not.toBeNull();
+      act(() => {
+        intersections.setIntersecting(firstMedia, true);
+        intersections.setIntersecting(secondMedia, false);
+      });
+      const remountedVideo = firstMedia.querySelector('video')!;
+      expect(remountedVideo).not.toBe(originalVideo);
+      Object.defineProperty(remountedVideo, 'videoWidth', { configurable: true, value: 1920 });
+      Object.defineProperty(remountedVideo, 'videoHeight', { configurable: true, value: 1080 });
+      Object.defineProperty(remountedVideo, 'requestVideoFrameCallback', { configurable: true, value: undefined });
+      fireEvent.loadedData(remountedVideo);
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1);
+
+      await act(async () => {
+        settleFirstPersistence?.(false);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(250);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+
+      expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(2);
+      expect(firstMedia).toHaveAttribute('data-video-preview-state', 'captured');
+      expect(firstMedia.querySelector('video')).toBeNull();
+    } finally {
+      vi.useRealTimers();
+      restoreCanvas();
+    }
+  });
+
   it('captures a poster the first time the Board decodes a Shot video, and only once', async () => {
     // BUG-166: a Shot only gained a poster when someone opened its Beat panel, so the Board — the
     // one surface that shows every Shot at once — had none to show for any Shot nobody had opened.
@@ -1403,12 +1931,13 @@ describe('BoardView', () => {
                 firstFrameChanged: false,
               },
             }),
+            makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
           ],
         }),
       ]);
-      render(<BoardView {...boardProps(projection)} actions={actions} />);
+      const rendered = render(<BoardView {...boardProps(projection)} actions={actions} />);
 
-      const video = screen.getByLabelText('Current Shot video') as HTMLVideoElement;
+      const video = rendered.container.querySelector<HTMLVideoElement>('[data-shot-id="shot_1"] video')!;
       Object.defineProperty(video, 'videoWidth', { configurable: true, value: 1920 });
       Object.defineProperty(video, 'videoHeight', { configurable: true, value: 1080 });
 
@@ -1426,6 +1955,34 @@ describe('BoardView', () => {
       // A tile can fire loadedData repeatedly; the capture must not be paid for twice.
       fireEvent.loadedData(video);
       await waitFor(() => expect(actions.persistCapturedPoster).toHaveBeenCalledTimes(1));
+
+      const withAuthoritativePoster = makeProjection([
+        makeBeat('beat_1', {
+          shots: [
+            makeShot('shot_1', {
+              currentPicture: {
+                ...posterlessCurrentPicture('video_first'),
+                posterAssetId: 'poster_first',
+              },
+            }),
+            makeShot('shot_2', { currentPicture: posterlessCurrentPicture('video_second') }),
+          ],
+        }),
+      ]);
+      rendered.rerender(<BoardView {...boardProps(withAuthoritativePoster, actions)} />);
+      expect(rendered.container.querySelector('[data-shot-id="shot_1"] img')).toHaveAttribute(
+        'src',
+        'weprompt-studio://asset/project_1/poster_first'
+      );
+
+      // The full PNG data URL must not survive the authoritative media transition. If the same
+      // posterless video returns, it must queue behind Shot 2 rather than reuse a stale grant.
+      rendered.rerender(<BoardView {...boardProps(projection, actions)} />);
+      await waitFor(() => {
+        expect(rendered.container.querySelector('[data-shot-id="shot_1"] video')).toBeNull();
+        expect(rendered.container.querySelector('[data-shot-id="shot_2"] video')).not.toBeNull();
+        expect(rendered.container.querySelectorAll('video')).toHaveLength(1);
+      });
     } finally {
       restoreCanvas();
     }

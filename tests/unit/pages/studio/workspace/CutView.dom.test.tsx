@@ -1067,7 +1067,7 @@ describe('the truthful Cut player and transport', () => {
     expect(screen.getByRole('status')).toHaveTextContent('This preview could not be loaded.');
   });
 
-  it.each(['plan', 'project', 'revision', 'order', 'pending'] as const)(
+  it.each(['plan', 'project', 'order'] as const)(
     'drops the prewarm on a %s change and ignores detached prewarm events',
     async (change) => {
       const media = mockMedia();
@@ -1089,12 +1089,10 @@ describe('the truthful Cut player and transport', () => {
       } else if (change === 'project') {
         nextProjectId = 'project_2';
         nextProjection = { ...nextProjection, projectId: nextProjectId };
-      } else if (change === 'revision') {
-        nextProjection = { ...nextProjection, projectRevision: nextProjection.projectRevision + 1 };
       } else if (change === 'order') {
         nextProjection = slateFirstProjection();
       }
-      view.rerender(<CutPlayer pending={change === 'pending'} projectId={nextProjectId} projection={nextProjection} />);
+      view.rerender(<CutPlayer pending={false} projectId={nextProjectId} projection={nextProjection} />);
 
       expect(document.querySelector('[data-cut-prewarm-media]')).toBeNull();
       expect(stalePrewarm).not.toHaveAttribute('src');
@@ -1111,6 +1109,192 @@ describe('the truthful Cut player and transport', () => {
       expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
     }
   );
+
+  it('preserves live media and prewarm through revision and poster-only refreshes', async () => {
+    const media = mockMedia();
+    const current = playableProjection();
+    const view = renderCutPlayer(current);
+    const video = mediaElement();
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(video);
+    setMediaNumber(video, 'currentTime', 4);
+    fireEvent.timeUpdate(video);
+    const prewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    const videoPauseCount = media.pause.mock.contexts.filter((context) => context === video).length;
+
+    const revised = structuredClone(current);
+    revised.projectRevision += 1;
+    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={revised} />);
+
+    expect(mediaElement()).toBe(video);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(prewarm);
+    expect(screen.getByText('0:03 / 0:23')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toHaveAttribute('aria-pressed', 'true');
+    expect(media.pause.mock.contexts.filter((context) => context === video)).toHaveLength(videoPauseCount);
+
+    const refreshed = structuredClone(revised);
+    refreshed.activeBeats[0]!.shots[0]!.currentPicture!.posterAssetId = 'take_1_poster_refreshed';
+    refreshed.activeBeats[0]!.title = 'Refreshed opening';
+    refreshed.cut.beats[0]!.title = 'Refreshed opening';
+    refreshed.activeBeats[0]!.shots[0]!.shootingScript = 'Refreshed opening picture';
+    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={refreshed} />);
+
+    expect(mediaElement()).toBe(video);
+    expect(video).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/take_1_poster_refreshed');
+    expect(video).toHaveAccessibleName('Beat 01 · Refreshed opening · Shot 01 · Refreshed opening picture');
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(prewarm);
+    expect(screen.getByText('0:03 / 0:23')).toBeVisible();
+    setMediaNumber(video, 'currentTime', 5);
+    fireEvent.timeUpdate(video);
+    expect(screen.getByText('0:04 / 0:23')).toBeVisible();
+  });
+
+  it('keeps a playing slate clock continuous through faster metadata refreshes', () => {
+    vi.useFakeTimers();
+    mockMedia();
+    const current = slateFirstProjection();
+    const view = renderCutPlayer(current);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+
+    for (let refresh = 1; refresh <= 20; refresh += 1) {
+      act(() => vi.advanceTimersByTime(50));
+      const refreshed = structuredClone(current);
+      refreshed.projectRevision += refresh;
+      refreshed.activeBeats[0]!.title = `Refreshed slate ${String(refresh)}`;
+      refreshed.cut.beats[0]!.title = `Refreshed slate ${String(refresh)}`;
+      view.rerender(<CutPlayer pending={false} projectId='project_1' projection={refreshed} />);
+    }
+
+    expect(screen.getByText('0:01 / 0:23')).toBeVisible();
+    expect(screen.getByText('Beat 01 · Refreshed slate 20')).toBeVisible();
+  });
+
+  it('uses pending as an interaction gate without discarding loaded media or position', async () => {
+    const media = mockMedia();
+    const player = React.createRef<CutPlayerHandle>();
+    const current = playableProjection();
+    const view = render(<CutPlayer ref={player} pending={false} projectId='project_1' projection={current} />);
+    const video = mediaElement();
+    setMediaNumber(video, 'duration', 10);
+    fireEvent.loadedMetadata(video);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(video);
+    setMediaNumber(video, 'currentTime', 4);
+    fireEvent.timeUpdate(video);
+    const prewarm = document.querySelector<HTMLVideoElement>('[data-cut-prewarm-media]')!;
+    const videoPauseCount = media.pause.mock.contexts.filter((context) => context === video).length;
+
+    view.rerender(<CutPlayer ref={player} pending projectId='project_1' projection={current} />);
+
+    expect(mediaElement()).toBe(video);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(prewarm);
+    expect(screen.getByText('0:03 / 0:23')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toBeDisabled();
+    expect(media.pause.mock.contexts.filter((context) => context === video)).toHaveLength(videoPauseCount);
+
+    act(() => {
+      player.current?.seek(12);
+      player.current?.togglePlayback();
+      player.current?.toggleJoinLoop();
+    });
+    expect(screen.getByText('0:03 / 0:23')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toHaveAttribute('aria-pressed', 'true');
+
+    view.rerender(<CutPlayer ref={player} pending={false} projectId='project_1' projection={current} />);
+    expect(mediaElement()).toBe(video);
+    expect(document.querySelector('[data-cut-prewarm-media]')).toBe(prewarm);
+    expect(screen.getByRole('button', { name: 'Pause film' })).not.toBeDisabled();
+  });
+
+  it('keeps a playing slate clock moving while pending disables user commands', () => {
+    vi.useFakeTimers();
+    mockMedia();
+    const current = slateFirstProjection();
+    const view = renderCutPlayer(current);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    act(() => vi.advanceTimersByTime(2_000));
+    expect(screen.getByText('0:02 / 0:23')).toBeVisible();
+
+    view.rerender(<CutPlayer pending projectId='project_1' projection={current} />);
+    act(() => vi.advanceTimersByTime(2_000));
+
+    expect(screen.getByText('0:04 / 0:23')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toBeDisabled();
+  });
+
+  it('keeps an active video loop running across its boundary while user commands are pending', async () => {
+    const media = mockMedia();
+    const firstBeat = playbackBeat('beat_a', 'A', [playbackShot('shot_a', 'take_a', 10, null, null)]);
+    const secondBeat = playbackBeat('beat_b', 'B', [playbackShot('shot_b', 'take_b', 10, null, null)]);
+    const current = {
+      ...projection(
+        cut({
+          beats: [
+            {
+              id: firstBeat.id,
+              title: firstBeat.title,
+              shotCount: 1,
+              durationKind: 'actual' as const,
+              durationSeconds: 10,
+              coverAssetId: firstBeat.coverAssetId,
+            },
+            {
+              id: secondBeat.id,
+              title: secondBeat.title,
+              shotCount: 1,
+              durationKind: 'actual' as const,
+              durationSeconds: 10,
+              coverAssetId: secondBeat.coverAssetId,
+            },
+          ],
+          filmDurationSeconds: 20,
+          coverCandidates: [],
+        }),
+        [firstBeat, secondBeat]
+      ),
+      activeBeatIds: [firstBeat.id, secondBeat.id],
+      activeShotIds: ['shot_a', 'shot_b'],
+    };
+    const player = React.createRef<CutPlayerHandle>();
+    const view = render(<CutPlayer ref={player} pending={false} projectId='project_1' projection={current} />);
+
+    act(() => player.current?.toggleJoinLoop());
+    const firstVideo = mediaElement();
+    setMediaNumber(firstVideo, 'currentTime', 0);
+    setMediaNumber(firstVideo, 'duration', 10);
+    fireEvent.loadedMetadata(firstVideo);
+    fireEvent.seeked(firstVideo);
+    fireEvent.click(screen.getByRole('button', { name: 'Play film' }));
+    await act(async () => Promise.resolve());
+    fireEvent.playing(firstVideo);
+    setMediaNumber(firstVideo, 'currentTime', 10);
+    fireEvent.timeUpdate(firstVideo);
+
+    const secondVideo = mediaElement();
+    expect(secondVideo).not.toBe(firstVideo);
+    setMediaNumber(secondVideo, 'currentTime', 0);
+    setMediaNumber(secondVideo, 'duration', 10);
+    fireEvent.loadedMetadata(secondVideo);
+    fireEvent.seeked(secondVideo);
+    await act(async () => Promise.resolve());
+    fireEvent.playing(secondVideo);
+    view.rerender(<CutPlayer ref={player} pending projectId='project_1' projection={current} />);
+
+    setMediaNumber(secondVideo, 'currentTime', 2);
+    fireEvent.timeUpdate(secondVideo);
+
+    const loopedVideo = mediaElement();
+    expect(loopedVideo).not.toBe(secondVideo);
+    expect(loopedVideo).toHaveAttribute('src', 'weprompt-studio://asset/project_1/take_a');
+    expect(screen.getByText('0:08 / 0:20')).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Pause film' })).toBeDisabled();
+    expect(media.pause.mock.contexts).toContain(secondVideo);
+  });
 
   it('waits for an exact asynchronous trim-in seek before playing a pre-metadata Play request', async () => {
     const media = mockMedia();
@@ -1561,7 +1745,7 @@ describe('the truthful Cut player and transport', () => {
     }
   );
 
-  it('resets and pauses for pending work, project mismatch, revision change, or order change and ignores stale events', async () => {
+  it('resets and pauses for a project mismatch and ignores stale events', async () => {
     const media = mockMedia();
     const current = playableProjection();
     const view = renderCutPlayer(current);
@@ -1575,31 +1759,19 @@ describe('the truthful Cut player and transport', () => {
     fireEvent.timeUpdate(staleVideo);
     expect(screen.getByText('0:03 / 0:23')).toBeVisible();
 
-    view.rerender(<CutPlayer pending projectId='project_1' projection={current} />);
-    expect(media.pause).toHaveBeenCalled();
-    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Play film' })).toBeDisabled();
-    fireEvent.timeUpdate(staleVideo);
-    fireEvent.ended(staleVideo);
-    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
-
     view.rerender(<CutPlayer pending={false} projectId='different_project' projection={current} />);
+    expect(media.pause.mock.contexts).toContain(staleVideo);
     const unavailable = screen.getByText('No film preview is available.');
     expect(unavailable).toBeVisible();
     const disabledPlay = screen.getByRole('button', { name: 'Play film' });
     expect(disabledPlay).toBeDisabled();
     fireEvent.click(disabledPlay);
     expect(media.play).toHaveBeenCalledTimes(1);
-
-    const revised = structuredClone(current);
-    revised.projectRevision += 1;
-    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={revised} />);
-    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
-    const reordered = slateFirstProjection();
-    reordered.projectRevision = revised.projectRevision;
-    view.rerender(<CutPlayer pending={false} projectId='project_1' projection={reordered} />);
-    expect(screen.getByText('0:00 / 0:23')).toBeVisible();
-    expect(document.querySelector('[data-media-kind="slate"]')).not.toBeNull();
+    fireEvent.timeUpdate(staleVideo);
+    fireEvent.ended(staleVideo);
+    fireEvent.error(staleVideo);
+    expect(screen.getByText('No film preview is available.')).toBeVisible();
+    expect(screen.getByRole('status')).not.toHaveTextContent('This preview could not be loaded.');
   });
 
   it('integrates a 2:1 preview-first hero whose transport and summary remain semantic siblings', () => {

@@ -5,7 +5,7 @@
  */
 
 import { Button, Popconfirm } from '@arco-design/web-react';
-import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -92,6 +92,70 @@ const PANEL_STATUS_KEYS = {
 
 const DRAWABLE_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['idle', 'failed', 'cancelled']);
 const BUSY_BOARD_ACTIVITIES = new Set<WorkspaceBoardPanelProjection['activity']>(['queued', 'drawing']);
+const MAX_CONCURRENT_BOARD_VIDEO_PROBES = 1;
+const BOARD_VIDEO_PROBE_LEASE_WINDOWS_MS = [5_000, 15_000, 30_000] as const;
+
+type BoardVideoProbeQueueEntry = {
+  grant: () => void;
+  state: 'queued' | 'active' | 'released';
+};
+
+/**
+ * A Board can expose many rendered Shots in one viewport. Loading every posterless video together
+ * competes with the video the owner is actually watching in the Beat panel, so Board probes pass
+ * through one small per-Board gate. Releasing a queued lease removes it without ever touching the
+ * network; releasing an active lease immediately admits the next still-visible tile.
+ */
+class BoardVideoProbeScheduler {
+  private active = 0;
+  private readonly queue: BoardVideoProbeQueueEntry[] = [];
+
+  acquire(grant: () => void): () => void {
+    const entry: BoardVideoProbeQueueEntry = { grant, state: 'queued' };
+    this.queue.push(entry);
+    this.drain();
+    return () => {
+      if (entry.state === 'released') return;
+      if (entry.state === 'active') this.active -= 1;
+      else {
+        const queuedIndex = this.queue.indexOf(entry);
+        if (queuedIndex >= 0) this.queue.splice(queuedIndex, 1);
+      }
+      entry.state = 'released';
+      this.drain();
+    };
+  }
+
+  private drain(): void {
+    while (this.active < MAX_CONCURRENT_BOARD_VIDEO_PROBES) {
+      const entry = this.queue.shift();
+      if (entry === undefined) return;
+      if (entry.state !== 'queued') continue;
+      entry.state = 'active';
+      this.active += 1;
+      try {
+        entry.grant();
+      } catch {
+        entry.state = 'released';
+        this.active -= 1;
+      }
+    }
+  }
+}
+
+const tearDownBoardVideoProbe = (video: HTMLVideoElement): void => {
+  try {
+    video.pause();
+  } catch {
+    // A detached or failed media element can reject control calls; src removal still releases it.
+  }
+  video.removeAttribute('src');
+  try {
+    video.load();
+  } catch {
+    // Best effort: removing src is still safer than admitting the next probe with it attached.
+  }
+};
 
 const isDrawableBoardPanel = (panel: WorkspaceBoardPanelProjection): boolean =>
   DRAWABLE_BOARD_ACTIVITIES.has(panel.activity) &&
@@ -156,6 +220,7 @@ export type BoardViewProps = {
   projection: WorkspaceProjection;
   projectStatus: StudioProjectStatusV2 | null;
   projectStatusPending: boolean;
+  previewSuspended: boolean;
   selectedBeatId: string | null;
   pending: boolean;
   gateLocked: boolean;
@@ -170,8 +235,10 @@ export type BoardViewProps = {
 
 type ShotMediaProps = {
   media: BoardShotTileMedia;
+  previewSuspended: boolean;
   projectId: string;
   shotId: string;
+  videoProbeScheduler: BoardVideoProbeScheduler;
   onPosterCaptured: (input: {
     shotId: string;
     videoAssetId: string;
@@ -181,15 +248,145 @@ type ShotMediaProps = {
   }) => Promise<boolean>;
 };
 
-const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPosterCaptured }) => {
+const ShotMedia: React.FC<ShotMediaProps> = ({
+  media,
+  previewSuspended,
+  projectId,
+  shotId,
+  videoProbeScheduler,
+  onPosterCaptured,
+}) => {
   const { t } = useTranslation();
   const assetUrl = media === null ? null : createManagedStudioAssetUrl(projectId, media.assetId);
+  const videoProbeKey = media?.kind === 'video' ? `${projectId}:${shotId}:${media.assetId}` : null;
   const [failedUrl, setFailedUrl] = useState<string | null>(null);
-  const capturedRef = useRef(new Set<string>());
+  const [visibility, setVisibility] = useState(() => ({
+    intersecting: typeof window === 'undefined' || typeof window.IntersectionObserver !== 'function',
+    epoch: 0,
+  }));
+  const [probeAttemptState, setProbeAttemptState] = useState<{ attempt: number; key: string | null }>(() => ({
+    attempt: 0,
+    key: videoProbeKey,
+  }));
+  const [grantedProbeRequestKey, setGrantedProbeRequestKey] = useState<string | null>(null);
+  const [finishedProbeKey, setFinishedProbeKey] = useState<string | null>(null);
+  const [localPoster, setLocalPoster] = useState<{ key: string; url: string } | null>(null);
+  const mediaRef = useRef<HTMLDivElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const captureAttemptsRef = useRef(new Map<string, Promise<StudioPosterCaptureResult>>());
   const captureRetriesRef = useRef(new Set<string>());
+  const captureRetryCancelByVideoRef = useRef(new WeakMap<HTMLVideoElement, () => void>());
+  const captureRetryKeyByVideoRef = useRef(new WeakMap<HTMLVideoElement, string>());
+  const nextVideoProbeInstanceRef = useRef(0);
   const showMedia = media !== null && assetUrl !== null && failedUrl !== assetUrl;
+  const probeAttempt = probeAttemptState.key === videoProbeKey ? probeAttemptState.attempt : 0;
+  const videoProbeRequestKey = videoProbeKey === null ? null : `${videoProbeKey}:${visibility.epoch}:${probeAttempt}`;
+  const localPosterUrl = videoProbeKey !== null && localPoster?.key === videoProbeKey ? localPoster.url : null;
+  const currentVideoProbeKeyRef = useRef(videoProbeKey);
+  currentVideoProbeKeyRef.current = videoProbeKey;
+  const currentVideoProbeRequestKeyRef = useRef(videoProbeRequestKey);
+  currentVideoProbeRequestKeyRef.current = videoProbeRequestKey;
+  const wantsVideoProbe =
+    showMedia &&
+    media?.kind === 'video' &&
+    !previewSuspended &&
+    visibility.intersecting &&
+    localPosterUrl === null &&
+    finishedProbeKey !== videoProbeKey;
+  const showVideoProbe = wantsVideoProbe && grantedProbeRequestKey === videoProbeRequestKey;
+  const setVideoProbeRef = useCallback((video: HTMLVideoElement | null) => {
+    const previous = videoRef.current;
+    if (video === null && previous !== null) {
+      captureRetryCancelByVideoRef.current.get(previous)?.();
+      captureRetryCancelByVideoRef.current.delete(previous);
+      const retryKey = captureRetryKeyByVideoRef.current.get(previous);
+      if (retryKey !== undefined) captureRetriesRef.current.delete(retryKey);
+      captureRetryKeyByVideoRef.current.delete(previous);
+      tearDownBoardVideoProbe(previous);
+    }
+    videoRef.current = video;
+    if (video !== null) {
+      nextVideoProbeInstanceRef.current += 1;
+      captureRetryKeyByVideoRef.current.set(
+        video,
+        `${currentVideoProbeKeyRef.current ?? 'video'}:${nextVideoProbeInstanceRef.current}`
+      );
+    }
+  }, []);
 
   useEffect(() => setFailedUrl(null), [assetUrl]);
+
+  useEffect(() => {
+    setLocalPoster((current) => (current === null || current.key === videoProbeKey ? current : null));
+    setFinishedProbeKey((current) => (current === null || current === videoProbeKey ? current : null));
+    setProbeAttemptState((current) => (current.key === videoProbeKey ? current : { attempt: 0, key: videoProbeKey }));
+  }, [videoProbeKey]);
+
+  useEffect(() => {
+    if (previewSuspended) {
+      setGrantedProbeRequestKey(null);
+      setProbeAttemptState((current) => (current.attempt === 0 ? current : { ...current, attempt: 0 }));
+    }
+  }, [previewSuspended]);
+
+  useEffect(() => {
+    if (media?.kind !== 'video') return;
+    const element = mediaRef.current;
+    if (element === null) return;
+    if (typeof window.IntersectionObserver !== 'function') {
+      setVisibility((current) => (current.intersecting ? current : { intersecting: true, epoch: current.epoch + 1 }));
+      return;
+    }
+    setVisibility((current) => (current.intersecting ? { intersecting: false, epoch: current.epoch + 1 } : current));
+    const observer = new window.IntersectionObserver(
+      (entries) => {
+        const entry = entries.at(-1);
+        const nextIntersecting = entry?.isIntersecting === true;
+        if (!nextIntersecting) {
+          setFinishedProbeKey((current) => (current === videoProbeKey ? null : current));
+          setProbeAttemptState((current) =>
+            current.key === videoProbeKey && current.attempt !== 0 ? { ...current, attempt: 0 } : current
+          );
+        }
+        setVisibility((current) =>
+          current.intersecting === nextIntersecting
+            ? current
+            : { intersecting: nextIntersecting, epoch: current.epoch + 1 }
+        );
+      },
+      { threshold: 0.01 }
+    );
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [media?.kind, videoProbeKey]);
+
+  useEffect(() => {
+    if (!wantsVideoProbe || videoProbeRequestKey === null) return;
+    let watchdog: number | null = null;
+    const release = videoProbeScheduler.acquire(() => {
+      setGrantedProbeRequestKey(videoProbeRequestKey);
+      watchdog = window.setTimeout(
+        () => {
+          if (currentVideoProbeRequestKeyRef.current !== videoProbeRequestKey) return;
+          if (probeAttempt + 1 < BOARD_VIDEO_PROBE_LEASE_WINDOWS_MS.length) {
+            setProbeAttemptState((current) =>
+              current.key === videoProbeKey && current.attempt === probeAttempt
+                ? { ...current, attempt: probeAttempt + 1 }
+                : current
+            );
+            return;
+          }
+          setFinishedProbeKey(videoProbeKey);
+        },
+        BOARD_VIDEO_PROBE_LEASE_WINDOWS_MS[probeAttempt] ?? BOARD_VIDEO_PROBE_LEASE_WINDOWS_MS.at(-1)
+      );
+    });
+    return () => {
+      if (watchdog !== null) window.clearTimeout(watchdog);
+      setGrantedProbeRequestKey((current) => (current === videoProbeRequestKey ? null : current));
+      release();
+    };
+  }, [probeAttempt, videoProbeKey, videoProbeRequestKey, videoProbeScheduler, wantsVideoProbe]);
 
   /*
    * The Board is a monitor: it shows every Shot at once, and a poster only ever existed for a Shot
@@ -200,13 +397,24 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
   const capturePoster = async (video: HTMLVideoElement): Promise<StudioPosterCaptureResult> => {
     if (media === null || media.kind !== 'video') return 'settled';
     const captureKey = `${projectId}:${shotId}:${media.assetId}`;
-    if (capturedRef.current.has(captureKey)) return 'settled';
+    const activeAttempt = captureAttemptsRef.current.get(captureKey);
+    if (activeAttempt !== undefined) return activeAttempt;
     const captured = captureStudioVideoPoster(video);
     if (captured === null) return 'frame_unavailable';
-    capturedRef.current.add(captureKey);
-    const persisted = await onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured }).catch(() => false);
-    if (!persisted) capturedRef.current.delete(captureKey);
-    return persisted ? 'settled' : 'persistence_failed';
+    const attempt = Promise.resolve()
+      .then(() => onPosterCaptured({ shotId, videoAssetId: media.assetId, ...captured }))
+      .then((persisted): StudioPosterCaptureResult => {
+        if (persisted && currentVideoProbeKeyRef.current === captureKey && mediaRef.current !== null) {
+          setLocalPoster({ key: captureKey, url: captured.dataUrl });
+        }
+        return persisted ? 'settled' : 'persistence_failed';
+      })
+      .catch((): StudioPosterCaptureResult => 'persistence_failed');
+    captureAttemptsRef.current.set(captureKey, attempt);
+    void attempt.then(() => {
+      if (captureAttemptsRef.current.get(captureKey) === attempt) captureAttemptsRef.current.delete(captureKey);
+    });
+    return attempt;
   };
 
   const scheduleCapture = (video: HTMLVideoElement): void => {
@@ -214,16 +422,49 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
       if (result === 'settled') return;
       if (media === null || media.kind !== 'video') return;
       const captureKey = `${projectId}:${shotId}:${media.assetId}`;
-      scheduleStudioPosterCaptureRetry(video, captureKey, captureRetriesRef.current, result, () =>
-        capturePoster(video)
-      );
+      const retryKey = captureRetryKeyByVideoRef.current.get(video);
+      if (retryKey === undefined) return;
+      let retryCount = 0;
+      const cancel = scheduleStudioPosterCaptureRetry(video, retryKey, captureRetriesRef.current, result, async () => {
+        const retryResult = await capturePoster(video);
+        retryCount += 1;
+        const helperWillRetryPersistence =
+          result === 'frame_unavailable' && retryCount === 1 && retryResult === 'persistence_failed';
+        const stillCurrentProbe =
+          videoRef.current === video && captureRetryKeyByVideoRef.current.get(video) === retryKey;
+        if (retryResult !== 'settled' && !helperWillRetryPersistence && stillCurrentProbe) {
+          setFinishedProbeKey(captureKey);
+        }
+        return retryResult;
+      });
+      if (cancel !== null) captureRetryCancelByVideoRef.current.set(video, cancel);
     });
   };
 
   return (
-    <div className={styles.shotMedia} data-media-kind={showMedia ? media.kind : 'unavailable'}>
-      {showMedia && media.kind === 'video' ? (
+    <div
+      ref={mediaRef}
+      className={styles.shotMedia}
+      data-media-kind={showMedia ? media.kind : 'unavailable'}
+      data-video-preview-state={
+        media?.kind !== 'video'
+          ? undefined
+          : localPosterUrl !== null
+            ? 'captured'
+            : !showMedia || finishedProbeKey === videoProbeKey
+              ? 'unavailable'
+              : showVideoProbe
+                ? 'probing'
+                : visibility.intersecting
+                  ? 'queued'
+                  : 'deferred'
+      }
+    >
+      {localPosterUrl !== null ? (
+        <img alt='' className={styles.shotMediaAsset} src={localPosterUrl} />
+      ) : showVideoProbe ? (
         <video
+          ref={setVideoProbeRef}
           aria-label={t(`${KEY_ROOT}.shot.videoPreview`)}
           className={styles.shotMediaAsset}
           muted
@@ -233,6 +474,10 @@ const ShotMedia: React.FC<ShotMediaProps> = ({ media, projectId, shotId, onPoste
           preload='metadata'
           src={assetUrl}
         />
+      ) : showMedia && media.kind === 'video' ? (
+        <span aria-label={t(`${KEY_ROOT}.shot.videoPreview`)} className={styles.coverPlaceholder} role='img'>
+          {t(`${KEY_ROOT}.shot.videoPreview`)}
+        </span>
       ) : showMedia ? (
         <img
           alt=''
@@ -374,9 +619,11 @@ type ShotTileProps = {
   generationLocked: boolean;
   interactionLocked: boolean;
   panel: WorkspaceBoardPanelProjection;
+  previewSuspended: boolean;
   projectId: string;
   shot: BoardShotTile;
   statusPending: boolean;
+  videoProbeScheduler: BoardVideoProbeScheduler;
   onReviewReferenceBinding: (shotId: string) => void;
 };
 
@@ -385,9 +632,11 @@ const ShotTile: React.FC<ShotTileProps> = ({
   generationLocked,
   interactionLocked,
   panel,
+  previewSuspended,
   projectId,
   shot,
   statusPending,
+  videoProbeScheduler,
   onReviewReferenceBinding,
 }) => {
   const { t } = useTranslation();
@@ -415,8 +664,10 @@ const ShotTile: React.FC<ShotTileProps> = ({
       <ShotMedia
         media={shot.media}
         onPosterCaptured={actions.persistCapturedPoster}
+        previewSuspended={previewSuspended}
         projectId={projectId}
         shotId={shot.shotId}
+        videoProbeScheduler={videoProbeScheduler}
       />
       <div
         ref={panelCardRef}
@@ -568,6 +819,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
   projection,
   projectStatus,
   projectStatusPending,
+  previewSuspended,
   selectedBeatId,
   pending,
   gateLocked,
@@ -582,6 +834,7 @@ export const BoardView: React.FC<BoardViewProps> = ({
   const { t } = useTranslation();
   const [localFocusItemKey, setLocalFocusItemKey] = useState<string | null>(null);
   const [restoreFocusIntent, setRestoreFocusIntent] = useState<{ projectId: string; beatId: string } | null>(null);
+  const [videoProbeScheduler] = useState(() => new BoardVideoProbeScheduler());
   const titleRefs = useRef(new Map<string, HTMLButtonElement>());
   const tileBoard = useMemo(
     () => (projectId === projection.projectId ? deriveBoardShotTiles(projection, projectStatus) : null),
@@ -852,9 +1105,11 @@ export const BoardView: React.FC<BoardViewProps> = ({
                         interactionLocked={interactionLocked}
                         onReviewReferenceBinding={onReviewReferenceBinding}
                         panel={panelByShotId.get(shot.shotId) ?? statusPendingPanel(shot.shotId)}
+                        previewSuspended={previewSuspended}
                         projectId={managedProjectId}
                         shot={shot}
                         statusPending={blockerStatusPending}
+                        videoProbeScheduler={videoProbeScheduler}
                       />
                     ))}
                   </ol>

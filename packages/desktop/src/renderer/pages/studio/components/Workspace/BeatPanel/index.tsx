@@ -822,7 +822,7 @@ const ShotCard: React.FC<ShotCardProps> = ({
         </button>
       </div>
 
-      {firstFramePickerOpen ? (
+      {firstFramePickerOpen && !hidden ? (
         <FirstFrames
           actions={actions}
           disabled={disabled}

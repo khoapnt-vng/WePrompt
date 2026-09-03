@@ -1320,7 +1320,7 @@ describe('BeatPlayer', () => {
     }
   });
 
-  it.each(['plan', 'project', 'revision', 'order'] as const)(
+  it.each(['plan', 'project', 'order'] as const)(
     'drops the prewarm on a %s change and ignores detached prewarm events',
     (change) => {
       const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
@@ -1352,8 +1352,6 @@ describe('BeatPlayer', () => {
         } else if (change === 'project') {
           nextProjectId = 'project_2';
           nextProjection = makeProjection([nextBeat], { projectId: nextProjectId });
-        } else if (change === 'revision') {
-          nextProjection = makeProjection([nextBeat], { projectRevision: projection.projectRevision + 1 });
         } else {
           const second = {
             ...nextBeat.shots[1]!,
@@ -1397,6 +1395,106 @@ describe('BeatPlayer', () => {
       }
     }
   );
+
+  it('preserves live playback and prewarm through revision and poster-only refreshes', () => {
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const play = vi.spyOn(HTMLMediaElement.prototype, 'play').mockResolvedValue(undefined);
+    const beat = contiguousVideoBeat();
+    const projection = makeProjection([beat]);
+    const result = render(
+      <BeatPlayer beat={beat} projectId='project_1' projection={projection}>
+        {(playback) => <output data-position={playback.positionSeconds} data-testid='stable-plan-position' />}
+      </BeatPlayer>
+    );
+
+    try {
+      const current = previewVideo();
+      const facts = installMediaFacts(current, { duration: 10 });
+      fireEvent.loadedMetadata(current);
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+      fireEvent.playing(current);
+      facts.setCurrentTime(4);
+      fireEvent.timeUpdate(current);
+      const prewarm = document.querySelector<HTMLVideoElement>('[data-beat-prewarm-media]')!;
+      const currentPauseCount = pause.mock.contexts.filter((context) => context === current).length;
+
+      const revisedBeat = structuredClone(beat);
+      const revisedProjection = makeProjection([revisedBeat], {
+        projectRevision: projection.projectRevision + 1,
+      });
+      result.rerender(
+        <BeatPlayer beat={revisedBeat} projectId='project_1' projection={revisedProjection}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='stable-plan-position' />}
+        </BeatPlayer>
+      );
+
+      expect(previewVideo()).toBe(current);
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(prewarm);
+      expect(screen.getByTestId('stable-plan-position')).toHaveAttribute('data-position', '3');
+      expect(screen.getByRole('button', { name: 'Pause Beat' })).toHaveAttribute('aria-pressed', 'true');
+      expect(pause.mock.contexts.filter((context) => context === current)).toHaveLength(currentPauseCount);
+
+      const refreshedBeat = structuredClone(revisedBeat);
+      refreshedBeat.shots[0]!.currentPicture!.posterAssetId = 'poster_1_refreshed';
+      refreshedBeat.shots[0]!.shootingScript = 'Refreshed opening picture';
+      const refreshedProjection = makeProjection([refreshedBeat], {
+        projectRevision: revisedProjection.projectRevision,
+      });
+      result.rerender(
+        <BeatPlayer beat={refreshedBeat} projectId='project_1' projection={refreshedProjection}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='stable-plan-position' />}
+        </BeatPlayer>
+      );
+
+      expect(previewVideo()).toBe(current);
+      expect(current).toHaveAttribute('poster', 'weprompt-studio://asset/project_1/poster_1_refreshed');
+      expect(current).toHaveAccessibleName('Shot 01 video · Refreshed opening picture');
+      expect(document.querySelector('[data-beat-prewarm-media]')).toBe(prewarm);
+      expect(screen.getByTestId('stable-plan-position')).toHaveAttribute('data-position', '3');
+      facts.setCurrentTime(5);
+      fireEvent.timeUpdate(current);
+      expect(screen.getByTestId('stable-plan-position')).toHaveAttribute('data-position', '4');
+    } finally {
+      result.unmount();
+      load.mockRestore();
+      pause.mockRestore();
+      play.mockRestore();
+    }
+  });
+
+  it('keeps a playing slate clock continuous through faster metadata refreshes', () => {
+    vi.useFakeTimers();
+    try {
+      const beat = makeBeat('beat_1', [makeShot('shot_1', 0)]);
+      const view = render(
+        <BeatPlayer beat={beat} projectId='project_1' projection={makeProjection([beat])}>
+          {(playback) => <output data-position={playback.positionSeconds} data-testid='stable-slate-position' />}
+        </BeatPlayer>
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Play Beat' }));
+
+      for (let refresh = 1; refresh <= 40; refresh += 1) {
+        act(() => vi.advanceTimersByTime(25));
+        const refreshedBeat = structuredClone(beat);
+        refreshedBeat.shots[0]!.shootingScript = `Refreshed slate ${String(refresh)}`;
+        view.rerender(
+          <BeatPlayer
+            beat={refreshedBeat}
+            projectId='project_1'
+            projection={makeProjection([refreshedBeat], { projectRevision: 3 + refresh })}
+          >
+            {(playback) => <output data-position={playback.positionSeconds} data-testid='stable-slate-position' />}
+          </BeatPlayer>
+        );
+      }
+
+      expect(screen.getByTestId('stable-slate-position')).toHaveAttribute('data-position', '1');
+      expect(screen.getByRole('img', { name: /Refreshed slate 40/ })).toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 
   it('plays only the exact picture trim, shows its poster during seek, and crosses into the planned slate', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
@@ -1558,7 +1656,7 @@ describe('BeatPlayer', () => {
     }
   });
 
-  it('resets on Beat/revision/order identity and ignores events from the detached video', () => {
+  it('resets on Beat identity and ignores events from the detached video', () => {
     const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
     const first = playableBeat();
     const result = render(
@@ -1999,6 +2097,56 @@ describe('BeatPanel', () => {
     expect(card.querySelector('[data-composer-reference-slot]')).toHaveTextContent('2');
     fireEvent.click(card.querySelector<HTMLButtonElement>('[data-composer-reference-slot]')!);
     expect(actions.reviewReferences).toHaveBeenCalledWith(shot.id);
+  });
+
+  it('releases a posterless First Frames probe and cancels its pending frame retry while inactive', async () => {
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    const getContext = vi
+      .spyOn(HTMLCanvasElement.prototype, 'getContext')
+      .mockReturnValue(pixelContext(vi.fn(), 'flat'));
+    const first = makeShot('shot_1', 0, { currentPicture: makeCurrentPicture('video_first') });
+    const second = makeShot('shot_2', 1, { currentPicture: makeCurrentPicture('video_second') });
+    const beat = makeBeat('beat_1', [first, second]);
+    const result = render(<BeatPanel {...panelProps(beat, makeDrafts(), makeActions(), makeProjection([beat]))} />);
+
+    try {
+      const firstCard = openFirstFramePicker(result.container, first.id);
+      const firstProbe = firstCard.querySelector<HTMLVideoElement>('[data-current-picture] video');
+      if (firstProbe === null) throw new Error('Missing posterless First Frames probe');
+      expect(firstProbe).toHaveAttribute('preload', 'auto');
+      expect(firstProbe).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_first');
+      const requestFrame = vi.fn(() => 17);
+      const cancelFrame = vi.fn();
+      Object.defineProperties(firstProbe, {
+        videoWidth: { configurable: true, value: 1920 },
+        videoHeight: { configurable: true, value: 1080 },
+        requestVideoFrameCallback: { configurable: true, value: requestFrame },
+        cancelVideoFrameCallback: { configurable: true, value: cancelFrame },
+      });
+      fireEvent.loadedData(firstProbe);
+      await waitFor(() => expect(requestFrame).toHaveBeenCalledTimes(1));
+
+      inspectShot(result.container, second.id);
+
+      expect(firstCard).toHaveAttribute('hidden');
+      expect(firstCard.querySelector('[data-first-frames-band]')).toBeNull();
+      expect(firstProbe).not.toHaveAttribute('src');
+      expect(pause.mock.contexts.filter((context) => context === firstProbe)).toHaveLength(1);
+      expect(load.mock.contexts.filter((context) => context === firstProbe)).toHaveLength(1);
+      expect(cancelFrame).toHaveBeenCalledWith(17);
+
+      const activeFirstCard = inspectShot(result.container, first.id);
+      const remountedProbe = activeFirstCard.querySelector<HTMLVideoElement>('[data-current-picture] video');
+      expect(remountedProbe).not.toBeNull();
+      expect(remountedProbe).not.toBe(firstProbe);
+      expect(remountedProbe).toHaveAttribute('src', 'weprompt-studio://asset/project_1/video_first');
+    } finally {
+      result.unmount();
+      getContext.mockRestore();
+      load.mockRestore();
+      pause.mockRestore();
+    }
   });
 
   it('marks an exhausted conditioning frame as FAILED with one free recovery action', async () => {

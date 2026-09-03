@@ -1682,6 +1682,47 @@ describe('WorkspaceControls', () => {
     expect(document.querySelector('section[data-aspect-ratio="9:16"]')).not.toBeNull();
   });
 
+  it('resumes Board video probes after the open Beat panel closes while keeping the Beat selected', async () => {
+    const originalIntersectionObserver = window.IntersectionObserver;
+    const pause = vi.spyOn(HTMLMediaElement.prototype, 'pause').mockImplementation(() => undefined);
+    const load = vi.spyOn(HTMLMediaElement.prototype, 'load').mockImplementation(() => undefined);
+    Object.defineProperty(window, 'IntersectionObserver', { configurable: true, value: undefined, writable: true });
+    const project = makeProject();
+    addCurrentVideoTake(project, 'shot_1');
+    const result = render(
+      <ControlsHarness activeView='board' routes={routeCatalog('ready', 'ready')} open={vi.fn()} project={project} />
+    );
+
+    try {
+      const boardShot = result.container.querySelector<HTMLElement>('[data-shot-id="shot_1"]');
+      const boardBeat = result.container.querySelector<HTMLElement>('[data-beat-id="beat_1"]');
+      if (boardShot === null || boardBeat === null) throw new Error('Board fixture was unavailable');
+      await waitFor(() => expect(boardShot.querySelector('video')).not.toBeNull());
+
+      fireEvent.click(
+        within(boardBeat).getByRole('button', {
+          name: /conversation\.creativeStudio\.workspace\.board\.openBeat/,
+        })
+      );
+      const panel = await screen.findByRole('dialog');
+      await waitFor(() => expect(boardShot.querySelector('video')).toBeNull());
+
+      fireEvent.click(within(panel).getByRole('button', { name: 'Close' }));
+      await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+      await waitFor(() => expect(boardShot.querySelector('video')).not.toBeNull());
+      expect(boardBeat).toHaveAttribute('data-selected', 'true');
+    } finally {
+      result.unmount();
+      Object.defineProperty(window, 'IntersectionObserver', {
+        configurable: true,
+        value: originalIntersectionObserver,
+        writable: true,
+      });
+      load.mockRestore();
+      pause.mockRestore();
+    }
+  });
+
   it('builds only an exact unlocked Table Beat reorder operation', () => {
     const exact = {
       activeBeatIds: ['beat_1', 'beat_2'],

@@ -115,6 +115,38 @@ const pauseMedia = (media: HTMLMediaElement | null): void => {
 
 const paddedPosition = (position: number): string => String(position).padStart(2, '0');
 
+const beatPlaybackPlanToken = (sequence: BeatPlaybackSequence | null): string =>
+  JSON.stringify(
+    sequence === null
+      ? null
+      : {
+          projectId: sequence.projectId,
+          beatId: sequence.beatId,
+          durationSeconds: sequence.durationSeconds,
+          segments: sequence.segments.map((segment) =>
+            segment.kind === 'video'
+              ? {
+                  kind: segment.kind,
+                  shotId: segment.shotId,
+                  assetId: segment.assetId,
+                  sourceDurationSeconds: segment.sourceDurationSeconds,
+                  sourceInSeconds: segment.sourceInSeconds,
+                  sourceOutSeconds: segment.sourceOutSeconds,
+                  durationSeconds: segment.durationSeconds,
+                  beatStartSeconds: segment.beatStartSeconds,
+                  beatEndSeconds: segment.beatEndSeconds,
+                }
+              : {
+                  kind: segment.kind,
+                  shotId: segment.shotId,
+                  durationSeconds: segment.durationSeconds,
+                  beatStartSeconds: segment.beatStartSeconds,
+                  beatEndSeconds: segment.beatEndSeconds,
+                }
+          ),
+        }
+  );
+
 const isEditableDescendant = (target: EventTarget | null, root: HTMLElement): boolean => {
   if (!(target instanceof Element) || target === root) return false;
   return (
@@ -129,7 +161,13 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   const { t } = useTranslation();
   const keyboardGuidanceId = useId();
   const sequence = useMemo(() => buildBeatPlaybackSequence(projectId, beat, projection), [beat, projectId, projection]);
-  const planToken = useMemo(() => JSON.stringify({ projectId, sequence }), [projectId, sequence]);
+  // Operational revisions and display metadata may refresh around the media without invalidating it.
+  const planToken = useMemo(() => beatPlaybackPlanToken(sequence), [sequence]);
+  const playbackPlanRef = useRef({ sequence, token: planToken });
+  if (playbackPlanRef.current.token !== planToken) {
+    playbackPlanRef.current = { sequence, token: planToken };
+  }
+  const playbackSequence = playbackPlanRef.current.sequence;
   const activeTokenRef = useRef(planToken);
   const [storedState, setStoredState] = useState<TransportState>(() => initialTransportState(planToken));
   const state = storedState.token === planToken ? storedState : initialTransportState(planToken);
@@ -148,7 +186,11 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   const appliedPlanTokenRef = useRef(planToken);
 
   const segment = sequence?.segments[state.segmentIndex] ?? null;
-  const joins = useMemo(() => (sequence === null ? [] : beatPlaybackJoins(sequence)), [sequence]);
+  const playbackSegment = playbackSequence?.segments[state.segmentIndex] ?? null;
+  const joins = useMemo(
+    () => (playbackSequence === null ? [] : beatPlaybackJoins(playbackSequence)),
+    [playbackSequence]
+  );
 
   useLayoutEffect(() => {
     activeTokenRef.current = planToken;
@@ -358,15 +400,15 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
 
   const loopRange = useCallback(
     (current: TransportState): { startSeconds: number; endSeconds: number } | null => {
-      if (sequence === null || current.loopJoinIndex === null) return null;
+      if (playbackSequence === null || current.loopJoinIndex === null) return null;
       const join = joins[current.loopJoinIndex];
       if (join === undefined) return null;
       return {
         startSeconds: Math.max(0, join - JOIN_LOOP_RADIUS_SECONDS),
-        endSeconds: Math.min(sequence.durationSeconds, join + JOIN_LOOP_RADIUS_SECONDS),
+        endSeconds: Math.min(playbackSequence.durationSeconds, join + JOIN_LOOP_RADIUS_SECONDS),
       };
     },
-    [joins, sequence]
+    [joins, playbackSequence]
   );
 
   const seekTo = useCallback(
@@ -374,7 +416,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       requestedSeconds: number,
       options: { joinCursorIndex?: number | null; loopJoinIndex?: number | null } = {}
     ): void => {
-      const currentSequence = sequence;
+      const currentSequence = playbackSequence;
       const activeState = stateRef.current;
       if (currentSequence === null || activeState.failed || activeTokenRef.current !== planToken) {
         return;
@@ -405,7 +447,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         loopJoinIndex: options.loopJoinIndex === undefined ? current.loopJoinIndex : options.loopJoinIndex,
       }));
     },
-    [clearPrewarm, invalidatePlayAttempt, planToken, replaceCurrentState, sequence, stopMediaBoundaryWatch]
+    [clearPrewarm, invalidatePlayAttempt, planToken, playbackSequence, replaceCurrentState, stopMediaBoundaryWatch]
   );
 
   const advanceSegment = useCallback(
@@ -488,14 +530,14 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   );
 
   useEffect(() => {
-    if (sequence === null || segment?.kind !== 'slate' || !state.playing || state.failed) return;
+    if (playbackSequence === null || playbackSegment?.kind !== 'slate' || !state.playing || state.failed) return;
     const token = planToken;
     const segmentIndex = state.segmentIndex;
     const startPositionSeconds = stateRef.current.positionSeconds;
     const startedAt = performance.now();
     const slateClock: SlateClock = { token, segmentIndex, startPositionSeconds, startedAt };
     slateClockRef.current = slateClock;
-    armPrewarm(token, segmentIndex, sequence);
+    armPrewarm(token, segmentIndex, playbackSequence);
     const timer = window.setInterval(() => {
       const current = stateRef.current;
       if (
@@ -509,7 +551,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         return;
       }
       const elapsedSeconds = Math.max(0, (performance.now() - startedAt) / 1_000);
-      const nextPosition = Math.min(segment.beatEndSeconds, startPositionSeconds + elapsedSeconds);
+      const nextPosition = Math.min(playbackSegment.beatEndSeconds, startPositionSeconds + elapsedSeconds);
       const activeLoop = loopRange(current);
       if (activeLoop !== null && nextPosition >= activeLoop.endSeconds) {
         window.clearInterval(timer);
@@ -520,10 +562,10 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
         });
         return;
       }
-      if (nextPosition >= segment.beatEndSeconds) {
+      if (nextPosition >= playbackSegment.beatEndSeconds) {
         window.clearInterval(timer);
         if (slateClockRef.current === slateClock) slateClockRef.current = null;
-        advanceSegment(token, segmentIndex, sequence);
+        advanceSegment(token, segmentIndex, playbackSequence);
         return;
       }
       updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, positionSeconds: nextPosition }));
@@ -538,8 +580,8 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     loopRange,
     planToken,
     seekTo,
-    segment,
-    sequence,
+    playbackSegment,
+    playbackSequence,
     state.failed,
     state.clockEpoch,
     state.playing,
@@ -662,7 +704,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       stopMediaBoundaryWatch();
       pauseMedia(media);
       if (playingMediaRef.current === media) playingMediaRef.current = null;
-      if (sequence !== null) advanceSegment(token, segmentIndex, sequence);
+      if (playbackSequence !== null) advanceSegment(token, segmentIndex, playbackSequence);
       return;
     }
     updateCurrentState(token, segmentIndex, (latest) => ({ ...latest, positionSeconds: nextPosition }));
@@ -727,7 +769,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   };
 
   const togglePlayback = (): void => {
-    if (sequence === null || segment === null || state.failed) return;
+    if (playbackSequence === null || playbackSegment === null || state.failed) return;
     const token = planToken;
     const segmentIndex = state.segmentIndex;
     if (state.playing) {
@@ -737,19 +779,20 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       playingMediaRef.current = null;
       const slateClock = slateClockRef.current;
       const pausedPosition =
-        segment.kind === 'slate' && slateClock?.token === token && slateClock.segmentIndex === segmentIndex
+        playbackSegment.kind === 'slate' && slateClock?.token === token && slateClock.segmentIndex === segmentIndex
           ? Math.min(
-              segment.beatEndSeconds,
+              playbackSegment.beatEndSeconds,
               slateClock.startPositionSeconds + Math.max(0, (performance.now() - slateClock.startedAt) / 1_000)
             )
-          : segment.kind === 'video' &&
+          : playbackSegment.kind === 'video' &&
               !state.seeking &&
               !state.buffering &&
               videoRef.current !== null &&
               Number.isFinite(videoRef.current.currentTime)
             ? Math.min(
-                segment.beatEndSeconds,
-                segment.beatStartSeconds + Math.max(0, videoRef.current.currentTime - segment.sourceInSeconds)
+                playbackSegment.beatEndSeconds,
+                playbackSegment.beatStartSeconds +
+                  Math.max(0, videoRef.current.currentTime - playbackSegment.sourceInSeconds)
               )
             : state.positionSeconds;
       slateClockRef.current = null;
@@ -761,7 +804,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
       }));
       return;
     }
-    if (state.positionSeconds >= sequence.durationSeconds) {
+    if (state.positionSeconds >= playbackSequence.durationSeconds) {
       seekTo(0, { joinCursorIndex: null, loopJoinIndex: null });
       replaceCurrentState(token, (current) => ({ ...current, playing: true }));
       return;
@@ -769,11 +812,11 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
     updateCurrentState(token, segmentIndex, (current) => ({
       ...current,
       playing: true,
-      buffering: segment.kind === 'video' && readyMediaRef.current?.media !== videoRef.current,
+      buffering: playbackSegment.kind === 'video' && readyMediaRef.current?.media !== videoRef.current,
     }));
     const ready = readyMediaRef.current;
     if (
-      segment.kind === 'video' &&
+      playbackSegment.kind === 'video' &&
       ready?.token === token &&
       ready.segmentIndex === segmentIndex &&
       ready.media === videoRef.current
@@ -783,7 +826,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   };
 
   const stepJoin = (direction: -1 | 1): void => {
-    if (sequence === null || joins.length === 0 || state.failed) return;
+    if (playbackSequence === null || joins.length === 0 || state.failed) return;
     const current = stateRef.current;
     let index: number;
     if (current.joinCursorIndex !== null) index = current.joinCursorIndex + direction;
@@ -805,7 +848,7 @@ export const BeatPlayer: React.FC<BeatPlayerProps> = ({ beat, children, inspecto
   };
 
   const toggleJoinLoop = (): void => {
-    if (sequence === null || joins.length === 0 || state.failed) return;
+    if (playbackSequence === null || joins.length === 0 || state.failed) return;
     const current = stateRef.current;
     if (current.loopJoinIndex !== null) {
       replaceCurrentState(planToken, (latest) => ({ ...latest, loopJoinIndex: null }));
