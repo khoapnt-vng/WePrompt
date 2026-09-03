@@ -315,6 +315,39 @@ describe('createStudioProviderResolver', () => {
     expect((await resolver(unavailableProviders, connections).listGenerationRoutes()).routes).toEqual([]);
   });
 
+  it('keeps a supported image model in connection candidates when the chat probe marks it unhealthy', async () => {
+    const model = 'google/gemini-3-pro-image-preview';
+    const imageProvider = provider({
+      platform: 'openrouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      models: [model],
+      model_health: { [model]: { status: 'unhealthy' } },
+    });
+
+    const candidates = await resolver([imageProvider], []).listConnectionCandidates();
+
+    expect(candidates[0]?.models).toEqual([{ model, health: 'unknown' }]);
+  });
+
+  it('keeps a validated supported image route when the chat probe marks it unhealthy', async () => {
+    const model = 'google/gemini-3-pro-image-preview';
+    const imageProvider = provider({
+      platform: 'openrouter',
+      base_url: 'https://openrouter.ai/api/v1',
+      models: [model],
+      model_health: { [model]: { status: 'unhealthy' } },
+    });
+    const imageBinding = binding({
+      adapterId: 'weprompt-image-v1',
+      model,
+      capabilities: { mediaKinds: ['image'], supportsFirstFrame: true },
+    });
+
+    const catalog = await resolver([imageProvider], [imageBinding]).listGenerationRoutes();
+
+    expect(catalog.routes).toMatchObject([{ model, kind: 'image', health: 'unknown' }]);
+  });
+
   it('keeps renderer-safe diagnostics for unavailable validated bindings', async () => {
     const unavailableProviders = [
       provider({ id: 'disabled', enabled: false }),

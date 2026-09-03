@@ -77,6 +77,7 @@ const ReviewSubject: React.FC<{ subject: StudioProposalReviewSubjectV2 }> = ({ s
       {t(`conversation.creativeStudio.workspace.proposals.subject.${subject.kind}`)}
       {subject.position === null ? null : ` ${subject.position}`}
       {subject.title === null || subject.title.length === 0 ? null : ` · ${subject.title}`}
+      {subject.position === null && (subject.title === null || subject.title.length === 0) ? ` · ${subject.id}` : null}
       {subject.ownerBeatTitle === null || subject.ownerBeatTitle.length === 0
         ? null
         : ` · ${t('conversation.creativeStudio.workspace.proposals.ownerBeat')} · ${subject.ownerBeatTitle}`}

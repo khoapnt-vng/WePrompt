@@ -4566,6 +4566,31 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.validateConnection).not.toHaveBeenCalled();
   });
 
+  it('validates a supported image model despite the chat-only health probe verdict', async () => {
+    const harness = makeHarness();
+    const model = 'google/gemini-3-pro-image-preview';
+    harness.listProviders.mockResolvedValueOnce([
+      {
+        id: 'provider_1',
+        platform: 'openrouter',
+        name: 'OpenRouter',
+        base_url: 'https://openrouter.ai/api/v1',
+        api_key: 'provider-secret',
+        models: [model],
+        model_health: { [model]: { status: 'unhealthy' } },
+      },
+    ]);
+
+    await expect(
+      harness.service.validateConnection({
+        providerId: 'provider_1',
+        integrationId: 'integration_g7Q2mB4p',
+        model,
+      })
+    ).resolves.toMatchObject({ valid: true, connection: { model } });
+    expect(harness.validateConnection).toHaveBeenCalledOnce();
+  });
+
   it('rejects a connection whose integration adapter is unavailable', async () => {
     const harness = makeHarness();
     harness.adapterRegistry.delete('weprompt-image-v1');
@@ -10759,6 +10784,59 @@ describe('Studio MCP schema-2 server', () => {
       await expect(readdir(fixture.slotsDir)).resolves.toEqual([]);
     } finally {
       await rm(fixture.projectDir, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a proposal that would create a Shot as a hard cut, and says what to draft instead', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-hard-cut-'));
+    const pendingDir = path.join(projectDir, 'proposals', 'pending');
+    const referencePendingDir = path.join(projectDir, 'reference-requests', 'pending');
+    await createSidecarFamilyV2(projectDir, 'proposals');
+    await createSidecarFamilyV2(projectDir, 'reference-requests');
+    const project = makeSchema2ServiceProject();
+    await writeStudioProjectFilesV2(projectDir, project);
+    const config = { projectId: project.id, projectDir, pendingDir, referencePendingDir };
+    const before = await readdir(pendingDir);
+
+    const endCardBatch = (chainBreak: 'none' | 'hard_cut') =>
+      [
+        {
+          kind: 'add_beat',
+          beatId: 'invitation',
+          beat: { title: 'The Next Story', story: 'Land the film.', targetSeconds: 6 },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'apply_coverage',
+          beatId: 'invitation',
+          shots: [
+            { shotId: 'invitation-endcard', shootingScript: 'The end card resolves.', durationSeconds: 6, chainBreak },
+          ],
+          fixedShots: [],
+        },
+      ] as StudioMutationOperationV2[];
+
+    try {
+      const refused = await createProposeStoryboardHandlerV2(config)({
+        base_revision: project.revision,
+        operations: endCardBatch('hard_cut'),
+      });
+
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain('invitation-endcard');
+      expect(refused.content[0].text).toContain('invitation');
+      expect(refused.content[0].text).toMatch(/chainBreak "none"/);
+      expect(refused.content[0].text).toMatch(/Beat panel/i);
+      await expect(readdir(pendingDir)).resolves.toEqual(before);
+
+      const accepted = await createProposeStoryboardHandlerV2(config)({
+        base_revision: project.revision,
+        operations: endCardBatch('none'),
+      });
+      expect(accepted.isError).toBeUndefined();
+      expect(accepted.content[0].text).toMatch(/recorded for user review/i);
+    } finally {
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 

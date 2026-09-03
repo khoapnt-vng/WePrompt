@@ -96,7 +96,7 @@ import {
   type StudioValidateConnectionRequest,
 } from '@/common/types/project/creativeStudioTypes';
 import { STUDIO_ENV } from '@/common/types/project/creativeStudioMcpEnv';
-import { isImagesApiModel } from '@/common/utils/imageModelAllowlist';
+import { isDisqualifiedByHealthVerdict, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
 import { BUILTIN_STUDIO_NAME } from '@process/resources/builtinMcp/constants';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
@@ -506,7 +506,7 @@ const assertConnectionModel: (value: unknown) => asserts value is string = (valu
 const providerIsAvailable = (provider: IProvider, model: string): boolean =>
   provider.enabled !== false &&
   provider.model_enabled?.[model] !== false &&
-  provider.model_health?.[model]?.status !== 'unhealthy' &&
+  !isDisqualifiedByHealthVerdict(provider, model) &&
   typeof provider.api_key === 'string' &&
   provider.api_key.trim().length > 0 &&
   typeof provider.base_url === 'string' &&

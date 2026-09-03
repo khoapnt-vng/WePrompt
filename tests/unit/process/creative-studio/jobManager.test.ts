@@ -1612,6 +1612,23 @@ describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANA
     expect(submit).not.toHaveBeenCalled();
   });
 
+  it('dispatches a supported image model despite the chat-only health probe verdict', async () => {
+    const submit = vi.fn(async () => ({ kind: 'complete' as const, outputs: [] }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-image-v1', { submit }), {
+      listProviders: async () => [
+        {
+          ...provider,
+          platform: 'gemini',
+          model_health: { 'image-model': { status: 'unhealthy' } },
+        },
+      ],
+    });
+
+    await expect(dispatchV2(harness)).resolves.toHaveLength(1);
+    await waitFor(() => expect(submit).toHaveBeenCalledOnce());
+    await expectV2Job(harness, { status: 'failed', error: { code: 'no_output' } });
+  });
+
   it('dispatches a semantic reference directly and retains its canonical candidate provenance', async () => {
     let outputPath = '';
     const submit = vi.fn(async (request: { prompt: string; conditioningImages?: readonly unknown[] }) => {

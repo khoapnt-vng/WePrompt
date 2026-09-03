@@ -849,7 +849,7 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
     }
   }, 60_000);
 
-  it('runs a real V2 paid seed submission through durable authorization, job, and primary ownership', async () => {
+  it('uses a real paid unpinned seed output as exact conditioning for a later video-only prepare', async () => {
     const rootDir = await mkdtemp(path.join(os.tmpdir(), 'studio-v2-generation-integration-'));
     const fake = createStudioE2EFakeBundle({ rootDir });
     const clock = new ControlledPollClock();
@@ -956,6 +956,10 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
       const seedChoice = {
         target: { kind: 'shot' as const, shotId: 'clip_lifecycle' },
         purpose: 'seed_still' as const,
+      };
+      const videoChoice = {
+        target: { kind: 'shot' as const, shotId: 'clip_lifecycle' },
+        purpose: 'video_take' as const,
       };
       const unassignedBefore = await store.getProjectV2(configured.id);
       await expect(
@@ -1133,17 +1137,22 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
       await expect(store.getProjectV2(configured.id)).resolves.toEqual(beforeRouteRefusal);
       await store.saveConnection(imageBinding);
 
+      await expect(
+        service.prepareSubmission({
+          projectId: configured.id,
+          expectedRevision: replacementApproved.project.revision,
+          originReferenceHandoffId: null,
+          baseChoices: [videoChoice],
+          cascadeChoices: [],
+        })
+      ).rejects.toMatchObject({ name: 'StudioPricingErrorV2', code: 'missing_conditioning' });
+
       const prepared = await service.prepareSubmission({
         projectId: configured.id,
         expectedRevision: replacementApproved.project.revision,
         originReferenceHandoffId: null,
         baseChoices: [seedChoice],
-        cascadeChoices: [
-          {
-            target: { kind: 'shot', shotId: 'clip_lifecycle' },
-            purpose: 'video_take',
-          },
-        ],
+        cascadeChoices: [videoChoice],
       });
       await expect(
         service.confirmSubmission({
@@ -1182,6 +1191,7 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
         shotJobIds: shot.jobIds,
         shotAssetIds: shot.assetIds,
         generationReferenceAssetIds: asset?.generationReferenceAssetIds,
+        seedStillId: shot.seedStillId,
         videoAssetId: shot.videoAssetId,
         assetShotId: asset?.shotId,
         mediaKind: asset?.mediaKind,
@@ -1197,12 +1207,28 @@ describe('Creative Studio generation lifecycle integration', { timeout: GENERATI
         shotJobIds: ['job_v2_lifecycle'],
         shotAssetIds: [primaryAssetId],
         generationReferenceAssetIds: [referenceCompleted.assetId],
+        seedStillId: null,
         videoAssetId: null,
         assetShotId: 'clip_lifecycle',
         mediaKind: 'image',
         collection: 'assets',
       });
       expect(primaryAssetId ? await mediaStore.resolveAssetV2(completed.id, primaryAssetId) : null).not.toBeNull();
+      if (primaryAssetId === null) throw new Error('Paid seed output was missing');
+      const videoPrepared = await service.prepareSubmission({
+        projectId: completed.id,
+        expectedRevision: completed.revision,
+        originReferenceHandoffId: null,
+        baseChoices: [videoChoice],
+        cascadeChoices: [],
+      });
+      expect(videoPrepared.baseOnly.baseItems).toEqual([
+        expect.objectContaining({
+          target: videoChoice.target,
+          purpose: videoChoice.purpose,
+          conditioningAssetId: primaryAssetId,
+        }),
+      ]);
       service.dispose();
     } finally {
       clock.releaseAll();

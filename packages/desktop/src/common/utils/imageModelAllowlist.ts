@@ -25,6 +25,7 @@ type ProviderShape = {
   platform?: string;
   base_url?: string;
   name?: string;
+  model_health?: Record<string, { status: 'unknown' | 'healthy' | 'unhealthy' }>;
 };
 
 const IMAGE_NAME_PATTERN = /(image|banana|imagine)/i;
@@ -65,6 +66,14 @@ export const isImageGenSupported = (provider: ProviderShape, modelName: string):
   if (!IMAGE_NAME_PATTERN.test(modelName) && !isImagesApiModel(modelName)) return false;
   return RULES.some((rule) => rule.match(provider));
 };
+
+/**
+ * The provider health probe is a tool-use chat completion, so it cannot judge
+ * image-generation endpoints. Ignore that verdict only for exact image tuples
+ * admitted by the shared allowlist; every other unhealthy model stays blocked.
+ */
+export const isDisqualifiedByHealthVerdict = (provider: ProviderShape, modelName: string): boolean =>
+  provider.model_health?.[modelName]?.status === 'unhealthy' && !isImageGenSupported(provider, modelName);
 
 /** Exact production admission point; stays fail-closed until a tuple passes the paid Task 8.5 evidence gate. */
 export const getImageModelMaxConditioningImages = (provider: ProviderShape, modelName: string): number => {

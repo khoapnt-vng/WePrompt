@@ -17,6 +17,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/common/types/project/creativeStudioManagedAssetCollections.ts',
   'packages/desktop/src/common/types/project/creativeStudioProjectSummary.ts',
   'packages/desktop/src/common/types/project/creativeStudioTypes.ts',
+  'packages/desktop/src/common/utils/imageModelAllowlist.ts',
   'packages/desktop/src/process/bridge/creativeStudioBridge.ts',
   'packages/desktop/src/process/resources/builtinMcp/studioDirectorCommandWriter.ts',
   'packages/desktop/src/process/resources/builtinMcp/studioPendingRecordWriter.ts',

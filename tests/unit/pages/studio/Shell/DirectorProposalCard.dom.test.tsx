@@ -374,6 +374,37 @@ describe('DirectorProposalCard semantic review', () => {
     ).toBeDisabled();
   });
 
+  it('falls back to the subject id when a refusal has neither a position nor a title', () => {
+    renderCard(
+      proposal({
+        status: 'unavailable',
+        groups: [],
+        reason: 'reducer_rejected',
+        refusal: {
+          reasonCode: 'invalid_operation',
+          operationKind: 'apply_coverage',
+          subjects: [
+            {
+              subject: {
+                kind: 'beat',
+                id: 'invitation',
+                title: null,
+                position: null,
+                ownerBeatId: null,
+                ownerBeatTitle: null,
+              },
+              fixedReasons: [],
+            },
+          ],
+        },
+      })
+    );
+
+    expect(screen.getByTitle('invitation')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.subject.beat · invitation'
+    );
+  });
+
   it('honors an independent dirty-draft acceptance blocker without hiding review text', () => {
     renderCard(proposal(), {
       acceptBlockedMessageKey: 'conversation.creativeStudio.workspace.proposals.saveBeforeApply',

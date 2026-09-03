@@ -125,8 +125,18 @@ const subject = (
   ownerBeatTitle: placement?.ownerBeatTitle ?? null,
 });
 
+/** Resolve a Beat that the refused batch intended to create but that is not yet in the project. */
+const proposedBeatTitle = (operations: readonly StudioMutationOperationV2[], beatId: string): string | null => {
+  for (const operation of operations) {
+    if (operation.kind !== 'add_beat' && operation.kind !== 'add_binned_beat') continue;
+    if (operation.beatId === beatId) return operation.beat.title;
+  }
+  return null;
+};
+
 const refusalSubject = (
   project: StudioProjectV2,
+  operations: readonly StudioMutationOperationV2[],
   kind: StudioProposalReviewSubjectV2['kind'],
   id: string,
   fixedReasons: StudioProposalReviewRefusalSubjectV2['fixedReasons'] = []
@@ -137,7 +147,7 @@ const refusalSubject = (
   if (kind === 'beat') {
     const beat = own(project.beats, id);
     return {
-      subject: subject('beat', id, beat?.title ?? null, beatPlacement(project, id)),
+      subject: subject('beat', id, beat?.title ?? proposedBeatTitle(operations, id), beatPlacement(project, id)),
       fixedReasons,
     };
   }
@@ -146,19 +156,22 @@ const refusalSubject = (
 
 const refusalSubjects = (
   project: StudioProjectV2,
+  operations: readonly StudioMutationOperationV2[],
   operation: StudioMutationOperationV2 | null,
   failureSubjects: readonly StudioMutationFailureSubjectV2[]
 ): StudioProposalReviewRefusalSubjectV2[] => {
   if (failureSubjects.length > 0) {
-    return failureSubjects.map((entry) => refusalSubject(project, 'shot', entry.shotId, entry.fixedReasons));
+    return failureSubjects.map((entry) =>
+      refusalSubject(project, operations, 'shot', entry.shotId, entry.fixedReasons)
+    );
   }
   if (operation !== null && 'shotId' in operation && typeof operation.shotId === 'string') {
-    return [refusalSubject(project, 'shot', operation.shotId)];
+    return [refusalSubject(project, operations, 'shot', operation.shotId)];
   }
   if (operation !== null && 'beatId' in operation && typeof operation.beatId === 'string') {
-    return [refusalSubject(project, 'beat', operation.beatId)];
+    return [refusalSubject(project, operations, 'beat', operation.beatId)];
   }
-  return [refusalSubject(project, 'project', project.id)];
+  return [refusalSubject(project, operations, 'project', project.id)];
 };
 
 const orderedBeatIds = (before: StudioProjectV2, after: StudioProjectV2): string[] => {
@@ -379,7 +392,7 @@ export const deriveStudioProposalReviewV2 = (
           ? {
               reasonCode: error.reasonCode,
               operationKind: operation?.kind ?? null,
-              subjects: refusalSubjects(project, operation, error.subjects),
+              subjects: refusalSubjects(project, operations, operation, error.subjects),
             }
           : null,
     };

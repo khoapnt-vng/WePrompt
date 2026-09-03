@@ -460,6 +460,42 @@ describe('schema-5 semantic proposal review', () => {
     });
   });
 
+  it('names a Beat the refused batch would have created, rather than the bare subject kind', () => {
+    const project = createProject();
+    const review = deriveStudioProposalReviewV2(
+      project,
+      proposal(project, [
+        {
+          kind: 'add_beat',
+          beatId: 'invitation',
+          beat: { title: 'The Next Story', story: 'Land the film.', targetSeconds: 6 },
+          beforeBeatId: null,
+        },
+        {
+          kind: 'apply_coverage',
+          beatId: 'invitation',
+          shots: [
+            {
+              shotId: 'invitation-endcard',
+              shootingScript: 'The end card resolves.',
+              durationSeconds: 6,
+              chainBreak: 'hard_cut',
+            },
+          ],
+          fixedShots: [],
+        },
+      ])
+    );
+
+    expect(review).toMatchObject({ status: 'unavailable', reason: 'reducer_rejected' });
+    expect(review.refusal?.subjects[0]?.subject).toMatchObject({
+      kind: 'beat',
+      id: 'invitation',
+      title: 'The Next Story',
+      position: null,
+    });
+  });
+
   it('reports only the exact partial fixed-review mismatch', () => {
     const project = createProject();
     const review = deriveStudioProposalReviewV2(

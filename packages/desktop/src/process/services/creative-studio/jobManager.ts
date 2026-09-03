@@ -20,6 +20,7 @@ import {
   type StudioRetryDownloadRequest,
   type StudioRetryJobRequest,
 } from '@/common/types/project/creativeStudioTypes';
+import { isDisqualifiedByHealthVerdict } from '@/common/utils/imageModelAllowlist';
 import {
   ProviderDeadlineError,
   runWithProviderDeadline,
@@ -325,7 +326,7 @@ const providerWithModel = (provider: IProvider, model: string): TProviderWithMod
 const providerIsAvailable = (provider: IProvider, model: string): boolean =>
   provider.enabled !== false &&
   provider.model_enabled?.[model] !== false &&
-  provider.model_health?.[model]?.status !== 'unhealthy' &&
+  !isDisqualifiedByHealthVerdict(provider, model) &&
   provider.api_key.trim().length > 0;
 
 const providerCredentialsAreUsable = (provider: IProvider): boolean =>

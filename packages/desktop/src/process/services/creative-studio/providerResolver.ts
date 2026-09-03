@@ -17,7 +17,11 @@ import type {
   StudioRouteCatalogEntry,
   StudioRouteConstraints,
 } from '@/common/types/project/creativeStudioTypes';
-import { isImageGenSupported, isImagesApiModel } from '@/common/utils/imageModelAllowlist';
+import {
+  isDisqualifiedByHealthVerdict,
+  isImageGenSupported,
+  isImagesApiModel,
+} from '@/common/utils/imageModelAllowlist';
 import { getBytePlusSeedanceModelSpec, isSupportedBytePlusSeedanceProvider } from './adapters/bytePlusSeedanceAdapter';
 import {
   getDefaultOpenRouterVideoCatalog,
@@ -107,7 +111,7 @@ const sanitizedProviderName = (provider: IProvider): string => {
 const available = (provider: IProvider, model: string): boolean =>
   provider.enabled !== false &&
   provider.model_enabled?.[model] !== false &&
-  provider.model_health?.[model]?.status !== 'unhealthy' &&
+  !isDisqualifiedByHealthVerdict(provider, model) &&
   providerIsConfigured(provider);
 
 const modelHealth = (provider: IProvider, model: string): StudioGenerationRoute['health'] => {
@@ -264,7 +268,7 @@ const resolveBindingRoute = (
   if (
     provider.enabled === false ||
     provider.model_enabled?.[binding.model] === false ||
-    provider.model_health?.[binding.model]?.status === 'unhealthy'
+    isDisqualifiedByHealthVerdict(provider, binding.model)
   ) {
     return {
       status: 'health',

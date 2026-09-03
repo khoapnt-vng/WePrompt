@@ -1245,6 +1245,27 @@ export function createListRoutesHandler(
   return async () => commandToolResult(await writer.listRoutes());
 }
 
+/**
+ * A Shot that does not exist yet cannot be created as a hard cut: `apply_coverage`'s reducer
+ * refuses the whole batch, while `add_shot` always creates a continuing Shot. Catch that mismatch
+ * at the Director boundary so the refusal can name the exact Shot, Beat, and available remedy.
+ */
+const firstUncreatableHardCutV2 = (
+  project: StudioProjectV2,
+  operations: readonly StudioMutationOperationV2[]
+): { beatId: string; shotId: string } | null => {
+  for (const operation of operations) {
+    if (operation.kind !== 'apply_coverage') continue;
+    for (const shot of operation.shots) {
+      if (shot.chainBreak !== 'hard_cut') continue;
+      if (!Object.hasOwn(project.shots, shot.shotId)) {
+        return { beatId: operation.beatId, shotId: shot.shotId };
+      }
+    }
+  }
+  return null;
+};
+
 export function createProposeStoryboardHandlerV2(
   config: StudioServerEnv | null
 ): (input: ProposeStoryboardInputV2) => Promise<StudioToolResult> {
@@ -1261,6 +1282,15 @@ export function createProposeStoryboardHandlerV2(
         return errorResult(
           `The project is at revision ${project.revision}; you proposed against ${base_revision}. ` +
             'Call read_storyboard and redraft.'
+        );
+      }
+      const hardCut = firstUncreatableHardCutV2(project, operations);
+      if (hardCut !== null) {
+        return errorResult(
+          `Shot ${hardCut.shotId} in Beat ${hardCut.beatId} does not exist yet and sets chainBreak ` +
+            '"hard_cut". A Shot cannot be created as a hard cut, so this batch would be refused whole. ' +
+            'Redraft it with chainBreak "none" and say in your reply that the person can cut it free ' +
+            'afterwards from the Beat panel, which is the only place a hard cut can be set.'
         );
       }
       await assertProjectSnapshotStatusV2(config, snapshot);

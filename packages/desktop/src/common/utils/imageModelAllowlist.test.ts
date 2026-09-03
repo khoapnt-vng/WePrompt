@@ -5,7 +5,12 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { getImageModelMaxConditioningImages, isImageGenSupported, isImagesApiModel } from './imageModelAllowlist';
+import {
+  getImageModelMaxConditioningImages,
+  isDisqualifiedByHealthVerdict,
+  isImageGenSupported,
+  isImagesApiModel,
+} from './imageModelAllowlist';
 
 const VNG_BASE_URL = 'https://maas-llm-aiplatform-hcm.api.vngcloud.vn/v1';
 
@@ -44,6 +49,54 @@ describe('isImageGenSupported', () => {
     expect(
       isImageGenSupported({ base_url: 'https://openrouter.ai/api/v1' }, 'google/gemini-2.5-flash-image-preview')
     ).toBe(true);
+  });
+});
+
+describe('isDisqualifiedByHealthVerdict', () => {
+  it.each([
+    [
+      'an unhealthy supported Gemini image model',
+      {
+        platform: 'gemini',
+        model_health: { 'gemini-2.5-flash-image-preview': { status: 'unhealthy' as const } },
+      },
+      'gemini-2.5-flash-image-preview',
+      false,
+    ],
+    [
+      'an unhealthy supported OpenRouter image model',
+      {
+        base_url: 'https://openrouter.ai/api/v1',
+        model_health: { 'google/gemini-3-pro-image-preview': { status: 'unhealthy' as const } },
+      },
+      'google/gemini-3-pro-image-preview',
+      false,
+    ],
+    [
+      'an unhealthy non-image model',
+      { platform: 'gemini', model_health: { 'gemini-2.5-pro': { status: 'unhealthy' as const } } },
+      'gemini-2.5-pro',
+      true,
+    ],
+    [
+      'an unhealthy image-like model on an unsupported provider',
+      {
+        platform: 'openai',
+        base_url: 'https://api.openai.com/v1',
+        model_health: { 'gpt-image-1': { status: 'unhealthy' as const } },
+      },
+      'gpt-image-1',
+      true,
+    ],
+    [
+      'a healthy non-image model',
+      { platform: 'openai', model_health: { 'gpt-5': { status: 'healthy' as const } } },
+      'gpt-5',
+      false,
+    ],
+    ['a model with no health verdict', { platform: 'openai' }, 'gpt-5', false],
+  ])('returns the scoped verdict for %s', (_label, provider, model, expected) => {
+    expect(isDisqualifiedByHealthVerdict(provider, model)).toBe(expected);
   });
 });
 
