@@ -1,165 +1,226 @@
 # Wave 2 — scope and split
 
-Read-only assessment of every file Wave 2 would touch, verdicted `rewire` / `adapt` /
-`rewrite` / `delete` against the CS4 contracts. Nothing implemented.
+> **Corrected 2026-09-03.** The first revision of this document (`c576ff1a4`) was wrong in ways
+> that **understated** the work, which is the dangerous direction. Its three load-bearing
+> premises — that `v2Service` was live, that video was ~29 hardcodes, and that References was a
+> port — are all disproved below. If you planned from the previous revision, re-plan.
+>
+> Provenance: measured in a worktree at `bd167da50` — a local spike one commit ahead of
+> `958478ded` (tip of `codex/creative-studio-4-pilot`), touching only
+> `service/pilot/runtime/jobs.ts`, so every claim outside that one file reflects `958478ded`.
+> Re-checked against `codex/creative-studio-4-phase-6` (Wave 1). Claims marked **[verified]**
+> were re-read directly; claims marked **[audit]** come from a 24-agent adversarial audit and
+> were not all independently re-read.
 
 ---
 
-## The headline: Wave 2 is not a port
+## 0. Read this first — a P0 regression, unrelated to Wave 2 scope
 
-I sized it earlier as "~9,100 lines of existing video and References code to port". That was
-wrong twice over, and both corrections point the same way.
+**Every renderer `prepare-photo` call is rejected at the IPC boundary. The mounted photo
+composer is broken for all users.** **[verified]**
 
-**The video adapters need no work at all.** All of them implement the *same*
-`GenerationProviderAdapter` — one definition at `adapters/types.ts:103`, no older variant
-anywhere in the repo — and name **zero** schema-5 identifiers. More than that, the registry
-at `adapters/index.ts:29-38` **already constructs all four unconditionally**, because the
-video deps are optional and the factories default to real singletons. The Pilot's runtime is
-handed a four-entry map today. The video adapters are unreachable for **route and
-media-kind** reasons, not registration reasons.
+`common/adapter/native/payloadSchemas.ts:1142-1154` declares the `mode: 'create'` branch of
+`'creative-studio-pilot.prepare-photo'` as `.strict()` over exactly six keys — `mode`,
+`projectId`, `expectedAuthoringRevision`, `words`, `settings`, `suggestedHandle`. It does not
+include `referencePieceIds`. `PilotCanvas.tsx:1031` sends `referencePieceIds` on every call.
+A `.strict()` object rejects unknown keys.
 
-**The References code is not portable, it is deletable.** `referenceSidecars.ts` (2,222),
-`referenceViewAdapter.ts` (870), `studioReferenceRequestWriter.ts` (694),
-`referenceRemovalBlockers.ts` (271) and the References view files all verdict **delete** —
-several are not merely dead but *un-runnable*, because no main process registers a provider
-for the schema-5 channels they call. And the semantic reference workflow is **already ~70%
-present in the Pilot under a different name**: the bounded Piece conditioning that shipped in
-`f962f705e`.
+The Director path is unaffected, because `service/pilot/director/processor.ts:98` calls
+`preparePhotoV3` in-process rather than over IPC. That is why this was not noticed.
 
-**So the real work was never the 9,100 lines.** It is generalising the Pilot's *own*
-image-shaped assumptions — code that works, is on the critical path, and touches money.
+Still unfixed on Wave 1 **[verified]**: the schema on `codex/creative-studio-4-phase-6` has no
+`referencePieceIds`, and that branch's `PilotCanvas` still sends it at two sites.
 
-| Verdict | Lines | What it means |
-|---|---|---|
-| `rewire` | 10,037 | works as written; needs constructing or selecting |
-| `delete` | 22,031 | dead or superseded; carry nothing |
-| `adapt` | 24,880 | **the actual Wave 2 cost** |
-| `rewrite` | 10,325 | cheaper fresh than ported |
+The fix is roughly ten lines — add
+`referencePieceIds: z.array(safeIdSchema).max(STUDIO_MAX_PIECE_CONDITIONING_INPUTS_V3)` to the
+create branch, and add the field to the fixture at
+`tests/unit/process/bridge/nativePayloadSchemas.test.ts:251`.
+
+**The guard matters more than the fix.** The payload-schema fixtures are hand-written next to
+the schema, so they agree with it by construction and can never catch a renderer that sends
+something else. Derive them from the transported request types, or assert against a real
+renderer call. This is what let a nine-layer feature ship while missing its tenth layer.
 
 ---
 
-## The correction that matters most for planning
+## 1. What was wrong in the previous revision
 
-I said the media-kind hardcoding was five sites. **It is not five.** Measured:
+**"The video adapters are unreachable for route and media-kind reasons, not registration
+reasons."** Half right. The registry does construct all four adapters unconditionally
+(`adapters/index.ts:33-38`). But they are inert Map entries no production path retrieves; the
+real gate is a set of `=== 'weprompt-image-v1'` pins downstream (`connectionController.ts:29`,
+`pilotProductionRuntime.ts:244`). **[audit]**
 
-- `service/pilot/runtime/media.ts` — **~30 gates**, not 3. The three assignments are the cheap
-  ones. Verdict: **rewrite**, 2,111 lines.
-- `service/pilot/runtime/jobs.ts` — **4**, not 1.
-- plus `projections.ts`, `prepare.ts`, and the schema-2 spine: `validation.ts` (3,901),
-  `estimate.ts` (2,051), `authorization.ts` (788), `composition.ts` (753),
-  `submissionIdentity.ts` (709).
+**"The References code is not portable, it is deletable."** The deletion half is right and the
+line count was exact — 4,205 lines across seven files. But the framing was wrong: References is
+**not** the video story. See §3. **[audit]**
 
-**Pricing and authorization are in the blast radius.** That is the single most important fact
-in this document: generalising media kind is a money-touching change, so it must happen once,
-deliberately, with the spend tests green — not twice, incidentally, during two feature ports.
+**"~30 gates in `runtime/media.ts`", "24,880 adapt lines", the `29 hardcodes` count.** None of
+these is reproducible. They came from counting `'image'` literals, which measures nothing: in
+`schema2/validation.ts`, 16 of 17 counted literals are V2 board-path branching that already
+coexists with working video, while ~10 genuine Pilot hardcodes in the same file went uncounted.
+The count was simultaneously too high and too low. **[audit]**
 
----
+**"`v2Service` produces video today through the same spine."** False, and this was the
+centrepiece. `v2Service.ts` (4,506 lines) is dead: `process/bridge/creativeStudioBridge.ts:26`
+states *"No schema-5 provider is registered or imported"* and registers only connections and
+pilot. Nothing constructs it. **[verified]**
 
-## And the answer to "are we doing double work?"
-
-You were right to push. My first split — video first, References second — **would have been**
-double work, because both would have reopened the same request-building and pricing spine.
-
-The correct axis is the shared primitive. But the sharing is more specific than I said last
-time, and the detail changes the slice:
-
-`ResolvedStudioGenerationRequest` carries **two mutually exclusive conditioning channels** —
-`firstFrame` for video and `conditioningImages` for stills. The video adapters use
-`hasImageConditioningFields(request)` (`types.ts:47-48`) as a **first-line disqualifier**, so
-a video request must **omit those keys entirely** — `undefined` is not sufficient.
-
-So the shared thing is not one conditioning field. It is **the request builder and its
-media-kind branch**, which must choose the right channel and omit the other. That is a small,
-precise, testable piece of work — and it is exactly the piece both features would otherwise
-have written differently.
+**File placement.** `validation.ts`, `estimate.ts`, `authorization.ts`, `composition.ts` and
+`submissionIdentity.ts` were listed under `service/pilot/`. They live under `service/schema2/`.
+The Pilot imports them; it does not own them. **[verified]**
 
 ---
 
-## The split
+## 2. Video — a nine-layer vertical feature, not a gate list
 
-### Slice 1 — generalise the media spine *(belongs in Wave 1)*
+The Pilot is image-only by construction from the tool schema down to the byte-signature check
+on every playback read. The layers, each an independent narrowing: **[audit]**
 
-The Pilot stops assuming its output is a photograph. Media kind, duration, the request
-builder's channel choice, and the pricing and validation paths that follow from them.
+| Layer | Gate |
+|---|---|
+| MCP tool schema | `pilotStudioServer.ts:131` — `studio_prepare_photo` is the only creation tool, `.strict()`, aspect-ratio + resolution only |
+| Director policy | `pilot/director/contracts.ts:26` — union has no motion member |
+| Persistence | `StudioPiecePhotoSettingsV3` has no duration; `mediaKind: 'image'` is a **type literal** at `creativeStudioTypes.ts:1894`, `:2109` |
+| Validation | `validation.ts:3337` categorically rejects non-image Piece assets |
+| Spend identity | `schema2/pricing/authorization.ts:560` derives the authorization id from the literal `'piece_image'` |
+| Runtime | `pilot/runtime/jobs.ts:470` rejects `durationSeconds !== 1`; `media.ts:52` image-only MIME allowlist |
+| Projections | `projections.ts:380` `mediaKind: 'image' as const` |
+| Connection wiring | `pilotProductionRuntime.ts:244` filters connections to `weprompt-image-v1` |
+| Renderer | `PilotCanvas.tsx:512` is a bare `<img>` — the only media element on the mounted path |
 
-- `runtime/media.ts` ~30 gates — **rewrite**; this is the bulk
-- `runtime/jobs.ts` 4 gates plus `durationSeconds: 1` — adapt
-- `prepare.ts`, `projections.ts`, `contracts.ts` — adapt
-- `validation.ts`, `estimate.ts`, `authorization.ts`, `composition.ts`,
-  `submissionIdentity.ts` — adapt, and **money is here**
-- `StudioPieceKindV2 = 'photograph'` gains a second member
+**It is a *purpose* problem more than a `mediaKind` problem.** `'piece_image'` is woven into
+spend identity, so a video purpose could never reproduce a matching authorization id.
 
-**Why Wave 1, not Wave 2:** the schema is already being bumped, and a contract
-generalisation done during a feature port is how it becomes a rewrite. The pricing exposure
-makes this argument stronger, not weaker.
+**Wave 1 has since frozen the contracts and wired none of them** **[verified]**:
+`StudioPieceKindV4 = 'photograph' | 'motion'` exists, `StudioPieceMotionSettingsV4` exists, and
+`'piece_motion'` exists as a purpose — but `StudioPieceKindV4` has two usage sites, both inside
+the type file; `piece_motion` appears nowhere in `schema2/pricing`; `authorization.ts:560` is
+unchanged; and there is still no `studio_prepare_motion` tool.
 
-**Demonstrable at the end:** nothing new to a user. This is the slice with no demo, which is
-precisely why it must not be smuggled into a feature slice where it will be rushed.
-
-### Slice 2 — one video Piece
-
-Thin, because Slice 1 did the general work and the adapters are already live.
-
-- Select a video route; omit the image conditioning keys per the disqualifier
-- `durationSeconds` inside the model's spec window — `seedance-1-5-pro` is 4–12,
-  `dreamina-seedance-2-0` is 4–15
-- Target **`bytePlusSeedanceAdapter`** for the demo: it is the only one with a real endpoint,
-  a `queued_only` cancellation policy, and a provider-supplied poster (`last_frame_url`)
-
-**One risk worth naming:** `imageAdapter` returns only `{kind:'complete'}` and defines no
-`poll` or `cancel`, so **the Pilot's entire remote-job machine is built and tested but has
-never run in production**. Video is the first thing to exercise submit → poll → cancel for
-real. Budget for that discovery rather than assuming tested means exercised.
-
-**Demonstrable at the end:** one video Piece produced, viewed, priced, with provenance. No
-Assembly, no film, no export.
-
-### Slice 3 — semantic References
-
-Not a port. Mostly deletion, then extension of what already exists.
-
-- Delete ~4,200 lines of dead schema-5 References code
-- Extend the bounded Piece conditioning already shipped — the assessment puts the semantic
-  workflow at **~70% present under a different name** — with naming, typing and reuse
-- The `stills` block with a caption per member is the canvas home, per grammar v2, so the old
-  References view is replaced wholesale rather than migrated
-- `referenceRemovalBlockers.ts` is deleted, but **read it before deleting**: it encodes real
-  rules about when a reference may be removed, and those rules may outlive their UI
-
-### Not Wave 2 — film export
-
-`filmExporter.ts` (1,833, adapt) and `editorFolder.ts` (413, rewrite) belong in Wave 3, where
-the wave list already puts export parity. The assessment's framing is the right test:
-**does a video Piece need a video *pipeline*, or just a video *byte stream*?** Slice 2 needs
-only the stream. `ffmpegBinaries.ts` is a `rewire`, but it resolves to bare `ffmpeg` on PATH
-and appears in no packaging config, so shipping it is Wave 3 work regardless.
+**Genuinely ready, needing no work:** all four adapters constructed; `rateCardConfig.ts:26-41`
+prices all three video adapters at `rateUnit: 'second'` with per-second math in
+`schema2/generation/spendMath.ts:59-70`; CSP already allows `media-src 'self' weprompt-studio:`
+and the custom protocol already does RFC 7233 range serving; **no ffmpeg is required** to
+produce or view one video Piece.
 
 ---
 
-## What this changes about Wave 2's size
+## 3. References — wiring, not a port, and not the video story
 
-Wave 2 as scoped — "References and video Pieces" — is **smaller than Wave 1** once Slice 1
-moves into Wave 1, and larger than it looks if Slice 1 stays.
+The semantic workflow was deliberately rebuilt as bounded Piece conditioning in `f962f705e`,
+and is **live on eight of nine layers including the mounted UI** — `PilotCanvas.tsx:1379-1415`
+already ships a full reference picker. **[audit]**
 
-- Slice 2 is genuinely small: the adapters are done, and the general work is upstream.
-- Slice 3 is mostly deletion plus a bounded extension of shipped code.
-- The 24,880 `adapt` lines are almost entirely Slice 1, which is a Wave 1 contract change.
+The single blocker is the IPC omission in §0. It is not a References enhancement; it is a P0
+regression that breaks the whole composer.
 
-That is the scope-down: **not by cutting features, but by recognising that most of the counted
-volume is either already working, already dead, or actually a Wave 1 contract job.**
+**Unlike video, there is no spend-identity hazard**: `pilot/prepare.ts:233-235` *mints* the
+authorization identity rather than deriving it from a purpose literal.
+
+**The 4,205 dead lines are deletable** — `referenceSidecars.ts` 2222, `referenceViewAdapter.ts`
+870, `studioReferenceRequestWriter.ts` 694, `referenceRemovalBlockers.ts` 271,
+`referenceBinding.ts` 83, `referenceRequest.ts` 50, `referenceStatus.ts` 15.
+
+**The `spendOrchestration` hazard was a false alarm** — recorded so nobody re-raises it. The
+file is `renderer/pages/studio/StudioPage/spendOrchestration.ts` (not `service/`); it does
+value-import and call `referenceCapabilityItems` at `:634` and `:746`; but it is itself
+unreachable — its only importer is `mediaViewAdapters.ts:38`, which has no importer, and
+`StudioPage/index.tsx` references none of the three. It is a **closed cycle of dead modules**.
+Delete the cluster whole, or not at all: removing one member breaks the build via the others.
+**[verified]**
 
 ---
 
-## Decisions this needs
+## 4. Export — not narrowed out; whole-project export is what went
 
-1. **Does Slice 1 move into Wave 1?** My recommendation is yes, and the pricing exposure is
-   the reason. This is the only genuinely contentious call here.
-2. **Second Piece kind: `video`, or `motion` to match the grammar?** The grammar's kind is
-   `motion` and absorbs video and clip sets; `StudioPieceKindV2` is a persisted union. Picking
-   the wrong name here is a schema migration later.
-3. **Is `durationSeconds` on the Piece or on the Assembly binding?** Raised earlier for the
-   Assembly clock; Slice 1 forces the answer, because the request builder needs a duration
-   before any Assembly exists.
-4. **Confirm References is delete-and-extend, not port.** ~4,200 lines are proposed for
-   deletion on the strength of this assessment. Worth a second opinion before anyone runs
-   `git rm`.
+Per-Piece export is genuinely wired end to end: real image bytes plus a provenance manifest, a
+native save dialog, and reveal-in-Finder. What disappeared with the cutover is **whole-project /
+film export**, not the ability to get work out. **[audit]**
+
+Three corrections a reader needs:
+
+- **It is behind an off-by-default flag.** Every export command short-circuits unless
+  `AIONUI_ENABLE_CREATIVE_STUDIO === '1'`. "Live" means "live when enabled".
+- **Reveal opens the wrong folder.** Export copies to the user's chosen destination, but
+  `resolveRevealPath` recomputes a path inside the app's confined store root and reveals that.
+- **Eight orphaned IPC channels remain declared** at `ipcBridge.ts:1432-1457` (`createExport`,
+  `getFilmExportCapability`, `getFilmExportStatus`, `cancelFilmExport`, …) with no registered
+  provider, and a still-present renderer hook invokes two of them.
+
+Wave 1 has since added `pilot/runtime/export.ts` and `schema2/exports/pieceManifestV4.ts`, so
+export work has migrated into Wave 1 regardless of what this document says. **[verified]**
+
+Note for anyone deleting the old export modules: only `filmExporter.ts` is genuinely
+unreachable. `catalog.ts` and `editorFolder.ts` are re-exported by a barrel that **is** on the
+live path.
+
+---
+
+## 5. Sound — narrowed out, but by an explicit decision
+
+Audio was real and live before CS4 — imported music bed, shot audio analysis, clip-audio
+playback, film-export audio mix — and was removed wholesale in `1a8db2713`. Nothing survives on
+the Pilot path. **[audit]**
+
+Unlike video, this was a **written decision, not silent narrowing**. And a *generatable* sound
+Piece never existed in any version, so that specific thing is a first-ever build rather than a
+restoration. Wave 1 added a sound addendum PRD and a designer delivery; no code.
+
+---
+
+## 6. The parity gap, stated properly
+
+The clearest measure is the tool diff. `scripts/build-mcp-servers.js:52` builds
+`builtin-mcp-studio.js` from `pilotStudioServer.ts`, so that file is what ships;
+`studioServer.ts` is dead, surviving only in the coverage config. **[verified]**
+
+Shipping today: `get_project_status`, `prepare_photo`, `rename_piece`, `get_command_status`,
+and Wave 1's new `propose_board`.
+
+Declared in the dead server and absent from the Pilot — the parity gap, in product terms:
+
+| Lost tool | What the Director can no longer do |
+|---|---|
+| `studio_request_reference_images` | ask for references |
+| `studio_apply_edits` | edit existing work |
+| `studio_apply_free_fix` | retry without charging |
+| `studio_get_conditioning_frame` | use a frame as conditioning |
+| `studio_list_routes` | see or choose a model route |
+| `studio_propose_paid_recovery` | offer a paid recovery after failure |
+| `studio_get_proposal` | read back a proposal |
+
+---
+
+## 7. What this means for Wave 2
+
+**Wave 2 as originally scoped — "References and video Pieces" — is no longer a coherent unit.**
+
+- References is not a port. It is a ten-line IPC fix (which is a P0 in its own right) plus a
+  separately-scoped deletion of 4,205 dead lines.
+- Video's contracts landed in Wave 1. Splitting the wiring into a separate wave means handing
+  off mid-feature, immediately after the contract work that gives it context.
+- Export already migrated into Wave 1.
+- Sound is a feature build, and partly a first-ever build.
+
+**Recommendation.** Fold the video wiring into Wave 1's tail while the contract context is
+fresh; treat the §0 regression as immediate and unrelated to wave planning; scope the remaining
+work around the seven lost tools in §6 rather than around waves, since each is a demonstrable
+capability with a clear done condition.
+
+**The decision this depends on** is whether CS4 is a stills product — in which case Wave 1 plus
+export is close to done — or a parity product, in which case §6 is the roadmap. Wave 2 as
+written straddles both and commits to neither.
+
+---
+
+## 8. Method note
+
+Both errors in the first revision came from the same habit: counting literals and reading
+names instead of tracing reachability. The rules that would have prevented them:
+
+1. **Never report a bare count as a size.** Distinguish a hardcode from a mention.
+2. **Prove liveness before citing code as evidence.** `v2Service.ts` looks fully featured and
+   runs nowhere.
+3. **Trace the vertical slice**, tool schema to rendered element. Nine layers each looked
+   locally reasonable while the tenth silently rejected every call.
