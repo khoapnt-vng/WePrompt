@@ -3,7 +3,7 @@
 Current as of 2026-09-04. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**128 bugs filed · 124 closed · 4 open** — 1 P1, 3 P2, 0 P3.
+**128 bugs filed · 126 closed · 2 open** — 1 P1, 1 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
@@ -20,8 +20,6 @@ BUG-210 records the remaining visible-ID seam after restoring plain-language Dir
 | Bug         | Priority | State          | Remaining gate                                                                                                                                                                                      |
 | ----------- | -------- | -------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | **BUG-144** | P1       | Owner-deferred | Approve and package distributable LGPL-compatible ffmpeg/ffprobe binaries; finish provenance, signing, notices and legal review; separately give found-but-unsupported builds accurate remediation. |
-| **BUG-163** | P2       | Code fixed     | Complete a current-head Electron restart/recovery pass with a stale bound conversation.                                                                                                             |
-| **BUG-166** | P2       | Code fixed     | Complete a current-head Electron pass with a varied-frame video and prove poster persistence across reload.                                                                                         |
 | **BUG-210** | P2       | Partial fix    | Carry the selected proposal through a typed backend-supported per-turn context so the editable draft and transcript no longer need the opaque routing ID.                                           |
 
 There is no actionable open P3 queue.
@@ -34,15 +32,6 @@ still ships no binaries, so its main distribution gate remains deferred by the o
 through application code alone. Separately, the truly missing-binary path is actionable, but a pair
 that is found and fails the capability probe is still misreported as missing; that copy split remains
 bounded code work and does not solve the distribution gate.
-
-### BUG-163 and BUG-166 — live closure only
-
-The recovery behavior is covered on the current branch: Director recovery passes nine targeted cases
-and its full 85-test file; poster capture covers flat-frame refusal, failure-specific retries, renderer
-and Main single-flight behavior, and idempotent duplicate persistence. The four affected UI suites pass
-456 tests together. The repository's fake MP4 is uniformly black, so it correctly exercises rejection
-but cannot prove positive poster persistence. These entries stay open until the two Electron scenarios
-above are run with suitable fixtures.
 
 ### BUG-210 — the reply is plain; the selected-proposal handoff is not yet hidden
 
@@ -74,14 +63,19 @@ without entering visible draft or transcript text.
   predecessor-frame boundaries, adds exact-frame Director review, presents resolved chained video as
   `X–2X`, and authorizes exactly one receipt-free remote-failure retry without changing legacy,
   continuity-change or Board-promotion graphs.
+- **Current-head Electron closures:** BUG-163 preserves the same stale-bound Director conversation,
+  history, claimant and project binding through its one-time rules repair, then reattaches on a second
+  restart without another write. BUG-166 captures a non-flat varied-video poster, persists the
+  manifest-matched PNG, paints it after reload and creates no duplicate thumbnail. Both live passes
+  used disposable profiles and made no paid provider request.
 
 The current backports preserve the corrected versions of the historical fixes: BUG-176 lifts each
 Shot tile rather than the entire Shot grid above the card overlay, and BUG-177 includes the viewer
 counter follow-up found during live verification.
 
 Implementation commit `d0ad3927d` closes BUG-162, BUG-171 and BUG-173 through BUG-177, restores
-BUG-200 and BUG-201, and hardens the still-live-gated BUG-166. Its final affected-path run passed 899
-tests. The repository run passed 672 test files and 10,633 tests with 25 skipped; coverage passed at
+BUG-200 and BUG-201, and hardens BUG-166 before its current-head live closure. Its final affected-path
+run passed 899 tests. The repository run passed 672 test files and 10,633 tests with 25 skipped; coverage passed at
 72.73% statements, 70.96% branches, 69.94% functions and 74.65% lines. TypeScript, formatting,
 translation validation and lint also pass; lint retains the repository's 1,324 warnings and has zero
 errors.
