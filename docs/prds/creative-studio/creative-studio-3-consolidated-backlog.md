@@ -3,7 +3,7 @@
 Current as of 2026-09-04. Counts are derived from
 `creative-studio-3-bug-list.md`; rejected intake items are not counted as bugs.
 
-**128 bugs filed · 126 closed · 2 open** — 1 P1, 1 P2, 0 P3.
+**129 bugs filed · 127 closed · 2 open** — 1 P1, 1 P2, 0 P3.
 
 The divergent CS4 register used BUG-179 through BUG-195 after the CS3 rollback. Two older CS3
 defects lost by that rollback are restored as BUG-200 and BUG-201 rather than reusing colliding ids.
@@ -12,6 +12,9 @@ closed without importing the absent audio-analysis feature slice. BUG-204, BUG-2
 BUG-208 reconcile Claude's follow-up findings against the recovery's actual contracts; proposed
 BUG-206 is the same incident as BUG-207, and non-reproducing BUG-209 remains outside the bug count.
 BUG-210 records the remaining visible-ID seam after restoring plain-language Director replies.
+BUG-212 closes the one confirmed defect in Claude's later intake: an exact terminal video-refusal
+code reached sanitized diagnostics but not the durable job result. Proposed BUG-211, BUG-213 and
+BUG-214 are corrected product or terminology questions and remain outside the bug count.
 
 ---
 
@@ -63,6 +66,9 @@ without entering visible draft or transcript text.
   predecessor-frame boundaries, adds exact-frame Director review, presents resolved chained video as
   `X–2X`, and authorizes exactly one receipt-free remote-failure retry without changing legacy,
   continuity-change or Board-promotion graphs.
+- **Terminal video-refusal classification:** BUG-212 carries an exact allowlisted safety refusal from
+  a successful terminal response into the durable result, while preserving status-first HTTP
+  authority, honest `unknown` outcomes and the existing bounded retry contract.
 - **Current-head Electron closures:** BUG-163 preserves the same stale-bound Director conversation,
   history, claimant and project binding through its one-time rules repair, then reattaches on a second
   restart without another write. BUG-166 captures a non-flat varied-video poster, persists the
@@ -107,6 +113,12 @@ line-covered. TypeScript, formatting, translation validation and lint pass with 
 and zero errors. The bug remains open only for the backend-supported hidden per-turn target described
 above.
 
+Terminal-refusal commit `09117688e` closes BUG-212 under its corrected scope. The adapter suite passes
+45 tests, an independent adapter/job-manager review run passes 111, and the repository suite passes
+672 files and 10,707 tests with 25 skipped. TypeScript, formatting and diff checks pass. Unknown
+terminal responses stay unknown and use only the already-authorized bounded retry or a fresh reviewed
+generation; the change does not broaden retry authority.
+
 ## 3. Planned product work outside the bug count
 
 - **Sound:** make review audio audible, identify routes that cannot produce sound, include sound in
@@ -116,6 +128,13 @@ above.
 - **Progressive work area:** derive readiness from status, provide a blank work area, disable empty
   views, advance on first content, then retire the References one-time transition.
 - **Beat track:** the design decisions exist, but the work still needs slicing before implementation.
+- **Board progressive monitoring:** decide whether a validated current panel should move into the
+  large delivered-picture pane while a Shot has no take or pinned seed. Reuse one decoded image,
+  preserve stale/pending authority, and label it as a board panel rather than delivered footage.
+- **Director cleanup and remedy routing:** decide whether parking Beats emptied by a restructure should
+  be proposal-only and human-reviewed, and whether project-status remedies need an explicit executor
+  field that distinguishes undoable direct edits from operational recovery. Preserve intentional
+  empty-Beat slates and do not widen the recovery tool to perform authoring mutations.
 
 These plans are product work, not open defects, and must not be included in the bug totals above.
 The proposed BUG-209 describes the absent audio-analysis implementation and is therefore represented by
