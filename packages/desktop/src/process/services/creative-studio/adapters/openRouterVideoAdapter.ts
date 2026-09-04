@@ -236,15 +236,21 @@ const mapStatusError = (status: number): SanitizedProviderError => {
   return { code: 'unknown' };
 };
 
+const classifiedContentRejectionCode = (
+  fallbackCode: SanitizedProviderError['code'],
+  evidence: OpenRouterHttpErrorEvidence
+): SanitizedProviderError['code'] =>
+  [evidence.errorCode, evidence.providerCode, evidence.upstreamCode].some(
+    (code) => code !== null && CONTENT_REJECTION_UPSTREAM_CODES.has(code)
+  )
+    ? 'content_rejected'
+    : fallbackCode;
+
 const classifiedHttpErrorCode = (
   statusCode: SanitizedProviderError['code'],
   evidence: OpenRouterHttpErrorEvidence
 ): SanitizedProviderError['code'] =>
-  statusCode === 'invalid_request' &&
-  evidence.upstreamCode !== null &&
-  CONTENT_REJECTION_UPSTREAM_CODES.has(evidence.upstreamCode)
-    ? 'content_rejected'
-    : statusCode;
+  statusCode === 'invalid_request' ? classifiedContentRejectionCode(statusCode, evidence) : statusCode;
 
 const record = (value: unknown): Record<string, unknown> | null =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
@@ -540,6 +546,17 @@ const defaultEmitHttpErrorEvidence = (evidence: OpenRouterHttpErrorEvidence): vo
   console.warn('[CreativeStudio:OpenRouterVideo:http-error]', evidence);
 };
 
+const emitHttpErrorEvidenceDetached = (
+  emitHttpErrorEvidence: (evidence: OpenRouterHttpErrorEvidence) => void | PromiseLike<void>,
+  evidence: OpenRouterHttpErrorEvidence
+): void => {
+  setTimeout((): void => {
+    void Promise.resolve()
+      .then(() => emitHttpErrorEvidence(evidence))
+      .catch((): undefined => undefined);
+  }, 0);
+};
+
 const requestJson = async (
   fetcher: ProviderFetch,
   url: string,
@@ -580,12 +597,7 @@ const requestJson = async (
       }
       const stableCode = evidence === null ? statusCode : classifiedHttpErrorCode(statusCode, evidence);
       if (evidence !== null) {
-        const classifiedEvidence = { ...evidence, stableCode };
-        setTimeout((): void => {
-          void Promise.resolve()
-            .then(() => emitHttpErrorEvidence(classifiedEvidence))
-            .catch((): undefined => undefined);
-        }, 0);
+        emitHttpErrorEvidenceDetached(emitHttpErrorEvidence, { ...evidence, stableCode });
       }
       throw new OpenRouterVideoAdapterError(stableCode);
     }
@@ -730,8 +742,10 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         return { kind: 'complete', outputs };
       }
       if (status === 'failed') {
-        await emitHttpErrorEvidence(terminalBodyEvidence(body, 'submit', provider.use_model));
-        throw new OpenRouterVideoAdapterError('unknown');
+        const evidence = terminalBodyEvidence(body, 'submit', provider.use_model);
+        const stableCode = classifiedContentRejectionCode('unknown', evidence);
+        emitHttpErrorEvidenceDetached(emitHttpErrorEvidence, { ...evidence, stableCode });
+        throw new OpenRouterVideoAdapterError(stableCode);
       }
       const id = jobId(body);
       if (!id) throw new OpenRouterVideoAdapterError('invalid_response');
@@ -767,9 +781,12 @@ export const createOpenRouterVideoAdapter = (deps: OpenRouterVideoAdapterDeps = 
         case 'cancelled':
         case 'canceled':
           return { status: 'cancelled', error: { code: 'unknown' } };
-        case 'failed':
-          await emitHttpErrorEvidence(terminalBodyEvidence(body, 'poll', provider.use_model));
-          return { status: 'failed', error: { code: 'unknown' } };
+        case 'failed': {
+          const evidence = terminalBodyEvidence(body, 'poll', provider.use_model);
+          const stableCode = classifiedContentRejectionCode('unknown', evidence);
+          emitHttpErrorEvidenceDetached(emitHttpErrorEvidence, { ...evidence, stableCode });
+          return { status: 'failed', error: { code: stableCode } };
+        }
         default:
           throw new OpenRouterVideoAdapterError('invalid_response');
       }

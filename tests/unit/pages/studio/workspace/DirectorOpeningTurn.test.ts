@@ -129,6 +129,8 @@ describe('the Director preset rules', () => {
 
   it('requires an exact proposal read and current storyboard before drafting a replacement', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_proposal with the\s+full proposal ID/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/proposal IDs are tool inputs only/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never repeat.*identifier.*(?:person|reply)/is);
     expect(DIRECTOR_PRESET_RULES).toMatch(/read_storyboard for current authority/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never silently rebase, apply, approve, reject, or substitute/i);
   });
@@ -176,14 +178,22 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/studio_get_project_status or studio_list_routes again/i);
   });
 
-  it('requires the exact persisted predecessor frame before revising an existing chained Shot', () => {
+  it('requires the exact persisted predecessor frame before proposing or revising a chained Shot', () => {
     expect(DIRECTOR_PRESET_RULES).toContain('studio_get_conditioning_frame');
-    expect(DIRECTOR_PRESET_RULES).toMatch(/revising an existing chained Shot.*studio_get_conditioning_frame/is);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /before proposing or revising any currently conditioned chained Shot.*studio_get_conditioning_frame/is
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/including before that Shot's first\s+generation/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /do not propose a downstream\s+Shooting script until its exact conditioning frame is available/i
+    );
     expect(DIRECTOR_PRESET_RULES).toMatch(/describe what.*frame already shows, then move/is);
     expect(DIRECTOR_PRESET_RULES).toMatch(/never.*substitute a poster or\s+seed still/is);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/claim a visual diagnosis when the exact conditioning frame is unavailable/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /claim a visual diagnosis when the exact\s+conditioning frame is unavailable/i
+    );
     expect(DIRECTOR_PRESET_RULES).toMatch(/active\s+model cannot inspect the attached image/i);
-    expect(DIRECTOR_PRESET_RULES).toMatch(/state that limitation and do not submit a frame-aware revision/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/state that.*limitation.*do not submit a frame-aware revision/is);
   });
 
   it('describes every governed operation from the exact shared disposition policy', () => {
@@ -262,6 +272,22 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/when the person owes an action, name that exact action/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/accept or revise a proposal/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/start reference\s+generation and confirm its spend/i);
+  });
+
+  it('tells the Director how to speak, not only what to do', () => {
+    /*
+     * Regression: the Director repeated a proposal UUID and internal fields such as chainBreak in
+     * otherwise user-facing prose. Exact identifiers remain necessary for tools, but they must not
+     * cross that boundary into the words shown to the person.
+     */
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never put an identifier in a sentence/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never name a tool, a field, or a stored value/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/not\s+chainBreak, not base_revision, not approvedAssetId/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never say review UI, human review/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/waiting for you rather than pending human\s+review/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/distinctions matter and\s+must survive; the vocabulary must not/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/one plain sentence saying what to do and where/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/no inline code spans/i);
   });
 
   it('forbids an evidence-free stock all-done claim', () => {

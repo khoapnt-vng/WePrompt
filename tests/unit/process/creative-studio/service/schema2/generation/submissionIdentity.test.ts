@@ -7,7 +7,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createStudioQuotedGenerationId } from '@/process/services/creative-studio/service/schema2/generation/submissionIdentity';
+import {
+  createStudioAutomaticReferenceRetryJobId,
+  createStudioAutomaticVideoRetryJobId,
+  createStudioQuotedGenerationId,
+} from '@/process/services/creative-studio/service/schema2/generation/submissionIdentity';
 
 describe('createStudioQuotedGenerationId', () => {
   it('matches the frozen quote-item vector', () => {
@@ -110,5 +114,30 @@ describe('createStudioQuotedGenerationId', () => {
     ],
   ] as const)('rejects invalid quote identity input %#', (input, errorType) => {
     expect(() => createStudioQuotedGenerationId(input as never)).toThrow(errorType);
+  });
+});
+
+describe('createStudioAutomaticVideoRetryJobId', () => {
+  it('matches its frozen identity vector without colliding with reference retries', () => {
+    const input = {
+      authorizationId: 'authorization_1',
+      itemId: 'item_1',
+      idempotencyKey: 'key_2',
+    };
+
+    expect(createStudioAutomaticVideoRetryJobId(input)).toBe(
+      'job_477b4e48919e0e4f30fcd49654f39ae113f9a4add44e8de468daa5bbca6a9203'
+    );
+    expect(createStudioAutomaticVideoRetryJobId(input)).not.toBe(createStudioAutomaticReferenceRetryJobId(input));
+  });
+
+  it('rejects unsafe persisted identity fields', () => {
+    expect(() =>
+      createStudioAutomaticVideoRetryJobId({
+        authorizationId: '../authorization',
+        itemId: 'item_1',
+        idempotencyKey: 'key_2',
+      })
+    ).toThrow(TypeError);
   });
 });

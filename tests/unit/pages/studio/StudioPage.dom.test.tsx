@@ -3587,7 +3587,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('keeps a blocked downstream video out by excluding its entire continuous Film cascade', async () => {
+  it('defers a blocked downstream video until it becomes the sequential Film frontier', async () => {
     const authority = projectWithGenerationReferences(3, {
       assignedBackgroundShotIds: ['shot_0', 'shot_1', 'shot_2'],
     });
@@ -3607,15 +3607,21 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
 
     fireEvent.click(screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.controls.renderFilm' }));
     const modal = await screen.findByTestId('studio-spend-gate');
-    expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeVisible();
+    expect(modal.querySelector('[data-generation-block-code="duration"]')).toBeNull();
 
     await waitFor(() =>
       expect(mocks.bridge.prepareSubmission.invoke).toHaveBeenCalledWith({
         projectId: authority.id,
         expectedRevision: authority.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'seed_still' }],
-        cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' }],
+        baseChoices: [
+          { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
+          { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'seed_still' },
+        ],
+        cascadeChoices: [
+          { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'video_take' },
+          { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
+        ],
       })
     );
   });
@@ -7624,6 +7630,71 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     fireEvent.click(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.table' }));
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
     expect(toggle).toHaveAttribute('aria-expanded', 'false');
+  });
+
+  it('reveals the Director with an exact no-spend request for an inherited conditioning frame', async () => {
+    const authority = projectWithHandoffShot();
+    const frameAssetId = 'conditioning_frame_shot_3';
+    authority.beats.beat_1!.targetSeconds = 8;
+    authority.beats.beat_1!.shotOrder.push('shot_4');
+    authority.shots.shot_4 = {
+      ...authority.shots.shot_3!,
+      id: 'shot_4',
+      shootingScript: 'Continue from the exact inherited frame.',
+      chainBreak: 'none',
+      assetIds: [],
+      jobIds: [],
+    };
+    authority.assets[frameAssetId] = {
+      ...recoveryAsset(frameAssetId, 'shot_3', 'image'),
+      managedAsset: { collection: 'conditioningFrames', fileName: `${frameAssetId}.png` },
+    };
+    authority.shots.shot_3!.assetIds.push(frameAssetId);
+    mockSupportedProject(authority);
+    mocks.bridge.projectWorkspaceChainFixture.invoke.mockResolvedValue(
+      ok({
+        ...chainStatus(authority),
+        boundaries: [
+          {
+            upstreamShotId: 'shot_3',
+            dependentShotId: 'shot_4',
+            status: 'on_disk' as const,
+            frameAssetId,
+          },
+        ],
+      })
+    );
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    fireEvent.click(toggle);
+
+    act(() => capturedBeatPanelActions().reviewConditioningFrame('shot_4'));
+
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'true'));
+    await waitFor(() => expect(document.activeElement).toBe(toggle));
+    expect(mocks.directorDraftRequest).toMatchObject({
+      projectId: authority.id,
+      prompt: 'conversation.creativeStudio.workspace.beatPanel.directorFrameReviewHint:{"shotId":"shot_4"}',
+    });
+    expect(mocks.bridge.applyAuthoringBatch.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('does not reveal the Director for a forged conditioning-frame review target', async () => {
+    mockSupportedProject(projectWithHandoffShot());
+    renderStudio();
+    await screen.findByRole('heading', { name: 'Launch film' });
+    await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
+    const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+    fireEvent.click(toggle);
+
+    act(() => capturedBeatPanelActions().reviewConditioningFrame('forged_shot'));
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false');
+    expect(mocks.directorDraftRequest).toBeNull();
   });
 
   it('ignores a reviewed-request reveal captured for a view that is no longer active', async () => {

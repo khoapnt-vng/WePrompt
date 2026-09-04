@@ -105,6 +105,7 @@ export type StudioServerEnv = {
 export type StudioToolResult = {
   content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }>;
   isError?: boolean;
+  structuredContent?: Record<string, unknown>;
 };
 
 export type ProposeBriefRuleInput = {
@@ -672,6 +673,10 @@ export const studioGetCommandStatusInputSchemaV2 = z4.object({ commandId: studio
 export const studioGetProjectStatusInputSchemaV2 = z4.object({ detail: z4.boolean().optional() }).strict();
 
 export const studioGetProposalInputSchemaV2 = z4.object({ proposalId: studioDirectorIdSchemaV2 }).strict();
+
+const studioProposalOutputSchemaV2 = z4
+  .object({ proposalId: studioDirectorIdSchemaV2, usage: z4.literal('tool_input_only') })
+  .strict();
 
 export const studioGetConditioningFrameInputSchemaV2 = z4.object({ shotId: studioDirectorIdSchemaV2 }).strict();
 
@@ -1362,9 +1367,10 @@ export function createProposeStoryboardHandlerV2(
         content: [
           {
             type: 'text',
-            text: `Proposal ${record.id} recorded for user review; the user decides what happens next.`,
+            text: 'The storyboard proposal is saved and waiting for review. It has not been applied.',
           },
         ],
+        structuredContent: { proposalId: record.id, usage: 'tool_input_only' },
       };
     } catch (error) {
       if (error instanceof StudioProposalWriteError) return errorResult(error.message);
@@ -1418,9 +1424,10 @@ export function createProposeBriefRuleHandlerV2(
         content: [
           {
             type: 'text',
-            text: `Rule ${record.id} recorded for user review; nothing is pinned until the user accepts it.`,
+            text: 'The rule proposal is saved and waiting for review. It is not active yet.',
           },
         ],
+        structuredContent: { proposalId: record.id, usage: 'tool_input_only' },
       };
     } catch (error) {
       if (error instanceof StudioProposalWriteError) return errorResult(error.message);
@@ -1660,7 +1667,7 @@ export function registerStudioToolsV2(
     'studio_get_conditioning_frame',
     {
       description:
-        'Read the exact current predecessor frame inherited by one active chained Shot. Use it before revising that Shot after a generation failure: the Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.',
+        "Read the exact current predecessor frame inherited by one active chained Shot. Use it before proposing or revising any currently conditioned chained Shot, including before that Shot's first generation; never propose a downstream Shooting script before its exact frame is available. The Shooting script must begin from what the attached frame already shows, then move. The app derives the predecessor, selected take, trim-aware endpoint, extraction and asset; never supply or infer a path or asset id. Visual input is required: if the active Director model cannot inspect the attached MCP image, state that limitation, ask the person to review the visible frame manually, and do not infer or submit a frame-aware revision. This is read-only and never writes, generates, quotes, authorizes, or spends.",
       inputSchema: studioGetConditioningFrameInputSchemaV2,
     },
     createStudioGetConditioningFrameHandlerV2(config)
@@ -1680,6 +1687,7 @@ export function registerStudioToolsV2(
       description:
         'Record one ordered schema-5 authoring mutation batch for user review. Requires base_revision from read_storyboard and never applies or generates anything directly. The input schema exposes only proposal-capable authoring operations plus the non-reference direct operations that may be needed in the same atomic review. Reference planning and shot-reference binding are Director-direct operations and must use studio_apply_edits; approval remains renderer-only. Unavailable operations are invalid arguments and must not be retried or translated into another tool. The final serialized proposal record must fit within 256 KiB.',
       inputSchema: studioProposeStoryboardInputSchemaV2,
+      outputSchema: studioProposalOutputSchemaV2,
     },
     async (input) =>
       createProposeStoryboardHandlerV2(config)({
@@ -1699,6 +1707,7 @@ export function registerStudioToolsV2(
           forbidden_terms: z.array(z.string().min(1).max(STUDIO_RULE_LIMITS.term)).max(STUDIO_RULE_LIMITS.maxTerms),
         })
         .strict(),
+      outputSchema: studioProposalOutputSchemaV2,
     },
     createProposeBriefRuleHandlerV2(config)
   );
@@ -1747,7 +1756,7 @@ export function registerStudioToolsV2(
     'studio_get_proposal',
     {
       description:
-        'Read one exact proposal by its complete proposalId. This read never authors the project, generates, authorizes, or spends. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
+        'Read one exact proposal by its complete proposalId. The proposalId is a tool input only; never repeat it in a user-facing reply. This read never authors the project, generates, authorizes, or spends. A pending answer is the original immutable proposal; after reading it, call read_storyboard and draft a new proposal against the current revision. Never silently rebase, apply, or replace the original proposal.',
       inputSchema: studioGetProposalInputSchemaV2,
     },
     createStudioGetProposalHandlerV2(config, writerDeps)

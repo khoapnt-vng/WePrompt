@@ -1232,7 +1232,7 @@
         }
       },
       "proposals": {
-        "proposalId": "Öneri kimliği",
+        "unlabelledItem": "Etiketsiz öğe",
         "mutationCount": "Önerilen {{count}} düzenleme",
         "mutationCount_one": "Önerilen {{count}} düzenleme",
         "mutationCount_other": "Önerilen {{count}} düzenleme",
@@ -1277,11 +1277,11 @@
         "saveAndRequestUpdated": "Kaydet ve güncel öneriyi hazırla",
         "reviewRuleDrafts": "Kural taslaklarını gözden geçir",
         "reviewRuleDraftsFirst": "Bu kural önerisini kabul etmeden önce yerel kural taslağını gözden geçirin veya silin.",
-        "reproposalPrompt": "Lütfen {{proposalId}} önerisini studio_get_proposal ile inceleyin, ardından read_storyboard çağrısı yapıp mevcut revizyon için yeni bir öneri hazırlayın. İlk öneriyi uygulamayın veya sessizce yeniden temellendirmeyin.",
+        "reproposalPrompt": "Seçtiğim önerinin güncellenmiş bir sürümünü hazırlayın. {{proposalId}} değerini yalnızca içeride tanımlamak için kullanın; yanıtınızda bu referanstan veya teknik adımlardan söz etmeyin.",
         "chatDecisionBusy": "Başka bir incelenmiş işlem hâlâ sürüyor.",
         "chatDirty": "Bu öneriyle çakışan taslakları onaylamadan önce kaydedin veya sıfırlayın.",
         "chatNoPending": "İşlem yapılacak bekleyen bir Yönetmen önerisi yok.",
-        "chatMultiplePending": "Birden fazla güncel Yönetmen önerisi hazır. Tam kimlikle /approve PROPOSAL_ID veya /reject PROPOSAL_ID kullanın.",
+        "chatMultiplePending": "Birden fazla Yönetmen önerisi hazır. İstediğiniz önerideki işlem düğmelerini kullanın.",
         "chatProposalNotFound": "Tam olarak bu öneri artık beklemede değil.",
         "chatUnavailable": "Şu anda hazır bekleyen bir Yönetmen önerisi yok. Kartından inceleyin veya güncel bir öneri isteyin.",
         "chatStale": "Bu öneri artık geçerli proje revizyonuyla eşleşmiyor.",
@@ -1399,6 +1399,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Başlangıç karesini Director ile incele",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1519,6 +1520,7 @@
           "keyboardGuidance": "Boşluk oynatır · Oklar arar · [ ] birleşimler · L döngü"
         },
         "directorRequestHint": "Yaratıcı Yönetmenden incelenmiş bir yeniden bölme önerisi isteyin.",
+        "directorFrameReviewHint": "Shot {{shotId}} için devralınan kesin koşullandırma karesini inceleyin ve karede zaten görünenlerden başlayıp ardından harekete geçen, kareye duyarlı bir Shooting script önerin. Medya üretmeyin, fiyat teklifi istemeyin, harcamaya izin vermeyin veya harcama yapmayın.",
         "recovery": {
           "cancelAndReviewRejoin": "İptal et ve yeniden bağlanmayı incele",
           "cancelAndReviewRejoinTitle": "Yetkilendirilmiş iş iptal edilip yeniden bağlanma incelensin mi?",
@@ -1545,6 +1547,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "Onaylamadan önce devralınan kesin başlangıç karesini ve Shooting script'i inceleyin. Yalnızca ilk sağlayıcı denemesi kesin biçimde başarısız olursa bir otomatik yeniden deneme ayrılır. İlk denemelerin maliyeti {{lower}}; onaylanan üst sınır {{upper}}.",
         "purpose": {
           "board_still": "Pano paneli",
           "reference_image": "Referans görüntüsü"

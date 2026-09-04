@@ -1230,7 +1230,7 @@
         }
       },
       "proposals": {
-        "proposalId": "提案 ID",
+        "unlabelledItem": "ラベルのない項目",
         "mutationCount": "{{count}} 件の編集案",
         "mutationCount_one": "{{count}} 件の編集案",
         "mutationCount_other": "{{count}} 件の編集案",
@@ -1275,11 +1275,11 @@
         "saveAndRequestUpdated": "保存して更新した提案を準備",
         "reviewRuleDrafts": "ルールの下書きを確認",
         "reviewRuleDraftsFirst": "このルール提案を承認する前に、ローカルのルール下書きを確認または破棄してください。",
-        "reproposalPrompt": "studio_get_proposal で提案 {{proposalId}} を確認し、次に read_storyboard を呼び出して現在のリビジョンに対する新しい提案を作成してください。元の提案を適用したり、暗黙にリベースしたりしないでください。",
+        "reproposalPrompt": "選択した提案の更新版を準備してください。{{proposalId}} は内部での識別にのみ使用し、この参照や技術的な手順を返信に含めないでください。",
         "chatDecisionBusy": "別のレビュー操作が進行中です。",
         "chatDirty": "この提案と競合する下書きを保存またはリセットしてから承認してください。",
         "chatNoPending": "操作できる保留中のディレクター提案はありません。",
-        "chatMultiplePending": "現在のディレクター提案が複数準備できています。完全な ID を指定して /approve PROPOSAL_ID または /reject PROPOSAL_ID を使用してください。",
+        "chatMultiplePending": "複数のディレクター提案が準備できています。対象の提案にある操作ボタンを使用してください。",
         "chatProposalNotFound": "指定した提案はもう保留中ではありません。",
         "chatUnavailable": "現在、準備できている保留中のディレクター提案はありません。カードで確認するか、更新した提案を依頼してください。",
         "chatStale": "この提案は現在のプロジェクトリビジョンと一致しません。",
@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "開始フレームを Creative Director と確認",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "スペースで再生 · 矢印でシーク · [ ] でつなぎ目 · L でループ"
         },
         "directorRequestHint": "Creative Director に、レビュー付きの再分割案を依頼してください。",
+        "directorFrameReviewHint": "Shot {{shotId}} が継承した正確なコンディショニングフレームを確認し、フレームにすでに写っている内容から始めて動きへつなげる Shooting script を提案してください。メディアの生成、見積もりの要求、支出の承認、支出は行わないでください。",
         "recovery": {
           "cancelAndReviewRejoin": "キャンセルして再接続を確認",
           "cancelAndReviewRejoinTitle": "承認済み作業をキャンセルして再接続を確認しますか？",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "確定する前に、継承した正確な開始フレームと Shooting script を確認してください。最初のプロバイダー試行が明確に失敗した場合に限り、自動再試行1回分が予約されます。最初の試行費用は {{lower}}、確定する上限は {{upper}} です。",
         "purpose": {
           "board_still": "ボードパネル",
           "reference_image": "リファレンス画像"

@@ -6908,6 +6908,110 @@ describe('CreativeStudioServiceV2', () => {
     ).rejects.toMatchObject({ code: 'quote_not_found' });
   });
 
+  it('prices and confirms a resolved predecessor-frame video with one reserved retry', async () => {
+    const project = makeContinuityProject('none');
+    const take: StudioAssetV2 = {
+      id: 'take_sequential_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'video',
+      mimeType: 'video/mp4',
+      managedAsset: { collection: 'assets', fileName: 'take_sequential_1.mp4' },
+      byteSize: 100,
+      sha256: 'c'.repeat(64),
+      durationSeconds: 10,
+      createdAt: '2026-08-17T00:00:01.000Z',
+    };
+    const frame: StudioAssetV2 = {
+      id: 'frame_sequential_1',
+      projectId: project.id,
+      shotId: 'clip_1',
+      mediaKind: 'image',
+      mimeType: 'image/png',
+      managedAsset: { collection: 'conditioningFrames', fileName: 'frame_sequential_1.png' },
+      byteSize: 25,
+      sha256: 'd'.repeat(64),
+      createdAt: '2026-08-17T00:00:02.000Z',
+    };
+    Object.assign(project.assets, { [take.id]: take, [frame.id]: frame });
+    project.shots.clip_1!.assetIds.push(take.id, frame.id);
+    project.shots.clip_1!.videoAssetId = take.id;
+    const extractionId = createStudioFrameExtractionId({
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: take.durationSeconds!,
+    });
+    project.frameExtractions[extractionId] = {
+      id: extractionId,
+      shotId: 'clip_1',
+      videoAssetId: take.id,
+      endpointSeconds: take.durationSeconds!,
+      frameAssetId: frame.id,
+      status: 'ready',
+      errorCode: null,
+      attemptCount: 1,
+    };
+    const harness = makeHarness(project);
+
+    const prepared = await harness.service.prepareSubmission({
+      projectId: project.id,
+      expectedRevision: project.revision,
+      originReferenceHandoffId: null,
+      baseChoices: [shotChoiceV2('clip_2', 'video_take')],
+      cascadeChoices: [],
+    });
+
+    expect(prepared.withCascade).toBeNull();
+    expect(prepared.baseOnly).toMatchObject({
+      lowerMinorUnits: 25,
+      upperMinorUnits: 50,
+      baseItems: [
+        {
+          target: { kind: 'shot', shotId: 'clip_2' },
+          purpose: 'video_take',
+          generationCount: 2,
+          conditioningAssetId: frame.id,
+          oneGenerationMinorUnits: 25,
+          requestedTotalMinorUnits: 50,
+        },
+      ],
+      cascadeItems: [],
+    });
+
+    await expect(
+      harness.service.confirmSubmission({
+        projectId: project.id,
+        quoteId: prepared.baseOnly.id,
+        expectedRevision: project.revision,
+      })
+    ).resolves.toEqual({ projectId: project.id, projectRevision: project.revision + 1 });
+
+    const committed = harness.getProject();
+    const authorization = committed.spendAuthorizations.find((candidate) => candidate.id === prepared.baseOnly.id)!;
+    const [item] = authorization.baseItems;
+    expect(item).toMatchObject({ purpose: 'video_take', generationCount: 2 });
+    expect(authorization.idempotencyKeys.filter((entry) => entry.itemId === item!.id)).toHaveLength(2);
+    const jobs = Object.values(committed.jobs).filter((job) => job.authorizationId === authorization.id);
+    expect(jobs).toEqual([
+      expect.objectContaining({
+        target: { kind: 'shot', shotId: 'clip_2' },
+        status: 'queued_local',
+        requestSnapshot: expect.objectContaining({
+          conditioningInput: expect.objectContaining({
+            kind: 'predecessor_frame',
+            predecessorShotId: 'clip_1',
+            takeAssetId: take.id,
+            frameAssetId: frame.id,
+          }),
+        }),
+      }),
+    ]);
+    expect(harness.submitShots).toHaveBeenCalledExactlyOnceWith({
+      projectId: project.id,
+      jobIds: [jobs[0]!.id],
+    });
+  });
+
   it('projects exact-one quote rows and preserves their totals and budget in durable authority', async () => {
     const project = makeSchema2ServiceProject();
     project.imageRouteId = imageRoute.choiceId;
@@ -7366,7 +7470,9 @@ describe('CreativeStudioServiceV2', () => {
 
   it('cancels one authorized seed wait, persists downstream terminalization, and requotes an exact trim-aware rejoin', async () => {
     let { project, take, seed: importedCandidate } = makeRejoinProject();
+    project.shots.clip_2!.chainBreak = 'none';
     project.shots.clip_2!.seedStillId = null;
+    project.shots.clip_2!.dismissedSeedStillIds = [importedCandidate.id];
     importedCandidate = project.assets[importedCandidate.id]!;
     importedCandidate.managedAsset = { collection: 'imports', fileName: 'seed_rejoin_import.png' };
     importedCandidate.sha256 = 'e'.repeat(64);
@@ -7404,20 +7510,22 @@ describe('CreativeStudioServiceV2', () => {
       projectId: project.id,
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
-      baseChoices: [shotChoiceV2('clip_2', 'seed_still')],
-      cascadeChoices: [shotChoiceV2('clip_2', 'video_take'), shotChoiceV2('clip_3', 'video_take')],
+      baseChoices: [],
+      cascadeChoices: [],
+      continuityChange: { shotId: 'clip_2', hardCut: true, requiresSeedGeneration: true },
     });
-    expect(prepared.withCascade).not.toBeNull();
+    expect(prepared.withCascade).toBeNull();
+    const initialQuote = prepared.baseOnly;
     await harness.service.confirmSubmission({
       projectId: project.id,
-      quoteId: prepared.withCascade!.id,
+      quoteId: initialQuote.id,
       expectedRevision: project.revision,
     });
 
     const authorized = harness.getProject();
     const seedJob = Object.values(authorized.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'seed_still' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_2'
@@ -7471,14 +7579,14 @@ describe('CreativeStudioServiceV2', () => {
     const cancelled = harness.getProject();
     const cancelledShotJob = Object.values(cancelled.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'video_take' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_2'
     )!;
     const downstreamJob = Object.values(cancelled.jobs).find(
       (job) =>
-        job.authorizationId === prepared.withCascade!.id &&
+        job.authorizationId === initialQuote.id &&
         job.purpose === 'video_take' &&
         job.target.kind === 'shot' &&
         job.target.shotId === 'clip_3'
@@ -7550,7 +7658,7 @@ describe('CreativeStudioServiceV2', () => {
       (item) => item.purpose === 'video_take' && item.target.kind === 'shot' && item.target.shotId === 'clip_2'
     );
     if (rejoinShotItem === undefined) throw new Error(`missing rejoin item: ${JSON.stringify(rejoin)}`);
-    expect(rejoinQuote.id).not.toBe(prepared.withCascade!.id);
+    expect(rejoinQuote.id).not.toBe(initialQuote.id);
     expect(rejoinQuote.projectRevision).toBe(cancelled.revision);
     expect(rejoinShotItem).toMatchObject({ purpose: 'video_take', generationCount: 1 });
     expect(rejoinItems).toEqual(
@@ -8808,7 +8916,9 @@ describe('Studio MCP schema-2 server', () => {
             properties?: Record<string, { const?: string; additionalProperties?: boolean }>;
           }>
         | undefined;
-      const proposalSchema = tools.find((tool) => tool.name === 'propose_storyboard')?.inputSchema;
+      const storyboardProposalTool = tools.find((tool) => tool.name === 'propose_storyboard');
+      const briefRuleProposalTool = tools.find((tool) => tool.name === 'propose_brief_rule');
+      const proposalSchema = storyboardProposalTool?.inputSchema;
       const proposalOperationItems = proposalSchema?.properties?.operations as
         | { items?: Record<string, unknown> }
         | undefined;
@@ -8835,6 +8945,17 @@ describe('Studio MCP schema-2 server', () => {
         'studio_request_reference_images',
       ]);
       expect(tools.every((tool) => Object.keys(tool.inputSchema).length > 0)).toBe(true);
+      for (const proposalTool of [storyboardProposalTool, briefRuleProposalTool]) {
+        expect(proposalTool?.outputSchema).toMatchObject({
+          type: 'object',
+          additionalProperties: false,
+          required: ['proposalId', 'usage'],
+          properties: {
+            proposalId: { type: 'string' },
+            usage: { type: 'string', const: 'tool_input_only' },
+          },
+        });
+      }
       expect(conditioningFrameTool?.inputSchema).toMatchObject({
         type: 'object',
         additionalProperties: false,
@@ -9044,6 +9165,8 @@ describe('Studio MCP schema-2 server', () => {
       expect(studioGetProposalInputSchemaV2.safeParse({ proposalId: 'proposal_exact' }).success).toBe(true);
       expect(proposalTool?.description).toMatch(/never authors the project, generates, authorizes, or spends/i);
       expect(proposalTool?.description).toMatch(/never silently rebase, apply, or replace/i);
+      expect(proposalTool?.description).toMatch(/tool input only/i);
+      expect(proposalTool?.description).toMatch(/never repeat.*user-facing reply/i);
       const commandStatus = tools.find((tool) => tool.name === 'studio_get_command_status');
       expect(commandStatus?.description).toMatch(/durable.*mutation or read-query status/i);
       expect(commandStatus?.description).not.toMatch(/schema-5/i);
@@ -9063,6 +9186,64 @@ describe('Studio MCP schema-2 server', () => {
       expect(referenceValidator({ referenceIds: [], unknown: true })).toMatchObject({ valid: false });
     } finally {
       await harness.close();
+    }
+  });
+
+  it('keeps exact proposal IDs in structured output across the real MCP protocol', async () => {
+    const projectDir = await mkdtemp(path.join(tmpdir(), 'studio-v2-proposal-output-'));
+    const { pendingDir } = await createSidecarFamilyV2(projectDir, 'proposals');
+    const { pendingDir: referencePendingDir } = await createSidecarFamilyV2(projectDir, 'reference-requests');
+    const project = makeSchema2ServiceProject();
+    await writeStudioProjectFilesV2(projectDir, project);
+    const harness = await createStudioMcpProtocolHarnessV2({
+      projectId: project.id,
+      projectDir,
+      pendingDir,
+      referencePendingDir,
+    });
+
+    try {
+      const storyboardResult = await harness.client.callTool({
+        name: 'propose_storyboard',
+        arguments: {
+          base_revision: project.revision,
+          operations: [{ kind: 'set_brief', brief: 'A protocol-level proposal.' }],
+        },
+      });
+      const storyboardOutput = storyboardResult.structuredContent as Record<string, unknown>;
+      expect(storyboardResult).not.toHaveProperty('isError');
+      expect(storyboardOutput).toMatchObject({ proposalId: expect.any(String), usage: 'tool_input_only' });
+      expect(storyboardResult.content[0]).toMatchObject({
+        type: 'text',
+        text: expect.stringMatching(/saved and waiting for review/i),
+      });
+      expect(JSON.stringify(storyboardResult.content)).not.toContain(storyboardOutput.proposalId);
+
+      const ruleResult = await harness.client.callTool({
+        name: 'propose_brief_rule',
+        arguments: {
+          base_revision: project.revision,
+          text: 'Keep the palette warm.',
+          forbidden_terms: [],
+        },
+      });
+      const ruleOutput = ruleResult.structuredContent as Record<string, unknown>;
+      expect(ruleResult).not.toHaveProperty('isError');
+      expect(ruleOutput).toMatchObject({ proposalId: expect.any(String), usage: 'tool_input_only' });
+      expect(ruleResult.content[0]).toMatchObject({
+        type: 'text',
+        text: expect.stringMatching(/saved and waiting for review/i),
+      });
+      expect(JSON.stringify(ruleResult.content)).not.toContain(ruleOutput.proposalId);
+      expect(ruleOutput.proposalId).not.toBe(storyboardOutput.proposalId);
+
+      const proposalFiles = (await readdir(pendingDir)).filter((name) => name.endsWith('.json'));
+      expect(proposalFiles.toSorted()).toEqual(
+        [`${String(storyboardOutput.proposalId)}.json`, `${String(ruleOutput.proposalId)}.json`].toSorted()
+      );
+    } finally {
+      await harness.close();
+      await rm(projectDir, { recursive: true, force: true });
     }
   });
 
@@ -11497,7 +11678,11 @@ describe('Studio MCP schema-2 server', () => {
         operations: endCardBatch('none'),
       });
       expect(accepted.isError).toBeUndefined();
-      expect(accepted.content[0].text).toMatch(/recorded for user review/i);
+      const proposalFile = (await readdir(pendingDir)).find((name) => name.endsWith('.json'));
+      const proposalId = proposalFile!.slice(0, -'.json'.length);
+      expect(accepted.content[0].text).toMatch(/saved and waiting for review/i);
+      expect(accepted.content[0].text).not.toContain(proposalId);
+      expect(accepted.structuredContent).toEqual({ proposalId, usage: 'tool_input_only' });
     } finally {
       await rm(projectDir, { recursive: true, force: true });
     }
@@ -11582,7 +11767,11 @@ describe('Studio MCP schema-2 server', () => {
       operations: [{ kind: 'set_brief', brief: 'Proposed only' }],
     });
     expect(proposed.isError).toBeUndefined();
-    expect(proposed.content[0].text).toMatch(/recorded for user review/i);
+    const storyboardProposalFile = (await readdir(pendingDir)).find((name) => name.endsWith('.json'));
+    const storyboardProposalId = storyboardProposalFile!.slice(0, -'.json'.length);
+    expect(proposed.content[0].text).toMatch(/saved and waiting for review/i);
+    expect(proposed.content[0].text).not.toContain(storyboardProposalId);
+    expect(proposed.structuredContent).toEqual({ proposalId: storyboardProposalId, usage: 'tool_input_only' });
     await expect(
       createProposeStoryboardHandlerV2(config)({
         base_revision: project.revision - 1,
@@ -11607,9 +11796,20 @@ describe('Studio MCP schema-2 server', () => {
     ).resolves.toMatchObject({
       isError: true,
     });
-    await expect(
-      ruleHandler({ base_revision: project.revision, text: 'Keep the palette warm.', forbidden_terms: [] })
-    ).resolves.not.toHaveProperty('isError');
+    const beforeRuleFiles = new Set(await readdir(pendingDir));
+    const proposedRule = await ruleHandler({
+      base_revision: project.revision,
+      text: 'Keep the palette warm.',
+      forbidden_terms: [],
+    });
+    expect(proposedRule).not.toHaveProperty('isError');
+    const ruleProposalFile = (await readdir(pendingDir)).find(
+      (name) => name.endsWith('.json') && !beforeRuleFiles.has(name)
+    );
+    const ruleProposalId = ruleProposalFile!.slice(0, -'.json'.length);
+    expect(proposedRule.content[0].text).toMatch(/saved and waiting for review/i);
+    expect(proposedRule.content[0].text).not.toContain(ruleProposalId);
+    expect(proposedRule.structuredContent).toEqual({ proposalId: ruleProposalId, usage: 'tool_input_only' });
     await expect(
       ruleHandler({ base_revision: project.revision, text: 'No competitor logos.', forbidden_terms: ['competitor'] })
     ).resolves.not.toHaveProperty('isError');

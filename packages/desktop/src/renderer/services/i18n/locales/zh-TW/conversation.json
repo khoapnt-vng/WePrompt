@@ -1230,7 +1230,7 @@
         }
       },
       "proposals": {
-        "proposalId": "提案 ID",
+        "unlabelledItem": "未命名項目",
         "mutationCount": "{{count}} 項提議編輯",
         "mutationCount_one": "{{count}} 項提議編輯",
         "mutationCount_other": "{{count}} 項提議編輯",
@@ -1275,11 +1275,11 @@
         "saveAndRequestUpdated": "儲存並準備更新提案",
         "reviewRuleDrafts": "檢查規則草稿",
         "reviewRuleDraftsFirst": "接受此規則提案前，請檢查或捨棄本機規則草稿。",
-        "reproposalPrompt": "請使用 studio_get_proposal 檢查提案 {{proposalId}}，然後呼叫 read_storyboard，並針對目前修訂版擬定一份新提案。請勿套用原提案，也不要在未告知的情況下對其變基。",
+        "reproposalPrompt": "請為我剛選取的提案準備更新版本。僅在內部使用 {{proposalId}} 來識別它，不要在回覆中提及此參照或任何技術步驟。",
         "chatDecisionBusy": "另一個審核操作仍在進行中。",
         "chatDirty": "核准此提案前，請儲存或重設與它衝突的草稿。",
         "chatNoPending": "目前沒有待處理的導演提案。",
-        "chatMultiplePending": "有多個目前導演提案已就緒。請使用完整 ID 輸入 /approve PROPOSAL_ID 或 /reject PROPOSAL_ID。",
+        "chatMultiplePending": "有多個導演提案已就緒。請使用您要處理的提案上的操作按鈕。",
         "chatProposalNotFound": "該指定提案已不再待處理。",
         "chatUnavailable": "目前沒有已就緒的待處理導演提案。請在卡片中檢查，或要求更新提案。",
         "chatStale": "此提案已與目前專案版本不符。",
@@ -1397,6 +1397,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "與 Creative Director 一起檢查起始幀",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -1517,6 +1518,7 @@
           "keyboardGuidance": "空白鍵播放 · 方向鍵定位 · [ ] 切換接點 · L 循環"
         },
         "directorRequestHint": "請 Creative Director 提供經審核的重新拆分方案。",
+        "directorFrameReviewHint": "請檢查 Shot {{shotId}} 繼承的精確條件幀，並提出一個感知該幀的 Shooting script：從畫面已有內容開始，再展開動作。不要生成媒體、請求報價、授權支出或花費。",
         "recovery": {
           "cancelAndReviewRejoin": "取消並審核重新銜接",
           "cancelAndReviewRejoinTitle": "取消已授權工作並審核重新銜接？",
@@ -1543,6 +1545,7 @@
         }
       },
       "gate": {
+        "predecessorVideoRetry": "確認前請檢查繼承的精確起始幀和 Shooting script。僅當首次供應商嘗試明確失敗時，才會預留一次自動重試。首次嘗試費用為 {{lower}}；確認的最高費用為 {{upper}}。",
         "purpose": {
           "board_still": "分鏡",
           "reference_image": "參考影像"

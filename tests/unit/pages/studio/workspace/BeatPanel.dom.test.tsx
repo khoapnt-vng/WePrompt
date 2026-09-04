@@ -419,6 +419,7 @@ vi.mock('react-i18next', () => ({
       if (key.endsWith('.composer.action.removeFromChain')) return 'Remove from chain';
       if (key.endsWith('.composer.action.tryAgain')) return 'Try again';
       if (key.endsWith('.composer.action.fixStartFrame')) return 'Fix start frame — free';
+      if (key.endsWith('.composer.reviewStartFrameWithDirector')) return 'Review start frame with Director';
       if (key.endsWith('.shotStatus.notReady')) return 'Not ready';
       if (key.endsWith('.shotStatus.ready')) return 'Ready to render';
       if (key.endsWith('.shotStatus.queued')) return 'Queued';
@@ -681,6 +682,7 @@ const makeActions = (overrides: Partial<BeatPanelActions> = {}) => ({
   reviewSeedStill: vi.fn(),
   reviewContinuity: vi.fn(),
   reviewReferences: vi.fn(),
+  reviewConditioningFrame: vi.fn(),
   resolveGenerationBlock: vi.fn(),
   retryGenerationJob: vi.fn().mockResolvedValue(true),
   cancelGenerationJob: vi.fn().mockResolvedValue(true),
@@ -3112,6 +3114,55 @@ describe('BeatPanel', () => {
 
     expect(card).toBeVisible();
     expect(within(card).getByRole('button', { name: 'Pin as first frame' })).toBeDisabled();
+  });
+
+  it('offers exact inherited start frames to the Director before generation', () => {
+    const inheritedFrame = makeSeedStill('conditioning_frame_1', {
+      effectiveSeed: true,
+      origin: 'inherited',
+      prompt: null,
+      sourceShotNumber: 1,
+    });
+    const chainedShot = makeShot('shot_2', 1, {
+      effectiveSeedAssetId: inheritedFrame.assetId,
+      frameBoundary: {
+        upstreamShotId: 'shot_1',
+        dependentShotId: 'shot_2',
+        status: 'on_disk',
+        frameAssetId: inheritedFrame.assetId,
+      },
+      firstFrames: [inheritedFrame],
+      hasEffectiveSeed: true,
+      segmentHead: false,
+    });
+    const beat = makeBeat('beat_1', [makeShot('shot_1', 0), chainedShot]);
+    const actions = makeActions();
+    const { container } = render(<BeatPanel {...panelProps(beat, makeDrafts(), actions, makeProjection([beat]))} />);
+    inspectShot(container, chainedShot.id);
+
+    const review = shotCard(container, chainedShot.id).querySelector<HTMLButtonElement>(
+      '[data-conditioning-frame-director-review]'
+    );
+    expect(review).not.toBeNull();
+    expect(review).toHaveTextContent('Review start frame with Director');
+    expect(review).toHaveAttribute('data-button-type', 'primary');
+    fireEvent.click(review!);
+    expect(actions.reviewConditioningFrame).toHaveBeenCalledExactlyOnceWith(chainedShot.id);
+  });
+
+  it('does not offer Director frame review for a segment-head still', () => {
+    const seed = makeSeedStill('seed_1', { effectiveSeed: true, origin: 'imported' });
+    const head = makeShot('shot_1', 0, {
+      effectiveSeedAssetId: seed.assetId,
+      firstFrames: [seed],
+      hasEffectiveSeed: true,
+      segmentHead: true,
+    });
+    const { container } = render(
+      <BeatPanel {...panelProps(makeBeat('beat_1', [head]), makeDrafts(), makeActions())} />
+    );
+
+    expect(shotCard(container, head.id).querySelector('[data-conditioning-frame-director-review]')).toBeNull();
   });
 
   it('reviews the complete ordered seed-and-video graph without the retired per-Shot reference picker', async () => {

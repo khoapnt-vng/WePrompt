@@ -668,6 +668,7 @@ const beatPanelActions = (): BeatPanelActions => ({
   parkBeat: vi.fn(async () => true),
   reviewShot: vi.fn(),
   reviewContinuity: vi.fn(),
+  reviewConditioningFrame: vi.fn(),
   retryGenerationJob: vi.fn(async () => true),
   cancelGenerationJob: vi.fn(async () => true),
   retryConditioning: vi.fn(async () => true),
@@ -1051,16 +1052,16 @@ describe('the largest legal render batch', () => {
     expect(batch).toEqual(['shot_1', 'shot_3']);
   });
 
-  it('honours the per-request shot cap, counting the cascade against it', () => {
-    // shot_1 cannot be rendered alone: choosing it commits shot_2 with it, so a cap of one admits no
-    // segment at all. Returning shot_1 here would hand back a batch the spend gate then refuses.
+  it('honours the per-request shot cap after each segment is clipped to one reviewed frontier', () => {
+    // The first unresolved predecessor boundary is no longer quoted, so a cap of one safely admits
+    // one frontier instead of rejecting the whole film-wide action.
     const project = makeProject();
     const batch = filmRenderBatchShotIds({
       project,
       projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
       maxShots: 1,
     });
-    expect(batch).toEqual([]);
+    expect(batch).toEqual(['shot_1']);
   });
 
   it('starts an incomplete segment at the Shot that needs work, not at its head', () => {
@@ -1115,14 +1116,13 @@ describe('the largest legal render batch', () => {
     expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_3']);
   });
 
-  it('counts the cascade each segment drags in, not only the segment heads', () => {
-    // beat_1's head cascades to shot_2 as well, so a batch of two heads touches three Shots. The cap
-    // is on distinct Shot ids across the whole selection, so counting heads lets the batch exceed it
-    // and the draft is then refused as unpayable — which is what a 30-Shot film hit in practice.
+  it('packs parallel segment frontiers without counting blind downstream work', () => {
+    // Each selected frontier touches one distinct Shot. A seed may add its same-Shot video, but the
+    // next Shot is held for a frame-aware review and does not consume this request's Shot cap.
     const project = makeProject();
     const projection = projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3));
 
-    expect(filmRenderBatchShotIds({ project, projection, maxShots: 2 })).toEqual(['shot_1']);
+    expect(filmRenderBatchShotIds({ project, projection, maxShots: 2 })).toEqual(['shot_1', 'shot_3']);
   });
 
   it('only ever returns a batch the spend gate will accept', () => {
@@ -1167,16 +1167,13 @@ describe('spend gate draft graph', () => {
     ).toBeNull();
   });
 
-  it('derives seed then same-shot/downstream video cascade with null video references', () => {
+  it('derives a seed and same-shot video but stops before blind downstream authoring', () => {
     const project = makeProject();
     const projection = readyProjection(project);
 
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toMatchObject({
       baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
-      cascadeChoices: [
-        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
-        { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
-      ],
+      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
     });
   });
 
@@ -1422,7 +1419,7 @@ describe('spend gate draft graph', () => {
     ).toEqual({ shotId: 'shot_2', hardCut: false, requiresSeedGeneration: false });
   });
 
-  it('builds the exact segment-head frame regeneration and dependent-picture wave', () => {
+  it('builds a segment-head frame regeneration only through its same-shot video boundary', () => {
     const project = makeProject();
     const projection = readyProjection(project);
 
@@ -1431,10 +1428,7 @@ describe('spend gate draft graph', () => {
       expectedRevision: project.revision,
       originReferenceHandoffId: null,
       baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
-      cascadeChoices: [
-        { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
-        { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
-      ],
+      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
     });
     expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_2' })).toBeNull();
     expect(seedRegenerationGateDraft({ project, projection, shotId: 'shot_3' })).toEqual({
@@ -3105,6 +3099,46 @@ describe('SpendGateModal', () => {
     expect(image).toHaveAttribute('data-conditioning-asset-id', 'seed_shot_1');
     expect(image).toHaveAttribute('src', expect.stringContaining('seed_shot_1'));
     expect(modal.querySelectorAll('[data-conditioning-asset-id]')).toHaveLength(1);
+  });
+
+  it('puts the inherited frame, Shooting script, and bounded retry price above the collapsed breakdown', async () => {
+    const retryQuote = quote('quote_predecessor_retry');
+    retryQuote.baseItems = [
+      {
+        ...retryQuote.baseItems[0]!,
+        target: { kind: 'shot', shotId: 'shot_2' },
+        purpose: 'video_take',
+        route: { choiceId: 'video_choice', providerId: 'safe_video', model: 'video_model' },
+        generationCount: 2,
+        durationSeconds: 4,
+        conditioningAssetId: 'frame_shot_1_end',
+        oneGenerationMinorUnits: 400,
+        requestedTotalMinorUnits: 800,
+        composition: shotComposition('shot_2', 'video_take', 'safe_video', 'video_model'),
+      },
+    ];
+    retryQuote.lowerMinorUnits = 400;
+    retryQuote.upperMinorUnits = 800;
+    const modal = await openPreparedGate({ baseOnly: retryQuote, withCascade: null });
+
+    expect(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.showBreakdown',
+      })
+    ).toHaveAttribute('aria-expanded', 'false');
+    const review = modal.querySelector('[data-predecessor-video-review="shot_2"]');
+    expect(review).toBeVisible();
+    expect(review).toHaveTextContent('shot_2');
+    expect(review).toHaveTextContent('conversation.creativeStudio.workspace.gate.readout.shootingScript');
+    expect(review).toHaveTextContent('shot_2');
+    expect(within(review as HTMLElement).getByRole('img')).toHaveAttribute(
+      'data-conditioning-asset-id',
+      'frame_shot_1_end'
+    );
+    expect(modal.querySelector('[data-predecessor-video-reviews]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.gate.predecessorVideoRetry'
+    );
+    expect(within(modal).getByRole('button', { name: /Confirm 1 generation/ })).toHaveTextContent('$8.00');
   });
 
   it('omits homogeneous group and purpose labels from each compact row', async () => {

@@ -843,33 +843,6 @@ const validGenerationChoice = (
  * A segment with work already in flight is skipped whole. Submitting its next shot would queue a
  * generation against a first frame that is still being produced.
  */
-/**
- * Every Shot a base choice pulls into the request: itself, plus the cascade running from it to the
- * end of its Beat, stopping where the chain is severed or where work is already in flight. This
- * mirrors the cascade the draft builder derives, so a batch is bounded by what will actually be
- * quoted rather than by how many segment heads it happens to name.
- */
-const cascadeCoverage = (
-  project: StudioRendererProjectV2,
-  projected: Map<string, { videoGenerationInFlight: boolean }>,
-  location: { shotId: string; shotIndex: number; beatId: string },
-  choice: StudioPrepareGenerationChoiceV2
-): string[] => {
-  const covered = [location.shotId];
-  const beat = Object.hasOwn(project.beats, location.beatId) ? project.beats[location.beatId] : undefined;
-  if (beat?.id !== location.beatId) return covered;
-  const first = choice.purpose === 'seed_still' ? location.shotIndex : location.shotIndex + 1;
-  for (let index = first; index < beat.shotOrder.length; index += 1) {
-    const downstreamId = beat.shotOrder[index]!;
-    const downstream = Object.hasOwn(project.shots, downstreamId) ? project.shots[downstreamId] : undefined;
-    if (downstream?.id !== downstreamId) break;
-    if (index > location.shotIndex && downstream.chainBreak === 'hard_cut') break;
-    if (projected.get(downstreamId)?.videoGenerationInFlight === true) break;
-    if (!covered.includes(downstreamId)) covered.push(downstreamId);
-  }
-  return covered;
-};
-
 export const filmRenderBatchShotIds = (input: {
   project: StudioRendererProjectV2;
   projection: WorkspaceProjection;
@@ -941,13 +914,13 @@ export const filmRenderBatchShotIds = (input: {
     };
     const next = ordered.find((entry) => needsWork(entry) && admissible(entry)) ?? ordered.find(admissible);
     if (next !== undefined && nextChoice !== null) {
-      // The cap counts distinct Shot ids across the whole selection, and choosing a head drags its
-      // whole cascade in with it. Counting heads alone lets a large film exceed the cap, and the
-      // draft is then refused as unpayable — which is what a 30-Shot film hit in practice.
+      // New work is authoring-sequential: a seed may bring along only its same-Shot video, while the
+      // next Shot waits for an exact inherited frame and a fresh review. Each frontier therefore
+      // covers exactly one distinct Shot for the native request cap.
       batch.push({
         shotId: next.shotId,
         filmIndex: next.filmIndex,
-        coveredShotIds: cascadeCoverage(input.project, projected, next, nextChoice),
+        coveredShotIds: [next.shotId],
       });
     }
   }
@@ -1048,22 +1021,15 @@ export const selectionGateDraft = (input: {
   for (const baseChoice of baseChoices) {
     const baseShotId = choiceShotId(baseChoice);
     const location = baseShotId === null ? undefined : locations.get(baseShotId);
-    const beat = location === undefined ? undefined : input.project.beats[location.beatId];
-    if (location === undefined || beat?.id !== location.beatId) return null;
-    const firstCascadeIndex = baseChoice.purpose === 'seed_still' ? location.shotIndex : location.shotIndex + 1;
-    for (let shotIndex = firstCascadeIndex; shotIndex < beat.shotOrder.length; shotIndex += 1) {
-      const downstreamId = beat.shotOrder[shotIndex]!;
-      const downstream = Object.hasOwn(input.project.shots, downstreamId)
-        ? input.project.shots[downstreamId]
-        : undefined;
-      if (downstream?.id !== downstreamId) return null;
-      if (shotIndex > location.shotIndex && downstream.chainBreak === 'hard_cut') break;
-      if (projectedShots.get(downstreamId)?.videoGenerationInFlight === true) break;
-      cascadeByPair.set(`${downstreamId}\0video_take`, {
-        target: { kind: 'shot', shotId: downstreamId },
-        purpose: 'video_take',
-      });
-    }
+    if (location === undefined || input.project.beats[location.beatId]?.id !== location.beatId) return null;
+    // Only a seed and its same-Shot video share a reviewed opening image. A video frontier is the
+    // boundary: its successor must be prepared later from the exact extracted predecessor frame.
+    if (baseChoice.purpose !== 'seed_still') continue;
+    if (projectedShots.get(baseShotId)?.videoGenerationInFlight === true) continue;
+    cascadeByPair.set(`${baseShotId}\0video_take`, {
+      target: { kind: 'shot', shotId: baseShotId },
+      purpose: 'video_take',
+    });
   }
   const cascadeChoices = [...cascadeByPair.values()].toSorted(
     (left, right) =>
@@ -1134,7 +1100,7 @@ export const seedRegenerationGateDraft = (input: {
     if (shot?.id !== shotId || projectedShot === undefined) return null;
     if (shotIndex > location.shotIndex && shot.chainBreak === 'hard_cut') break;
     if (projectedShot.videoGenerationBlocked || projectedShot.seedAuthorizationLock !== null) return null;
-    cascadeChoices.push(shotGenerationChoice(shotId, 'video_take'));
+    if (shotIndex === location.shotIndex) cascadeChoices.push(shotGenerationChoice(shotId, 'video_take'));
   }
   const baseChoices = [shotGenerationChoice(input.shotId, 'seed_still')];
   if (!withinNativeSubmissionBounds(baseChoices, cascadeChoices)) return null;

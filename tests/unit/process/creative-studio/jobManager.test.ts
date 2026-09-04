@@ -14,6 +14,7 @@ import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import type {
   StudioCancellationPolicy,
   StudioGenerationRequestPlan,
+  StudioJobErrorCode,
   StudioJobV2,
   StudioProjectV2,
   StudioProviderAdapterId,
@@ -45,7 +46,10 @@ import {
   composeStudioGenerationV2,
   createStudioFrameExtractionId,
   createStudioQuotedGenerationId,
+  createStudioAutomaticVideoRetryJobId,
   deriveStudioInstructionProfileV2,
+  studioAutomaticVideoRetryFailureCodeIsEligibleV2,
+  studioGenerationCompositionDigestV2,
 } from '@process/services/creative-studio/service/schema2/generation';
 import { createStudioSpendReceiptV2 } from '@process/services/creative-studio/service/schema2/pricing';
 import { createCreativeStudioStore, type CreativeStudioStore } from '@process/services/creative-studio/store';
@@ -205,8 +209,9 @@ const createV2Harness = async (
   const store = createCreativeStudioStore({ rootDir, fs: fsWithoutDiskBarriers, now: fixedNow });
   const purpose = options.purpose ?? 'seed_still';
   const generationCount = options.generationCount ?? 1;
-  if (generationCount === 2 && purpose !== 'reference_image') {
-    throw new Error('Only semantic-reference fixtures may reserve a variation-grid retry');
+  const boundedPredecessorVideo = generationCount === 2 && purpose === 'video_take';
+  if (generationCount === 2 && purpose !== 'reference_image' && !boundedPredecessorVideo) {
+    throw new Error('Only semantic references and predecessor-frame videos may reserve a retry');
   }
   const providerBinding: StudioProviderRef = {
     providerId: provider.id,
@@ -248,10 +253,31 @@ const createV2Harness = async (
         title: 'Opening',
         story: 'Introduce the product in a luminous paper world.',
         targetSeconds: null,
-        shotOrder: ['shot_1'],
+        shotOrder: boundedPredecessorVideo ? ['shot_predecessor', 'shot_1'] : ['shot_1'],
       },
     },
     shots: {
+      ...(boundedPredecessorVideo
+        ? {
+            shot_predecessor: {
+              id: 'shot_predecessor',
+              shootingScript: 'A paper airplane enters the luminous paper world.',
+              durationSeconds: 5,
+              trimInSeconds: null,
+              trimOutSeconds: null,
+              chainBreak: 'none' as const,
+              referenceBinding: { status: 'ready' as const, characterReferenceIds: [], backgroundReferenceId: null },
+              seedStillId: null,
+              dismissedSeedStillIds: [],
+              boardAssetId: null,
+              supersededBoardAssetIds: [],
+              videoAssetId: null,
+              supersededVideoAssetIds: [],
+              assetIds: [],
+              jobIds: [],
+            },
+          }
+        : {}),
       shot_1: {
         id: 'shot_1',
         shootingScript: 'A paper airplane crosses a sunrise.',
@@ -295,27 +321,216 @@ const createV2Harness = async (
   if (purpose === 'video_take') {
     const importsDirectory = path.join(rootDir, authored.id, 'imports');
     await nodeFs.mkdir(importsDirectory, { recursive: true });
-    await writeFile(path.join(importsDirectory, 'seed_v2.png'), png);
-    quotedProject = await store.updateProjectV2(authored.id, (current) => {
-      current.assets.seed_v2 = {
-        id: 'seed_v2',
-        projectId: current.id,
-        shotId: 'shot_1',
-        mediaKind: 'image',
-        mimeType: 'image/png',
-        managedAsset: { collection: 'imports', fileName: 'seed_v2.png' },
-        byteSize: png.length,
-        sha256: createHash('sha256').update(png).digest('hex'),
-        createdAt: current.updatedAt,
-        projectReferenceId: null,
-        generationReferenceAssetIds: [],
-        producerJobId: null,
-        compositionDigest: null,
-      };
-      current.shots.shot_1!.assetIds.push('seed_v2');
-      current.shots.shot_1!.seedStillId = 'seed_v2';
-      return current;
-    });
+    if (boundedPredecessorVideo) {
+      const assetsDirectory = path.join(rootDir, authored.id, 'assets');
+      const framesDirectory = path.join(rootDir, authored.id, 'conditioningFrames');
+      await Promise.all([
+        nodeFs.mkdir(assetsDirectory, { recursive: true }),
+        nodeFs.mkdir(framesDirectory, { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(path.join(importsDirectory, 'seed_predecessor_v2.png'), png),
+        writeFile(path.join(assetsDirectory, 'take_predecessor_v2.mp4'), mp4),
+        writeFile(path.join(framesDirectory, 'frame_predecessor_v2.png'), png),
+      ]);
+      quotedProject = await store.updateProjectV2(authored.id, (current) => {
+        const predecessor = current.shots.shot_predecessor!;
+        const seedId = 'seed_predecessor_v2';
+        const takeId = 'take_predecessor_v2';
+        const frameId = 'frame_predecessor_v2';
+        current.assets[seedId] = {
+          id: seedId,
+          projectId: current.id,
+          shotId: predecessor.id,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'imports', fileName: 'seed_predecessor_v2.png' },
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+          createdAt: current.updatedAt,
+          projectReferenceId: null,
+          generationReferenceAssetIds: [],
+          producerJobId: null,
+          compositionDigest: null,
+        };
+        predecessor.seedStillId = seedId;
+        predecessor.assetIds.push(seedId);
+        const source = {
+          kind: 'shot' as const,
+          beatId: 'beat_1',
+          story: current.beats.beat_1!.story,
+          shotId: predecessor.id,
+          shootingScript: predecessor.shootingScript,
+        };
+        const composition = composeStudioGenerationV2({
+          projectRevision: current.revision,
+          brief: current.brief,
+          rules: current.rules,
+          source,
+          purpose: 'video_take',
+          referenceInputs: [],
+          aspectRatio: current.aspectRatio,
+          resolution: current.resolution,
+          route: providerBinding,
+          boardStyle: null,
+          instructionProfile: deriveStudioInstructionProfileV2(providerBinding, 'video_take', source),
+        });
+        const predecessorPlan = {
+          kind: 'resolved' as const,
+          snapshot: {
+            composition,
+            aspectRatio: current.aspectRatio,
+            resolution: current.resolution,
+            durationSeconds: predecessor.durationSeconds,
+            referenceInputs: [],
+            conditioningInput: { kind: 'seed_still' as const, assetId: seedId },
+          },
+        };
+        const predecessorItem: StudioQuotedGeneration = {
+          id: createStudioQuotedGenerationId({
+            projectId: current.id,
+            projectRevision: current.revision,
+            target: { kind: 'shot', shotId: predecessor.id },
+            purpose: 'video_take',
+          }),
+          target: { kind: 'shot', shotId: predecessor.id },
+          purpose: 'video_take',
+          routeId,
+          generationCount: 1,
+          requestPlan: predecessorPlan,
+          rateUnit: 'second',
+          rateMinorUnits: 3,
+        };
+        const predecessorTotals = calculateStudioQuoteTotals([predecessorItem]);
+        if (predecessorTotals === null) throw new Error('invalid predecessor authority');
+        const predecessorAuthorization: StudioSpendAuthorization = {
+          id: 'authorization_predecessor_v2',
+          projectId: current.id,
+          projectRevision: current.revision,
+          originReferenceHandoffId: null,
+          rateCardDigest: 'c'.repeat(64),
+          currency: 'USD',
+          baseItems: [predecessorItem],
+          cascadeItems: [],
+          lowerMinorUnits: predecessorTotals.lowerMinorUnits,
+          upperMinorUnits: predecessorTotals.upperMinorUnits,
+          expiresAt: '2026-08-17T12:05:00.000Z',
+          confirmedAt: '2026-08-17T12:00:01.000Z',
+          providerBindings: [{ itemId: predecessorItem.id, provider: providerBinding }],
+          idempotencyKeys: [{ itemId: predecessorItem.id, key: 'key_predecessor_v2' }],
+        };
+        const predecessorJobId = 'job_predecessor_v2';
+        current.assets[takeId] = {
+          id: takeId,
+          projectId: current.id,
+          shotId: predecessor.id,
+          mediaKind: 'video',
+          mimeType: 'video/mp4',
+          managedAsset: { collection: 'assets', fileName: 'take_predecessor_v2.mp4' },
+          byteSize: mp4.length,
+          sha256: createHash('sha256').update(mp4).digest('hex'),
+          width: 1280,
+          height: 720,
+          durationSeconds: 5,
+          createdAt: current.updatedAt,
+          projectReferenceId: null,
+          generationReferenceAssetIds: [],
+          producerJobId: predecessorJobId,
+          compositionDigest: studioGenerationCompositionDigestV2(composition),
+        };
+        const predecessorJob: StudioJobV2 = {
+          id: predecessorJobId,
+          projectId: current.id,
+          target: { kind: 'shot', shotId: predecessor.id },
+          status: 'succeeded',
+          provider: providerBinding,
+          idempotencyKey: 'key_predecessor_v2',
+          providerJobId: 'remote_predecessor_v2',
+          remoteStartedAt: '2026-08-17T12:00:01.000Z',
+          cancellationPolicy: route.cancellationPolicy,
+          outputAssetIds: [takeId],
+          error: null,
+          retryOfJobId: null,
+          retryReason: null,
+          duplicateChargeAcknowledged: false,
+          duplicateChargeAcknowledgedAt: null,
+          createdAt: current.updatedAt,
+          updatedAt: current.updatedAt,
+          purpose: 'video_take',
+          authorizationId: predecessorAuthorization.id,
+          authorizationItemId: predecessorItem.id,
+          composition,
+          requestPlan: predecessorPlan,
+          requestSnapshot: predecessorPlan.snapshot,
+          spendReceipt: createStudioSpendReceiptV2({
+            authorization: predecessorAuthorization,
+            itemId: predecessorItem.id,
+            jobId: predecessorJobId,
+          }),
+          outputAssetIdsByRole: { primary: takeId, poster: null },
+        };
+        predecessor.videoAssetId = takeId;
+        predecessor.assetIds.push(takeId, frameId);
+        predecessor.jobIds.push(predecessorJob.id);
+        current.jobs[predecessorJob.id] = predecessorJob;
+        current.spendAuthorizations.push(predecessorAuthorization);
+        current.assets[frameId] = {
+          id: frameId,
+          projectId: current.id,
+          shotId: predecessor.id,
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'conditioningFrames', fileName: 'frame_predecessor_v2.png' },
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+          width: 1,
+          height: 1,
+          createdAt: current.updatedAt,
+          projectReferenceId: null,
+          generationReferenceAssetIds: [],
+          producerJobId: null,
+          compositionDigest: null,
+        };
+        const extractionId = createStudioFrameExtractionId({
+          shotId: predecessor.id,
+          videoAssetId: takeId,
+          endpointSeconds: 5,
+        });
+        current.frameExtractions[extractionId] = {
+          id: extractionId,
+          shotId: predecessor.id,
+          videoAssetId: takeId,
+          endpointSeconds: 5,
+          frameAssetId: frameId,
+          status: 'ready',
+          errorCode: null,
+          attemptCount: 1,
+        };
+        return current;
+      });
+    } else {
+      await writeFile(path.join(importsDirectory, 'seed_v2.png'), png);
+      quotedProject = await store.updateProjectV2(authored.id, (current) => {
+        current.assets.seed_v2 = {
+          id: 'seed_v2',
+          projectId: current.id,
+          shotId: 'shot_1',
+          mediaKind: 'image',
+          mimeType: 'image/png',
+          managedAsset: { collection: 'imports', fileName: 'seed_v2.png' },
+          byteSize: png.length,
+          sha256: createHash('sha256').update(png).digest('hex'),
+          createdAt: current.updatedAt,
+          projectReferenceId: null,
+          generationReferenceAssetIds: [],
+          producerJobId: null,
+          compositionDigest: null,
+        };
+        current.shots.shot_1!.assetIds.push('seed_v2');
+        current.shots.shot_1!.seedStillId = 'seed_v2';
+        return current;
+      });
+    }
   }
   const requestPlan =
     options.requestPlan ??
@@ -324,7 +539,15 @@ const createV2Harness = async (
           kind: 'resolved' as const,
           snapshot: {
             ...makeResolvedPlanV2(quotedProject, purpose, providerBinding).snapshot,
-            conditioningInput: { kind: 'seed_still' as const, assetId: 'seed_v2' },
+            conditioningInput: boundedPredecessorVideo
+              ? {
+                  kind: 'predecessor_frame' as const,
+                  predecessorShotId: 'shot_predecessor',
+                  takeAssetId: 'take_predecessor_v2',
+                  frameAssetId: 'frame_predecessor_v2',
+                  endpointSeconds: 5,
+                }
+              : { kind: 'seed_still' as const, assetId: 'seed_v2' },
           },
         }
       : makeResolvedPlanV2(quotedProject, purpose, providerBinding));
@@ -401,12 +624,12 @@ const createV2Harness = async (
   };
   const jobs = [job];
   const project = await store.updateProjectV2(quotedProject.id, (current) => {
-    current.spendAuthorizations = [authorization];
-    current.jobs = Object.fromEntries(jobs.map((job) => [job.id, job]));
+    current.spendAuthorizations.push(authorization);
+    Object.assign(current.jobs, Object.fromEntries(jobs.map((candidateJob) => [candidateJob.id, candidateJob])));
     if (target.kind === 'reference') {
-      current.references[target.referenceId]!.jobIds = jobs.map((job) => job.id);
+      current.references[target.referenceId]!.jobIds = jobs.map((candidateJob) => candidateJob.id);
     } else {
-      current.shots[target.shotId]!.jobIds = jobs.map((job) => job.id);
+      current.shots[target.shotId]!.jobIds = jobs.map((candidateJob) => candidateJob.id);
     }
     return current;
   });
@@ -1233,6 +1456,309 @@ describe('StudioJobManager V2 durable authorized lifecycle', { timeout: JOB_MANA
       'private credential detail'
     );
   }, 30_000);
+
+  it('atomically spends the reserved second key once after a stochastic predecessor-video failure', async () => {
+    let primaryPath = '';
+    let submissionCount = 0;
+    const submit = vi.fn(async () => {
+      submissionCount += 1;
+      return {
+        kind: 'remote' as const,
+        providerJobId: submissionCount === 1 ? 'remote_video_initial' : 'remote_video_retry',
+      };
+    });
+    const poll = vi.fn(async (providerJobId: string) => {
+      if (providerJobId === 'remote_video_initial') {
+        return { status: 'failed' as const, error: { code: 'provider_unavailable' as const } };
+      }
+      return {
+        status: 'succeeded' as const,
+        outputs: [
+          {
+            mediaKind: 'video' as const,
+            role: 'primary' as const,
+            source: { kind: 'file' as const, path: primaryPath },
+            mimeType: 'video/mp4' as const,
+            byteSize: mp4.length,
+            durationSeconds: 5,
+          },
+        ],
+      };
+    });
+    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit, poll }), {
+      purpose: 'video_take',
+      generationCount: 2,
+      sleep: async () => undefined,
+      nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      probeVideoDurationSecondsV2: async () => 5,
+    });
+    primaryPath = path.join(harness.rootDir, 'provider-retried-video.mp4');
+    await writeFile(primaryPath, mp4);
+    const retryJobId = createStudioAutomaticVideoRetryJobId({
+      authorizationId: harness.authorization.id,
+      itemId: harness.item.id,
+      idempotencyKey: 'key_v2_2',
+    });
+
+    await dispatchV2(harness);
+    await expectV2Job(harness, {
+      status: 'failed',
+      providerJobId: 'remote_video_initial',
+      error: { code: 'provider_unavailable' },
+      spendReceipt: null,
+    });
+    await expectV2Job(
+      harness,
+      {
+        status: 'succeeded',
+        providerJobId: 'remote_video_retry',
+        idempotencyKey: 'key_v2_2',
+        retryOfJobId: 'job_v2_1',
+        retryReason: 'provider_failure',
+        spendReceipt: { jobId: retryJobId, generationCount: 1, totalMinorUnits: 15 },
+      },
+      retryJobId
+    );
+
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
+    const authorityJobs = Object.values(loaded.project.jobs).filter(
+      (job) => job.authorizationId === harness.authorization.id && job.authorizationItemId === harness.item.id
+    );
+    expect(authorityJobs.map((job) => job.id)).toEqual(['job_v2_1', retryJobId]);
+    expect(loaded.project.shots.shot_1!.jobIds).toEqual(['job_v2_1', retryJobId]);
+    expect(submit).toHaveBeenCalledTimes(2);
+    const [initialRequest, retryRequest] = submit.mock.calls.map(([request]) => request);
+    expect(initialRequest).toMatchObject({
+      idempotencyKey: 'key_v2_1',
+      prompt: harness.jobs[0]!.composition.prompt,
+      firstFrame: { assetId: 'frame_predecessor_v2', mimeType: 'image/png', byteSize: png.length },
+    });
+    expect(retryRequest).toMatchObject({
+      idempotencyKey: 'key_v2_2',
+      prompt: initialRequest!.prompt,
+      mediaKind: initialRequest!.mediaKind,
+      aspectRatio: initialRequest!.aspectRatio,
+      resolution: initialRequest!.resolution,
+      durationSeconds: initialRequest!.durationSeconds,
+      routeConstraints: initialRequest!.routeConstraints,
+      firstFrame: { assetId: 'frame_predecessor_v2', mimeType: 'image/png', byteSize: png.length },
+    });
+  });
+
+  it('never spends a third key after the reserved predecessor-video retry also fails', async () => {
+    let submissionCount = 0;
+    const submit = vi.fn(async () => {
+      submissionCount += 1;
+      return { kind: 'remote' as const, providerJobId: `remote_video_failure_${submissionCount}` };
+    });
+    const poll = vi.fn(async () => ({
+      status: 'failed' as const,
+      error: { code: 'unknown' as const },
+    }));
+    const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit, poll }), {
+      purpose: 'video_take',
+      generationCount: 2,
+      sleep: async () => undefined,
+      nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+    });
+    const retryJobId = createStudioAutomaticVideoRetryJobId({
+      authorizationId: harness.authorization.id,
+      itemId: harness.item.id,
+      idempotencyKey: 'key_v2_2',
+    });
+
+    await dispatchV2(harness);
+    await expectV2Job(
+      harness,
+      {
+        status: 'failed',
+        error: { code: 'unknown' },
+        retryOfJobId: 'job_v2_1',
+        retryReason: 'provider_failure',
+        spendReceipt: null,
+      },
+      retryJobId
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const loaded = await harness.store.getProjectV2(harness.project.id);
+    if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
+    const authorityJobs = Object.values(loaded.project.jobs).filter(
+      (job) => job.authorizationId === harness.authorization.id && job.authorizationItemId === harness.item.id
+    );
+    expect(authorityJobs.map((job) => job.id)).toEqual(['job_v2_1', retryJobId]);
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(poll).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not auto-retry deterministic, ambiguous, cancelled, paid, or seed-conditioned failures', async () => {
+    expect(
+      (['rate_limited', 'provider_unavailable', 'timeout', 'no_output', 'unknown'] as StudioJobErrorCode[]).filter(
+        studioAutomaticVideoRetryFailureCodeIsEligibleV2
+      )
+    ).toEqual(['rate_limited', 'provider_unavailable', 'timeout', 'no_output', 'unknown']);
+    expect(
+      (
+        [
+          'invalid_request',
+          'content_rejected',
+          'auth',
+          'quota',
+          'poll_deadline',
+          'seed_still_variation_grid',
+          'submission_unknown',
+          'download_failed',
+          'unsupported',
+        ] as StudioJobErrorCode[]
+      ).filter(studioAutomaticVideoRetryFailureCodeIsEligibleV2)
+    ).toEqual([]);
+
+    const deterministicCodes: StudioJobErrorCode[] = [
+      'invalid_request',
+      'content_rejected',
+      'auth',
+      'quota',
+      'unsupported',
+    ];
+    for (const [index, code] of deterministicCodes.entries()) {
+      const submit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: `remote_deterministic_${index}` }));
+      const poll = vi.fn(async () => ({ status: 'failed' as const, error: { code } }));
+      // eslint-disable-next-line no-await-in-loop -- Every exclusion owns a separate frozen authorization.
+      const harness = await createV2Harness(controllableAdapter('weprompt-media-gateway-v1', { submit, poll }), {
+        purpose: 'video_take',
+        generationCount: 2,
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      });
+      // eslint-disable-next-line no-await-in-loop -- Let the exact terminal exclusion settle durably.
+      await dispatchV2(harness);
+      // eslint-disable-next-line no-await-in-loop -- Each deterministic code must remain a one-job authority.
+      await expectV2Job(harness, { status: 'failed', error: { code }, spendReceipt: null });
+      // eslint-disable-next-line no-await-in-loop -- Inspect the same isolated authorization after its terminal write.
+      const loaded = await harness.store.getProjectV2(harness.project.id);
+      expect(
+        loaded.status === 'supported'
+          ? Object.values(loaded.project.jobs).filter((job) => job.authorizationId === harness.authorization.id)
+          : []
+      ).toHaveLength(1);
+      expect(submit).toHaveBeenCalledOnce();
+    }
+
+    const pollGate = deferred<ProviderJobSnapshot>();
+    const paidSubmit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_paid_failure' }));
+    const paidPoll = vi.fn(async () => pollGate.promise);
+    const paid = await createV2Harness(
+      controllableAdapter('weprompt-media-gateway-v1', {
+        submit: paidSubmit,
+        poll: paidPoll,
+      }),
+      {
+        purpose: 'video_take',
+        generationCount: 2,
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      }
+    );
+    await dispatchV2(paid);
+    await waitFor(() => expect(paidPoll).toHaveBeenCalledOnce());
+    await paid.store.updateProjectV2(paid.project.id, (project) => {
+      const job = project.jobs.job_v2_1!;
+      job.status = 'failed';
+      job.error = { code: 'no_output', messageKey: 'noOutput' };
+      job.spendReceipt = createStudioSpendReceiptV2({
+        authorization: paid.authorization,
+        itemId: paid.item.id,
+        jobId: job.id,
+      });
+      return project;
+    });
+    pollGate.resolve({ status: 'failed', error: { code: 'provider_unavailable' } });
+    await waitFor(async () => {
+      const loaded = await paid.store.getProjectV2(paid.project.id);
+      if (loaded.status !== 'supported') throw new Error('V2 project disappeared');
+      expect(loaded.project.jobs.job_v2_1).toMatchObject({
+        status: 'failed',
+        error: { code: 'no_output' },
+        spendReceipt: { jobId: 'job_v2_1' },
+      });
+      expect(
+        Object.values(loaded.project.jobs).filter((job) => job.authorizationId === paid.authorization.id)
+      ).toHaveLength(1);
+    });
+    expect(paidSubmit).toHaveBeenCalledOnce();
+
+    const cancelledSubmit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_cancelled_video' }));
+    const cancelled = await createV2Harness(
+      controllableAdapter('weprompt-media-gateway-v1', {
+        submit: cancelledSubmit,
+        poll: async () => ({ status: 'cancelled', error: { code: 'unknown' } }),
+      }),
+      {
+        purpose: 'video_take',
+        generationCount: 2,
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      }
+    );
+    await dispatchV2(cancelled);
+    await expectV2Job(cancelled, { status: 'cancelled', error: null, spendReceipt: null });
+    expect(cancelledSubmit).toHaveBeenCalledOnce();
+
+    const uncertainSubmit = vi.fn(async () => {
+      throw Object.assign(new Error('submission state is unknowable'), { code: 'timeout' });
+    });
+    const uncertain = await createV2Harness(
+      controllableAdapter('weprompt-media-gateway-v1', {
+        submit: uncertainSubmit,
+      }),
+      {
+        purpose: 'video_take',
+        generationCount: 2,
+      }
+    );
+    await dispatchV2(uncertain);
+    await expectV2Job(uncertain, { status: 'needs_attention', error: { code: 'submission_unknown' } });
+    expect(uncertainSubmit).toHaveBeenCalledOnce();
+
+    const uncertainPollSubmit = vi.fn(async () => ({
+      kind: 'remote' as const,
+      providerJobId: 'remote_poll_uncertain_video',
+    }));
+    const uncertainPoll = await createV2Harness(
+      controllableAdapter('weprompt-media-gateway-v1', {
+        submit: uncertainPollSubmit,
+        poll: async () => {
+          throw Object.assign(new Error('poll state is unknowable'), { code: 'unknown' });
+        },
+      }),
+      {
+        purpose: 'video_take',
+        generationCount: 2,
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      }
+    );
+    await dispatchV2(uncertainPoll);
+    await expectV2Job(uncertainPoll, { status: 'needs_attention', error: { code: 'unknown' } });
+    expect(uncertainPollSubmit).toHaveBeenCalledOnce();
+
+    const seedSubmit = vi.fn(async () => ({ kind: 'remote' as const, providerJobId: 'remote_seed_failure' }));
+    const seed = await createV2Harness(
+      controllableAdapter('weprompt-media-gateway-v1', {
+        submit: seedSubmit,
+        poll: async () => ({ status: 'failed', error: { code: 'provider_unavailable' } }),
+      }),
+      {
+        purpose: 'video_take',
+        sleep: async () => undefined,
+        nowEpochMs: () => Date.parse('2026-08-17T12:00:03.000Z'),
+      }
+    );
+    await dispatchV2(seed);
+    await expectV2Job(seed, { status: 'failed', error: { code: 'provider_unavailable' } });
+    expect(seedSubmit).toHaveBeenCalledOnce();
+  }, 60_000);
 
   it('ignores queued progress regression after a V2 remote job has entered running', async () => {
     const snapshots: ProviderJobSnapshot[] = [

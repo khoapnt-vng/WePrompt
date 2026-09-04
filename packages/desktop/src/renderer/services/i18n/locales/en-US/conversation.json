@@ -1792,6 +1792,7 @@
           "story": "Story · The narrative purpose and progression for this Beat"
         },
         "directorRequestHint": "Ask the Creative Director for a reviewed re-split proposal.",
+        "directorFrameReviewHint": "Inspect the exact inherited conditioning frame for Shot {{shotId}} and propose a frame-aware Shooting script that begins from what the frame already shows, then moves. Do not generate media, request a quote, authorize spend, or spend.",
         "common": {
           "cancel": "Cancel",
           "keepWaiting": "Keep waiting",
@@ -1950,6 +1951,7 @@
         },
         "composer": {
           "framesSet": "Frames · {{count}} set",
+          "reviewStartFrameWithDirector": "Review start frame with Director",
           "start": "Start",
           "end": "End",
           "references": "Refs",
@@ -2131,7 +2133,7 @@
       },
       "proposals": {
         "title": "Director proposal",
-        "proposalId": "Proposal ID",
+        "unlabelledItem": "Unlabelled item",
         "revision": "Based on revision {{revision}}",
         "mutationCount": "{{count}} proposed edits",
         "mutationCount_one": "{{count}} proposed edit",
@@ -2177,11 +2179,11 @@
         "saveAndRequestUpdated": "Save and prepare updated proposal",
         "reviewRuleDrafts": "Review rule drafts",
         "reviewRuleDraftsFirst": "Review or discard the local rule draft before accepting this rule proposal.",
-        "reproposalPrompt": "Please inspect proposal {{proposalId}} with studio_get_proposal, then call read_storyboard and draft a new proposal against the current revision. Do not apply or silently rebase the original proposal.",
+        "reproposalPrompt": "Prepare an updated version of the proposal I selected. Use {{proposalId}} only to identify it internally, and do not mention this reference or any technical steps in your reply.",
         "chatDecisionBusy": "Another reviewed action is still in progress.",
         "chatDirty": "Save or reset the drafts that conflict with this proposal before approving it.",
         "chatNoPending": "There is no pending Director proposal to act on.",
-        "chatMultiplePending": "More than one current Director proposal is ready. Use /approve PROPOSAL_ID or /reject PROPOSAL_ID with the full ID.",
+        "chatMultiplePending": "More than one Director proposal is ready. Use the action buttons on the proposal you mean.",
         "chatProposalNotFound": "That exact proposal is no longer pending.",
         "chatUnavailable": "No pending Director proposal is currently ready. Use its card to review it or request an updated proposal.",
         "chatStale": "This proposal no longer matches the current project revision.",
@@ -2352,6 +2354,7 @@
       "gate": {
         "title": "Review generation",
         "reviewBeforeSpend": "Preparing an estimate is free. Only the explicit Confirm action can submit paid work.",
+        "predecessorVideoRetry": "Review the exact inherited start frame and Shooting script before confirming. One automatic retry is reserved only if the first provider attempt fails unambiguously. First attempts cost {{lower}}; the confirmed maximum is {{upper}}.",
         "requestedShots": "{{count}} shots selected",
         "requestedShots_one": "{{count}} shot selected",
         "requestedShots_other": "{{count}} shots selected",

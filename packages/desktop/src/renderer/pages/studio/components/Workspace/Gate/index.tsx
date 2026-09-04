@@ -365,6 +365,14 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   const breakdownId = useId();
   const quote = selectedSpendGateQuote(state);
   const summary = useMemo(() => (quote === null ? null : summarizeQuote(quote)), [quote]);
+  const predecessorVideoRows =
+    summary?.rows.filter(
+      (row) =>
+        row.purpose === 'video_take' &&
+        row.generationCount === 2 &&
+        typeof row.conditioningAssetId === 'string' &&
+        row.composition.inputs.source.kind === 'shot'
+    ) ?? [];
   const visible = state.phase !== 'closed';
   const breakdownOpen = visible && quote !== null && expandedQuoteId === quote.id;
   const closeGate = useCallback(() => {
@@ -690,6 +698,48 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
             <p className={styles.freeEstimateNote} data-free-estimate-note>
               {t('conversation.creativeStudio.workspace.gate.reviewBeforeSpend')}
             </p>
+            {predecessorVideoRows.length === 0 ? null : (
+              <div className={styles.predecessorReviews} data-predecessor-video-reviews>
+                <p>
+                  {t('conversation.creativeStudio.workspace.gate.predecessorVideoRetry', {
+                    lower: formatMoney(summary.lowerMinorUnits, summary.currency),
+                    upper: formatMoney(summary.upperMinorUnits, summary.currency),
+                  })}
+                </p>
+                {predecessorVideoRows.map((row) => {
+                  if (
+                    row.target.kind !== 'shot' ||
+                    typeof row.conditioningAssetId !== 'string' ||
+                    row.composition.inputs.source.kind !== 'shot'
+                  ) {
+                    return null;
+                  }
+                  return (
+                    <div
+                      className={styles.predecessorReview}
+                      data-predecessor-video-review={row.target.shotId}
+                      key={`${row.target.shotId}:${row.conditioningAssetId}`}
+                    >
+                      <img
+                        alt={t('conversation.creativeStudio.workspace.gate.conditioningFrameAlt', {
+                          shot: row.target.shotId,
+                        })}
+                        className={styles.predecessorFrame}
+                        data-conditioning-asset-id={row.conditioningAssetId}
+                        src={createManagedStudioAssetUrl(summary.projectId, row.conditioningAssetId)}
+                      />
+                      <div className={styles.predecessorScript}>
+                        <strong>
+                          {t('conversation.creativeStudio.workspace.gate.readout.shootingScript')} ·{' '}
+                          <bdi dir='auto'>{row.target.shotId}</bdi>
+                        </strong>
+                        <pre dir='auto'>{row.composition.inputs.source.shootingScript}</pre>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {projectReferenceIds === null ? null : (
               <>
                 <p data-project-reference-scope>

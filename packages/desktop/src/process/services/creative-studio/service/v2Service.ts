@@ -174,6 +174,7 @@ import {
   resolveStudioReferenceBindingV2,
   resolveStudioCanonicalBoardAssetV2,
   resolveStudioCurrentBoardPanelAuthorityV2,
+  studioGenerationCountIsValidV2,
   studioGenerationTargetKey,
   terminalizeStudioUnboundDependenciesV2,
   type StudioMutationApplyResultV2,
@@ -2251,10 +2252,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
         const retryReason = paidGenerationRetryReasonV2(candidate);
         return retryReason === null ? [] : [{ job: candidate, retryReason }];
       });
-      if (
-        item.generationCount !== 1 &&
-        !(item.purpose === 'reference_image' && item.target.kind === 'reference' && item.generationCount === 2)
-      ) {
+      if (!studioGenerationCountIsValidV2(item)) {
         throw invalid('Invalid Studio generation count');
       }
       {
