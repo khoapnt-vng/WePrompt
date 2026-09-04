@@ -478,13 +478,52 @@ describe('OpenRouter video generation adapter', () => {
   it.each([
     ['pending', { status: 'queued' }],
     ['processing', { status: 'running' }],
-    ['failed', { status: 'failed', error: { code: 'unknown' } }],
     ['cancelled', { status: 'cancelled', error: { code: 'unknown' } }],
   ])('maps the %s polling state', async (status, expected) => {
     const fetch: ProviderFetch = async () => response(200, { status });
     const adapter = createOpenRouterVideoAdapter({ fetch, catalog: await admittedCatalog() });
 
     await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual(expected);
+  });
+
+  it('keeps a terminal poll failure without allowlisted evidence unknown', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const adapter = createOpenRouterVideoAdapter({
+      fetch: async () => response(200, { status: 'failed' }),
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual({
+      status: 'failed',
+      error: { code: 'unknown' },
+    });
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({ stableCode: 'unknown', errorCode: null, upstreamCode: null })
+    );
+  });
+
+  it('keeps a sanitized but non-allowlisted terminal code unknown', async () => {
+    const emitHttpErrorEvidence = vi.fn();
+    const adapter = createOpenRouterVideoAdapter({
+      fetch: async () =>
+        response(200, { status: 'failed', error: { code: 'InputImageDimensionsRejected.InvalidRatio' } }),
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.poll?.('job_abc', provider(), new AbortController().signal)).resolves.toEqual({
+      status: 'failed',
+      error: { code: 'unknown' },
+    });
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        stableCode: 'unknown',
+        errorCode: 'InputImageDimensionsRejected.InvalidRatio',
+      })
+    );
   });
 
   it('maps completed unsigned_urls to the primary video output', async () => {
@@ -836,8 +875,42 @@ describe('OpenRouter video generation adapter', () => {
     });
   });
 
-  it('reports the upstream code when a poll says the generation failed', async () => {
-    const emitHttpErrorEvidence = vi.fn();
+  it('classifies an allowlisted terminal submit rejection even when diagnostic emission fails', async () => {
+    const emitHttpErrorEvidence = vi.fn(() => {
+      throw new Error('diagnostic sink failed');
+    });
+    const fetch = vi.fn(async () =>
+      response(200, {
+        status: 'failed',
+        error: { code: 'InputImageSensitiveContentDetected.PrivacyInformation' },
+      })
+    ) as unknown as ProviderFetch;
+    const adapter = createOpenRouterVideoAdapter({
+      fetch,
+      catalog: await admittedCatalog(),
+      emitHttpErrorEvidence,
+    });
+
+    await expect(adapter.submit(request, provider(), new AbortController().signal)).rejects.toMatchObject({
+      code: 'content_rejected',
+    });
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
+    expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorCode: 'InputImageSensitiveContentDetected.PrivacyInformation',
+        operation: 'submit',
+        stableCode: 'content_rejected',
+        upstreamCode: null,
+      })
+    );
+  });
+
+  it('classifies an allowlisted terminal poll rejection without waiting for diagnostic emission', async () => {
+    let releaseSink!: () => void;
+    const stalledSink = new Promise<void>((resolve) => {
+      releaseSink = resolve;
+    });
+    const emitHttpErrorEvidence = vi.fn(() => stalledSink);
     const fetch = vi.fn(async () =>
       response(200, {
         id: 'remote_1',
@@ -852,13 +925,27 @@ describe('OpenRouter video generation adapter', () => {
       catalog: await admittedCatalog(),
       emitHttpErrorEvidence,
     });
-    const snapshot = await adapter.poll('remote_1', provider(), new AbortController().signal);
-    expect(snapshot.status).toBe('failed');
-    // The provider's own reason must reach the diagnostic channel; without it every
-    // chained-generation failure is indistinguishable and uninvestigable.
+
+    const polling = adapter.poll('remote_1', provider(), new AbortController().signal);
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const outcome = await Promise.race([
+        polling,
+        new Promise<'stalled'>((resolve) => {
+          timeout = setTimeout(() => resolve('stalled'), 200);
+        }),
+      ]);
+      expect(outcome).toEqual({ status: 'failed', error: { code: 'content_rejected' } });
+    } finally {
+      if (timeout !== undefined) clearTimeout(timeout);
+      releaseSink();
+      await polling;
+    }
+    await vi.waitFor(() => expect(emitHttpErrorEvidence).toHaveBeenCalledOnce());
     expect(emitHttpErrorEvidence).toHaveBeenCalledWith(
       expect.objectContaining({
         operation: 'poll',
+        stableCode: 'content_rejected',
         upstreamCode: 'InputImageSensitiveContentDetected.PrivacyInformation',
       })
     );
