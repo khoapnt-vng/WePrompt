@@ -67,6 +67,12 @@ type FakeBinaryOptions = {
   renderFailure?: boolean;
   verifyDurationSeconds?: number;
   malformedMediaProbe?: boolean;
+  mediaVideoDurationSeconds?: number | 'N/A';
+  mediaVideoDurationTag?: string;
+  mediaVideoDurationTicks?: number;
+  mediaVideoTimeBase?: string;
+  mediaAudioDurationSeconds?: number | 'N/A';
+  mediaContainerDurationSeconds?: number;
   profile?: string;
   level?: number;
   colorPrimaries?: string;
@@ -81,6 +87,17 @@ const fakeFfmpegPair = async (options: FakeBinaryOptions = {}) => {
   const ffprobe = path.join(root, 'ffprobe');
   const invocationLog = path.join(root, 'invocations.ndjson');
   const durationSeconds = options.durationSeconds ?? 9;
+  const mediaVideoStream = {
+    codec_type: 'video',
+    duration: String(options.mediaVideoDurationSeconds ?? 4),
+    ...(options.mediaVideoDurationTag === undefined ? {} : { tags: { DURATION: options.mediaVideoDurationTag } }),
+    ...(options.mediaVideoDurationTicks === undefined ? {} : { duration_ts: String(options.mediaVideoDurationTicks) }),
+    ...(options.mediaVideoTimeBase === undefined ? {} : { time_base: options.mediaVideoTimeBase }),
+  };
+  const mediaAudioStream = {
+    codec_type: 'audio',
+    duration: String(options.mediaAudioDurationSeconds ?? options.mediaContainerDurationSeconds ?? 4),
+  };
   await writeFile(
     ffmpeg,
     `#!/usr/bin/env node
@@ -128,9 +145,9 @@ if (args.includes('-version')) {
     const source = fs.readFileSync(3, 'utf8');
     process.stdout.write(JSON.stringify({
       streams: source === 'video-one'
-        ? [{ codec_type: 'video', duration: '4' }, { codec_type: 'audio', duration: '4' }]
-        : [{ codec_type: 'video', duration: '4' }],
-      format: { duration: '4' }
+        ? [${JSON.stringify(mediaVideoStream)}, ${JSON.stringify(mediaAudioStream)}]
+        : [${JSON.stringify(mediaVideoStream)}],
+      format: { duration: '${options.mediaContainerDurationSeconds ?? 4}' }
     }));
   }
 } else {
@@ -289,10 +306,88 @@ const sources = (): StudioFilmVerifiedSourceV2[] => [
   sourceFor(BED, BED_BYTES),
 ];
 
+const singleShotFixture = (input: {
+  storedDurationSeconds: number;
+  sourceInSeconds?: number;
+  trimOutSeconds?: number;
+  mimeType?: 'video/mp4' | 'video/webm';
+}) => {
+  const sourceInSeconds = input.sourceInSeconds ?? 0;
+  const trimOutSeconds = input.trimOutSeconds ?? 0;
+  const sourceOutSeconds = input.storedDurationSeconds - trimOutSeconds;
+  const baseAsset = asset({
+    id: VIDEO_ONE.id,
+    shotId: 'shot_1',
+    kind: 'video',
+    bytes: VIDEO_ONE_BYTES,
+    durationSeconds: input.storedDurationSeconds,
+  });
+  const sourceAsset: StudioAssetV2 =
+    input.mimeType === 'video/webm'
+      ? {
+          ...baseAsset,
+          mimeType: 'video/webm',
+          managedAsset: { collection: 'assets', fileName: `${baseAsset.id}.webm` },
+        }
+      : baseAsset;
+  const baseProject = project();
+  const sourceProject = project({
+    beatOrder: ['beat_1'],
+    beats: { beat_1: { ...baseProject.beats.beat_1!, shotOrder: ['shot_1'] } },
+    shots: {
+      shot_1: {
+        ...baseProject.shots.shot_1!,
+        videoAssetId: sourceAsset.id,
+        trimInSeconds: sourceInSeconds === 0 ? null : sourceInSeconds,
+        trimOutSeconds: trimOutSeconds === 0 ? null : trimOutSeconds,
+      },
+    },
+    assets: { [sourceAsset.id]: sourceAsset },
+    bedAssetId: null,
+  });
+  const compose = (): StudioEditorFolderCompositionV2 => {
+    const base = composition();
+    return {
+      ...base,
+      timeline: {
+        ...base.timeline,
+        durationSeconds: sourceOutSeconds - sourceInSeconds,
+        beats: [
+          {
+            ...base.timeline.beats[0]!,
+            durationSeconds: sourceOutSeconds - sourceInSeconds,
+            entries: [
+              {
+                kind: 'shot',
+                shotOrdinal: 1,
+                shotId: 'shot_1',
+                videoAssetId: sourceAsset.id,
+                relativePath: 'media/video_1.mp4',
+                timelineStartSeconds: 0,
+                sourceInSeconds,
+                sourceOutSeconds,
+                durationSeconds: sourceOutSeconds - sourceInSeconds,
+                chainBreak: 'none',
+              },
+            ],
+          },
+        ],
+        bed: null,
+      },
+    };
+  };
+  const source = sourceFor(sourceAsset, VIDEO_ONE_BYTES);
+  return {
+    project: sourceProject,
+    source,
+    compose,
+  };
+};
+
 /**
  * Every case in this file writes a fake ffmpeg/ffprobe pair to disk and runs the real exporter
  * over it, so each one is dominated by process spawning rather than by its assertions. Measured
- * in isolation on a quiet machine the eleven cases run 0ms-3.9s, but under full-suite parallelism
+ * in isolation on a quiet machine the original cases ran 0ms-3.9s, but under full-suite parallelism
  * one of them exceeded the 10s global testTimeout — and the case that lost the race was a 1.35s
  * one, not the slowest, so no per-case ceiling derived from isolated timings would be safe.
  *
@@ -440,6 +535,496 @@ describe('schema-2 film runtime', { timeout: FAKE_FFMPEG_TIMEOUT_MS }, () => {
       ])
     );
     expect(render!.args).not.toContain('-movflags');
+    await result.cleanup();
+  });
+
+  it('clamps a bounded AAC/container tail to decoded video while retaining authored Film facts', async () => {
+    const decodedVideoDurationSeconds = 241 / 24;
+    const normalizedDurationSeconds = 241 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: decodedVideoDurationSeconds,
+      mediaVideoDurationTicks: 241_000,
+      mediaVideoTimeBase: '1/24000',
+      mediaAudioDurationSeconds: 10.1,
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      schemaVersion: 2,
+      nominalDurationSeconds: 10.1,
+      renderedDurationSeconds: normalizedDurationSeconds,
+      segments: [
+        {
+          kind: 'shot',
+          sourceOutSeconds: 10.1,
+          effectiveSourceOutSeconds: decodedVideoDurationSeconds,
+          renderedSourceOutSeconds: decodedVideoDurationSeconds,
+          normalizedDurationSeconds,
+        },
+      ],
+    });
+    const invocations = (await readFile(binaries.invocationLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { binary: string; args: string[] });
+    const render = invocations.find(({ binary, args }) => binary === 'ffmpeg' && args.includes('-filter_complex'));
+    const graph = render?.args[render.args.indexOf('-filter_complex') + 1];
+    expect(graph).toContain(`trim=duration=${decodedVideoDurationSeconds.toFixed(12)}`);
+    expect(graph).not.toContain('tpad=');
+    await result.cleanup();
+  });
+
+  it('reads an audio-bearing WebM video endpoint from its stream duration tag', async () => {
+    const decodedVideoDurationSeconds = 10.041667;
+    const normalizedDurationSeconds = 241 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1, mimeType: 'video/webm' });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: 'N/A',
+      mediaVideoDurationTag: '00:00:10.041667000',
+      mediaAudioDurationSeconds: 'N/A',
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts.segments[0]).toMatchObject({
+      kind: 'shot',
+      sourceOutSeconds: 10.1,
+      effectiveSourceOutSeconds: decodedVideoDurationSeconds,
+      normalizedDurationSeconds,
+    });
+    await result.cleanup();
+  });
+
+  it('applies a nonzero authored trim-in before clamping to the decoded video endpoint', async () => {
+    const decodedVideoDurationSeconds = 241 / 24;
+    const sourceInSeconds = 1.25;
+    const normalizedDurationSeconds = 211 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1, sourceInSeconds });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: decodedVideoDurationSeconds,
+      mediaVideoDurationTicks: 241_000,
+      mediaVideoTimeBase: '1/24000',
+      mediaAudioDurationSeconds: 10.1,
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 8.85,
+      renderedDurationSeconds: normalizedDurationSeconds,
+      segments: [
+        {
+          kind: 'shot',
+          sourceInSeconds,
+          sourceOutSeconds: 10.1,
+          effectiveSourceOutSeconds: decodedVideoDurationSeconds,
+          renderedSourceOutSeconds: decodedVideoDurationSeconds,
+          normalizedDurationSeconds,
+        },
+      ],
+    });
+    const invocations = (await readFile(binaries.invocationLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { binary: string; args: string[] });
+    const render = invocations.find(({ binary, args }) => binary === 'ffmpeg' && args.includes('-filter_complex'));
+    expect(render?.args).toEqual(expect.arrayContaining(['-ss', '1.25', '-t', '8.791666666667']));
+    await result.cleanup();
+  });
+
+  it('keeps supported audio-bearing WebM media that exposes only its container duration', async () => {
+    const normalizedDurationSeconds = 242 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1, mimeType: 'video/webm' });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: 'N/A',
+      mediaAudioDurationSeconds: 'N/A',
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts.segments[0]).toMatchObject({
+      kind: 'shot',
+      sourceOutSeconds: 10.1,
+      effectiveSourceOutSeconds: 10.1,
+      normalizedDurationSeconds,
+    });
+    await result.cleanup();
+  });
+
+  it('preserves authored head and tail trims against the decoded video interval', async () => {
+    const decodedVideoDurationSeconds = 10.041667;
+    const sourceInSeconds = 1.25;
+    const trimOutSeconds = 0.5;
+    const expectedSourceOutSeconds = 10.1 - trimOutSeconds;
+    const normalizedDurationSeconds = 200 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1, sourceInSeconds, trimOutSeconds });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: decodedVideoDurationSeconds,
+      mediaAudioDurationSeconds: 10.1,
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts.segments[0]).toMatchObject({
+      kind: 'shot',
+      sourceInSeconds,
+      sourceOutSeconds: expectedSourceOutSeconds,
+      effectiveSourceOutSeconds: expectedSourceOutSeconds,
+      renderedSourceOutSeconds: expectedSourceOutSeconds,
+      normalizedDurationSeconds,
+    });
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 8.35,
+      renderedDurationSeconds: normalizedDurationSeconds,
+    });
+    const invocations = (await readFile(binaries.invocationLog, 'utf8'))
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { binary: string; args: string[] });
+    const render = invocations.find(({ binary, args }) => binary === 'ffmpeg' && args.includes('-filter_complex'));
+    expect(render?.args).toEqual(expect.arrayContaining(['-ss', '1.25', '-t', '8.333333333333']));
+    await result.cleanup();
+  });
+
+  it('does not extend the Film cut when the decoded video track outlives its stored endpoint', async () => {
+    const fixture = singleShotFixture({ storedDurationSeconds: 10 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: 10,
+      verifyDurationSeconds: 10,
+      mediaVideoDurationSeconds: 10.05,
+      mediaAudioDurationSeconds: 10.05,
+      mediaContainerDurationSeconds: 10,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts.segments[0]).toMatchObject({
+      kind: 'shot',
+      sourceOutSeconds: 10,
+      effectiveSourceOutSeconds: 10,
+      normalizedDurationSeconds: 10,
+    });
+    await result.cleanup();
+  });
+
+  it('rejects a gross audio and container tail instead of hiding a truncated video track', async () => {
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1 });
+    const binaries = await fakeFfmpegPair({
+      mediaVideoDurationSeconds: 9,
+      mediaAudioDurationSeconds: 10.1,
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    await expect(
+      exporter.render({
+        project: fixture.project,
+        transition: { kind: 'cut' },
+        trimTails: false,
+        sources: [fixture.source],
+        signal: new AbortController().signal,
+        onProgress: () => undefined,
+      })
+    ).rejects.toMatchObject({ code: 'invalid_media' });
+  });
+
+  it('accepts a gross mux tail when the authored Cut ends before the decoded video endpoint', async () => {
+    const normalizedDurationSeconds = 194 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1, trimOutSeconds: 2 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: 9,
+      mediaAudioDurationSeconds: 10.1,
+      mediaContainerDurationSeconds: 10.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 8.1,
+      renderedDurationSeconds: normalizedDurationSeconds,
+      segments: [{ kind: 'shot', sourceOutSeconds: 8.1, effectiveSourceOutSeconds: 8.1 }],
+    });
+    await result.cleanup();
+  });
+
+  it('clamps stale advisory metadata when every current media endpoint ends earlier', async () => {
+    const fixture = singleShotFixture({ storedDurationSeconds: 10.1 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: 9,
+      verifyDurationSeconds: 9,
+      mediaVideoDurationSeconds: 9,
+      mediaAudioDurationSeconds: 9,
+      mediaContainerDurationSeconds: 9,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 10.1,
+      renderedDurationSeconds: 9,
+      segments: [
+        {
+          kind: 'shot',
+          sourceOutSeconds: 10.1,
+          effectiveSourceOutSeconds: 9,
+          renderedSourceOutSeconds: 9,
+        },
+      ],
+    });
+    await result.cleanup();
+  });
+
+  it('accepts exactly the video-tail tolerance and rejects the next measurable overhang', async () => {
+    const render = async (storedDurationSeconds: number, videoDurationSeconds = 10) => {
+      const normalizedDurationSeconds = Math.floor(videoDurationSeconds * 24 + 1e-9) / 24;
+      const fixture = singleShotFixture({ storedDurationSeconds });
+      const binaries = await fakeFfmpegPair({
+        durationSeconds: normalizedDurationSeconds,
+        verifyDurationSeconds: normalizedDurationSeconds,
+        mediaVideoDurationSeconds: videoDurationSeconds,
+        mediaAudioDurationSeconds: storedDurationSeconds,
+        mediaContainerDurationSeconds: storedDurationSeconds,
+      });
+      const exporter = createStudioFilmExporterV2({
+        ffmpegBinary: binaries.ffmpeg,
+        ffprobeBinary: binaries.ffprobe,
+        tempRoot: binaries.root,
+        composeEditorFolder: fixture.compose,
+      });
+      return exporter.render({
+        project: fixture.project,
+        transition: { kind: 'cut' },
+        trimTails: false,
+        sources: [fixture.source],
+        signal: new AbortController().signal,
+        onProgress: () => undefined,
+      });
+    };
+
+    const accepted = await render(10.125);
+    expect(accepted.facts.segments[0]).toMatchObject({
+      kind: 'shot',
+      sourceOutSeconds: 10.125,
+      effectiveSourceOutSeconds: 10,
+    });
+    await accepted.cleanup();
+    const fractionalBoundary = await render(4.0002, 3.8752);
+    expect(fractionalBoundary.facts).toMatchObject({
+      renderedDurationSeconds: 3.875,
+      segments: [{ kind: 'shot', sourceOutSeconds: 4.0002, effectiveSourceOutSeconds: 3.8752 }],
+    });
+    await fractionalBoundary.cleanup();
+    await expect(render(10.125_001)).rejects.toMatchObject({ code: 'invalid_media' });
+  });
+
+  it('retains a bounded fractional provider overrun at the fifteen-second Film boundary', async () => {
+    const decodedVideoDurationSeconds = 15.069002;
+    const normalizedDurationSeconds = 361 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 15.1 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: decodedVideoDurationSeconds,
+      mediaAudioDurationSeconds: 15.1,
+      mediaContainerDurationSeconds: 15.1,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 15.1,
+      renderedDurationSeconds: normalizedDurationSeconds,
+      segments: [
+        {
+          kind: 'shot',
+          sourceOutSeconds: 15.1,
+          effectiveSourceOutSeconds: decodedVideoDurationSeconds,
+        },
+      ],
+    });
+    await result.cleanup();
+  });
+
+  it('does not impose the requested Shot ceiling on a longer canonical provider take', async () => {
+    const normalizedDurationSeconds = 388 / 24;
+    const fixture = singleShotFixture({ storedDurationSeconds: 16.2 });
+    const binaries = await fakeFfmpegPair({
+      durationSeconds: normalizedDurationSeconds,
+      verifyDurationSeconds: normalizedDurationSeconds,
+      mediaVideoDurationSeconds: 16.2,
+      mediaAudioDurationSeconds: 16.2,
+      mediaContainerDurationSeconds: 16.2,
+    });
+    const exporter = createStudioFilmExporterV2({
+      ffmpegBinary: binaries.ffmpeg,
+      ffprobeBinary: binaries.ffprobe,
+      tempRoot: binaries.root,
+      composeEditorFolder: fixture.compose,
+    });
+
+    const result = await exporter.render({
+      project: fixture.project,
+      transition: { kind: 'cut' },
+      trimTails: false,
+      sources: [fixture.source],
+      signal: new AbortController().signal,
+      onProgress: () => undefined,
+    });
+
+    expect(result.facts).toMatchObject({
+      nominalDurationSeconds: 16.2,
+      renderedDurationSeconds: normalizedDurationSeconds,
+      segments: [
+        {
+          kind: 'shot',
+          sourceOutSeconds: 16.2,
+          effectiveSourceOutSeconds: 16.2,
+          renderedSourceOutSeconds: 16.2,
+          normalizedDurationSeconds,
+        },
+      ],
+    });
     await result.cleanup();
   });
 

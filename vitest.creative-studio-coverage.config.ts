@@ -45,6 +45,7 @@ const creativeStudioRuntimeManifest = [
   'packages/desktop/src/process/services/creative-studio/service/schema2/chain.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/catalog.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/editorFolder.ts',
+  'packages/desktop/src/process/services/creative-studio/service/schema2/exports/mediaDuration.ts',
   'packages/desktop/src/process/services/creative-studio/service/filmExporter.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/exports/index.ts',
   'packages/desktop/src/process/services/creative-studio/service/schema2/factories.ts',

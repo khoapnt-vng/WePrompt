@@ -1570,7 +1570,7 @@ describe('CreativeStudioServiceV2', () => {
     const project = makeSchema2ServiceProject();
     const cleanup = vi.fn(async () => undefined);
     const facts = {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       nominalDurationSeconds: 8,
       renderedDurationSeconds: 8,
       transition: { kind: 'cut' as const },
@@ -2295,7 +2295,7 @@ describe('CreativeStudioServiceV2', () => {
       capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
       render: vi.fn(async () => ({
         facts: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           nominalDurationSeconds: 10,
           renderedDurationSeconds: 10,
           transition: { kind: 'cut' },
@@ -2309,6 +2309,7 @@ describe('CreativeStudioServiceV2', () => {
               sourceSha256: take.sha256,
               sourceInSeconds: 0,
               sourceOutSeconds: 5,
+              effectiveSourceOutSeconds: 5,
               renderedSourceOutSeconds: 5,
               normalizedDurationSeconds: 5,
               chainBreak: 'none',
@@ -2441,7 +2442,7 @@ describe('CreativeStudioServiceV2', () => {
         await released;
         return {
           facts: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             nominalDurationSeconds: 8,
             renderedDurationSeconds: 8,
             transition: { kind: 'cut' },

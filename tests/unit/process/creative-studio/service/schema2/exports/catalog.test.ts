@@ -19,6 +19,7 @@ import {
   type StudioExportArtifactV2,
   type StudioExportCatalogV2,
   type StudioExportShapeV2,
+  type StudioFilmExportFactsV1,
   type StudioFilmExportFactsV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2 } from '@/process/services/creative-studio/service/schema2/factories';
@@ -76,7 +77,7 @@ const makeArtifact = (
 });
 
 const filmFacts = (): StudioFilmExportFactsV2 => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   nominalDurationSeconds: 4,
   renderedDurationSeconds: 4,
   transition: { kind: 'cut' },
@@ -90,6 +91,7 @@ const filmFacts = (): StudioFilmExportFactsV2 => ({
       sourceSha256: 'b'.repeat(64),
       sourceInSeconds: 0,
       sourceOutSeconds: 4,
+      effectiveSourceOutSeconds: 4,
       renderedSourceOutSeconds: 4,
       normalizedDurationSeconds: 4,
       chainBreak: 'none',
@@ -139,6 +141,19 @@ const filmFacts = (): StudioFilmExportFactsV2 => ({
     limiterLatencyCompensated: true,
   },
 });
+
+const filmFactsV1 = (): StudioFilmExportFactsV1 => {
+  const current = filmFacts();
+  return {
+    ...current,
+    schemaVersion: 1,
+    segments: current.segments.map((segment) => {
+      if (segment.kind === 'slate') return segment;
+      const { effectiveSourceOutSeconds: _effectiveSourceOutSeconds, ...legacy } = segment;
+      return legacy;
+    }),
+  };
+};
 
 const makeFilmArtifact = (id = 'film_1', createdAt = CREATED_AT): StudioExportArtifactV2 => ({
   schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
@@ -255,6 +270,90 @@ describe('schema-2 export catalog', () => {
     ).toBe(false);
   });
 
+  it('continues to validate and project legacy Film facts schema 1', () => {
+    const catalog: StudioExportCatalogV2 = {
+      schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+      projectId: CONTEXT.projectId,
+      revision: 2,
+      artifacts: [{ ...makeFilmArtifact(), film: filmFactsV1() }],
+    };
+
+    expect(validateStudioExportCatalogV2(catalog, CONTEXT)).toBe(true);
+    expect(parseStudioExportCatalogV2(Buffer.from(JSON.stringify(catalog)), CONTEXT)).toEqual(catalog);
+    expect(projectStudioRendererExportCatalogV2(catalog).artifacts[0]).toMatchObject({
+      shape: 'film',
+      film: { nominalDurationSeconds: 4, renderedDurationSeconds: 4, trimmedShotCount: 0 },
+    });
+    const inheritedDescriptor = Object.getOwnPropertyDescriptor(Object.prototype, 'effectiveSourceOutSeconds');
+    Object.defineProperty(Object.prototype, 'effectiveSourceOutSeconds', {
+      configurable: true,
+      value: 5,
+    });
+    try {
+      expect(projectStudioRendererExportCatalogV2(catalog).artifacts[0]).toMatchObject({
+        film: { trimmedShotCount: 0 },
+      });
+    } finally {
+      if (inheritedDescriptor === undefined) delete Object.prototype.effectiveSourceOutSeconds;
+      else Object.defineProperty(Object.prototype, 'effectiveSourceOutSeconds', inheritedDescriptor);
+    }
+  });
+
+  it('keeps authored, decoded, and quiet-tail Film endpoints independently exact in schema 2', () => {
+    const accepts = (film: StudioFilmExportFactsV2): boolean =>
+      validateStudioExportCatalogV2(
+        {
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+          projectId: CONTEXT.projectId,
+          revision: 2,
+          artifacts: [{ ...makeFilmArtifact(), film }],
+        },
+        CONTEXT
+      );
+    const clamped = filmFacts();
+    const decodedOut = 241 / 24;
+    clamped.nominalDurationSeconds = 10.1;
+    clamped.renderedDurationSeconds = decodedOut;
+    clamped.segments[0] = {
+      ...clamped.segments[0]!,
+      sourceOutSeconds: 10.1,
+      effectiveSourceOutSeconds: decodedOut,
+      renderedSourceOutSeconds: decodedOut,
+      normalizedDurationSeconds: decodedOut,
+    };
+    const tamperedNominal = structuredClone(clamped);
+    tamperedNominal.nominalDurationSeconds = 10;
+    const invertedEndpoint = structuredClone(clamped);
+    invertedEndpoint.segments[0]!.effectiveSourceOutSeconds = 10.2;
+    const missingEffective = structuredClone(clamped) as unknown as {
+      segments: Array<Record<string, unknown>>;
+    };
+    delete missingEffective.segments[0]!.effectiveSourceOutSeconds;
+
+    expect(accepts(clamped)).toBe(true);
+    expect(
+      projectStudioRendererExportCatalogV2({
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: CONTEXT.projectId,
+        revision: 2,
+        artifacts: [{ ...makeFilmArtifact(), film: clamped }],
+      }).artifacts[0]
+    ).toMatchObject({ film: { trimmedShotCount: 0 } });
+    expect(accepts(tamperedNominal)).toBe(false);
+    expect(accepts(invertedEndpoint)).toBe(false);
+    expect(
+      validateStudioExportCatalogV2(
+        {
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+          projectId: CONTEXT.projectId,
+          revision: 2,
+          artifacts: [{ ...makeFilmArtifact(), film: missingEffective }],
+        },
+        CONTEXT
+      )
+    ).toBe(false);
+  });
+
   it('rejects film facts outside the frozen geometry, duration, tail, and final-shot contract', () => {
     const accepts = (film: StudioFilmExportFactsV2): boolean =>
       validateStudioExportCatalogV2(
@@ -320,16 +419,6 @@ describe('schema-2 export catalog', () => {
       },
     ];
 
-    const oversizedShot = filmFacts();
-    oversizedShot.nominalDurationSeconds = 16;
-    oversizedShot.renderedDurationSeconds = 16;
-    oversizedShot.segments[0] = {
-      ...oversizedShot.segments[0]!,
-      sourceOutSeconds: 16,
-      renderedSourceOutSeconds: 16,
-      normalizedDurationSeconds: 16,
-    };
-
     const oversizedSlate = filmFacts();
     oversizedSlate.nominalDurationSeconds = 1_441;
     oversizedSlate.renderedDurationSeconds = 1_441;
@@ -343,16 +432,45 @@ describe('schema-2 export catalog', () => {
       },
     ];
 
-    for (const facts of [
-      wrongGeometry,
-      excessiveTail,
-      trimmedFinalShot,
-      tooShortForDissolve,
-      oversizedShot,
-      oversizedSlate,
-    ]) {
+    for (const facts of [wrongGeometry, excessiveTail, trimmedFinalShot, tooShortForDissolve, oversizedSlate]) {
       expect(accepts(facts)).toBe(false);
     }
+  });
+
+  it('keeps the frozen 15-second schema-1 bound without imposing it on current provider take facts', () => {
+    const acceptsFilm = (film: StudioFilmExportFactsV1 | StudioFilmExportFactsV2): boolean =>
+      validateStudioExportCatalogV2(
+        {
+          schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+          projectId: CONTEXT.projectId,
+          revision: 2,
+          artifacts: [{ ...makeFilmArtifact(), film }],
+        },
+        CONTEXT
+      );
+    const current = filmFacts();
+    const normalizedDurationSeconds = 388 / 24;
+    current.nominalDurationSeconds = 16.2;
+    current.renderedDurationSeconds = normalizedDurationSeconds;
+    current.segments[0] = {
+      ...current.segments[0]!,
+      sourceOutSeconds: 16.2,
+      effectiveSourceOutSeconds: 16.2,
+      renderedSourceOutSeconds: 16.2,
+      normalizedDurationSeconds,
+    };
+    const legacy = filmFactsV1();
+    legacy.nominalDurationSeconds = 16.2;
+    legacy.renderedDurationSeconds = normalizedDurationSeconds;
+    legacy.segments[0] = {
+      ...legacy.segments[0]!,
+      sourceOutSeconds: 16.2,
+      renderedSourceOutSeconds: 16.2,
+      normalizedDurationSeconds,
+    };
+
+    expect(acceptsFilm(current)).toBe(true);
+    expect(acceptsFilm(legacy)).toBe(false);
   });
   it('treats absence as logical revision one and projects only renderer-safe fields', () => {
     const logical = parseStudioExportCatalogV2(null, CONTEXT);
@@ -917,7 +1035,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
     const dissolveSeconds = 8 / 24;
     const facts: StudioFilmExportFactsV2 = {
       ...filmFacts(),
-      nominalDurationSeconds: 10,
+      nominalDurationSeconds: 10.1,
       renderedDurationSeconds: 9.5 - dissolveSeconds,
       transition: { kind: 'dissolve', requestedSeconds: 0.35, seconds: dissolveSeconds },
       dissolveCount: 1,
@@ -929,7 +1047,8 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
           sourceAssetId: 'take_1',
           sourceSha256: 'b'.repeat(64),
           sourceInSeconds: 0,
-          sourceOutSeconds: 4,
+          sourceOutSeconds: 4.1,
+          effectiveSourceOutSeconds: 4,
           renderedSourceOutSeconds: 3.5,
           normalizedDurationSeconds: 3.5,
           chainBreak: 'none',
@@ -942,6 +1061,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
           sourceSha256: 'c'.repeat(64),
           sourceInSeconds: 0,
           sourceOutSeconds: 4,
+          effectiveSourceOutSeconds: 4,
           renderedSourceOutSeconds: 4,
           normalizedDurationSeconds: 4,
           chainBreak: 'none',
@@ -1012,7 +1132,7 @@ describe('createStudioExportCatalogStoreV2 filesystem authority', () => {
           payloadFileCount: 1,
           createdAt: CREATED_AT,
           film: {
-            nominalDurationSeconds: 10,
+            nominalDurationSeconds: 10.1,
             renderedDurationSeconds: 9.5 - dissolveSeconds,
             transition: { kind: 'dissolve', requestedSeconds: 0.35, seconds: dissolveSeconds },
             trimTails: true,

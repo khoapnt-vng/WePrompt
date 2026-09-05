@@ -14,6 +14,7 @@ import path from 'node:path';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { resolveStudioFfmpegBinaries } from '../ffmpegBinaries';
 import { studioChildProcessDetached, terminateStudioChildProcessTree } from '../childProcessTree';
+import { readStudioVideoDurationProbeV2, type StudioVideoDurationProbeV2 } from './schema2/exports/mediaDuration';
 import {
   STUDIO_BED_FADE_OUT_SECONDS,
   STUDIO_FILM_EXPORT_AUDIO_CHANNELS,
@@ -22,6 +23,7 @@ import {
   STUDIO_FILM_EXPORT_DISSOLVE_SECONDS,
   STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION,
   STUDIO_FILM_EXPORT_FRAME_RATE,
+  STUDIO_FILM_EXPORT_MEDIA_DURATION_TOLERANCE_SECONDS,
   STUDIO_FILM_EXPORT_TAKE_GAIN,
   type StudioAssetV2,
   type StudioFilmExportCapabilityV2,
@@ -855,14 +857,13 @@ const createOwnedPlaceholder = async (targetPath: string): Promise<{ handle: Fil
   }
 };
 
-type MediaProbe = { hasAudio: boolean };
+type MediaProbe = StudioVideoDurationProbeV2;
 
 const probeMedia = async (
   spawnProcess: typeof spawn,
   ffprobe: string,
   sourcePath: string,
   expectedIdentity: FileIdentity,
-  minimumVideoSeconds: number,
   signal: AbortSignal
 ): Promise<MediaProbe> => {
   const handle = await openExactFile(sourcePath, expectedIdentity);
@@ -870,27 +871,23 @@ const probeMedia = async (
     const result = await runChild(
       spawnProcess,
       ffprobe,
-      ['-v', 'error', '-show_entries', 'stream=codec_type,duration:format=duration', '-of', 'json', '-fd', '3', 'fd:'],
+      [
+        '-v',
+        'error',
+        '-show_entries',
+        'stream=codec_type,duration,duration_ts,time_base:stream_tags=DURATION:format=duration',
+        '-of',
+        'json',
+        '-fd',
+        '3',
+        'fd:',
+      ],
       { signal, timeoutMs: CAPABILITY_TIMEOUT_MS, inheritedFds: [handle.fd] }
     );
-    const parsed = JSON.parse(result.stdout.toString('utf8')) as {
-      streams?: Array<{ codec_type?: unknown; duration?: unknown }>;
-      format?: { duration?: unknown };
-    };
-    const streams = Array.isArray(parsed.streams) ? parsed.streams : [];
-    const video = streams.filter(({ codec_type }) => codec_type === 'video');
-    const audio = streams.filter(({ codec_type }) => codec_type === 'audio');
-    const videoDurationSeconds = Number(video[0]?.duration ?? parsed.format?.duration);
-    if (
-      video.length !== 1 ||
-      audio.length > 1 ||
-      !Number.isFinite(videoDurationSeconds) ||
-      videoDurationSeconds + 1 / STUDIO_FILM_EXPORT_FRAME_RATE < minimumVideoSeconds
-    ) {
-      return fail('invalid_media');
-    }
+    const parsed = readStudioVideoDurationProbeV2(JSON.parse(result.stdout.toString('utf8')));
+    if (parsed === null) return fail('invalid_media');
     if (!sameIdentity(identity(await handle.stat()), expectedIdentity)) return fail('invalid_media');
-    return { hasAudio: audio.length === 1 };
+    return parsed;
   } catch (error) {
     // An already-classified export failure keeps its own cause. Flattening it here
     // reported a cancellation, or a child that never settled, as invalid media —
@@ -993,7 +990,10 @@ type PlannedSegment =
       sourcePath: string;
       sourceIdentity: FileIdentity;
       sourceInSeconds: number;
+      /** Authored exclusive endpoint retained for nominal-duration facts. */
       sourceOutSeconds: number;
+      /** Decoded exclusive endpoint used before optional quiet-tail removal. */
+      effectiveSourceOutSeconds: number;
       renderedSourceOutSeconds: number;
       normalizedDurationSeconds: number;
       chainBreak: 'none' | 'hard_cut';
@@ -1008,6 +1008,9 @@ type PlannedSegment =
     };
 
 const decimal = (value: number): string => Number(value.toFixed(12)).toString();
+
+const exceedsDurationTolerance = (left: number, right: number, tolerance: number): boolean =>
+  left - right - tolerance > Number.EPSILON * Math.max(1, Math.abs(left), Math.abs(right)) * 4;
 
 const frameAlignedDuration = (seconds: number, errorCode: StudioFilmExportErrorCodeV2 = 'invalid_media'): number => {
   const frames = Math.floor(seconds * STUDIO_FILM_EXPORT_FRAME_RATE + 1e-9);
@@ -1308,8 +1311,8 @@ const verifyOutput = async (
       !Number.isFinite(videoDuration) ||
       Math.abs(videoDuration - expected.durationSeconds) > 1 / STUDIO_FILM_EXPORT_FRAME_RATE + 1e-6 ||
       !Number.isFinite(audioDuration) ||
-      Math.abs(audioDuration - expected.durationSeconds) > 0.125 ||
-      Math.abs(duration - expected.durationSeconds) > 0.125
+      Math.abs(audioDuration - expected.durationSeconds) > STUDIO_FILM_EXPORT_MEDIA_DURATION_TOLERANCE_SECONDS ||
+      Math.abs(duration - expected.durationSeconds) > STUDIO_FILM_EXPORT_MEDIA_DURATION_TOLERANCE_SECONDS
     ) {
       return fail('render_failed');
     }
@@ -1557,14 +1560,36 @@ export const createStudioFilmExporterV2 = (deps: StudioFilmExporterDepsV2 = {}):
               const asset = ownValue(input.project.assets, entry.videoAssetId);
               const staged = materialized.get(entry.videoAssetId);
               if (asset === undefined || staged === undefined) return fail('invalid_media');
-              const media = await probeMedia(
-                spawnProcess,
-                ffprobe,
-                staged.filePath,
-                staged.identity,
-                entry.sourceOutSeconds,
-                renderSignal
-              );
+              const sourceInSeconds = entry.sourceInSeconds;
+              const sourceOutSeconds = entry.sourceOutSeconds;
+              const authoredDurationSeconds = sourceOutSeconds - sourceInSeconds;
+              if (
+                !Number.isFinite(authoredDurationSeconds) ||
+                authoredDurationSeconds <= 0 ||
+                authoredDurationSeconds > Number.MAX_SAFE_INTEGER
+              ) {
+                return fail('invalid_media');
+              }
+              const media = await probeMedia(spawnProcess, ffprobe, staged.filePath, staged.identity, renderSignal);
+              const requestedEnvelopeEndSeconds = Math.min(sourceOutSeconds, media.envelopeDurationSeconds);
+              if (
+                exceedsDurationTolerance(
+                  requestedEnvelopeEndSeconds,
+                  media.videoDurationSeconds,
+                  STUDIO_FILM_EXPORT_MEDIA_DURATION_TOLERANCE_SECONDS
+                )
+              ) {
+                return fail('invalid_media');
+              }
+              const effectiveSourceOutSeconds = Math.min(sourceOutSeconds, media.videoDurationSeconds);
+              const effectiveDurationSeconds = effectiveSourceOutSeconds - sourceInSeconds;
+              if (
+                !Number.isFinite(effectiveDurationSeconds) ||
+                effectiveDurationSeconds <= 0 ||
+                effectiveDurationSeconds > Number.MAX_SAFE_INTEGER
+              ) {
+                return fail('invalid_media');
+              }
               const minimumDuration = Math.max(
                 1,
                 renderedTransition.kind === 'dissolve' ? 1 + renderedTransition.seconds : 1
@@ -1576,24 +1601,23 @@ export const createStudioFilmExporterV2 = (deps: StudioFilmExporterDepsV2 = {}):
                       ffmpeg,
                       staged.filePath,
                       staged.identity,
-                      entry.sourceInSeconds,
-                      entry.sourceOutSeconds,
+                      sourceInSeconds,
+                      effectiveSourceOutSeconds,
                       minimumDuration,
                       renderSignal
                     )
                   : 0;
-              const renderedDuration = frameAlignedDuration(
-                entry.sourceOutSeconds - entry.sourceInSeconds - trimmedSeconds
-              );
+              const renderedDuration = frameAlignedDuration(effectiveDurationSeconds - trimmedSeconds);
               segments.push({
                 kind: 'shot',
                 shotId: entry.shotId,
                 asset,
                 sourcePath: staged.filePath,
                 sourceIdentity: staged.identity,
-                sourceInSeconds: entry.sourceInSeconds,
-                sourceOutSeconds: entry.sourceOutSeconds,
-                renderedSourceOutSeconds: entry.sourceOutSeconds - trimmedSeconds,
+                sourceInSeconds,
+                sourceOutSeconds,
+                effectiveSourceOutSeconds,
+                renderedSourceOutSeconds: effectiveSourceOutSeconds - trimmedSeconds,
                 normalizedDurationSeconds: renderedDuration,
                 chainBreak: entry.chainBreak,
                 hasAudio: media.hasAudio,
@@ -1620,7 +1644,14 @@ export const createStudioFilmExporterV2 = (deps: StudioFilmExporterDepsV2 = {}):
               transitionCount += 1;
             }
           }
-          const nominalDurationSeconds = composition.timeline.durationSeconds;
+          const nominalDurationSeconds = segments.reduce(
+            (sum, segment) =>
+              sum +
+              (segment.kind === 'shot'
+                ? segment.sourceOutSeconds - segment.sourceInSeconds
+                : segment.nominalDurationSeconds),
+            0
+          );
           const renderedDurationSeconds =
             segments.reduce(
               (sum, segment) =>
@@ -1737,6 +1768,7 @@ export const createStudioFilmExporterV2 = (deps: StudioFilmExporterDepsV2 = {}):
                     sourceSha256: segment.asset.sha256,
                     sourceInSeconds: segment.sourceInSeconds,
                     sourceOutSeconds: segment.sourceOutSeconds,
+                    effectiveSourceOutSeconds: segment.effectiveSourceOutSeconds,
                     renderedSourceOutSeconds: segment.renderedSourceOutSeconds,
                     normalizedDurationSeconds: segment.normalizedDurationSeconds,
                     chainBreak: segment.chainBreak,
