@@ -1,7 +1,9 @@
 .rail {
   display: flex;
-  inline-size: clamp(300px, 31vw, 430px);
-  min-inline-size: 300px;
+  box-sizing: border-box;
+  inline-size: var(--studio-director-width, clamp(300px, 31vw, 430px));
+  max-inline-size: 100%;
+  min-inline-size: 0;
   min-block-size: 0;
   flex: none;
   flex-direction: column;
@@ -173,4 +175,26 @@
   .content {
     transition: none;
   }
+}
+
+/* When the containing workspace cannot fit both panes, the shell marks this rail as a drawer. */
+.overlay {
+  position: absolute;
+  z-index: 10;
+  inset-block: 0;
+  inset-inline-start: 0;
+  inline-size: var(--studio-director-width, clamp(300px, 31vw, 430px));
+  max-inline-size: 100%;
+  box-shadow: var(--shadow-raised);
+  transition: none;
+}
+
+.overlay.collapsed {
+  inline-size: 0;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.overlay .content {
+  transition: none;
 }

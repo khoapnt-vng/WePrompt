@@ -1045,7 +1045,11 @@ export type DirectorRailProps = {
   contentId: string;
   /** Owned by the shell: the drag handle that sets it is the separator beside this pane. */
   widthPixels?: number;
+  /** Owned by the shell: present this pane above the work surface when a split cannot fit. */
+  overlay?: boolean;
 };
+
+type DirectorRailStyle = React.CSSProperties & { '--studio-director-width': string };
 
 /** A single docked owner: collapsing or changing workspace views never unmounts its chat surface. */
 export const DirectorRail: React.FC<DirectorRailProps> = ({
@@ -1059,6 +1063,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   collapsed,
   contentId,
   widthPixels,
+  overlay = false,
 }) => {
   const { t } = useTranslation();
   const { allConversations, hasLoadedConversations } = useConversationHistoryContext();
@@ -1394,16 +1399,14 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
       : 'messageKey' in visibleState && visibleState.messageKey
         ? t(visibleState.messageKey)
         : null;
+  const railStyle: DirectorRailStyle | undefined =
+    collapsed || widthPixels === undefined ? undefined : { '--studio-director-width': `${widthPixels}px` };
 
   return (
     <aside
       aria-label={title}
-      className={`${styles.rail} ${collapsed ? styles.collapsed : ''}`}
-      style={
-        collapsed || widthPixels === undefined
-          ? undefined
-          : { inlineSize: `${widthPixels}px`, minInlineSize: `${widthPixels}px` }
-      }
+      className={`${styles.rail} ${overlay ? styles.overlay : ''} ${collapsed ? styles.collapsed : ''}`}
+      style={railStyle}
       data-studio-director-rail
     >
       <div ref={contentRef} id={contentId} className={styles.content} aria-hidden={collapsed} inert={collapsed}>

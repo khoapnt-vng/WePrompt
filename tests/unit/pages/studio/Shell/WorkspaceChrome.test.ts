@@ -19,6 +19,15 @@ const css = (): string =>
     'utf8'
   );
 
+const directorCss = (): string =>
+  readFileSync(
+    resolve(
+      process.cwd(),
+      'packages/desktop/src/renderer/pages/studio/components/Workspace/DirectorRail/DirectorRail.module.css'
+    ),
+    'utf8'
+  );
+
 /**
  * Every declaration that reaches `selector`, concatenated. A selector appears in more than one rule
  * here — shared chip styling plus an active-state override — and matching only the first block would
@@ -156,6 +165,36 @@ describe('workspace view switch treatment', () => {
     expect(block(narrow, '.projectTitle')).toMatch(/max-inline-size:\s*80px/);
     expect(block(narrow, '.viewNavigation')).toMatch(/min-inline-size:\s*96px/);
     expect(block(narrow, '.viewNavigation')).toMatch(/flex:\s*1 0 96px/);
+  });
+
+  it('overlays the Director instead of squeezing the work surface at the 400px window floor', () => {
+    const workspace = css();
+    const director = directorCss();
+
+    expect(block(workspace, '.panesCompact')).toMatch(/position:\s*relative/);
+    expect(block(workspace, '.panesCompact')).toMatch(/isolation:\s*isolate/);
+    expect(block(workspace, '.panesCompact .workPanel')).toMatch(/inline-size:\s*100%/);
+    expect(block(workspace, '.panesCompact .workPanel')).toMatch(/z-index:\s*0/);
+    expect(block(workspace, '.panesCompact .railResizer')).toMatch(/display:\s*none/);
+
+    const backdrop = block(workspace, '.railBackdrop');
+    expect(backdrop).toMatch(/position:\s*absolute/);
+    expect(backdrop).toMatch(/z-index:\s*5/);
+    expect(backdrop).toMatch(/inset:\s*0/);
+
+    const wideRail = block(director, '.rail');
+    expect(wideRail).toMatch(/box-sizing:\s*border-box/);
+    expect(wideRail).toMatch(/max-inline-size:\s*100%/);
+    expect(wideRail).toMatch(/min-inline-size:\s*0/);
+
+    const rail = block(director, '.overlay');
+    expect(rail).toMatch(/position:\s*absolute/);
+    expect(rail).toMatch(/z-index:\s*10/);
+    expect(rail).toMatch(/inset-block:\s*0/);
+    expect(rail).toMatch(/inset-inline-start:\s*0/);
+    expect(rail).toMatch(/max-inline-size:\s*100%/);
+    expect(rail).not.toMatch(/!important/);
+    expect(rail).toMatch(/transition:\s*none/);
   });
 
   it('draws distinct visible markers for dormant work and the one next view', () => {

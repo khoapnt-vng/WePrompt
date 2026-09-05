@@ -174,6 +174,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
     collapsed,
     contentId,
     widthPixels,
+    overlay = false,
     pendingProposalCount = 0,
     pendingProposalTargetId,
     onProposalIntent,
@@ -184,6 +185,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
     collapsed: boolean;
     contentId: string;
     widthPixels?: number;
+    overlay?: boolean;
     pendingProposalCount?: number;
     pendingProposalTargetId?: string;
     onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
@@ -194,9 +196,16 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
     return (
       <aside
         data-studio-director-rail
+        data-studio-director-overlay={overlay}
         data-studio-director-pending-proposal-count={pendingProposalCount}
         data-studio-director-pending-proposal-target={pendingProposalTargetId}
-        style={collapsed || widthPixels === undefined ? undefined : { inlineSize: `${widthPixels}px` }}
+        style={
+          collapsed || widthPixels === undefined
+            ? undefined
+            : ({ '--studio-director-width': `${widthPixels}px` } as React.CSSProperties & {
+                '--studio-director-width': string;
+              })
+        }
       >
         <div id={contentId} data-studio-director-content aria-hidden={collapsed} inert={collapsed}>
           <span tabIndex={0} data-studio-director-focus-target>
@@ -7674,6 +7683,164 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(document.activeElement).toBe(toggle);
   });
 
+  it('makes a compact Director overlay dismissible without leaving the covered workspace interactive', async () => {
+    const originalResizeObserver = Object.getOwnPropertyDescriptor(globalThis, 'ResizeObserver');
+    const originalGetBoundingClientRect = Element.prototype.getBoundingClientRect;
+    let panesWidth = 760;
+    let observer: ResizeObserver | null = null;
+    let observerCallback: ResizeObserverCallback | null = null;
+    const observed = new Set<Element>();
+    const disconnect = vi.fn(() => observed.clear());
+    const panesRect = (): DOMRect =>
+      ({
+        x: 0,
+        y: 0,
+        width: panesWidth,
+        height: 600,
+        top: 0,
+        right: panesWidth,
+        bottom: 600,
+        left: 0,
+        toJSON: () => ({}),
+      }) as DOMRect;
+
+    class MutableResizeObserver {
+      constructor(callback: ResizeObserverCallback) {
+        observerCallback = callback;
+        observer = this as unknown as ResizeObserver;
+      }
+
+      observe(target: Element): void {
+        observed.add(target);
+      }
+
+      unobserve(target: Element): void {
+        observed.delete(target);
+      }
+
+      disconnect(): void {
+        disconnect();
+      }
+    }
+
+    const setPaneWidth = async (next: number): Promise<void> => {
+      panesWidth = next;
+      const panes = document.querySelector<HTMLElement>('[data-studio-panes]')!;
+      const entry = { target: panes, contentRect: panesRect() } as ResizeObserverEntry;
+      await act(async () => observerCallback?.([entry], observer!));
+    };
+    let view: ReturnType<typeof renderStudio> | null = null;
+
+    try {
+      Object.defineProperty(globalThis, 'ResizeObserver', {
+        configurable: true,
+        writable: true,
+        value: MutableResizeObserver,
+      });
+      Element.prototype.getBoundingClientRect = function getBoundingClientRect(): DOMRect {
+        return this instanceof HTMLElement && this.hasAttribute('data-studio-panes')
+          ? panesRect()
+          : originalGetBoundingClientRect.call(this);
+      };
+      view = renderStudio('/studio/project_1/table');
+      await screen.findByRole('heading', { name: 'Launch film' });
+      const toggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
+      const workPanel = document.querySelector<HTMLElement>('[data-studio-work-panel]')!;
+      const resizer = screen.getByRole('separator');
+
+      expect(document.querySelector('[data-studio-panes]')).toHaveAttribute('data-studio-director-layout', 'split');
+      expect(resizer).toHaveAttribute('aria-valuenow', '431');
+      expect(document.querySelector('[data-studio-director-rail]')).toHaveStyle({
+        '--studio-director-width': '431px',
+      });
+      resizer.focus();
+      expect(document.activeElement).toBe(resizer);
+      // Changing the preferred rail width also recomputes the layout: 447 + 8 + 320 no longer fits.
+      fireEvent.keyDown(resizer, { key: 'ArrowRight' });
+      await waitFor(() =>
+        expect(document.querySelector('[data-studio-panes]')).toHaveAttribute('data-studio-director-layout', 'overlay')
+      );
+      expect(
+        document
+          .querySelector<HTMLElement>('[data-studio-director-rail]')
+          ?.style.getPropertyValue('--studio-director-width')
+      ).toBe('447px');
+      expect(disconnect).toHaveBeenCalledTimes(1);
+
+      const backdrop = document.querySelector<HTMLButtonElement>('[data-studio-director-backdrop]')!;
+
+      expect(document.querySelector('[data-studio-panes]')).toHaveAttribute('data-studio-director-layout', 'overlay');
+      expect(document.querySelector('[data-studio-director-rail]')).toHaveAttribute(
+        'data-studio-director-overlay',
+        'true'
+      );
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(workPanel).toHaveAttribute('inert');
+      expect(backdrop).toHaveAccessibleName('conversation.creativeStudio.workspace.director.hide');
+      expect(backdrop).toHaveAttribute('tabindex', '-1');
+      expect(screen.queryByRole('separator')).toBeNull();
+      expect(document.activeElement).toBe(toggle);
+
+      const references = screen.getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.references',
+      });
+      references.focus();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+
+      toggle.focus();
+      fireEvent.keyDown(window, { key: 'Escape' });
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+      expect(workPanel).not.toHaveAttribute('inert');
+      expect(document.activeElement).toBe(toggle);
+
+      fireEvent.click(toggle);
+      await waitFor(() => expect(workPanel).toHaveAttribute('inert'));
+      fireEvent.click(document.querySelector<HTMLButtonElement>('[data-studio-director-backdrop]')!);
+      await waitFor(() => expect(toggle).toHaveAttribute('aria-expanded', 'false'));
+      expect(workPanel).not.toHaveAttribute('inert');
+      expect(document.querySelector('[data-studio-director-backdrop]')).toBeNull();
+      expect(document.activeElement).toBe(toggle);
+
+      // A collapsed Director opens no overlay, so crossing the boundary must not steal work focus.
+      await setPaneWidth(775);
+      workPanel.tabIndex = -1;
+      workPanel.focus();
+      await setPaneWidth(774);
+      expect(document.activeElement).toBe(workPanel);
+      expect(workPanel).not.toHaveAttribute('inert');
+      expect(document.querySelector('[data-studio-director-backdrop]')).toBeNull();
+
+      fireEvent.click(toggle);
+      await waitFor(() => expect(workPanel).toHaveAttribute('inert'));
+      await setPaneWidth(775);
+      expect(toggle).toHaveAttribute('aria-expanded', 'true');
+      expect(workPanel).not.toHaveAttribute('inert');
+      expect(document.querySelector('[data-studio-director-backdrop]')).toBeNull();
+      const dragHandle = screen.getByRole('separator');
+      expect(dragHandle).toHaveAttribute('aria-valuenow', '447');
+
+      // If a drag crosses the boundary, the unmounted handle cannot leave a stale pointer session.
+      Object.defineProperty(dragHandle, 'setPointerCapture', { configurable: true, value: vi.fn() });
+      fireEvent.pointerDown(dragHandle, { pointerId: 7, clientX: 0 });
+      await setPaneWidth(774);
+      await setPaneWidth(775);
+      const replacementHandle = screen.getByRole('separator');
+      fireEvent.pointerMove(replacementHandle, { pointerId: 7, clientX: 100 });
+      expect(replacementHandle).toHaveAttribute('aria-valuenow', '447');
+
+      expect(observed.size).toBe(1);
+      view.unmount();
+      view = null;
+      expect(disconnect).toHaveBeenCalledTimes(2);
+    } finally {
+      view?.unmount();
+      Element.prototype.getBoundingClientRect = originalGetBoundingClientRect;
+      if (originalResizeObserver === undefined) Reflect.deleteProperty(globalThis, 'ResizeObserver');
+      else Object.defineProperty(globalThis, 'ResizeObserver', originalResizeObserver);
+    }
+  });
+
   it('keeps pending Director proposals discoverable while the rail is collapsed', async () => {
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([proposal()])));
     renderStudio('/studio/project_1/board');
@@ -7735,7 +7902,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
 
     // The pane itself follows the value, not just the announcement.
     const rail = document.querySelector<HTMLElement>('[data-studio-director-rail]');
-    expect(rail?.style.inlineSize).toBe(`${resizer.getAttribute('aria-valuenow')}px`);
+    expect(rail?.style.getPropertyValue('--studio-director-width')).toBe(`${resizer.getAttribute('aria-valuenow')}px`);
 
     fireEvent.keyDown(resizer, { key: 'Home' });
     await waitFor(() => expect(resizer.getAttribute('aria-valuenow')).toBe(resizer.getAttribute('aria-valuemin')));

@@ -238,8 +238,16 @@ export const RAIL_WIDTH_DEFAULT_PX = 431;
 export const RAIL_WIDTH_MIN_PX = 280;
 export const RAIL_WIDTH_MAX_PX = 720;
 export const RAIL_WIDTH_STEP_PX = 16;
+export const RAIL_RESIZER_WIDTH_PX = 8;
+export const WORK_PANEL_MIN_WIDTH_PX = 320;
 
 const RAIL_WIDTH_STORAGE_KEY = 'aionui.studio.railWidth';
+
+/** The drawer is required when a split cannot show the chosen rail and a usable work surface. */
+export const directorRailNeedsOverlay = (availableWidth: number, railWidth: number): boolean =>
+  Number.isFinite(availableWidth) &&
+  availableWidth > 0 &&
+  availableWidth < railWidth + RAIL_RESIZER_WIDTH_PX + WORK_PANEL_MIN_WIDTH_PX;
 
 /**
  * A stored preference is untrusted input — it outlives releases and can be edited by hand — so an
@@ -359,14 +367,51 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   const viewHeadingId = `studio-${activeView}-heading`;
   const railContentId = useId();
   const viewStatusDescriptionPrefix = useId();
+  const [railWidth, setRailWidth] = useState(readStoredRailWidth);
+  const [compactLayout, setCompactLayout] = useState(false);
   const railScopeKey = railPreferenceKey(project.id, activeView);
   const [railCollapsed, setRailCollapsed] = useState(() =>
     railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView))
   );
 
   const railToggleRef = useRef<HTMLButtonElement | null>(null);
+  const panesRef = useRef<HTMLDivElement | null>(null);
+  const workPanelRef = useRef<HTMLDivElement | null>(null);
+  const railResizerRef = useRef<HTMLDivElement | null>(null);
+  const railBackdropRef = useRef<HTMLButtonElement | null>(null);
+  const railCollapsedRef = useRef(railCollapsed);
+  railCollapsedRef.current = railCollapsed;
   const nextDirectorFocusRequestId = useRef(0);
   const [directorFocusRequest, setDirectorFocusRequest] = useState<DirectorFocusRequest | null>(null);
+
+  useLayoutEffect(() => {
+    const panes = panesRef.current;
+    if (panes === null) return;
+    const update = (availableWidth: number): void => {
+      const next = directorRailNeedsOverlay(availableWidth, railWidth);
+      const active = document.activeElement;
+      const focusWillDisappear = next
+        ? !railCollapsedRef.current &&
+          (workPanelRef.current?.contains(active) || railResizerRef.current?.contains(active))
+        : railBackdropRef.current?.contains(active);
+      if (focusWillDisappear) railToggleRef.current?.focus();
+      setCompactLayout(next);
+    };
+    const measure = (): void => update(panes.getBoundingClientRect().width);
+    measure();
+
+    if (typeof ResizeObserver === 'function') {
+      const observer = new ResizeObserver((entries) => {
+        const entry = entries.find(({ target }) => target === panes);
+        update(entry?.contentRect.width ?? panes.getBoundingClientRect().width);
+      });
+      observer.observe(panes);
+      return () => observer.disconnect();
+    }
+
+    window.addEventListener('resize', measure);
+    return () => window.removeEventListener('resize', measure);
+  }, [railWidth]);
 
   // Reset before paint so one view never displays another view's choice. When a navigation leaves
   // focus inside a rail that starts collapsed, return focus to the control that can reveal it.
@@ -385,6 +430,14 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     setRailCollapsed(next);
   }, [activeView, project.id, railCollapsed]);
 
+  const closeRail = useCallback((): void => {
+    // Focus must leave the overlay before its contents become inert and hidden.
+    railToggleRef.current?.focus();
+    setDirectorFocusRequest(null);
+    storeRailCollapsed(project.id, activeView, true);
+    setRailCollapsed(true);
+  }, [activeView, project.id]);
+
   const revealDirector = useCallback(
     (expectedScope: { projectId: string; view: StudioView }): boolean => {
       if (expectedScope.projectId !== project.id || expectedScope.view !== activeView) return false;
@@ -402,9 +455,34 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     if (railCollapsed || directorFocusRequest?.scopeKey !== railScopeKey) return;
     railToggleRef.current?.focus();
   }, [directorFocusRequest, railCollapsed, railScopeKey]);
-  const [railWidth, setRailWidth] = useState(readStoredRailWidth);
+  const compactOverlayOpen = compactLayout && !railCollapsed;
+
+  useLayoutEffect(() => {
+    if (!compactOverlayOpen || !workPanelRef.current?.contains(document.activeElement)) return;
+    railToggleRef.current?.focus();
+  }, [compactOverlayOpen]);
+
+  useEffect(() => {
+    if (!compactOverlayOpen) return;
+    const dismiss = (event: KeyboardEvent): void => {
+      const active = document.activeElement;
+      const railContent = document.getElementById(railContentId);
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        (active !== railToggleRef.current && !railContent?.contains(active))
+      ) {
+        return;
+      }
+      event.preventDefault();
+      closeRail();
+    };
+    window.addEventListener('keydown', dismiss);
+    return () => window.removeEventListener('keydown', dismiss);
+  }, [closeRail, compactOverlayOpen, railContentId]);
+
   const dragRef = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
-  const railRef = useRef<HTMLDivElement | null>(null);
 
   const applyRailWidth = useCallback((width: number): void => {
     const clamped = clampRailWidth(width);
@@ -413,9 +491,9 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   }, []);
 
   useEffect(() => {
-    if (!railCollapsed) return;
+    if (!railCollapsed && !compactLayout) return;
     dragRef.current = null;
-  }, [railCollapsed]);
+  }, [compactLayout, railCollapsed]);
 
   const toggleBaseLabel = t(
     railCollapsed
@@ -581,7 +659,12 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
         {renderAction === undefined ? null : <span className={styles.barAction}>{renderAction}</span>}
         {projectMenu}
       </header>
-      <div className={styles.panes} data-studio-panes>
+      <div
+        ref={panesRef}
+        className={`${styles.panes} ${compactLayout ? styles.panesCompact : ''}`}
+        data-studio-panes
+        data-studio-director-layout={compactLayout ? 'overlay' : 'split'}
+      >
         <DirectorRail
           project={project}
           reviewedOutputs={reviewedOutputs}
@@ -593,10 +676,11 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           collapsed={railCollapsed}
           contentId={railContentId}
           widthPixels={railWidth}
+          overlay={compactLayout}
         />
-        {railCollapsed ? null : (
+        {railCollapsed || compactLayout ? null : (
           <div
-            ref={railRef}
+            ref={railResizerRef}
             className={styles.railResizer}
             data-studio-rail-resizer
             role='separator'
@@ -624,6 +708,12 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
                 event.currentTarget.releasePointerCapture(event.pointerId);
               }
             }}
+            onPointerCancel={() => {
+              dragRef.current = null;
+            }}
+            onLostPointerCapture={() => {
+              dragRef.current = null;
+            }}
             onDoubleClick={() => applyRailWidth(RAIL_WIDTH_DEFAULT_PX)}
             onKeyDown={(event) => {
               const next = railWidthFromKey(railWidth, event.key);
@@ -633,7 +723,19 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
             }}
           />
         )}
-        <div className={styles.workPanel} data-studio-work-panel>
+        {compactOverlayOpen ? (
+          <button
+            ref={railBackdropRef}
+            type='button'
+            aria-controls={railContentId}
+            aria-label={toggleBaseLabel}
+            className={styles.railBackdrop}
+            data-studio-director-backdrop
+            onClick={closeRail}
+            tabIndex={-1}
+          />
+        ) : null}
+        <div ref={workPanelRef} className={styles.workPanel} data-studio-work-panel inert={compactOverlayOpen}>
           <div className={styles.workScroll} data-studio-work-scroll>
             {notice === undefined ? null : (
               <div role='alert' className={styles.projectAlert}>
