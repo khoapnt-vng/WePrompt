@@ -215,7 +215,7 @@ const validProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
     },
     {
       id: 'bindings',
-      state: 'complete',
+      state: 'not_started',
       summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
       blockers: [],
     },
@@ -240,7 +240,7 @@ const validProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
     },
   ],
   blockerCount: 0,
-  advisories: [],
+  advisories: [{ cause: 'next_action', stage: 'storyboard' }],
   boards: { currentPictureCount: 0, shotCount: 0 },
   detail: detail ? { shots: [], references: [] } : null,
 });
@@ -1076,14 +1076,154 @@ describe('Studio Director V2 read-query contracts', () => {
       query: { kind: 'get_project_status', detail: false },
       result: validProjectStatusV2(false),
     };
-    const withSecret = structuredClone(receipt) as any;
-    withSecret.result.stages[0].summary.rawPrompt = 'secret';
-    const countMismatch = structuredClone(receipt) as any;
-    countMismatch.result.stages[3].summary.shotCount = 1;
-    const blockedWithoutBlocker = structuredClone(receipt) as any;
-    blockedWithoutBlocker.result.stages[0].state = 'blocked';
+    const withSecret = structuredClone(receipt);
+    Object.assign(withSecret.result.stages[0]!.summary, { rawPrompt: 'secret' });
+    const countMismatch = structuredClone(receipt);
+    countMismatch.result.stages.find((stage) => stage.id === 'storyboard')!.summary.shotCount = 1;
+    const blockedWithoutBlocker = structuredClone(receipt);
+    blockedWithoutBlocker.result.stages[0]!.state = 'blocked';
+    const contradictoryBrief = structuredClone(receipt);
+    contradictoryBrief.result.stages.find((stage) => stage.id === 'brief')!.summary.hasBrief = false;
+    const contradictoryEngines = structuredClone(receipt);
+    contradictoryEngines.result.stages.find((stage) => stage.id === 'engines')!.summary.image = 'unavailable';
+    const impossibleProduction = structuredClone(receipt);
+    impossibleProduction.result.stages.find((stage) => stage.id === 'production')!.state = 'complete';
+    const relabeledReferences = structuredClone(receipt);
+    relabeledReferences.result.stages.find((stage) => stage.id === 'references')!.state = 'in_progress';
+    relabeledReferences.result.advisories = [{ cause: 'next_action', stage: 'references' }];
+    const relabeledStoryboard = structuredClone(receipt);
+    relabeledStoryboard.result.stages.find((stage) => stage.id === 'storyboard')!.state = 'in_progress';
+    const relabeledBindings = structuredClone(receipt);
+    relabeledBindings.result.stages.find((stage) => stage.id === 'bindings')!.state = 'in_progress';
+    const relabeledCut = structuredClone(receipt);
+    relabeledCut.result.stages.find((stage) => stage.id === 'cut')!.state = 'in_progress';
+    const relabeledEmptyBrief = structuredClone(receipt);
+    const emptyBrief = relabeledEmptyBrief.result.stages.find((stage) => stage.id === 'brief')!;
+    emptyBrief.state = 'in_progress';
+    emptyBrief.summary = { stage: 'brief', hasBrief: false };
+    relabeledEmptyBrief.result.advisories = [{ cause: 'next_action', stage: 'brief' }];
 
-    for (const invalid of [withSecret, countMismatch, blockedWithoutBlocker]) {
+    const orphanStoryboardCounts = structuredClone(receipt);
+    const orphanStoryboard = orphanStoryboardCounts.result.stages.find((stage) => stage.id === 'storyboard')!;
+    orphanStoryboard.state = 'not_started';
+    orphanStoryboard.summary = {
+      stage: 'storyboard',
+      beatCount: 0,
+      shotCount: 4,
+      authoredShotCount: 4,
+      plannedSeconds: 18,
+      targetSeconds: 30,
+    };
+    const orphanBindings = orphanStoryboardCounts.result.stages.find((stage) => stage.id === 'bindings')!;
+    orphanBindings.state = 'complete';
+    orphanBindings.summary = { stage: 'bindings', readyShotCount: 4, shotCount: 4, maxConditioningImages: 3 };
+    orphanStoryboardCounts.result.stages.find((stage) => stage.id === 'production')!.summary = {
+      stage: 'production',
+      currentTakeCount: 0,
+      shotCount: 4,
+      activeJobCount: 0,
+    };
+    orphanStoryboardCounts.result.stages.find((stage) => stage.id === 'cut')!.summary = {
+      stage: 'cut',
+      currentTakeCount: 0,
+      shotCount: 4,
+      durationSeconds: null,
+      targetSeconds: 30,
+      structurallyPlayable: false,
+    };
+    orphanStoryboardCounts.result.boards.shotCount = 4;
+
+    const playableWithoutTakes = structuredClone(receipt);
+    const playableStoryboard = playableWithoutTakes.result.stages.find((stage) => stage.id === 'storyboard')!;
+    playableStoryboard.state = 'complete';
+    playableStoryboard.summary = {
+      stage: 'storyboard',
+      beatCount: 1,
+      shotCount: 4,
+      authoredShotCount: 4,
+      plannedSeconds: 30,
+      targetSeconds: 30,
+    };
+    const playableBindings = playableWithoutTakes.result.stages.find((stage) => stage.id === 'bindings')!;
+    playableBindings.state = 'complete';
+    playableBindings.summary = { stage: 'bindings', readyShotCount: 4, shotCount: 4, maxConditioningImages: 3 };
+    playableWithoutTakes.result.stages.find((stage) => stage.id === 'production')!.summary = {
+      stage: 'production',
+      currentTakeCount: 0,
+      shotCount: 4,
+      activeJobCount: 0,
+    };
+    const playableCut = playableWithoutTakes.result.stages.find((stage) => stage.id === 'cut')!;
+    playableCut.state = 'complete';
+    playableCut.summary = {
+      stage: 'cut',
+      currentTakeCount: 0,
+      shotCount: 4,
+      durationSeconds: 30,
+      targetSeconds: 30,
+      structurallyPlayable: true,
+    };
+    playableWithoutTakes.result.boards.shotCount = 4;
+    playableWithoutTakes.result.advisories = [{ cause: 'next_action', stage: 'production' }];
+
+    const plannedTimeWithoutShots = structuredClone(receipt);
+    const noShotStoryboard = plannedTimeWithoutShots.result.stages.find((stage) => stage.id === 'storyboard')!;
+    noShotStoryboard.state = 'in_progress';
+    noShotStoryboard.summary = {
+      stage: 'storyboard',
+      beatCount: 1,
+      shotCount: 0,
+      authoredShotCount: 0,
+      plannedSeconds: 18,
+      targetSeconds: 30,
+    };
+
+    const playableSlateWithoutBeat = structuredClone(receipt);
+    const falseSlateCut = playableSlateWithoutBeat.result.stages.find((stage) => stage.id === 'cut')!;
+    falseSlateCut.state = 'complete';
+    falseSlateCut.summary = {
+      stage: 'cut',
+      currentTakeCount: 0,
+      shotCount: 0,
+      durationSeconds: 30,
+      targetSeconds: 30,
+      structurallyPlayable: true,
+    };
+
+    const allTakesButUnplayable = structuredClone(playableWithoutTakes);
+    const allTakeProduction = allTakesButUnplayable.result.stages.find((stage) => stage.id === 'production')!;
+    allTakeProduction.state = 'complete';
+    allTakeProduction.summary = { stage: 'production', currentTakeCount: 4, shotCount: 4, activeJobCount: 0 };
+    const unplayableCut = allTakesButUnplayable.result.stages.find((stage) => stage.id === 'cut')!;
+    unplayableCut.state = 'in_progress';
+    unplayableCut.summary = {
+      stage: 'cut',
+      currentTakeCount: 4,
+      shotCount: 4,
+      durationSeconds: 30,
+      targetSeconds: 30,
+      structurallyPlayable: false,
+    };
+    allTakesButUnplayable.result.advisories = [{ cause: 'next_action', stage: 'cut' }];
+
+    for (const invalid of [
+      withSecret,
+      countMismatch,
+      blockedWithoutBlocker,
+      contradictoryBrief,
+      contradictoryEngines,
+      impossibleProduction,
+      relabeledReferences,
+      relabeledStoryboard,
+      relabeledBindings,
+      relabeledCut,
+      relabeledEmptyBrief,
+      orphanStoryboardCounts,
+      playableWithoutTakes,
+      plannedTimeWithoutShots,
+      playableSlateWithoutBeat,
+      allTakesButUnplayable,
+    ]) {
       expect(parseReceiptV2(invalid)).toEqual({ status: 'invalid' });
       expect(JSON.stringify(parseReceiptV2(invalid))).not.toContain('secret');
     }
@@ -1468,6 +1608,93 @@ describe('Studio Director V2 read-query contracts', () => {
     expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
   });
 
+  it.each([
+    ['an unknown stage', { cause: 'next_action', stage: 'pilot' }],
+    ['a missing stage', { cause: 'next_action' }],
+    ['an extra field', { cause: 'next_action', stage: 'production', proposalId: 'proposal_1' }],
+  ])('rejects a next-action advisory with %s', (_case, advisory) => {
+    const result = validProjectStatusV2(false);
+    (result as unknown as { advisories: unknown[] }).advisories = [advisory];
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result,
+    } as const;
+
+    expect(parseReceiptV2(receipt).status).toBe('invalid');
+  });
+
+  it('keeps pre-guidance schema-2 status receipts with no next action readable', () => {
+    const result = validProjectStatusV2(false);
+    result.advisories = [];
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result,
+    } as const;
+
+    expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+  });
+
+  it('accepts a blocked engine stage whose selected routes are otherwise ready', () => {
+    const result = validProjectStatusV2(false);
+    const engines = result.stages.find((stage) => stage.id === 'engines')!;
+    engines.state = 'blocked';
+    engines.blockers = [
+      {
+        cause: 'route_incompatible_frame',
+        where: { kind: 'route', routeKind: 'video' },
+        remedy: { kind: 'owner_only', reason: 'choose_compatible_engine' },
+      },
+    ];
+    result.blockerCount = 1;
+    result.advisories = [];
+    const receipt = {
+      schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+      commandId: 'command_1',
+      projectId: 'project_1',
+      decidedAt: NOW,
+      status: 'answered',
+      query: { kind: 'get_project_status', detail: false },
+      result,
+    } as const;
+
+    expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+  });
+
+  it.each([
+    ['the wrong next stage', [{ cause: 'next_action', stage: 'production' }]],
+    [
+      'duplicate next actions',
+      [
+        { cause: 'next_action', stage: 'storyboard' },
+        { cause: 'next_action', stage: 'production' },
+      ],
+    ],
+  ])('rejects blocker-free incomplete status with %s', (_case, advisories) => {
+    const result = validProjectStatusV2(false);
+    (result as unknown as { advisories: unknown[] }).advisories = advisories;
+    expect(
+      parseReceiptV2({
+        schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
+        commandId: 'command_1',
+        projectId: 'project_1',
+        decidedAt: NOW,
+        status: 'answered',
+        query: { kind: 'get_project_status', detail: false },
+        result,
+      }).status
+    ).toBe('invalid');
+  });
+
   it('accepts a Shooting-script blocker only at an exact Shot location', () => {
     const makeReceipt = (where: StudioProjectStatusV2['stages'][number]['blockers'][number]['where']) => {
       const result = validProjectStatusV2(false);
@@ -1481,6 +1708,7 @@ describe('Studio Director V2 read-query contracts', () => {
         },
       ];
       result.blockerCount = 1;
+      result.advisories = [];
       return {
         schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
         commandId: 'command_1',
@@ -1514,6 +1742,7 @@ describe('Studio Director V2 read-query contracts', () => {
   it('keeps current-segment recovery valid when a downstream blocker prepares an earlier Shot root', () => {
     const result = validProjectStatusV2(false);
     const storyboard = result.stages.find((stage) => stage.id === 'storyboard')!;
+    storyboard.state = 'in_progress';
     storyboard.summary = {
       stage: 'storyboard',
       beatCount: 1,
@@ -1523,6 +1752,7 @@ describe('Studio Director V2 read-query contracts', () => {
       targetSeconds: 30,
     };
     const bindings = result.stages.find((stage) => stage.id === 'bindings')!;
+    bindings.state = 'complete';
     bindings.summary = { stage: 'bindings', readyShotCount: 2, shotCount: 2, maxConditioningImages: 3 };
     const production = result.stages.find((stage) => stage.id === 'production')!;
     production.summary = { stage: 'production', currentTakeCount: 0, shotCount: 2, activeJobCount: 0 };
@@ -1562,6 +1792,7 @@ describe('Studio Director V2 read-query contracts', () => {
     };
     result.boards.shotCount = 2;
     result.blockerCount = 1;
+    result.advisories = [];
     const receipt = {
       schemaVersion: STUDIO_DIRECTOR_COMMAND_SCHEMA_VERSION_V2,
       commandId: 'command_1',

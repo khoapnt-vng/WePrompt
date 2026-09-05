@@ -1309,7 +1309,17 @@
         "references": "References",
         "table": "Table",
         "board": "Board",
-        "cut": "Cut"
+        "cut": "Cut",
+        "status": {
+          "next": "Next"
+        },
+        "guidance": {
+          "noReferences": "No reference work is planned, so this view can be skipped.",
+          "noStoryboard": "There are no Beats or Shots in the storyboard yet.",
+          "noTakes": "{{view}} has no current takes yet — {{current}} of {{total}} Shots are ready.",
+          "nextInView": "Next: continue in {{view}}.",
+          "nextStage": "Next: finish {{stage}} in Project settings."
+        }
       },
       "referenceWorkflow": {
         "panel": {

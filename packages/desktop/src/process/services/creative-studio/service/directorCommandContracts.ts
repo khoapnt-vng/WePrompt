@@ -21,6 +21,7 @@ import {
   STUDIO_REFERENCE_REQUEST_SCHEMA_VERSION,
   STUDIO_REFERENCE_REQUEST_V2_MAX_RECORD_BYTES,
   STUDIO_DIRECTOR_OPERATION_DISPOSITIONS_V2,
+  STUDIO_FILM_EXPORT_FRAME_RATE,
   type StudioDirectorCommandReceiptV2,
   type StudioDirectorCommandRecordV2,
   type StudioDirectorFreeRecoveryAppliedReceiptV2,
@@ -355,6 +356,11 @@ const isNonnegativeSafeIntegerV2 = (value: unknown): value is number =>
 const isFiniteNonnegativeV2 = (value: unknown): value is number =>
   typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
+const projectStatusTargetMatchesV2 = (actualSeconds: number, targetSeconds: number): boolean => {
+  const roundingEpsilon = Number.EPSILON * Math.max(1, Math.abs(actualSeconds), Math.abs(targetSeconds)) * 4;
+  return Math.abs(actualSeconds - targetSeconds) <= 1 / STUDIO_FILM_EXPORT_FRAME_RATE + roundingEpsilon;
+};
+
 const isBoundedSafeTextV2 = (value: unknown): value is string =>
   typeof value === 'string' &&
   value.length > 0 &&
@@ -672,6 +678,12 @@ const validatesSummaryV2 = (value: unknown, stage: (typeof STUDIO_PROJECT_STATUS
 const validatesAdvisoryV2 = (value: unknown): boolean => {
   const advisory = snapshotDataRecordV2(value);
   if (advisory === null) return false;
+  if (advisory.cause === 'next_action') {
+    return (
+      hasExactKeysV2(advisory, new Set(['cause', 'stage'])) &&
+      STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.some((stage) => stage === advisory.stage)
+    );
+  }
   if (advisory.cause === 'target_duration_mismatch') {
     return (
       hasExactKeysV2(advisory, new Set(['cause', 'stage', 'actualSeconds', 'targetSeconds'])) &&
@@ -872,6 +884,21 @@ const validatesProjectStatusResultV2 = (value: unknown, projectId: string, detai
     return count + (stage.blockers as unknown[]).length;
   }, 0);
   if (blockerCount !== result.blockerCount) return false;
+  const expectedNextStage =
+    blockerCount === 0
+      ? result.stages.find((stageValue) => (stageValue as JsonRecord).state !== 'complete')
+      : undefined;
+  const nextActions = result.advisories.filter(
+    (advisoryValue) => (advisoryValue as JsonRecord).cause === 'next_action'
+  ) as JsonRecord[];
+  if (
+    expectedNextStage === undefined
+      ? nextActions.length !== 0
+      : nextActions.length > 1 ||
+        (nextActions.length === 1 && nextActions[0]?.stage !== (expectedNextStage as JsonRecord).id)
+  ) {
+    return false;
+  }
   const boards = snapshotDataRecordV2(result.boards);
   if (
     boards === null ||
@@ -893,7 +920,69 @@ const validatesProjectStatusResultV2 = (value: unknown, projectId: string, detai
   const productionSummary = stageById.get('production')?.summary as JsonRecord;
   const cutSummary = stageById.get('cut')?.summary as JsonRecord;
   const referencesSummary = stageById.get('references')?.summary as JsonRecord;
+  const brief = stageById.get('brief')!;
+  const engines = stageById.get('engines')!;
+  const references = stageById.get('references')!;
+  const storyboard = stageById.get('storyboard')!;
+  const bindings = stageById.get('bindings')!;
+  const production = stageById.get('production')!;
+  const cut = stageById.get('cut')!;
+  const briefSummary = brief.summary as JsonRecord;
+  const enginesSummary = engines.summary as JsonRecord;
+  const referencesComplete = referencesSummary.approvedCount === referencesSummary.plannedCount;
+  const storyboardComplete =
+    Number(storyboardSummary.beatCount) > 0 &&
+    Number(storyboardSummary.shotCount) > 0 &&
+    storyboardSummary.authoredShotCount === storyboardSummary.shotCount &&
+    projectStatusTargetMatchesV2(Number(storyboardSummary.plannedSeconds), Number(storyboardSummary.targetSeconds));
+  const expectedStoryboardState =
+    Number(storyboardSummary.beatCount) === 0 ? 'not_started' : storyboardComplete ? 'complete' : 'in_progress';
+  const expectedBindingsState =
+    Number(bindingsSummary.shotCount) === 0
+      ? 'not_started'
+      : bindingsSummary.readyShotCount === bindingsSummary.shotCount
+        ? 'complete'
+        : 'in_progress';
+  const expectedProductionState =
+    Number(productionSummary.shotCount) === 0 ||
+    (Number(productionSummary.currentTakeCount) === 0 && Number(productionSummary.activeJobCount) === 0)
+      ? 'not_started'
+      : productionSummary.currentTakeCount === productionSummary.shotCount
+        ? 'complete'
+        : 'in_progress';
+  const cutComplete =
+    cutSummary.structurallyPlayable === true &&
+    cutSummary.durationSeconds !== null &&
+    projectStatusTargetMatchesV2(Number(cutSummary.durationSeconds), Number(cutSummary.targetSeconds));
+  const expectedCutState = cutComplete
+    ? 'complete'
+    : cutSummary.structurallyPlayable === true || Number(cutSummary.currentTakeCount) > 0
+      ? 'in_progress'
+      : 'not_started';
   if (
+    brief.state !== (briefSummary.hasBrief ? 'complete' : 'not_started') ||
+    (engines.state !== 'blocked' &&
+      (engines.state === 'complete') !== (enginesSummary.image === 'ready' && enginesSummary.video === 'ready')) ||
+    (references.state !== 'blocked' && references.state !== (referencesComplete ? 'complete' : 'in_progress')) ||
+    (Number(storyboardSummary.beatCount) === 0 &&
+      (Number(storyboardSummary.shotCount) !== 0 ||
+        Number(storyboardSummary.authoredShotCount) !== 0 ||
+        Number(storyboardSummary.plannedSeconds) !== 0)) ||
+    (Number(storyboardSummary.shotCount) === 0 && Number(storyboardSummary.plannedSeconds) !== 0) ||
+    (storyboard.state !== 'blocked' && storyboard.state !== expectedStoryboardState) ||
+    (bindings.state !== 'blocked' && bindings.state !== expectedBindingsState) ||
+    (production.state !== 'blocked' && production.state !== expectedProductionState) ||
+    (cutSummary.structurallyPlayable === true &&
+      Number(cutSummary.shotCount) > 0 &&
+      cutSummary.currentTakeCount !== cutSummary.shotCount) ||
+    (cutSummary.structurallyPlayable === true &&
+      Number(cutSummary.shotCount) === 0 &&
+      Number(storyboardSummary.beatCount) === 0) ||
+    (cut.state !== 'blocked' &&
+      Number(cutSummary.shotCount) > 0 &&
+      cutSummary.currentTakeCount === cutSummary.shotCount &&
+      cutSummary.structurallyPlayable !== true) ||
+    (cut.state !== 'blocked' && cut.state !== expectedCutState) ||
     storyboardSummary.shotCount !== bindingsSummary.shotCount ||
     storyboardSummary.shotCount !== productionSummary.shotCount ||
     storyboardSummary.shotCount !== cutSummary.shotCount ||

@@ -2270,6 +2270,10 @@ export type StudioProjectStatusBlockerV2 = {
 
 export type StudioProjectStatusAdvisoryV2 =
   | {
+      cause: 'next_action';
+      stage: StudioProjectStatusStageIdV2;
+    }
+  | {
       cause: 'target_duration_mismatch';
       stage: Extract<StudioProjectStatusStageIdV2, 'storyboard' | 'cut'>;
       actualSeconds: number;

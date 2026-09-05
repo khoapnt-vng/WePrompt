@@ -134,9 +134,13 @@
 /* Inside the bar, so it carries no boundary of its own — the bar's own edge is the boundary. */
 .viewNavigation {
   display: flex;
-  flex: 0 0 auto;
+  min-inline-size: 0;
+  flex: 0 1 auto;
   flex-wrap: nowrap;
   gap: 8px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-inline: contain;
 }
 
 /* Drawn as IBM Plex Mono 9.5px chips with 0.76px tracking, 6px corners and 5x11 padding. The
@@ -145,6 +149,10 @@
    locales that fall back to en-US and into scripts that have no case. */
 .viewLink,
 .viewLinkActive {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
   border-radius: 6px;
   padding-block: 5px;
   padding-inline: 11px;
@@ -154,6 +162,7 @@
   letter-spacing: 0.76px;
   text-decoration: none;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 /* The active chip is marked by its ground, not by weight. Both chips compute 400 in the drawing,
@@ -161,6 +170,38 @@
 .viewLinkActive {
   color: var(--color-text-1);
   background: var(--color-bg-2);
+}
+
+/* Main's exact status adds a hollow marker to empty work and a stronger ground to the one next
+   view. The text itself stays at full opacity so an inspectable link never looks disabled. */
+.viewLink[data-studio-view-recommended='true'],
+.viewLinkActive[data-studio-view-recommended='true'] {
+  color: var(--color-primary-6);
+  background: var(--color-primary-light-1);
+}
+
+.viewLink:focus-visible,
+.viewLinkActive:focus-visible {
+  outline: 2px solid var(--color-primary-6);
+  outline-offset: -2px;
+}
+
+.viewLinkNext {
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding-block: 1px;
+  padding-inline: 4px;
+  font-size: 7.5px;
+  letter-spacing: 0.45px;
+  line-height: 1;
+}
+
+.viewLinkDormantMark {
+  inline-size: 5px;
+  block-size: 5px;
+  flex: 0 0 auto;
+  border: 1px solid currentColor;
+  border-radius: 50%;
 }
 
 /* The card takes its content's height and .workScroll scrolls the whole card. Left shrinkable it is
@@ -198,6 +239,47 @@
   border: 0;
 }
 
+.viewGuidance {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-block-end: 18px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding-block: 9px;
+  padding-inline: 11px;
+  color: var(--color-text-2);
+  background: var(--color-fill-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.viewGuidance p {
+  margin: 0;
+}
+
+.viewGuidanceEmpty {
+  color: var(--color-text-3);
+}
+
+.viewGuidanceNext {
+  color: var(--color-text-1);
+  font-weight: var(--fw-semibold);
+}
+
+.srOnly {
+  position: absolute;
+  inline-size: 1px;
+  block-size: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
 .projectAlert {
   border: 1px solid var(--color-danger-light-3);
   border-radius: 8px;
@@ -211,8 +293,11 @@
 /* One row heading the project. Both panes sit under it, so toggling the rail must not move it. */
 .appBar {
   display: flex;
+  box-sizing: border-box;
+  block-size: 54px;
   flex: 0 0 auto;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 11px;
   border-block-end: 1px solid var(--color-border-2);
   padding-block: 11px;
@@ -334,4 +419,36 @@
   flex: 0 0 auto;
   align-items: center;
   margin-inline-start: 8px;
+}
+
+/* At the supported 400px window floor, keep identity compact and give the view switcher a real
+   scrollport. The whole bar remains horizontally recoverable for unusually long action labels. */
+@media (max-width: 600px) {
+  .appBar {
+    gap: 4px;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding-inline: 6px;
+  }
+
+  .projectDot,
+  .statStrip,
+  .barSpacer {
+    display: none;
+  }
+
+  .projectTitle {
+    min-inline-size: 64px;
+    max-inline-size: 80px;
+    flex: 0 1 80px;
+  }
+
+  .viewNavigation {
+    min-inline-size: 96px;
+    flex: 1 0 96px;
+  }
+
+  .barAction {
+    margin-inline-start: 0;
+  }
 }

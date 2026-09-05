@@ -546,6 +546,7 @@ describe('projectStudioStatusV2', () => {
     expect(stage(status, 'references').state).toBe('complete');
     expect(stage(status, 'storyboard').state).toBe('not_started');
     expect(status.boards).toEqual({ currentPictureCount: 0, shotCount: 0 });
+    expect(status.advisories).toContainEqual({ cause: 'next_action', stage: 'storyboard' });
     expect(status.detail).toBeNull();
   });
 
@@ -564,6 +565,7 @@ describe('projectStudioStatusV2', () => {
       actualSeconds: outside.shots.shot_1!.durationSeconds,
       targetSeconds: 30,
     });
+    expect(status.advisories).toContainEqual({ cause: 'next_action', stage: 'storyboard' });
   });
 
   it('keeps an empty active Beat in progress and excludes its slate target from planned storyboard time', () => {
@@ -618,6 +620,7 @@ describe('projectStudioStatusV2', () => {
         },
       ],
     });
+    expect(status.advisories).not.toContainEqual(expect.objectContaining({ cause: 'next_action' }));
     expect(status.blockerCount).toBe(1);
   });
 
@@ -710,6 +713,9 @@ describe('projectStudioStatusV2', () => {
       blockers: [],
       summary: { currentTakeCount: 0, shotCount: 1, activeJobCount: 0 },
     });
+    expect(status.advisories.filter((advisory) => advisory.cause === 'next_action')).toEqual([
+      { cause: 'next_action', stage: 'production' },
+    ]);
   });
 
   it('does not call a slate-backed missing video playable', () => {
@@ -763,6 +769,7 @@ describe('projectStudioStatusV2', () => {
     expect(status.advisories).toContainEqual(
       expect.objectContaining({ cause: 'current_take_stale', stage: 'production', shotId: 'shot_1' })
     );
+    expect(status.advisories).not.toContainEqual(expect.objectContaining({ cause: 'next_action' }));
   });
 
   it.each([

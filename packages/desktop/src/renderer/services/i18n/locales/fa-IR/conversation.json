@@ -880,7 +880,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "مرجع‌ها"
+        "references": "مرجع‌ها",
+        "status": {
+          "next": "بعدی"
+        },
+        "guidance": {
+          "noReferences": "هیچ کاری برای مرجع‌ها برنامه‌ریزی نشده است، بنابراین می‌توانید از این نما بگذرید.",
+          "noStoryboard": "هنوز هیچ Beat یا Shotی در استوری‌بورد وجود ندارد.",
+          "noTakes": "هنوز هیچ برداشت فعلی در {{view}} وجود ندارد — {{current}} از {{total}} Shot آماده هستند.",
+          "nextInView": "مرحلهٔ بعد: کار را در {{view}} ادامه دهید.",
+          "nextStage": "مرحلهٔ بعد: {{stage}} را در تنظیمات پروژه تکمیل کنید."
+        }
       },
       "referenceWorkflow": {
         "panel": {

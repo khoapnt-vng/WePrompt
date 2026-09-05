@@ -880,7 +880,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "레퍼런스"
+        "references": "레퍼런스",
+        "status": {
+          "next": "다음"
+        },
+        "guidance": {
+          "noReferences": "레퍼런스 작업이 예정되어 있지 않으므로 이 보기는 건너뛸 수 있습니다.",
+          "noStoryboard": "스토리보드에 아직 Beat나 Shot이 없습니다.",
+          "noTakes": "{{view}}에 아직 현재 테이크가 없습니다 — 전체 Shot {{total}}개 중 {{current}}개가 준비되었습니다.",
+          "nextInView": "다음: {{view}}에서 계속하세요.",
+          "nextStage": "다음: 프로젝트 설정에서 {{stage}} 단계를 완료하세요."
+        }
       },
       "referenceWorkflow": {
         "panel": {

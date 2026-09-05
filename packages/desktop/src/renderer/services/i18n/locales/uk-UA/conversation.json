@@ -880,7 +880,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "Референси"
+        "references": "Референси",
+        "status": {
+          "next": "Далі"
+        },
+        "guidance": {
+          "noReferences": "Роботу з референсами не заплановано, тому цей розділ можна пропустити.",
+          "noStoryboard": "У розкадруванні ще немає ні Beats, ні Shots.",
+          "noTakes": "У розділі «{{view}}» ще немає поточних дублів — готові {{current}} із {{total}} Shots.",
+          "nextInView": "Далі: продовжте роботу в розділі «{{view}}».",
+          "nextStage": "Далі: завершіть етап «{{stage}}» у налаштуваннях проєкту."
+        }
       },
       "referenceWorkflow": {
         "panel": {

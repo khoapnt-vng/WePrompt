@@ -10,6 +10,9 @@ import type {
   StudioBeat,
   StudioBinItem,
   StudioPlanningShotBoundaryV2,
+  StudioProjectStatusStageIdV2,
+  StudioProjectStatusStageStateV2,
+  StudioProjectStatusStageV2,
   StudioProjectStatusV2,
   StudioRendererBoardPanelStatusV2,
   StudioRendererChainBoundaryV2,
@@ -22,8 +25,16 @@ import type {
   StudioRendererUndoTopV2,
   StudioRendererWorkspaceStatusV2,
   StudioShot,
+  StudioView,
 } from '@/common/types/project/creativeStudioTypes';
-import { STUDIO_BED_FADE_OUT_SECONDS } from '@/common/types/project/creativeStudioTypes';
+import {
+  STUDIO_BED_FADE_OUT_SECONDS,
+  STUDIO_FILM_EXPORT_FRAME_RATE,
+  STUDIO_MAX_MUTATION_OPERATIONS,
+  STUDIO_MAX_PROJECT_REFERENCES,
+  STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2,
+  STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
+} from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
 import {
   exactStudioProjectStatusV2,
@@ -1738,5 +1749,565 @@ export const buildStudioBarStats = (
     blockerCount: exactStatus?.blockerCount ?? null,
     filmSeconds: projection.cut.filmDurationSeconds,
     targetSeconds: projection.cut.targetDurationSeconds,
+  };
+};
+
+export type StudioWorkspaceViewReadiness = 'ready' | 'empty' | 'not_started';
+
+export type StudioWorkspaceViewProgress = {
+  stage: StudioProjectStatusStageIdV2;
+  state: StudioProjectStatusStageStateV2;
+  readiness: StudioWorkspaceViewReadiness;
+  currentCount: number;
+  totalCount: number;
+  recommended: boolean;
+};
+
+export type StudioWorkspaceProgress = {
+  views: Record<StudioView, StudioWorkspaceViewProgress>;
+  nextAction: { stage: StudioProjectStatusStageIdV2; view: StudioView | null } | null;
+};
+
+const statusStage = <Stage extends StudioProjectStatusStageIdV2>(
+  status: StudioProjectStatusV2,
+  id: Stage
+): Extract<StudioProjectStatusStageV2, { id: Stage }> | null =>
+  (status.stages.find((candidate) => candidate.id === id) as
+    | Extract<StudioProjectStatusStageV2, { id: Stage }>
+    | undefined) ?? null;
+
+const validStatusCount = (value: number): boolean => Number.isSafeInteger(value) && value >= 0;
+const statusRecord = (value: unknown): Record<string, unknown> | null =>
+  typeof value === 'object' && value !== null && !Array.isArray(value) ? (value as Record<string, unknown>) : null;
+const exactStatusKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+const finiteNonnegativeStatusNumber = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const workspaceStatusTargetMatches = (actualSeconds: number, targetSeconds: number): boolean => {
+  const roundingEpsilon = Number.EPSILON * Math.max(1, Math.abs(actualSeconds), Math.abs(targetSeconds)) * 4;
+  return Math.abs(actualSeconds - targetSeconds) <= 1 / STUDIO_FILM_EXPORT_FRAME_RATE + roundingEpsilon;
+};
+const safeStatusId = (value: unknown): value is string =>
+  typeof value === 'string' && value.length > 0 && value.length <= 256 && /^[A-Za-z0-9_-]+$/.test(value);
+const statusModelAvailabilities = new Set(['ready', 'selection_required', 'setup_required', 'unavailable']);
+const statusOwnerReasons = new Set([
+  'select_engine',
+  'configure_engine',
+  'repair_engine_health',
+  'choose_compatible_engine',
+  'approve_reference',
+  'select_seed',
+  'review_project_data',
+  'review_job_recovery',
+  'acknowledge_possible_duplicate_charge',
+  'retry_download',
+  'edit_cut',
+  'replace_audio_bed',
+]);
+
+const denseStatusArray = (value: unknown, minimum: number, maximum: number): value is unknown[] => {
+  try {
+    if (
+      !Array.isArray(value) ||
+      value.length < minimum ||
+      value.length > maximum ||
+      Reflect.ownKeys(value).length !== value.length + 1
+    ) {
+      return false;
+    }
+    for (let index = 0; index < value.length; index += 1) {
+      if (!Object.hasOwn(value, index)) return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const uniqueSafeStatusIdArray = (value: unknown, minimum: number, maximum: number): value is string[] => {
+  if (!denseStatusArray(value, minimum, maximum)) return false;
+  const ids = new Set<string>();
+  for (const id of value) {
+    if (!safeStatusId(id) || ids.has(id)) return false;
+    ids.add(id);
+  }
+  return true;
+};
+
+const validWorkspaceStageSummary = (stage: StudioProjectStatusStageV2): boolean => {
+  const summary = statusRecord(stage.summary);
+  if (summary === null) return false;
+  switch (stage.id) {
+    case 'brief':
+      return exactStatusKeys(summary, ['stage', 'hasBrief']) && typeof summary.hasBrief === 'boolean';
+    case 'engines':
+      return (
+        exactStatusKeys(summary, ['stage', 'image', 'video']) &&
+        statusModelAvailabilities.has(summary.image as string) &&
+        statusModelAvailabilities.has(summary.video as string)
+      );
+    case 'references':
+      return (
+        exactStatusKeys(summary, ['stage', 'plannedCount', 'approvedCount']) &&
+        validStatusCount(summary.plannedCount as number) &&
+        validStatusCount(summary.approvedCount as number)
+      );
+    case 'storyboard':
+      return (
+        exactStatusKeys(summary, [
+          'stage',
+          'beatCount',
+          'shotCount',
+          'authoredShotCount',
+          'plannedSeconds',
+          'targetSeconds',
+        ]) &&
+        validStatusCount(summary.beatCount as number) &&
+        validStatusCount(summary.shotCount as number) &&
+        validStatusCount(summary.authoredShotCount as number) &&
+        finiteNonnegativeStatusNumber(summary.plannedSeconds) &&
+        finiteNonnegativeStatusNumber(summary.targetSeconds)
+      );
+    case 'bindings':
+      return (
+        exactStatusKeys(summary, ['stage', 'readyShotCount', 'shotCount', 'maxConditioningImages']) &&
+        validStatusCount(summary.readyShotCount as number) &&
+        validStatusCount(summary.shotCount as number) &&
+        (summary.maxConditioningImages === null || validStatusCount(summary.maxConditioningImages as number))
+      );
+    case 'production':
+      return (
+        exactStatusKeys(summary, ['stage', 'currentTakeCount', 'shotCount', 'activeJobCount']) &&
+        validStatusCount(summary.currentTakeCount as number) &&
+        validStatusCount(summary.shotCount as number) &&
+        validStatusCount(summary.activeJobCount as number)
+      );
+    case 'cut':
+      return (
+        exactStatusKeys(summary, [
+          'stage',
+          'currentTakeCount',
+          'shotCount',
+          'durationSeconds',
+          'targetSeconds',
+          'structurallyPlayable',
+        ]) &&
+        validStatusCount(summary.currentTakeCount as number) &&
+        validStatusCount(summary.shotCount as number) &&
+        (summary.durationSeconds === null || finiteNonnegativeStatusNumber(summary.durationSeconds)) &&
+        finiteNonnegativeStatusNumber(summary.targetSeconds) &&
+        typeof summary.structurallyPlayable === 'boolean'
+      );
+  }
+};
+
+const validWorkspaceGenerationChoice = (value: unknown): boolean => {
+  const choice = statusRecord(value);
+  if (choice === null || !exactStatusKeys(choice, ['target', 'purpose'])) return false;
+  const target = statusRecord(choice.target);
+  return (
+    target !== null &&
+    exactStatusKeys(target, ['kind', 'shotId']) &&
+    target.kind === 'shot' &&
+    safeStatusId(target.shotId) &&
+    (choice.purpose === 'seed_still' || choice.purpose === 'board_still' || choice.purpose === 'video_take')
+  );
+};
+
+const validWorkspacePrepareIntent = (value: unknown): boolean => {
+  const prepare = statusRecord(value);
+  if (prepare === null) return false;
+  if (prepare.kind === 'project_references') {
+    return (
+      exactStatusKeys(prepare, ['kind', 'referenceIds']) &&
+      uniqueSafeStatusIdArray(prepare.referenceIds, 1, STUDIO_MAX_PROJECT_REFERENCES)
+    );
+  }
+  if (
+    prepare.kind !== 'generation' ||
+    !exactStatusKeys(prepare, ['kind', 'baseChoices', 'cascadeChoices', 'continuityChange']) ||
+    !denseStatusArray(prepare.baseChoices, 0, STUDIO_MAX_MUTATION_OPERATIONS) ||
+    !denseStatusArray(prepare.cascadeChoices, 0, STUDIO_MAX_MUTATION_OPERATIONS) ||
+    !prepare.baseChoices.every(validWorkspaceGenerationChoice) ||
+    !prepare.cascadeChoices.every(validWorkspaceGenerationChoice)
+  ) {
+    return false;
+  }
+  if (prepare.continuityChange === null) return prepare.baseChoices.length > 0;
+  const change = statusRecord(prepare.continuityChange);
+  return (
+    prepare.baseChoices.length === 0 &&
+    prepare.cascadeChoices.length === 0 &&
+    change !== null &&
+    exactStatusKeys(change, ['shotId', 'hardCut', 'requiresSeedGeneration']) &&
+    safeStatusId(change.shotId) &&
+    typeof change.hardCut === 'boolean' &&
+    typeof change.requiresSeedGeneration === 'boolean'
+  );
+};
+
+const validWorkspaceRemedy = (value: unknown): boolean => {
+  const remedy = statusRecord(value);
+  if (remedy === null) return false;
+  if (remedy.kind === 'owner_only') {
+    return exactStatusKeys(remedy, ['kind', 'reason']) && statusOwnerReasons.has(remedy.reason as string);
+  }
+  if (remedy.kind === 'proposal') {
+    return (
+      exactStatusKeys(remedy, ['kind', 'prepare', 'estimatedMinorUnits', 'currency']) &&
+      remedy.estimatedMinorUnits === null &&
+      remedy.currency === null &&
+      validWorkspacePrepareIntent(remedy.prepare)
+    );
+  }
+  if (remedy.kind !== 'free_fix' || typeof remedy.op !== 'string') return false;
+  if (remedy.op === 'retry_conditioning_frame') {
+    return exactStatusKeys(remedy, ['kind', 'op', 'dependentShotId']) && safeStatusId(remedy.dependentShotId);
+  }
+  if (remedy.op === 'terminalize_refused_job') {
+    return exactStatusKeys(remedy, ['kind', 'op', 'jobId']) && safeStatusId(remedy.jobId);
+  }
+  return (
+    remedy.op === 'set_shot_reference_binding' &&
+    exactStatusKeys(remedy, ['kind', 'op', 'shotId']) &&
+    safeStatusId(remedy.shotId)
+  );
+};
+
+const validWorkspaceWhere = (value: unknown): boolean => {
+  const where = statusRecord(value);
+  if (where === null || typeof where.kind !== 'string') return false;
+  if (where.kind === 'project' || where.kind === 'cut') return exactStatusKeys(where, ['kind']);
+  if (where.kind === 'route') {
+    return (
+      exactStatusKeys(where, ['kind', 'routeKind']) && (where.routeKind === 'image' || where.routeKind === 'video')
+    );
+  }
+  if (where.kind === 'reference') {
+    return (
+      exactStatusKeys(where, ['kind', 'referenceId', 'jobId']) &&
+      safeStatusId(where.referenceId) &&
+      (where.jobId === null || safeStatusId(where.jobId))
+    );
+  }
+  return (
+    where.kind === 'shot' &&
+    exactStatusKeys(where, ['kind', 'beatId', 'shotId', 'beatPosition', 'shotPosition', 'jobId']) &&
+    safeStatusId(where.beatId) &&
+    safeStatusId(where.shotId) &&
+    validStatusCount(where.beatPosition as number) &&
+    validStatusCount(where.shotPosition as number) &&
+    (where.jobId === null || safeStatusId(where.jobId))
+  );
+};
+
+const validWorkspaceBlocker = (value: unknown): boolean => {
+  const blocker = statusRecord(value);
+  if (
+    blocker === null ||
+    !exactStatusKeys(blocker, ['cause', 'where', 'remedy']) ||
+    !STUDIO_PROJECT_STATUS_BLOCKER_CAUSES_V2.some((cause) => cause === blocker.cause) ||
+    !validWorkspaceWhere(blocker.where) ||
+    !validWorkspaceRemedy(blocker.remedy)
+  ) {
+    return false;
+  }
+  const where = blocker.where as Record<string, unknown>;
+  const remedy = blocker.remedy as Record<string, unknown>;
+  const cause = blocker.cause;
+  if (cause === 'route_inventory_unavailable' && where.kind !== 'project') return false;
+  if (
+    (cause === 'route_not_selected' ||
+      cause === 'route_setup_required' ||
+      cause === 'route_unavailable' ||
+      cause === 'route_retired' ||
+      cause === 'route_incompatible_frame' ||
+      cause === 'route_first_frame_unsupported') &&
+    where.kind !== 'route'
+  ) {
+    return false;
+  }
+  if (cause === 'route_duration_unsupported' && where.kind !== 'shot') return false;
+  if (
+    (cause === 'reference_generation_required' ||
+      cause === 'reference_approval_required' ||
+      cause === 'reference_generation_failed') &&
+    where.kind !== 'reference'
+  ) {
+    return false;
+  }
+  if (
+    (cause === 'reference_binding_unassigned' ||
+      cause === 'reference_binding_unknown_reference' ||
+      cause === 'reference_binding_wrong_kind' ||
+      cause === 'reference_binding_unapproved_reference' ||
+      cause === 'reference_binding_missing_asset' ||
+      cause === 'reference_binding_capacity_exceeded' ||
+      cause === 'shooting_script_required' ||
+      cause === 'seed_selection_required' ||
+      cause === 'seed_generation_required' ||
+      cause === 'conditioning_frame_required' ||
+      cause === 'extraction_failed' ||
+      cause === 'dependency_failed') &&
+    where.kind !== 'shot'
+  ) {
+    return false;
+  }
+  if ((cause === 'cut_invalid_media' || cause === 'cut_bed_too_short') && where.kind !== 'cut') return false;
+  if (remedy.kind === 'free_fix') {
+    if (remedy.op === 'terminalize_refused_job') return where.jobId === remedy.jobId;
+    return where.kind === 'shot' && where.shotId === (remedy.dependentShotId ?? remedy.shotId);
+  }
+  if (remedy.kind !== 'proposal') return true;
+  const prepare = remedy.prepare as Record<string, unknown>;
+  if (prepare.kind === 'project_references') {
+    return where.kind === 'reference' && (prepare.referenceIds as unknown[]).includes(where.referenceId);
+  }
+  if (where.kind !== 'shot') return false;
+  if (prepare.continuityChange !== null) {
+    return (prepare.continuityChange as Record<string, unknown>).shotId === where.shotId;
+  }
+  return true;
+};
+
+const validWorkspaceAdvisory = (value: unknown): boolean => {
+  const advisory = statusRecord(value);
+  if (advisory === null) return false;
+  if (advisory.cause === 'next_action') {
+    return (
+      exactStatusKeys(advisory, ['cause', 'stage']) &&
+      STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.some((stageId) => stageId === advisory.stage)
+    );
+  }
+  if (advisory.cause === 'target_duration_mismatch') {
+    return (
+      exactStatusKeys(advisory, ['cause', 'stage', 'actualSeconds', 'targetSeconds']) &&
+      (advisory.stage === 'storyboard' || advisory.stage === 'cut') &&
+      finiteNonnegativeStatusNumber(advisory.actualSeconds) &&
+      finiteNonnegativeStatusNumber(advisory.targetSeconds)
+    );
+  }
+  if (advisory.cause !== 'current_take_stale') return false;
+  if (
+    !exactStatusKeys(advisory, ['cause', 'stage', 'shotId', 'staleCauses']) ||
+    advisory.stage !== 'production' ||
+    !safeStatusId(advisory.shotId) ||
+    !denseStatusArray(advisory.staleCauses, 1, 2) ||
+    !advisory.staleCauses.every((cause) => cause === 'continuity_stale' || cause === 'generation_out_of_date')
+  ) {
+    return false;
+  }
+  return new Set(advisory.staleCauses).size === advisory.staleCauses.length;
+};
+
+const viewForStatusStage = (stageId: StudioProjectStatusStageIdV2): StudioView | null => {
+  switch (stageId) {
+    case 'references':
+      return 'references';
+    case 'storyboard':
+    case 'bindings':
+      return 'table';
+    case 'production':
+      return 'board';
+    case 'cut':
+      return 'cut';
+    case 'brief':
+    case 'engines':
+      return null;
+  }
+};
+
+/** Maps exact Main status to honest, non-gating view progress. Unknown or inconsistent authority stays neutral. */
+export const deriveStudioWorkspaceProgress = (
+  status: StudioProjectStatusV2 | null,
+  projectId: string,
+  projectRevision: number
+): StudioWorkspaceProgress | null => {
+  const exact = exactStudioProjectStatusV2(status, projectId, projectRevision);
+  if (exact === null) return null;
+  const brief = statusStage(exact, 'brief');
+  const engines = statusStage(exact, 'engines');
+  const references = statusStage(exact, 'references');
+  const storyboard = statusStage(exact, 'storyboard');
+  const bindings = statusStage(exact, 'bindings');
+  const production = statusStage(exact, 'production');
+  const cut = statusStage(exact, 'cut');
+  if (
+    brief === null ||
+    engines === null ||
+    references === null ||
+    storyboard === null ||
+    bindings === null ||
+    production === null ||
+    cut === null
+  ) {
+    return null;
+  }
+  if (
+    exact.stages.some(
+      (item) =>
+        !validWorkspaceStageSummary(item) ||
+        !denseStatusArray(item.blockers, 0, 512) ||
+        !item.blockers.every(validWorkspaceBlocker) ||
+        (item.state === 'blocked') !== item.blockers.length > 0
+    )
+  ) {
+    return null;
+  }
+  const referencesComplete = references.summary.approvedCount === references.summary.plannedCount;
+  const storyboardComplete =
+    storyboard.summary.beatCount > 0 &&
+    storyboard.summary.shotCount > 0 &&
+    storyboard.summary.authoredShotCount === storyboard.summary.shotCount &&
+    workspaceStatusTargetMatches(storyboard.summary.plannedSeconds, storyboard.summary.targetSeconds);
+  const expectedStoryboardState =
+    storyboard.summary.beatCount === 0 ? 'not_started' : storyboardComplete ? 'complete' : 'in_progress';
+  const expectedBindingsState =
+    bindings.summary.shotCount === 0
+      ? 'not_started'
+      : bindings.summary.readyShotCount === bindings.summary.shotCount
+        ? 'complete'
+        : 'in_progress';
+  const expectedProductionState =
+    production.summary.shotCount === 0 ||
+    (production.summary.currentTakeCount === 0 && production.summary.activeJobCount === 0)
+      ? 'not_started'
+      : production.summary.currentTakeCount === production.summary.shotCount
+        ? 'complete'
+        : 'in_progress';
+  const cutComplete =
+    cut.summary.structurallyPlayable &&
+    cut.summary.durationSeconds !== null &&
+    workspaceStatusTargetMatches(cut.summary.durationSeconds, cut.summary.targetSeconds);
+  const expectedCutState = cutComplete
+    ? 'complete'
+    : cut.summary.structurallyPlayable || cut.summary.currentTakeCount > 0
+      ? 'in_progress'
+      : 'not_started';
+  if (
+    brief.state !== (brief.summary.hasBrief ? 'complete' : 'not_started') ||
+    (engines.state !== 'blocked' &&
+      (engines.state === 'complete') !== (engines.summary.image === 'ready' && engines.summary.video === 'ready')) ||
+    !validStatusCount(references.summary.approvedCount) ||
+    !validStatusCount(references.summary.plannedCount) ||
+    references.summary.approvedCount > references.summary.plannedCount ||
+    (references.state !== 'blocked' && references.state !== (referencesComplete ? 'complete' : 'in_progress')) ||
+    !validStatusCount(storyboard.summary.authoredShotCount) ||
+    !validStatusCount(storyboard.summary.beatCount) ||
+    !validStatusCount(storyboard.summary.shotCount) ||
+    storyboard.summary.authoredShotCount > storyboard.summary.shotCount ||
+    (storyboard.summary.beatCount === 0 &&
+      (storyboard.summary.shotCount !== 0 ||
+        storyboard.summary.authoredShotCount !== 0 ||
+        storyboard.summary.plannedSeconds !== 0)) ||
+    (storyboard.summary.shotCount === 0 && storyboard.summary.plannedSeconds !== 0) ||
+    (storyboard.state !== 'blocked' && storyboard.state !== expectedStoryboardState) ||
+    !validStatusCount(bindings.summary.readyShotCount) ||
+    !validStatusCount(bindings.summary.shotCount) ||
+    bindings.summary.readyShotCount > bindings.summary.shotCount ||
+    (bindings.state !== 'blocked' && bindings.state !== expectedBindingsState) ||
+    !validStatusCount(production.summary.activeJobCount) ||
+    !validStatusCount(production.summary.currentTakeCount) ||
+    !validStatusCount(production.summary.shotCount) ||
+    production.summary.currentTakeCount > production.summary.shotCount ||
+    (production.state !== 'blocked' && production.state !== expectedProductionState) ||
+    !validStatusCount(cut.summary.currentTakeCount) ||
+    !validStatusCount(cut.summary.shotCount) ||
+    cut.summary.currentTakeCount > cut.summary.shotCount ||
+    typeof cut.summary.structurallyPlayable !== 'boolean' ||
+    (cut.summary.structurallyPlayable &&
+      cut.summary.shotCount > 0 &&
+      cut.summary.currentTakeCount !== cut.summary.shotCount) ||
+    (cut.summary.structurallyPlayable && cut.summary.shotCount === 0 && storyboard.summary.beatCount === 0) ||
+    (cut.state !== 'blocked' &&
+      cut.summary.shotCount > 0 &&
+      cut.summary.currentTakeCount === cut.summary.shotCount &&
+      !cut.summary.structurallyPlayable) ||
+    (cut.state !== 'blocked' && cut.state !== expectedCutState) ||
+    !validStatusCount(exact.boards.currentPictureCount) ||
+    !validStatusCount(exact.boards.shotCount) ||
+    exact.boards.currentPictureCount > exact.boards.shotCount ||
+    storyboard.summary.shotCount !== bindings.summary.shotCount ||
+    storyboard.summary.shotCount !== production.summary.shotCount ||
+    storyboard.summary.shotCount !== cut.summary.shotCount ||
+    storyboard.summary.shotCount !== exact.boards.shotCount ||
+    production.summary.currentTakeCount !== cut.summary.currentTakeCount ||
+    !denseStatusArray(exact.advisories, 0, 512) ||
+    !exact.advisories.every(validWorkspaceAdvisory)
+  ) {
+    return null;
+  }
+
+  const expectedNextStage =
+    exact.blockerCount === 0 ? exact.stages.find((candidate) => candidate.state !== 'complete') : undefined;
+  const nextActions = exact.advisories.filter((advisory) => advisory.cause === 'next_action');
+  if (
+    expectedNextStage === undefined
+      ? nextActions.length !== 0
+      : nextActions.length !== 1 || nextActions[0]!.stage !== expectedNextStage.id
+  ) {
+    return null;
+  }
+  const nextAction =
+    expectedNextStage === undefined
+      ? null
+      : { stage: expectedNextStage.id, view: viewForStatusStage(expectedNextStage.id) };
+  const tableStage =
+    storyboard.state !== 'complete' ? storyboard : bindings.state !== 'complete' ? bindings : storyboard;
+  const boardHasContent =
+    production.summary.currentTakeCount > 0 ||
+    production.summary.activeJobCount > 0 ||
+    exact.boards.currentPictureCount > 0 ||
+    production.state === 'in_progress' ||
+    production.state === 'blocked';
+  const cutHasContent =
+    cut.summary.currentTakeCount > 0 ||
+    cut.summary.structurallyPlayable ||
+    cut.state === 'in_progress' ||
+    cut.state === 'blocked';
+  const recommendedView = nextAction?.view ?? null;
+
+  return {
+    views: {
+      references: {
+        stage: 'references',
+        state: references.state,
+        readiness: references.summary.plannedCount === 0 && references.state === 'complete' ? 'empty' : 'ready',
+        currentCount: references.summary.approvedCount,
+        totalCount: references.summary.plannedCount,
+        recommended: recommendedView === 'references',
+      },
+      table: {
+        stage: tableStage.id,
+        state: tableStage.state,
+        readiness:
+          storyboard.summary.beatCount === 0 && storyboard.state === 'complete'
+            ? 'empty'
+            : storyboard.summary.beatCount === 0 && storyboard.state === 'not_started'
+              ? 'not_started'
+              : 'ready',
+        currentCount:
+          tableStage.id === 'bindings' ? bindings.summary.readyShotCount : storyboard.summary.authoredShotCount,
+        totalCount: tableStage.id === 'bindings' ? bindings.summary.shotCount : storyboard.summary.shotCount,
+        recommended: recommendedView === 'table',
+      },
+      board: {
+        stage: 'production',
+        state: production.state,
+        readiness: boardHasContent ? 'ready' : 'not_started',
+        currentCount: production.summary.currentTakeCount,
+        totalCount: production.summary.shotCount,
+        recommended: recommendedView === 'board',
+      },
+      cut: {
+        stage: 'cut',
+        state: cut.state,
+        readiness: cutHasContent ? 'ready' : 'not_started',
+        currentCount: cut.summary.currentTakeCount,
+        totalCount: cut.summary.shotCount,
+        recommended: recommendedView === 'cut',
+      },
+    },
+    nextAction,
   };
 };

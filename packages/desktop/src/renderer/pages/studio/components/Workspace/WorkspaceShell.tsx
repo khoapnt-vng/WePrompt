@@ -15,11 +15,13 @@ import { STUDIO_VIEWS, studioViewPath, type StudioView } from '@/renderer/pages/
 import { DirectorRail, type DirectorProposalChatIntent } from './DirectorRail';
 import type { WorkspaceProjectEditAuthority } from './Views/viewTypes';
 import styles from './Workspace.module.css';
-import type { StudioBarStats } from './workspaceProjection';
+import type { StudioBarStats, StudioWorkspaceProgress, StudioWorkspaceViewProgress } from './workspaceProjection';
 
 export type WorkspaceShellProps = {
   project: StudioRendererProjectV2;
   activeView: StudioView;
+  workspaceProgress?: StudioWorkspaceProgress | null;
+  nextActionText?: string | null;
   stats?: StudioBarStats;
   reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
@@ -335,6 +337,8 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   {
     project,
     activeView,
+    workspaceProgress = null,
+    nextActionText = null,
     stats,
     reviewedOutputs,
     onDirectorProposalIntent,
@@ -354,6 +358,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
   const { t } = useTranslation();
   const viewHeadingId = `studio-${activeView}-heading`;
   const railContentId = useId();
+  const viewStatusDescriptionPrefix = useId();
   const railScopeKey = railPreferenceKey(project.id, activeView);
   const [railCollapsed, setRailCollapsed] = useState(() =>
     railCollapsedForView(activeView, readStoredRailCollapsed(project.id, activeView))
@@ -425,6 +430,31 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
       : toggleBaseLabel;
   const filmClock = clock(stats?.filmSeconds);
   const targetClock = clock(stats?.targetSeconds);
+  const activeViewProgress = workspaceProgress?.views[activeView] ?? null;
+  const viewLabel = (view: StudioView): string => t(`conversation.creativeStudio.workspace.views.${view}`);
+  const noContentText = (view: StudioView, progress: StudioWorkspaceViewProgress): string | null => {
+    if (view === 'references') {
+      return progress.readiness === 'empty'
+        ? t('conversation.creativeStudio.workspace.views.guidance.noReferences')
+        : null;
+    }
+    if (view === 'table') {
+      return progress.readiness === 'ready'
+        ? null
+        : t('conversation.creativeStudio.workspace.views.guidance.noStoryboard');
+    }
+    if (progress.currentCount === 0 && progress.totalCount > 0) {
+      return t('conversation.creativeStudio.workspace.views.guidance.noTakes', {
+        view: viewLabel(view),
+        current: progress.currentCount,
+        total: progress.totalCount,
+      });
+    }
+    return progress.totalCount === 0 && progress.readiness !== 'ready'
+      ? t('conversation.creativeStudio.workspace.views.guidance.noStoryboard')
+      : null;
+  };
+  const activeViewEmptyText = activeViewProgress === null ? null : noContentText(activeView, activeViewProgress);
 
   return (
     <div className={styles.shell} data-studio-workspace-shell>
@@ -503,16 +533,50 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           className={styles.viewNavigation}
           data-studio-view-navigation
         >
-          {STUDIO_VIEWS.map((view) => (
-            <Link
-              key={view}
-              aria-current={view === activeView ? 'page' : undefined}
-              className={view === activeView ? styles.viewLinkActive : styles.viewLink}
-              to={studioViewPath(project.id, view)}
-            >
-              {t(`conversation.creativeStudio.workspace.views.${view}`)}
-            </Link>
-          ))}
+          {STUDIO_VIEWS.map((view) => {
+            const progress = workspaceProgress?.views[view] ?? null;
+            const emptyText = progress === null ? null : noContentText(view, progress);
+            const description =
+              progress === null
+                ? null
+                : [
+                    progress.recommended ? t('conversation.creativeStudio.workspace.views.status.next') : null,
+                    emptyText,
+                  ]
+                    .filter((part): part is string => part !== null)
+                    .join(' — ');
+            const descriptionId = `${viewStatusDescriptionPrefix}-${view}`;
+            return (
+              <React.Fragment key={view}>
+                <Link
+                  aria-current={view === activeView ? 'page' : undefined}
+                  aria-describedby={description === null || description.length === 0 ? undefined : descriptionId}
+                  className={view === activeView ? styles.viewLinkActive : styles.viewLink}
+                  data-studio-view-readiness={progress?.readiness}
+                  data-studio-view-recommended={progress?.recommended ? 'true' : undefined}
+                  data-studio-view-stage-state={progress?.state}
+                  title={
+                    description === null || description.length === 0 ? undefined : `${viewLabel(view)} · ${description}`
+                  }
+                  to={studioViewPath(project.id, view)}
+                >
+                  {viewLabel(view)}
+                  {progress?.recommended ? (
+                    <span aria-hidden='true' className={styles.viewLinkNext} data-studio-view-marker='next'>
+                      {t('conversation.creativeStudio.workspace.views.status.next')}
+                    </span>
+                  ) : progress !== null && progress.readiness !== 'ready' ? (
+                    <span aria-hidden='true' className={styles.viewLinkDormantMark} data-studio-view-marker='dormant' />
+                  ) : null}
+                </Link>
+                {description === null || description.length === 0 ? null : (
+                  <span className={styles.srOnly} id={descriptionId}>
+                    {description}
+                  </span>
+                )}
+              </React.Fragment>
+            );
+          })}
         </nav>
         {renderAction === undefined ? null : <span className={styles.barAction}>{renderAction}</span>}
         {projectMenu}
@@ -580,6 +644,18 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
               <h2 className={styles.viewHeading} id={viewHeadingId}>
                 {t(`conversation.creativeStudio.workspace.views.${activeView}`)}
               </h2>
+              {activeViewEmptyText === null && nextActionText === null ? null : (
+                <div
+                  className={styles.viewGuidance}
+                  data-studio-view-guidance
+                  data-studio-view-guidance-view={activeView}
+                >
+                  {activeViewEmptyText === null ? null : (
+                    <p className={styles.viewGuidanceEmpty}>{activeViewEmptyText}</p>
+                  )}
+                  {nextActionText === null ? null : <p className={styles.viewGuidanceNext}>{nextActionText}</p>}
+                </div>
+              )}
               {children}
             </main>
           </div>

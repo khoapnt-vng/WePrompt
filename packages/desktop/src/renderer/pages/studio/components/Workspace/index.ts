@@ -59,7 +59,7 @@ export type {
   WorkspaceDraftValue,
   WorkspaceSelection,
 } from './useWorkspaceDrafts';
-export { buildStudioBarStats, projectWorkspace } from './workspaceProjection';
+export { buildStudioBarStats, deriveStudioWorkspaceProgress, projectWorkspace } from './workspaceProjection';
 export type {
   WorkspaceBinnedBeatProjection,
   WorkspaceBinnedShotProjection,
@@ -81,6 +81,9 @@ export type {
   WorkspaceSeedStillProjection,
   WorkspaceShotProjection,
   StudioBarStats,
+  StudioWorkspaceProgress,
+  StudioWorkspaceViewProgress,
+  StudioWorkspaceViewReadiness,
 } from './workspaceProjection';
 export { WorkspaceShell } from './WorkspaceShell';
 export type {

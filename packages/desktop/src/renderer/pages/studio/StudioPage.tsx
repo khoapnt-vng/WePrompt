@@ -50,6 +50,7 @@ import {
   handoffGateDraft,
   majorUnitsToMinorUnits,
   buildStudioBarStats,
+  deriveStudioWorkspaceProgress,
   countStoredStudioRuleDrafts,
   countStoredWorkspaceDrafts,
   projectWorkspace,
@@ -116,6 +117,13 @@ type StudioProposalDecisionReceipt = {
   proposalId: string;
   status: 'accepted' | 'rejected';
   decidedAt: string;
+  /** The committed revision whose next action this receipt may describe. Rejections do not commit. */
+  projectRevision: number | null;
+};
+
+type StudioNextActionAnnouncement = {
+  key: string;
+  text: string;
 };
 
 type StudioReviewedActionTarget = {
@@ -374,6 +382,8 @@ const StudioProjectPage: React.FC<{
   const [proposalReceiptFocusId, setProposalReceiptFocusId] = useState<string | null>(null);
   const [proposalDecisionAnnouncement, setProposalDecisionAnnouncement] =
     useState<StudioProposalDecisionReceipt | null>(null);
+  const [nextActionAnnouncement, setNextActionAnnouncement] = useState<StudioNextActionAnnouncement | null>(null);
+  const announcedNextActionKeysRef = useRef(new Set<string>());
   const currentRecentProposalDecisions = useMemo(
     () => recentProposalDecisions.filter((receipt) => receipt.projectId === projectId),
     [projectId, recentProposalDecisions]
@@ -386,6 +396,8 @@ const StudioProjectPage: React.FC<{
     setRecentProposalDecisions([]);
     setProposalReceiptFocusId(null);
     setProposalDecisionAnnouncement(null);
+    setNextActionAnnouncement(null);
+    announcedNextActionKeysRef.current.clear();
   }, [projectId]);
   const [reviewedAction, setReviewedAction] = useState<StudioReviewedActionLatch | null>(null);
   const reviewedActionRef = useRef<StudioReviewedActionLatch | null>(null);
@@ -468,6 +480,55 @@ const StudioProjectPage: React.FC<{
     () => (project === null ? null : projectWorkspace(project, workspaceStatus, chainStatus)),
     [chainStatus, project, workspaceStatus]
   );
+  const workspaceProgress = useMemo(
+    () => (project === null ? null : deriveStudioWorkspaceProgress(projectStatus, project.id, project.revision)),
+    [project, projectStatus]
+  );
+  const workspaceNextActionText =
+    workspaceProgress?.nextAction === undefined || workspaceProgress.nextAction === null
+      ? null
+      : workspaceProgress.nextAction.view === null
+        ? t('conversation.creativeStudio.workspace.views.guidance.nextStage', {
+            stage: t(`conversation.creativeStudio.library.projectStatus.stage.${workspaceProgress.nextAction.stage}`),
+          })
+        : t('conversation.creativeStudio.workspace.views.guidance.nextInView', {
+            view: t(`conversation.creativeStudio.workspace.views.${workspaceProgress.nextAction.view}`),
+          });
+  useEffect(() => {
+    const decision = proposalDecisionAnnouncement;
+    if (
+      decision === null ||
+      decision.projectId !== projectId ||
+      decision.status !== 'accepted' ||
+      decision.projectRevision === null
+    ) {
+      setNextActionAnnouncement(null);
+      return;
+    }
+
+    const key = `${decision.projectId}:${decision.proposalId}:${decision.projectRevision}`;
+    if (project?.id !== decision.projectId || project.revision > decision.projectRevision) {
+      setNextActionAnnouncement(null);
+      return;
+    }
+    if (project === null || project.revision !== decision.projectRevision || workspaceProgress === null) {
+      // Status refreshes clear the exact status briefly. Preserve an announcement that was already
+      // mounted for this decision so assistive technology does not hear it twice when status returns.
+      setNextActionAnnouncement((current) => (current?.key === key ? current : null));
+      return;
+    }
+    if (workspaceProgress.nextAction === null || workspaceNextActionText === null) {
+      setNextActionAnnouncement(null);
+      return;
+    }
+
+    if (announcedNextActionKeysRef.current.has(key)) {
+      setNextActionAnnouncement((current) => (current?.key === key ? current : null));
+      return;
+    }
+    announcedNextActionKeysRef.current.add(key);
+    setNextActionAnnouncement({ key, text: workspaceNextActionText });
+  }, [project, projectId, proposalDecisionAnnouncement, workspaceNextActionText, workspaceProgress]);
   const projectionRef = useRef<WorkspaceProjection | null>(projection);
   projectionRef.current = projection;
   const currentGenerationCapability =
@@ -3781,6 +3842,7 @@ const StudioProjectPage: React.FC<{
           proposalId: decidedProposal.id,
           status: decidedProposal.status,
           decidedAt: decidedProposal.decidedAt,
+          projectRevision: decision === 'accept' ? projectRevisionAfterDecision : null,
         };
         setRecentProposalDecisions((current) => [
           ...current.filter(
@@ -4370,6 +4432,10 @@ const StudioProjectPage: React.FC<{
           proposalId: proposal.id,
           status: proposal.status,
           decidedAt: proposal.decidedAt,
+          projectRevision:
+            proposal.status === 'accepted' && Number.isSafeInteger(proposal.baseRevision + 1)
+              ? proposal.baseRevision + 1
+              : null,
         });
       }
     }
@@ -4377,6 +4443,11 @@ const StudioProjectPage: React.FC<{
   for (const receipt of currentRecentProposalDecisions) {
     proposalDecisionReceipts.set(receipt.proposalId, receipt);
   }
+  const latestCurrentAcceptedReceiptId = [...proposalDecisionReceipts.values()]
+    .filter((receipt) => receipt.status === 'accepted' && receipt.projectRevision === project.revision)
+    .sort(
+      (left, right) => studioTimelineTimestamp(right.decidedAt, 0) - studioTimelineTimestamp(left.decidedAt, 0)
+    )[0]?.proposalId;
   const reviewedDirectorOutputs: WorkspaceReviewedOutput[] = [
     ...(pendingProposals.length === 0 && proposalErrorMessageKey === null
       ? []
@@ -4401,6 +4472,7 @@ const StudioProjectPage: React.FC<{
         content: (
           <DirectorProposalReceipt
             focusOnMount={proposalReceiptFocusId === receipt.proposalId}
+            nextActionText={receipt.proposalId === latestCurrentAcceptedReceiptId ? workspaceNextActionText : null}
             status={receipt.status}
             onFocused={() => setProposalReceiptFocusId(null)}
           />
@@ -4441,6 +4513,11 @@ const StudioProjectPage: React.FC<{
           </span>
         )}
       </span>
+      <span aria-atomic='true' aria-live='polite' className='sr-only' data-studio-next-action-announcement>
+        {nextActionAnnouncement === null ? null : (
+          <span key={nextActionAnnouncement.key}>{nextActionAnnouncement.text}</span>
+        )}
+      </span>
       <WorkspaceShell
         ref={workspaceShellRef}
         project={project}
@@ -4450,6 +4527,8 @@ const StudioProjectPage: React.FC<{
         directorPendingProposalCount={pendingProposals.length}
         directorProposalTargetId={pendingProposals.length === 0 ? undefined : DIRECTOR_PROPOSAL_INBOX_ID}
         activeView={activeView}
+        workspaceProgress={workspaceProgress}
+        nextActionText={workspaceNextActionText}
         stats={projection === null ? undefined : buildStudioBarStats(projection, projectStatus)}
         renderAction={
           <Button type='primary' disabled={workspacePending || spendGateLocked} onClick={renderFilm}>

@@ -48,6 +48,7 @@ export type DirectorProposalsProps = {
 
 export type DirectorProposalReceiptProps = {
   status: 'accepted' | 'rejected';
+  nextActionText?: string | null;
   focusOnMount?: boolean;
   onFocused?: () => void;
 };
@@ -55,6 +56,7 @@ export type DirectorProposalReceiptProps = {
 /** A compact Director-timeline receipt. A stable live region outside the remountable rail announces new decisions. */
 export const DirectorProposalReceipt: React.FC<DirectorProposalReceiptProps> = ({
   status,
+  nextActionText = null,
   focusOnMount = false,
   onFocused,
 }) => {
@@ -103,6 +105,9 @@ export const DirectorProposalReceipt: React.FC<DirectorProposalReceiptProps> = (
             : 'conversation.creativeStudio.workspace.proposals.chatRejected'
         )}
       />
+      {status === 'accepted' && nextActionText !== null ? (
+        <p className={styles.receiptNextAction}>{nextActionText}</p>
+      ) : null}
     </div>
   );
 };

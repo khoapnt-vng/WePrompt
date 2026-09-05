@@ -152,6 +152,15 @@ const localizedShotComposerKeys = [
   'beatPanel.composer.chain.stop',
 ] as const;
 
+const localizedWorkspaceProgressKeys = [
+  'views.status.next',
+  'views.guidance.noReferences',
+  'views.guidance.noStoryboard',
+  'views.guidance.noTakes',
+  'views.guidance.nextInView',
+  'views.guidance.nextStage',
+] as const;
+
 const loadConversation = (locale: string): JsonObject =>
   JSON.parse(readFileSync(join(localeRoot, locale, 'conversation.json'), 'utf8')) as JsonObject;
 
@@ -428,6 +437,7 @@ const expectedLeaves = [
   'views.table',
   'views.board',
   'views.cut',
+  ...localizedWorkspaceProgressKeys,
   ...localizedReferencesPanelKeys,
   'referenceWorkflow.description',
   'referenceWorkflow.generationScope',
@@ -1461,6 +1471,7 @@ const localizedWorkspaceKeys = [
   'proposals.field.placement',
   'proposals.field.order',
   'views.references',
+  ...localizedWorkspaceProgressKeys,
   'editorFolderExport.action',
   'editorFolderExport.actionWithSlates',
   'editorFolderExport.exporting',
@@ -2278,6 +2289,7 @@ describe('Creative Studio workspace translations', () => {
         ...localizedMoveToBinKeys,
         ...localizedBoardKeys,
         ...localizedBoardPromotionKeys,
+        ...localizedWorkspaceProgressKeys,
         'table.columns.length',
         'table.columns.story',
         'table.plannedPending',

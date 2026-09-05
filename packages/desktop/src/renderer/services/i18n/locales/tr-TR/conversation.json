@@ -882,7 +882,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "Referanslar"
+        "references": "Referanslar",
+        "status": {
+          "next": "Sonraki"
+        },
+        "guidance": {
+          "noReferences": "Herhangi bir referans çalışması planlanmadığı için bu görünümü atlayabilirsiniz.",
+          "noStoryboard": "Storyboard’da henüz Beat veya Shot yok.",
+          "noTakes": "{{view}} görünümünde henüz güncel çekim yok — {{total}} Shot'ın {{current}} tanesi hazır.",
+          "nextInView": "Sonraki: {{view}} görünümünde devam edin.",
+          "nextStage": "Sonraki: Proje ayarlarında {{stage}} aşamasını tamamlayın."
+        }
       },
       "referenceWorkflow": {
         "panel": {

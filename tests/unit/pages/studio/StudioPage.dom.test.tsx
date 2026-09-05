@@ -537,6 +537,16 @@ const projectWithDraftBatch = (beatCount: number): StudioRendererProjectV2 => {
   return value;
 };
 
+/** The BUG-217 live state: an accepted, fully authored storyboard with no planned references or media. */
+const projectReadyForProduction = (): StudioRendererProjectV2 => {
+  const value = projectWithDraftBatch(4);
+  value.targetDurationSeconds = 16;
+  for (const shot of Object.values(value.shots)) {
+    shot.referenceBinding = readyReferenceBinding([], null);
+  }
+  return value;
+};
+
 const projectWithGenerationReferences = (
   beatCount: number,
   input: { approvedBackground?: boolean; assignedBackgroundShotIds?: readonly string[] } = {}
@@ -1226,6 +1236,7 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
   });
   const shotCount = positions.length;
   const currentTakeCount = positions.filter(({ shot }) => shot.videoAssetId !== null).length;
+  const currentBoardPictureCount = positions.filter(({ shot }) => shot.boardAssetId !== null).length;
   const plannedSeconds = positions.reduce((sum, { shot }) => sum + shot.durationSeconds, 0);
   const referenceDetails = authority.referenceOrder.flatMap((referenceId) => {
     const reference = authority.references[referenceId];
@@ -1303,7 +1314,7 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
     },
     {
       id: 'references',
-      state: referenceDetails.length === 0 ? 'not_started' : referenceBlockers.length === 0 ? 'complete' : 'blocked',
+      state: referenceBlockers.length === 0 ? 'complete' : 'blocked',
       summary: {
         stage: 'references',
         plannedCount: referenceDetails.length,
@@ -1365,14 +1376,16 @@ const projectStatus = (authority: StudioRendererProjectV2): StudioProjectStatusV
       blockers: [],
     },
   ];
+  const blockerCount = referenceBlockers.length + bindingBlockers.length;
+  const nextStage = blockerCount === 0 ? stages.find((candidate) => candidate.state !== 'complete') : undefined;
   return {
     projectId: authority.id,
     projectRevision: authority.revision,
     catalogVersion: 'catalog_1',
     stages,
-    blockerCount: referenceBlockers.length + bindingBlockers.length,
-    advisories: [],
-    boards: { currentPictureCount: currentTakeCount, shotCount },
+    blockerCount,
+    advisories: nextStage === undefined ? [] : [{ cause: 'next_action', stage: nextStage.id }],
+    boards: { currentPictureCount: currentBoardPictureCount, shotCount },
     detail: {
       shots: bindingDetails.map(({ beat, beatIndex, shot, shotIndex, binding }) => ({
         beatId: beat.id,
@@ -2205,6 +2218,94 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(document.querySelector('[data-studio-bar-ready]')).toHaveTextContent(
       'conversation.creativeStudio.workspace.project.ready'
     );
+  });
+
+  it('keeps every view inspectable while subordinating empty work and naming the one next action', async () => {
+    const authority = projectReadyForProduction();
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1/cut');
+
+    await screen.findByRole('heading', { name: authority.name });
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut');
+    const navigation = screen.getByRole('navigation', {
+      name: 'conversation.creativeStudio.workspace.views.title',
+    });
+    const references = within(navigation).getByRole('link', {
+      name: 'conversation.creativeStudio.workspace.views.references',
+    });
+    const table = within(navigation).getByRole('link', {
+      name: 'conversation.creativeStudio.workspace.views.table',
+    });
+    const board = within(navigation).getByRole('link', {
+      name: 'conversation.creativeStudio.workspace.views.board',
+    });
+    const cut = within(navigation).getByRole('link', {
+      name: 'conversation.creativeStudio.workspace.views.cut',
+    });
+
+    await waitFor(() => expect(board).toHaveAttribute('data-studio-view-recommended', 'true'));
+    expect(references).toHaveAttribute('href', '/studio/project_1/references');
+    expect(table).toHaveAttribute('href', '/studio/project_1/table');
+    expect(board).toHaveAttribute('href', '/studio/project_1/board');
+    expect(cut).toHaveAttribute('href', '/studio/project_1/cut');
+    for (const link of [references, table, board, cut]) expect(link).not.toHaveAttribute('aria-disabled');
+    expect(references).toHaveAttribute('data-studio-view-readiness', 'empty');
+    expect(references).toHaveAttribute('data-studio-view-stage-state', 'complete');
+    expect(table).toHaveAttribute('data-studio-view-readiness', 'ready');
+    expect(table).toHaveAttribute('data-studio-view-stage-state', 'complete');
+    expect(board).toHaveAttribute('data-studio-view-readiness', 'not_started');
+    expect(board).toHaveAttribute('data-studio-view-stage-state', 'not_started');
+    expect(cut).toHaveAttribute('data-studio-view-readiness', 'not_started');
+    expect(cut).toHaveAttribute('data-studio-view-stage-state', 'not_started');
+    expect(cut).toHaveAttribute('aria-current', 'page');
+    expect(references.querySelector('[data-studio-view-marker="dormant"]')).not.toBeNull();
+    expect(table.querySelector('[data-studio-view-marker]')).toBeNull();
+    expect(board.querySelector('[data-studio-view-marker="next"]')).not.toBeNull();
+    expect(board.querySelector('[data-studio-view-marker="dormant"]')).toBeNull();
+    expect(cut.querySelector('[data-studio-view-marker="dormant"]')).not.toBeNull();
+    expect(navigation.querySelectorAll('[data-studio-view-marker="next"]')).toHaveLength(1);
+    expect(board).toHaveAccessibleDescription(
+      expect.stringContaining('conversation.creativeStudio.workspace.views.status.next')
+    );
+    expect(board).toHaveAccessibleDescription(
+      expect.stringContaining('conversation.creativeStudio.workspace.views.guidance.noTakes')
+    );
+    expect(cut).toHaveAccessibleDescription(
+      expect.stringContaining('conversation.creativeStudio.workspace.views.guidance.noTakes')
+    );
+
+    const guidance = document.querySelector<HTMLElement>('[data-studio-view-guidance]');
+    expect(guidance).not.toBeNull();
+    expect(guidance?.tagName).toBe('DIV');
+    expect(guidance).toHaveAttribute('data-studio-view-guidance-view', 'cut');
+    expect(guidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.noTakes');
+    expect(guidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
+    expect(within(guidance!).queryByRole('link')).toBeNull();
+  });
+
+  it('keeps view progress neutral when Main status is stale', async () => {
+    const authority = projectReadyForProduction();
+    mockSupportedProject(authority);
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValue(
+      ok({ ...projectStatus(authority), projectRevision: authority.revision - 1 })
+    );
+
+    renderStudio('/studio/project_1/cut');
+
+    await screen.findByRole('heading', { name: authority.name });
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalled());
+    const navigation = screen.getByRole('navigation', {
+      name: 'conversation.creativeStudio.workspace.views.title',
+    });
+    for (const link of within(navigation).getAllByRole('link')) {
+      expect(link).not.toHaveAttribute('data-studio-view-readiness');
+      expect(link).not.toHaveAttribute('data-studio-view-recommended');
+      expect(link).not.toHaveAttribute('data-studio-view-stage-state');
+      expect(link).not.toHaveAttribute('aria-disabled');
+    }
+    expect(document.querySelector('[data-studio-view-guidance]')).toBeNull();
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut');
   });
 
   it('fails the app-bar status closed when Main returns an internally inconsistent aggregate', async () => {
@@ -8193,6 +8294,103 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(screen.queryByText('conversation.creativeStudio.workspace.proposals.chatNoPending')).toBeNull();
   });
 
+  it('adds the committed next action to the newest accepted Director receipt after exact status arrives', async () => {
+    const acceptedProject = projectReadyForProduction();
+    acceptedProject.revision = 4;
+    acceptedProject.updatedAt = '2026-01-01T00:00:05.000Z';
+    mockProposalUntilDecision(proposal());
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: decidedProposal('accepted'),
+        project: acceptedProject,
+        applied: true,
+      })
+    );
+    renderStudio();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+
+    const receipt = await findProposalReceipt('accepted');
+    expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
+
+    mockSupportedProject(acceptedProject);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
+
+    await waitFor(() => {
+      const currentReceipt = document.querySelector<HTMLElement>('[data-studio-proposal-receipt="accepted"]');
+      expect(currentReceipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
+      expect(currentReceipt).toHaveTextContent('conversation.creativeStudio.workspace.views.board');
+    });
+    expect(
+      screen.getByRole('navigation', { name: 'conversation.creativeStudio.workspace.views.title' })
+    ).toContainElement(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' }));
+    expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' })).toHaveAttribute(
+      'data-studio-view-recommended',
+      'true'
+    );
+    expect(document.querySelector('[data-studio-proposal-decision-announcement]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.proposals.chatAccepted'
+    );
+    await waitFor(() =>
+      expect(document.querySelector('[data-studio-next-action-announcement]')).toHaveTextContent(
+        'conversation.creativeStudio.workspace.views.guidance.nextInView'
+      )
+    );
+
+    const announcement = document.querySelector('[data-studio-next-action-announcement] > span');
+    expect(announcement).not.toBeNull();
+    const refreshedStatus = deferred<{ ok: true; data: StudioProjectStatusV2 }>();
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockReturnValueOnce(refreshedStatus.promise);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    expect(document.querySelector('[data-studio-next-action-announcement] > span')).toBe(announcement);
+
+    await act(async () => {
+      refreshedStatus.resolve(ok(projectStatus(acceptedProject)));
+      await refreshedStatus.promise;
+    });
+    await waitFor(() =>
+      expect(document.querySelector('[data-studio-next-action-announcement] > span')).toBe(announcement)
+    );
+
+    const blockedStatus = projectStatus(acceptedProject);
+    const blockedProduction = blockedStatus.stages.find((stage) => stage.id === 'production')!;
+    blockedProduction.state = 'blocked';
+    blockedProduction.blockers = [
+      {
+        cause: 'seed_selection_required',
+        where: { kind: 'shot', beatId: 'beat_0', shotId: 'shot_0', beatPosition: 1, shotPosition: 1, jobId: null },
+        remedy: { kind: 'owner_only', reason: 'select_seed' },
+      },
+    ];
+    blockedStatus.blockerCount = 1;
+    blockedStatus.advisories = [];
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(blockedStatus));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
+    await waitFor(() => expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement());
+
+    mocks.bridge.getProjectStatus.invoke.mockClear();
+    mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(projectStatus(acceptedProject)));
+    act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalledOnce());
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'conversation.creativeStudio.workspace.views.board' })).toHaveAttribute(
+        'data-studio-view-recommended',
+        'true'
+      )
+    );
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
+
+    const changedProject = { ...acceptedProject, revision: 5, updatedAt: '2026-01-01T00:00:06.000Z' };
+    mockSupportedProject(changedProject);
+    act(() => mocks.listeners.projectUpdated?.({ projectId: changedProject.id, projectRevision: 5 }));
+    await waitFor(() => expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement());
+  });
+
   it('keeps a delayed proposal event silent after the project event already reconciled the catalog', async () => {
     mockProposalUntilDecision(proposal());
     mocks.bridge.acceptProposal.invoke.mockImplementation(async () => {
@@ -8636,6 +8834,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(document.querySelector('[data-studio-proposal-decision-announcement]')).toHaveTextContent(
       'conversation.creativeStudio.workspace.proposals.chatRejected'
     );
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
     expect(screen.getByTestId('message-list-content')).toContainElement(receipt);
     expect(document.querySelector('[data-studio-work-panel] main')).not.toContainElement(receipt);
     expect(screen.queryByTestId('studio-proposal-proposal_1')).toBeNull();
@@ -8803,6 +9002,33 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(screen.queryByTestId('studio-proposal-proposal_2')).toBeNull();
   });
 
+  it.each([
+    ['the acceptance commit is current', 4, true],
+    ['the project has changed since acceptance', 5, false],
+  ] as const)('restores next-step guidance only when %s', async (_case, revision, expectsGuidance) => {
+    const authority = projectReadyForProduction();
+    authority.revision = revision;
+    authority.updatedAt = `2026-01-01T00:00:0${revision + 1}.000Z`;
+    mockSupportedProject(authority);
+    const accepted = staleProposal(decidedProposal('accepted'), revision);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([accepted], revision)));
+
+    renderStudio();
+
+    const receipt = await findProposalReceipt('accepted');
+    await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalled());
+    if (expectsGuidance) {
+      await waitFor(() =>
+        expect(receipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView')
+      );
+      expect(receipt).toHaveTextContent('conversation.creativeStudio.workspace.views.board');
+    } else {
+      expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
+      expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.board');
+    }
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
+  });
+
   it('fails a malformed durable proposal receipt catalog closed', async () => {
     const malformed = { ...decidedProposal('accepted'), decidedAt: '2025-12-31T23:59:59.000Z' };
     mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([malformed])));
@@ -8812,6 +9038,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
     expect(document.querySelector('[data-studio-proposal-receipt]')).toBeNull();
     expect(document.querySelector('[data-studio-proposal-decision-announcement]')).toBeEmptyDOMElement();
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
   });
 
   it('accepts the one exact current proposal from human Director chat without entering the spend gate', async () => {

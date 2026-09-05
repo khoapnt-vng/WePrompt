@@ -1345,12 +1345,17 @@ export const projectStudioStatusV2 = (
   if (!STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.every((id, index) => stages[index]?.id === id)) {
     throw new TypeError('Invalid Studio project status stage order');
   }
+  const blockerCount = stages.reduce((count, item) => count + item.blockers.length, 0);
+  if (blockerCount === 0) {
+    const nextStage = stages.find((item) => item.state !== 'complete');
+    if (nextStage !== undefined) advisories.push({ cause: 'next_action', stage: nextStage.id });
+  }
   return {
     projectId: project.id,
     projectRevision: project.revision,
     catalogVersion: routeInput.status === 'available' ? routeInput.catalog.catalogVersion : null,
     stages,
-    blockerCount: stages.reduce((count, item) => count + item.blockers.length, 0),
+    blockerCount,
     advisories,
     boards: { currentPictureCount: boardPictureCount, shotCount: locations.length },
     detail:

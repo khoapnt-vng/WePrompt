@@ -886,7 +886,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "Referências"
+        "references": "Referências",
+        "status": {
+          "next": "Próximo"
+        },
+        "guidance": {
+          "noReferences": "Nenhum trabalho com referências está planejado, então esta visualização pode ser ignorada.",
+          "noStoryboard": "Ainda não há Beats nem Shots no storyboard.",
+          "noTakes": "Ainda não há tomadas atuais em {{view}} — {{current}} de {{total}} Shots estão prontos.",
+          "nextInView": "Próximo: continue em {{view}}.",
+          "nextStage": "Próximo: conclua {{stage}} nas configurações do projeto."
+        }
       },
       "referenceWorkflow": {
         "panel": {

@@ -880,7 +880,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "參考圖"
+        "references": "參考圖",
+        "status": {
+          "next": "下一步"
+        },
+        "guidance": {
+          "noReferences": "未規劃任何參考圖工作，因此可以跳過此檢視。",
+          "noStoryboard": "分鏡中還沒有 Beat 或 Shot。",
+          "noTakes": "{{view}} 中目前還沒有鏡次 — {{total}} 個 Shot 中已有 {{current}} 個準備就緒。",
+          "nextInView": "下一步：繼續在 {{view}} 中操作。",
+          "nextStage": "下一步：在專案設定中完成 {{stage}}。"
+        }
       },
       "referenceWorkflow": {
         "panel": {

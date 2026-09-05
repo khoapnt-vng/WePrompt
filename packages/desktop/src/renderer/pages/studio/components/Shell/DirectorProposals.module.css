@@ -11,3 +11,10 @@
   outline: 2px solid var(--color-primary-6);
   outline-offset: 2px;
 }
+
+.receiptNextAction {
+  margin-block: 7px 0;
+  color: var(--color-text-1);
+  font-size: 12px;
+  line-height: 1.45;
+}

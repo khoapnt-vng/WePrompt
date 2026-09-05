@@ -880,7 +880,17 @@
   "creativeStudio": {
     "workspace": {
       "views": {
-        "references": "Референсы"
+        "references": "Референсы",
+        "status": {
+          "next": "Далее"
+        },
+        "guidance": {
+          "noReferences": "Работа с референсами не запланирована, поэтому этот раздел можно пропустить.",
+          "noStoryboard": "В раскадровке пока нет ни Beats, ни Shots.",
+          "noTakes": "В разделе «{{view}}» пока нет текущих дублей — готовы {{current}} из {{total}} Shots.",
+          "nextInView": "Далее: продолжите работу в разделе «{{view}}».",
+          "nextStage": "Далее: завершите этап «{{stage}}» в настройках проекта."
+        }
       },
       "referenceWorkflow": {
         "panel": {

@@ -63,6 +63,13 @@ describe('workspace chrome type scale', () => {
     expect(block(css(), '.barSpacer')).toMatch(/flex:\s*1 1 auto/);
   });
 
+  it('keeps the app bar at the 54px drawing height without wrapping translated controls', () => {
+    const rule = block(css(), '.appBar');
+    expect(rule).toMatch(/box-sizing:\s*border-box/);
+    expect(rule).toMatch(/block-size:\s*54px/);
+    expect(rule).toMatch(/flex-wrap:\s*nowrap/);
+  });
+
   it('stacks the bar above the panes rather than beside them', () => {
     // The shell is a flex container holding the bar and the panes row. Left as a row — which it was
     // — the bar lays out beside the panes at a third of the width and the full height, and every
@@ -96,8 +103,11 @@ describe('workspace view switch treatment', () => {
       resolve(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json'),
       'utf8'
     );
-    const views = JSON.parse(locale).creativeStudio.workspace.views as Record<string, string>;
-    for (const [key, value] of Object.entries(views)) {
+    const views = JSON.parse(locale).creativeStudio.workspace.views as Record<string, unknown>;
+    for (const key of ['title', 'references', 'table', 'board', 'cut']) {
+      const value = views[key];
+      expect(typeof value, key).toBe('string');
+      if (typeof value !== 'string') continue;
       expect(value, key).not.toBe(value.toUpperCase());
     }
   });
@@ -120,6 +130,41 @@ describe('workspace view switch treatment', () => {
     expect(barGround).toBeDefined();
     expect(chipGround).toBeDefined();
     expect(chipGround).not.toBe(barGround);
+  });
+
+  it('keeps inspectable empty links legible and gives keyboard focus an explicit ring', () => {
+    expect(css()).not.toMatch(/data-studio-view-readiness[^}]*opacity:/s);
+    expect(block(css(), '.viewLink:focus-visible')).toMatch(/outline:\s*2px solid/);
+    expect(block(css(), '.viewLink:focus-visible')).toMatch(/outline-offset:\s*-2px/);
+    expect(block(css(), '.viewLinkActive:focus-visible')).toMatch(/outline:\s*2px solid/);
+  });
+
+  it('keeps every translated view reachable in the 400px window without wrapping the app bar', () => {
+    const navigation = block(css(), '.viewNavigation');
+    expect(navigation).toMatch(/min-inline-size:\s*0/);
+    expect(navigation).toMatch(/flex:\s*0 1 auto/);
+    expect(navigation).toMatch(/overflow-x:\s*auto/);
+    expect(navigation).toMatch(/overflow-y:\s*hidden/);
+    expect(block(css(), '.viewLink')).toMatch(/flex:\s*0 0 auto/);
+
+    const narrow = /@media \(max-width: 600px\) \{([\s\S]*)\}\s*$/.exec(css())?.[1] ?? '';
+    expect(block(narrow, '.appBar')).toMatch(/overflow-x:\s*auto/);
+    expect(block(narrow, '.appBar')).toMatch(/padding-inline:\s*6px/);
+    expect(block(narrow, '.projectDot')).toMatch(/display:\s*none/);
+    expect(block(narrow, '.statStrip')).toMatch(/display:\s*none/);
+    expect(block(narrow, '.projectTitle')).toMatch(/min-inline-size:\s*64px/);
+    expect(block(narrow, '.projectTitle')).toMatch(/max-inline-size:\s*80px/);
+    expect(block(narrow, '.viewNavigation')).toMatch(/min-inline-size:\s*96px/);
+    expect(block(narrow, '.viewNavigation')).toMatch(/flex:\s*1 0 96px/);
+  });
+
+  it('draws distinct visible markers for dormant work and the one next view', () => {
+    const dormant = block(css(), '.viewLinkDormantMark');
+    const next = block(css(), '.viewLinkNext');
+    expect(dormant).toMatch(/inline-size:\s*5px/);
+    expect(dormant).toMatch(/block-size:\s*5px/);
+    expect(dormant).toMatch(/border:\s*1px solid currentColor/);
+    expect(next).toMatch(/border:\s*1px solid currentColor/);
   });
 });
 
