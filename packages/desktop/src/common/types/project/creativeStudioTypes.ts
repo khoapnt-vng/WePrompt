@@ -25,7 +25,7 @@ export type {
  * unsaved-draft preflight before closing the window. A second copy of this list would not
  * just be a style problem — a view missing from main's copy closes with no prompt and loses the drafts.
  */
-export const STUDIO_VIEWS = ['references', 'table', 'board', 'cut'] as const;
+export const STUDIO_VIEWS = ['table', 'references', 'board', 'cut'] as const;
 
 export type StudioView = (typeof STUDIO_VIEWS)[number];
 
@@ -1048,6 +1048,7 @@ export type StudioRendererBoardPanelStaleCauseV2 = 'request_out_of_date' | 'rout
 export type StudioRendererBoardPanelStatusV2 = {
   shotId: string;
   assetId: string | null;
+  newSpendSeedAssetId: string | null;
   producerJobId: string | null;
   latestJobId: string | null;
   staleCauses: StudioRendererBoardPanelStaleCauseV2[];
@@ -2328,6 +2329,8 @@ export type StudioProjectStatusShotDetailV2 = {
   beatPosition: number;
   shotPosition: number;
   seedStillAssetId: string | null;
+  /** Omitted only by persisted Director status receipts created before this field existed. */
+  newSpendSeedAssetId?: string | null;
   videoAssetId: string | null;
   latestGenerationJob: null | {
     jobId: string;

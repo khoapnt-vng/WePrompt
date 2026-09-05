@@ -453,6 +453,26 @@ const addCurrentBoardPanel = (project: StudioProjectV2, shotId: string, assetId 
   return asset;
 };
 
+const markBoardPanelHistoricalV1 = (project: StudioProjectV2, panel: StudioAssetV2): void => {
+  const job = panel.producerJobId === null ? undefined : project.jobs[panel.producerJobId];
+  if (job === undefined || job.requestPlan.kind !== 'resolved' || job.requestSnapshot === null) {
+    throw new Error('Historical Board fixture requires one resolved producer');
+  }
+  const compositions = new Set([
+    job.composition,
+    job.requestPlan.snapshot.composition,
+    job.requestSnapshot.composition,
+  ]);
+  for (const composition of compositions) {
+    composition.inputs.instructionProfile = 'weprompt-image-v1.board-still.v1';
+    composition.prompt = composition.prompt.replace(
+      'weprompt-image-v1.board-still.v2',
+      'weprompt-image-v1.board-still.v1'
+    );
+  }
+  panel.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+};
+
 const addSelectedVideo = (project: StudioProjectV2, shotId: string, assetId = `video_${shotId}`): StudioAssetV2 => {
   const asset = addDerivationAsset(project, {
     id: assetId,
@@ -619,8 +639,41 @@ describe('schema-2 Studio estimates', () => {
       'STORY\nMove through the clean daylight space.'
     );
     expect(firstPlan.kind === 'resolved' ? firstPlan.snapshot.composition.prompt : '').toContain(
-      'BOARD STYLE\nUse a restrained grey-tone storyboard drawing'
+      "PRODUCTION VISUAL DIRECTION\nFollow the project's final intended visual language"
     );
+  });
+
+  it('uses an explicitly promoted fresh Board frame after a later unpromoted redraw', () => {
+    const project = makeBoardDerivationProject(1);
+    const promoted = addCurrentBoardPanel(project, 'shot_1', 'board_promoted');
+    project.shots.shot_1!.seedStillId = promoted.id;
+    addCurrentBoardPanel(project, 'shot_1', 'board_redraw');
+
+    const graph = deriveStudioSubmissionQuoteGraphV2({
+      project,
+      request: prepareRequest([choice('shot_1', 'video_take')], []),
+    });
+
+    expect(graph.baseItems[0]?.requestPlan).toEqual(
+      expect.objectContaining({
+        kind: 'resolved',
+        snapshot: expect.objectContaining({ conditioningInput: { kind: 'seed_still', assetId: promoted.id } }),
+      })
+    );
+  });
+
+  it('refuses new video spend conditioned on a historical board-still.v1 frame', () => {
+    const project = makeBoardDerivationProject(1);
+    const historical = addCurrentBoardPanel(project, 'shot_1', 'board_historical');
+    project.shots.shot_1!.seedStillId = historical.id;
+    markBoardPanelHistoricalV1(project, historical);
+
+    expect(() =>
+      deriveStudioSubmissionQuoteGraphV2({
+        project,
+        request: prepareRequest([choice('shot_1', 'video_take')], []),
+      })
+    ).toThrow(expect.objectContaining({ code: 'missing_conditioning' }));
   });
 
   it('accepts exactly 24 Board Shots and refuses a twenty-fifth', () => {
@@ -711,7 +764,7 @@ describe('schema-2 Studio estimates', () => {
     );
   });
 
-  it('prices only selected takes in the promoted Board panel segment and derives against the candidate pin', () => {
+  it('prices only the promoted segment head and leaves connected takes for a fresh later quote', () => {
     const project = makeBoardDerivationProject(4);
     const panel = addCurrentBoardPanel(project, 'shot_1');
     addSelectedVideo(project, 'shot_1');
@@ -732,45 +785,36 @@ describe('schema-2 Studio estimates', () => {
         target.kind === 'shot' ? target.shotId : target.referenceId,
         purpose,
       ])
-    ).toEqual([
-      ['shot_1', 'video_take'],
-      ['shot_2', 'video_take'],
-    ]);
+    ).toEqual([['shot_1', 'video_take']]);
     expect(options.baseOnly.baseItems[0]?.requestPlan).toEqual(
       expect.objectContaining({
         kind: 'resolved',
         snapshot: expect.objectContaining({ conditioningInput: { kind: 'seed_still', assetId: panel.id } }),
       })
     );
-    expect(options.baseOnly.baseItems[1]?.requestPlan).toEqual(
-      expect.objectContaining({
-        kind: 'after_take_selection',
-        dependency: expect.objectContaining({
-          kind: 'authorized_predecessor',
-          predecessorShotId: 'shot_1',
-        }),
-      })
-    );
     expect(project.shots.shot_1!.seedStillId).toBeNull();
+    expect(JSON.stringify(options)).not.toContain('shot_2');
     expect(JSON.stringify(options)).not.toContain('shot_4');
   });
 
-  it('refuses paid Board promotion when a selected downstream Shot has a blank Shooting script', () => {
+  it('does not pull a selected downstream Shot with a blank script into the head-only promotion quote', () => {
     const project = makeBoardDerivationProject();
     const panel = addCurrentBoardPanel(project, 'shot_1');
     addSelectedVideo(project, 'shot_1');
     addSelectedVideo(project, 'shot_2');
     project.shots.shot_2!.shootingScript = '\t';
 
-    expect(() =>
-      deriveStudioSubmissionQuoteGraphV2({
-        project,
-        request: boardPromotionRequest('shot_1', panel.id),
-        resolveRoute: () => {
-          throw new Error('route composition must not run');
-        },
-      })
-    ).toThrow(expect.objectContaining({ code: 'missing_shooting_script' }));
+    const graph = deriveStudioSubmissionQuoteGraphV2({
+      project,
+      request: boardPromotionRequest('shot_1', panel.id),
+    });
+
+    expect(graph.baseItems).toHaveLength(1);
+    expect(graph.baseItems[0]).toMatchObject({
+      target: { kind: 'shot', shotId: 'shot_1' },
+      purpose: 'video_take',
+    });
+    expect(JSON.stringify(graph)).not.toContain('shot_2');
   });
 
   it('refuses paid Board promotion when no selected take would be made stale', () => {

@@ -14,6 +14,7 @@ import type {
   IProvider,
   ISessionMcpServer,
   TChatConversation,
+  TContextHandoffItem,
   TProviderWithModel,
 } from '@/common/config/storage';
 import { BUILTIN_STUDIO_NAME } from '@/common/config/builtinCapabilities';
@@ -173,6 +174,33 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
 const SAFE_STUDIO_ID = /^[A-Za-z0-9_-]{1,256}$/;
+export const isSafeDirectorProposalId = (value: unknown): value is string =>
+  typeof value === 'string' && SAFE_STUDIO_ID.test(value);
+
+/** Fixed ownership lets Studio replace this private target without touching a person's pins. */
+export const STUDIO_SELECTED_PROPOSAL_PIN_ID = 'studio_selected_proposal';
+
+/**
+ * Gives the model an exact proposal tool argument without leaking the identifier into the composer.
+ * The ID is untrusted persisted data, so an unsafe value produces no context at all.
+ */
+export const buildStudioSelectedProposalPin = (proposalId: unknown, now: number): TContextHandoffItem | null => {
+  if (!isSafeDirectorProposalId(proposalId)) return null;
+  return {
+    id: STUDIO_SELECTED_PROPOSAL_PIN_ID,
+    title: 'Selected proposal (tool only)',
+    content: [
+      'SELECTED PROPOSAL TARGET — TOOL-ONLY CONTEXT.',
+      `Use exactly ${proposalId} only as the proposalId input to studio_get_proposal when the person requests an updated version.`,
+      'Never repeat, expose, paraphrase, or ask the person to type this identifier.',
+      'Do not use it to apply, approve, or reject the proposal. After reading it, call read_storyboard for current authority before drafting a replacement.',
+    ].join('\n'),
+    source: 'manual',
+    created_at: now,
+    updated_at: now,
+  };
+};
+
 const isSafeDirectorConversationId = (value: unknown): value is string =>
   typeof value === 'string' && SAFE_STUDIO_ID.test(value);
 const SAFE_CHOICE_ID = /^choice_[a-f0-9]{24}$/;
@@ -1032,13 +1060,58 @@ const DirectorConversationSurface: React.FC<{
   );
 };
 
+const EMPTY_PENDING_PROPOSAL_IDS: readonly string[] = [];
+const STUDIO_OWNED_PIN_IDS = new Set([STUDIO_BRIEF_RULES_PIN_ID, STUDIO_SELECTED_PROPOSAL_PIN_ID]);
+
+const sameModelFacingPin = (left: TContextHandoffItem, right: TContextHandoffItem): boolean =>
+  left.id === right.id && left.title === right.title && left.content === right.content && left.source === right.source;
+
+/** Timestamps are bookkeeping; exact model-facing ownership and content determine whether a write is needed. */
+const hasExactStudioOwnedPins = (
+  currentPins: readonly TContextHandoffItem[],
+  desiredPins: readonly TContextHandoffItem[]
+): boolean => {
+  const currentOwned = currentPins.filter((pin) => STUDIO_OWNED_PIN_IDS.has(pin.id));
+  return (
+    currentOwned.length === desiredPins.length &&
+    desiredPins.every((desired) => currentOwned.some((current) => sameModelFacingPin(current, desired)))
+  );
+};
+
+const studioOwnedPinSignature = (conversationId: string, desiredPins: readonly TContextHandoffItem[]): string =>
+  JSON.stringify([
+    conversationId,
+    ...desiredPins.map(({ id, title, content, source }) => ({ id, title, content, source })),
+  ]);
+
+type DirectorDraftRequest = {
+  requestId: number;
+  projectId: string;
+  prompt: string;
+  proposalTargetId: string | null;
+};
+
+type InstalledProposalTarget = {
+  projectId: string;
+  proposalId: string;
+  conversation: DirectorConversation;
+  pins: TContextHandoffItem[];
+};
+
+type InstalledStudioContext = {
+  conversation: DirectorConversation;
+  signature: string;
+  pins: TContextHandoffItem[];
+};
+
 export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutputs?: readonly MessageListInlineItem[];
   pendingProposalCount?: number;
+  pendingProposalIds?: readonly string[];
   pendingProposalTargetId?: string;
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
-  draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
+  draftRequest?: DirectorDraftRequest | null;
   onDraftRequestConsumed?: (requestId: number) => void;
   /** Owned by the shell: the collapse control lives in the app bar, not in this pane. */
   collapsed: boolean;
@@ -1056,6 +1129,7 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
   reviewedOutputs = [],
   pendingProposalCount = 0,
+  pendingProposalIds = EMPTY_PENDING_PROPOSAL_IDS,
   pendingProposalTargetId,
   onProposalIntent,
   draftRequest,
@@ -1075,7 +1149,22 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   const conversationsRef = useRef(allConversations);
   const mountedRef = useRef(true);
   const boundResolutionVersion = useRef(0);
+  const contextSyncVersionRef = useRef(0);
+  const contextSyncTailRef = useRef<Promise<void>>(Promise.resolve());
+  const installedStudioContextRef = useRef<InstalledStudioContext | null>(null);
+  const selectedProposalTargetRef = useRef<InstalledProposalTarget | null>(null);
+  const consumedDraftRequestRef = useRef<number | null>(null);
+  const latestDraftRequestRef = useRef(draftRequest);
+  const onDraftRequestConsumedRef = useRef(onDraftRequestConsumed);
   const contentRef = useRef<HTMLDivElement>(null);
+  const pendingProposalIdSignature = pendingProposalIds.join('\0');
+  const safePendingProposalIds = useMemo(
+    () => new Set(pendingProposalIds.filter(isSafeDirectorProposalId)),
+    // The safe Studio alphabet cannot contain NUL, so this is an exact, order-sensitive list signature.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [pendingProposalIdSignature]
+  );
+  const latestPendingProposalIdsRef = useRef(safePendingProposalIds);
   const inlineItems = useMemo<readonly MessageListInlineItem[]>(
     () =>
       reviewedOutputs.map((output) => ({
@@ -1095,6 +1184,9 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   stateRef.current = state;
   projectRef.current = project;
   conversationsRef.current = allConversations;
+  latestDraftRequestRef.current = draftRequest;
+  onDraftRequestConsumedRef.current = onDraftRequestConsumed;
+  latestPendingProposalIdsRef.current = safePendingProposalIds;
 
   useEffect(() => {
     mountedRef.current = true;
@@ -1299,12 +1391,12 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
 
   const visibleState: DirectorState =
     state.projectId === project.id ? state : { kind: 'loading', projectId: project.id };
-  const consumedDraftRequestRef = useRef<number | null>(null);
   useEffect(() => {
     if (
       draftRequest === null ||
       draftRequest === undefined ||
       draftRequest.projectId !== project.id ||
+      draftRequest.proposalTargetId !== null ||
       visibleState.kind !== 'ready' ||
       consumedDraftRequestRef.current === draftRequest.requestId
     ) {
@@ -1360,33 +1452,157 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
   }, [project.briefConversationId, runExplicitAttempt, visibleState]);
 
   const effectiveRules = useMemo(() => resolveEffectiveStudioRules(project.rules), [project.rules]);
-  const lastPinSignature = useRef<string | null>(null);
   useEffect(() => {
+    const syncVersion = ++contextSyncVersionRef.current;
     if (visibleState.kind !== 'ready') return;
     const conversation = visibleState.conversation;
-    const pin = buildStudioBriefRulesPin({ rules: effectiveRules, now: Date.now() });
-    const signature = `${conversation.id}:${pin?.content ?? ''}`;
-    if (lastPinSignature.current === signature) return;
-    const currentPins = getConversationPinnedContext(conversation);
-    const preserved = currentPins.filter((item) => item.id !== STUDIO_BRIEF_RULES_PIN_ID);
-    if (pin === null && preserved.length === currentPins.length) return;
-    lastPinSignature.current = signature;
-    const patch = buildContextHandoffExtraPatch(conversation, {
-      pinned_context: pin === null ? preserved : [...preserved, pin],
-    });
-    void ipcBridge.conversation.update
-      .invoke({
-        id: conversation.id,
-        merge_extra: true,
-        updates: { extra: patch as TChatConversation['extra'] },
-      })
-      .then((ok) => {
-        if (!ok) lastPinSignature.current = null;
-      })
-      .catch(() => {
-        lastPinSignature.current = null;
-      });
-  }, [effectiveRules, visibleState]);
+    const proposalDraft =
+      draftRequest !== null &&
+      draftRequest !== undefined &&
+      draftRequest.projectId === project.id &&
+      draftRequest.proposalTargetId !== null &&
+      isSafeDirectorProposalId(draftRequest.proposalTargetId) &&
+      safePendingProposalIds.has(draftRequest.proposalTargetId)
+        ? draftRequest
+        : null;
+    const retainedTarget = selectedProposalTargetRef.current;
+    const retainedProposalId =
+      retainedTarget !== null &&
+      retainedTarget.projectId === project.id &&
+      safePendingProposalIds.has(retainedTarget.proposalId)
+        ? retainedTarget.proposalId
+        : null;
+    const proposalTargetId = proposalDraft?.proposalTargetId ?? retainedProposalId;
+    const now = Date.now();
+    const rulesPin = buildStudioBriefRulesPin({ rules: effectiveRules, now });
+    const proposalPin = buildStudioSelectedProposalPin(proposalTargetId, now);
+    const desiredPins = [rulesPin, proposalPin].filter((pin): pin is TContextHandoffItem => pin !== null);
+    const signature = studioOwnedPinSignature(conversation.id, desiredPins);
+    const observedPins = getConversationPinnedContext(conversation);
+
+    const finishSuccessfulSync = (installedPins: TContextHandoffItem[]): void => {
+      const installation = { conversation, signature, pins: installedPins };
+      installedStudioContextRef.current = installation;
+      selectedProposalTargetRef.current =
+        proposalTargetId === null
+          ? null
+          : {
+              projectId: project.id,
+              proposalId: proposalTargetId,
+              conversation,
+              pins: installedPins,
+            };
+      if (proposalDraft === null || consumedDraftRequestRef.current === proposalDraft.requestId) return;
+      const latest = latestDraftRequestRef.current;
+      if (
+        latest === null ||
+        latest === undefined ||
+        latest.requestId !== proposalDraft.requestId ||
+        latest.projectId !== project.id ||
+        latest.proposalTargetId !== proposalTargetId ||
+        !isSafeDirectorProposalId(latest.proposalTargetId) ||
+        !latestPendingProposalIdsRef.current.has(latest.proposalTargetId)
+      ) {
+        return;
+      }
+      requestConversationSendBoxPrefill(conversation.id, latest.prompt);
+      consumedDraftRequestRef.current = latest.requestId;
+      onDraftRequestConsumedRef.current?.(latest.requestId);
+    };
+
+    const sync = async (): Promise<void> => {
+      if (syncVersion !== contextSyncVersionRef.current) return;
+      const installed = installedStudioContextRef.current;
+      const alreadyInstalled = installed?.conversation === conversation && installed.signature === signature;
+      const currentPins =
+        installed?.conversation === conversation
+          ? [
+              ...observedPins.filter((pin) => !STUDIO_OWNED_PIN_IDS.has(pin.id)),
+              ...installed.pins.filter((pin) => STUDIO_OWNED_PIN_IDS.has(pin.id)),
+            ]
+          : observedPins;
+      const preservedPins = currentPins.filter((item) => !STUDIO_OWNED_PIN_IDS.has(item.id));
+      const nextPins = [...preservedPins, ...desiredPins];
+      if (!alreadyInstalled && !hasExactStudioOwnedPins(currentPins, desiredPins)) {
+        const patch = buildContextHandoffExtraPatch(conversation, { pinned_context: nextPins });
+        let updated = false;
+        try {
+          updated = Boolean(
+            await ipcBridge.conversation.update.invoke({
+              id: conversation.id,
+              merge_extra: true,
+              updates: { extra: patch as TChatConversation['extra'] },
+            })
+          );
+        } catch {
+          return;
+        }
+        if (!updated) return;
+        installedStudioContextRef.current = { conversation, signature, pins: nextPins };
+      }
+      if (
+        !mountedRef.current ||
+        projectRef.current.id !== project.id ||
+        syncVersion !== contextSyncVersionRef.current
+      ) {
+        if (proposalPin !== null && projectRef.current.id !== project.id) {
+          const clearedPins = nextPins.filter((pin) => pin.id !== STUDIO_SELECTED_PROPOSAL_PIN_ID);
+          const patch = buildContextHandoffExtraPatch(conversation, { pinned_context: clearedPins });
+          try {
+            await ipcBridge.conversation.update.invoke({
+              id: conversation.id,
+              merge_extra: true,
+              updates: { extra: patch as TChatConversation['extra'] },
+            });
+          } catch {
+            // Leaving the project still invalidates the local target; a later mount reconciles again.
+          }
+        }
+        return;
+      }
+      finishSuccessfulSync(nextPins);
+    };
+
+    const queued = contextSyncTailRef.current.then(sync);
+    contextSyncTailRef.current = queued.catch((): void => undefined);
+  }, [draftRequest, effectiveRules, pendingProposalIdSignature, project.id, safePendingProposalIds, visibleState]);
+
+  useEffect(() => {
+    const scopedProjectId = project.id;
+    return () => {
+      contextSyncVersionRef.current += 1;
+      const installed = selectedProposalTargetRef.current;
+      if (projectRef.current.id === scopedProjectId || installed === null || installed.projectId !== scopedProjectId) {
+        return;
+      }
+      selectedProposalTargetRef.current = null;
+      const clearedPins = installed.pins.filter((pin) => pin.id !== STUDIO_SELECTED_PROPOSAL_PIN_ID);
+      const clear = async (): Promise<void> => {
+        const patch = buildContextHandoffExtraPatch(installed.conversation, { pinned_context: clearedPins });
+        try {
+          const updated = await ipcBridge.conversation.update.invoke({
+            id: installed.conversation.id,
+            merge_extra: true,
+            updates: { extra: patch as TChatConversation['extra'] },
+          });
+          if (updated) {
+            installedStudioContextRef.current = {
+              conversation: installed.conversation,
+              signature: studioOwnedPinSignature(
+                installed.conversation.id,
+                clearedPins.filter((pin) => STUDIO_OWNED_PIN_IDS.has(pin.id))
+              ),
+              pins: clearedPins,
+            };
+          }
+        } catch {
+          // The next mount reconciles Studio-owned context from current project authority.
+        }
+      };
+      const queued = contextSyncTailRef.current.then(clear);
+      contextSyncTailRef.current = queued.catch((): void => undefined);
+    };
+  }, [project.id]);
 
   const title = t('conversation.creativeStudio.workspace.director.title');
   const recoverLabel =

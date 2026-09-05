@@ -2024,7 +2024,7 @@ describe('createCreativeStudioCloseHandshake', () => {
    */
   it('interpolates view segments into the route pattern without needing regex escaping', () => {
     // Guards the guard: an empty shared list would make every derived case below vacuous.
-    expect(STUDIO_VIEWS).toEqual(['references', 'table', 'board', 'cut']);
+    expect(STUDIO_VIEWS).toEqual(['table', 'references', 'board', 'cut']);
     for (const view of STUDIO_VIEWS) {
       expect(view, `${view} must stay a plain lowercase segment`).toMatch(/^[a-z]+$/);
     }

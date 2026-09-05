@@ -257,5 +257,16 @@ export const isStudioGenerationRequestCurrent = (
 ): boolean => {
   const normalizedCurrent = structuredClone(current);
   normalizedCurrent.composition.inputs.projectRevision = recorded.composition.inputs.projectRevision;
+  const recordedInputs = recorded.composition.inputs;
+  const currentInputs = normalizedCurrent.composition.inputs;
+  const currentBoardProfile = `${currentInputs.route.adapterId}.board-still.v2`;
+  if (
+    recordedInputs.purpose === 'board_still' &&
+    currentInputs.purpose === 'board_still' &&
+    recordedInputs.instructionProfile === currentBoardProfile &&
+    currentInputs.instructionProfile === currentBoardProfile
+  ) {
+    normalizedCurrent.composition.inputs.boardStyle = recordedInputs.boardStyle;
+  }
   return studioGenerationRequestSnapshotsEqual(recorded, normalizedCurrent);
 };

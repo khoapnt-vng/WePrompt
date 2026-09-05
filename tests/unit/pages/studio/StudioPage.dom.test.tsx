@@ -69,7 +69,12 @@ const mocks = vi.hoisted(() => {
       projectStatusPending: boolean;
     },
     directorProposalIntent: null as null | ((intent: DirectorProposalChatIntent) => Promise<void>),
-    directorDraftRequest: null as null | { requestId: number; projectId: string; prompt: string },
+    directorDraftRequest: null as null | {
+      requestId: number;
+      projectId: string;
+      prompt: string;
+      proposalTargetId: string | null;
+    },
     bridge: {
       getProject: { invoke: vi.fn() },
       getProjectWorkspace: { invoke: vi.fn() },
@@ -166,6 +171,7 @@ vi.mock('@/renderer/pages/studio/components/Workspace', async (importOriginal) =
 });
 
 vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
+  isSafeDirectorProposalId: (value: unknown) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,256}$/u.test(value),
   // Applies widthPixels the way the real pane does. A mock that drops the prop would let the shell
   // stop passing it without a single test noticing.
   DirectorRail: ({
@@ -189,7 +195,12 @@ vi.mock('@/renderer/pages/studio/components/Workspace/DirectorRail', () => ({
     pendingProposalCount?: number;
     pendingProposalTargetId?: string;
     onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
-    draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
+    draftRequest?: {
+      requestId: number;
+      projectId: string;
+      prompt: string;
+      proposalTargetId: string | null;
+    } | null;
   }) => {
     mocks.directorProposalIntent = onProposalIntent ?? null;
     mocks.directorDraftRequest = draftRequest ?? null;
@@ -418,6 +429,7 @@ const projectWithHandoffShot = (): StudioRendererProjectV2 => {
 
 const projectWithReferenceHandoff = (): StudioRendererProjectV2 => {
   const value = projectWithHandoffShot();
+  value.targetDurationSeconds = 4;
   value.referencePlanStatus = 'planned';
   value.referenceOrder = ['reference_3'];
   value.references.reference_3 = {
@@ -865,6 +877,76 @@ const withCurrentBoardPanels = (
   return value;
 };
 
+/** Installs the reviewed hi-fi target every unfinished Shot now needs before Film video review. */
+const withReviewedBoardTargets = (source: StudioRendererProjectV2): StudioRendererProjectV2 => {
+  const value = structuredClone(source);
+  value.imageRouteId ??= 'route_image';
+  for (const beatId of value.beatOrder) {
+    const beat = value.beats[beatId];
+    if (beat?.id !== beatId) continue;
+    for (const [shotIndex, shotId] of beat.shotOrder.entries()) {
+      const shot = value.shots[shotId];
+      if (shot?.id !== shotId) continue;
+      const assetId = `reviewed_board_${shotId}`;
+      const jobId = `reviewed_board_job_${shotId}`;
+      value.assets[assetId] = {
+        id: assetId,
+        projectId: value.id,
+        shotId,
+        mediaKind: 'image',
+        mimeType: 'image/png',
+        managedAsset: { collection: 'boardStills', fileName: `${assetId}.png` },
+        byteSize: 16,
+        sha256: '9'.repeat(64),
+        createdAt: '2026-01-01T00:00:01.000Z',
+        projectReferenceId: null,
+        generationReferenceAssetIds: [],
+        producerJobId: jobId,
+        compositionDigest: '8'.repeat(64),
+      };
+      value.jobs[jobId] = {
+        id: jobId,
+        projectId: value.id,
+        target: { kind: 'shot', shotId },
+        status: 'succeeded',
+        provider: { choiceId: 'route_image', providerId: 'provider_safe', model: 'model_safe' },
+        outputAssetIds: [assetId],
+        outputAssetIdsByRole: { primary: assetId, poster: null },
+        error: null,
+        canCancel: false,
+        canRetry: false,
+        canRetryDownload: false,
+        retryOfJobId: null,
+        retryReason: null,
+        duplicateChargeAcknowledged: false,
+        duplicateChargeAcknowledgedAt: null,
+        purpose: 'board_still',
+        composition: testComposition({ kind: 'shot', shotId }, 'board_still', {
+          projectRevision: value.revision,
+          boardStyle: value.boardStyle,
+        }),
+        spendReceipt: {
+          purpose: 'board_still',
+          routeId: 'route_image',
+          currency: 'USD',
+          rateUnit: 'generation',
+          rateMinorUnits: 3,
+          durationSeconds: null,
+          generationCount: 1,
+          totalMinorUnits: 3,
+        },
+        createdAt: '2026-01-01T00:00:01.000Z',
+        updatedAt: '2026-01-01T00:00:01.000Z',
+      };
+      shot.boardAssetId = assetId;
+      shot.assetIds.push(assetId);
+      shot.jobIds.push(jobId);
+      if (shotIndex === 0 || shot.chainBreak === 'hard_cut') shot.seedStillId = assetId;
+    }
+  }
+  return value;
+};
+
 const withCurrentVideoTakes = (
   source: StudioRendererProjectV2,
   shotNumbers: readonly number[]
@@ -1133,10 +1215,27 @@ const boardPanels = (authority: StudioRendererProjectV2): StudioRendererWorkspac
             job.status === 'succeeded' &&
             job.outputAssetIdsByRole.primary === shot.boardAssetId
         );
+      const explicitSeed = shot.seedStillId === null ? undefined : authority.assets[shot.seedStillId];
+      const ordinarySeed = shot.assetIds
+        .flatMap((assetId) => {
+          const asset = authority.assets[assetId];
+          return asset?.mediaKind === 'image' &&
+            (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports')
+            ? [asset]
+            : [];
+        })
+        .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
       return [
         {
           shotId,
           assetId: shot.boardAssetId,
+          newSpendSeedAssetId:
+            explicitSeed?.mediaKind === 'image' &&
+            (explicitSeed.managedAsset.collection === 'assets' ||
+              explicitSeed.managedAsset.collection === 'imports' ||
+              explicitSeed.managedAsset.collection === 'boardStills')
+              ? explicitSeed.id
+              : (ordinarySeed?.id ?? null),
           producerJobId: producer?.id ?? null,
           latestJobId: latestBoardJob?.id ?? null,
           staleCauses: [],
@@ -2254,6 +2353,16 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     });
 
     await waitFor(() => expect(board).toHaveAttribute('data-studio-view-recommended', 'true'));
+    expect(
+      within(navigation)
+        .getAllByRole('link')
+        .map((link) => link.getAttribute('href'))
+    ).toEqual([
+      '/studio/project_1/table',
+      '/studio/project_1/references',
+      '/studio/project_1/board',
+      '/studio/project_1/cut',
+    ]);
     expect(references).toHaveAttribute('href', '/studio/project_1/references');
     expect(table).toHaveAttribute('href', '/studio/project_1/table');
     expect(board).toHaveAttribute('href', '/studio/project_1/board');
@@ -2278,7 +2387,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       expect.stringContaining('conversation.creativeStudio.workspace.views.status.next')
     );
     expect(board).toHaveAccessibleDescription(
-      expect.stringContaining('conversation.creativeStudio.workspace.views.guidance.noTakes')
+      expect.stringContaining('conversation.creativeStudio.workspace.views.guidance.frameProgress')
     );
     expect(cut).toHaveAccessibleDescription(
       expect.stringContaining('conversation.creativeStudio.workspace.views.guidance.noTakes')
@@ -2289,8 +2398,19 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(guidance?.tagName).toBe('DIV');
     expect(guidance).toHaveAttribute('data-studio-view-guidance-view', 'cut');
     expect(guidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.noTakes');
-    expect(guidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
-    expect(within(guidance!).queryByRole('link')).toBeNull();
+    expect(guidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames');
+    const nextActionLink = within(guidance!).getByRole('link', {
+      name: 'conversation.creativeStudio.workspace.views.guidance.cta.frames',
+    });
+    expect(nextActionLink).toHaveAttribute('href', '/studio/project_1/board');
+    expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/cut');
+
+    fireEvent.click(nextActionLink);
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/board'));
+    const boardGuidance = document.querySelector<HTMLElement>('[data-studio-view-guidance]');
+    expect(boardGuidance).toHaveAttribute('data-studio-view-guidance-view', 'board');
+    expect(boardGuidance).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames');
+    expect(within(boardGuidance!).queryByRole('link')).toBeNull();
   });
 
   it('keeps view progress neutral when Main status is stale', async () => {
@@ -2331,7 +2451,8 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('opens first-time Director-defined reference work before the Table', async () => {
-    mockSupportedProject(projectWithReferenceHandoff());
+    const authority = projectWithReferenceHandoff();
+    mockSupportedProject(authority);
 
     renderStudio('/studio/project_1');
 
@@ -2339,6 +2460,72 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(
       screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.references' })
     ).toBeVisible();
+  });
+
+  it('introduces an unplanned References step once after the Storyline without trapping later navigation', async () => {
+    const authority = projectWithHandoffShot();
+    authority.targetDurationSeconds = 4;
+    mockSupportedProject(authority);
+
+    renderStudio('/studio/project_1');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+    const navigation = screen.getByRole('navigation', {
+      name: 'conversation.creativeStudio.workspace.views.title',
+    });
+    expect(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.references',
+      })
+    ).toHaveAttribute('data-studio-view-recommended', 'true');
+    expect(document.querySelector('[data-studio-next-action="references"]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.referenceWorkflow.description'
+    );
+
+    fireEvent.click(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.table',
+      })
+    );
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.references',
+      })
+    ).not.toHaveAttribute('data-studio-view-recommended');
+    expect(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.table',
+      })
+    ).toHaveAttribute('data-studio-view-recommended', 'true');
+
+    fireEvent.click(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.references',
+      })
+    );
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/references'));
+    expect(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.references',
+      })
+    ).not.toHaveAttribute('data-studio-view-recommended');
+    expect(
+      within(navigation).getByRole('link', {
+        name: 'conversation.creativeStudio.workspace.views.table',
+      })
+    ).toHaveAttribute('data-studio-view-recommended', 'true');
+    expect(document.querySelector('[data-studio-next-action="references"]')).toBeNull();
+    expect(document.querySelector('[data-studio-next-action="bindings"]')).not.toBeNull();
+  });
+
+  it('starts an existing project at the Table after its visual references are complete', async () => {
+    mockSupportedProject(projectWithCandidateReference());
+
+    renderStudio('/studio/project_1');
+
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1/table'));
+    expect(screen.getByRole('heading', { name: 'conversation.creativeStudio.workspace.views.table' })).toBeVisible();
   });
 
   it('keeps a new empty project view-less until its first Director reference plan arrives', async () => {
@@ -3625,7 +3812,9 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('opens one automatically estimated spend gate from the app-bar Render action without spending', async () => {
-    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    const authority = withReviewedBoardTargets(
+      projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] })
+    );
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockResolvedValue(
       ok({ baseOnly: boardPromotionQuote(authority, ['shot_0']), withCascade: null })
@@ -3680,14 +3869,16 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('filters a Main-blocked independent Film anchor out of paid review', async () => {
-    const authority = projectWithGenerationReferences(2, {
-      assignedBackgroundShotIds: ['shot_0', 'shot_1'],
-    });
+    const authority = withReviewedBoardTargets(
+      projectWithGenerationReferences(2, {
+        assignedBackgroundShotIds: ['shot_0', 'shot_1'],
+      })
+    );
     authority.shots.shot_1!.chainBreak = 'hard_cut';
     mockSupportedProject(authority);
     mockGenerationBlock(
-      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
-      { code: 'no_engine', role: 'image' }
+      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'video_take' },
+      { code: 'no_engine', role: 'video' }
     );
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
@@ -3702,18 +3893,20 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
         projectId: authority.id,
         expectedRevision: authority.revision,
         originReferenceHandoffId: null,
-        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
-        cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+        baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+        cascadeChoices: [],
       })
     );
   });
 
   it('shows an all-blocked exact Film intent without allowing preparation', async () => {
-    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    const authority = withReviewedBoardTargets(
+      projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] })
+    );
     mockSupportedProject(authority);
     mockGenerationBlock(
-      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
-      { code: 'no_engine', role: 'image' }
+      { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'video_take' },
+      { code: 'no_engine', role: 'video' }
     );
     renderStudio();
     await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalled());
@@ -3728,9 +3921,11 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('defers a blocked downstream video until it becomes the sequential Film frontier', async () => {
-    const authority = projectWithGenerationReferences(3, {
-      assignedBackgroundShotIds: ['shot_0', 'shot_1', 'shot_2'],
-    });
+    const authority = withReviewedBoardTargets(
+      projectWithGenerationReferences(3, {
+        assignedBackgroundShotIds: ['shot_0', 'shot_1', 'shot_2'],
+      })
+    );
     authority.beats.beat_0!.shotOrder = ['shot_0', 'shot_1'];
     authority.beatOrder = ['beat_0', 'beat_2'];
     delete authority.beats.beat_1;
@@ -3755,19 +3950,16 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
         expectedRevision: authority.revision,
         originReferenceHandoffId: null,
         baseChoices: [
-          { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'seed_still' },
-          { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'seed_still' },
-        ],
-        cascadeChoices: [
           { target: { kind: 'shot', shotId: 'shot_0' }, purpose: 'video_take' },
           { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
         ],
+        cascadeChoices: [],
       })
     );
   });
 
   it('never invents or mutates a missing Shot reference binding during paid review', async () => {
-    const authority = projectWithGenerationReferences(1);
+    const authority = withReviewedBoardTargets(projectWithGenerationReferences(1));
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockResolvedValueOnce({
       ok: false,
@@ -3792,7 +3984,9 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('bypasses free assignment when the seed-still Shot already has one exact approved background', async () => {
-    const authority = projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] });
+    const authority = withReviewedBoardTargets(
+      projectWithGenerationReferences(1, { assignedBackgroundShotIds: ['shot_0'] })
+    );
     mockSupportedProject(authority);
     mocks.bridge.prepareSubmission.invoke.mockRejectedValueOnce(new Error('stop after request capture'));
     renderStudio();
@@ -3932,12 +4126,41 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
   });
 
-  it('prepares and confirms atomic paid Board promotion only from its two explicit actions', async () => {
+  it('fails closed when free Board promotion changes a downstream selected take', async () => {
+    const initial = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
+    initial.videoRouteId = 'route_video';
+    initial.shots.board_shot_02!.chainBreak = 'none';
+    const corrupted = structuredClone(initial);
+    corrupted.revision += 1;
+    corrupted.shots.board_shot_01!.seedStillId = 'board_asset_01';
+    corrupted.shots.board_shot_02!.videoAssetId = null;
+    mocks.bridge.getProjectWorkspace.invoke
+      .mockResolvedValueOnce(projectWorkspaceLoad(initial))
+      .mockResolvedValue(projectWorkspaceLoad(corrupted));
+    mocks.bridge.applyAuthoringBatch.invoke.mockResolvedValue(commit(corrupted.revision));
+    renderStudio();
+    await waitFor(() => expect(mocks.boardActions).not.toBeNull());
+
+    act(() => capturedBoardActions().promotePanel('board_shot_01', 'board_asset_01'));
+    const modal = await screen.findByTestId('studio-spend-gate');
+    fireEvent.click(
+      within(modal).getByRole('button', {
+        name: 'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction',
+      })
+    );
+
+    expect(await screen.findByText('conversation.creativeStudio.workspace.errors.storage')).toBeVisible();
+    expect(within(modal).queryByText('conversation.creativeStudio.workspace.gate.promotion.promoted')).toBeNull();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+  });
+
+  it('prepares and confirms a head-only paid Board promotion only from its two explicit actions', async () => {
     const authority = withCurrentVideoTakes(withCurrentBoardPanels(projectWithBoardJobs(3, false), [1]), [1, 2, 3]);
     authority.videoRouteId = 'route_video';
     authority.shots.board_shot_02!.chainBreak = 'none';
     mockSupportedProject(authority);
-    const quote = boardPromotionQuote(authority, ['board_shot_01', 'board_shot_02']);
+    const quote = boardPromotionQuote(authority, ['board_shot_01']);
     mocks.bridge.prepareSubmission.invoke.mockResolvedValue(ok({ baseOnly: quote, withCascade: null }));
     mocks.bridge.confirmSubmission.invoke.mockResolvedValue(
       ok({ projectId: authority.id, projectRevision: authority.revision + 1 })
@@ -4505,7 +4728,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
   });
 
   it('refreshes an open generation gate and clears a stale catalog blocker without reopening it', async () => {
-    const authority = projectWithDraftBatch(1);
+    const authority = withReviewedBoardTargets(projectWithDraftBatch(1));
     mockSupportedProject(authority);
     const refreshedCapability = deferred<ReturnType<typeof supportedCapabilityResult>>();
     let capabilityCall = 0;
@@ -4535,12 +4758,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     await waitFor(() => expect(mocks.bridge.getGenerationCapability.invoke).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(mocks.beatPanelActions).not.toBeNull());
 
-    act(() =>
-      capturedBeatPanelActions().reviewShot('shot_0', [
-        { shotId: 'shot_0', purpose: 'seed_still' },
-        { shotId: 'shot_0', purpose: 'video_take' },
-      ])
-    );
+    act(() => capturedBeatPanelActions().reviewShot('shot_0', [{ shotId: 'shot_0', purpose: 'video_take' }]));
     const modal = await screen.findByTestId('studio-spend-gate');
     expect(
       within(modal).queryByRole('button', { name: 'conversation.creativeStudio.workspace.gate.prepare' })
@@ -8461,6 +8679,43 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     expect(screen.queryByText('conversation.creativeStudio.workspace.proposals.chatNoPending')).toBeNull();
   });
 
+  it('prefills a safe Director continuation after accepting storyline work without auto-sending or spending', async () => {
+    const storylineProposal: StudioRendererProposalV2 = {
+      ...proposal(),
+      payload: {
+        kind: 'mutation_batch',
+        operations: [{ kind: 'edit_shot', shotId: 'shot_0', changes: { shootingScript: 'A stronger opening.' } }],
+      },
+    };
+    mockProposalUntilDecision(storylineProposal);
+    mocks.bridge.acceptProposal.invoke.mockResolvedValue(
+      ok({
+        proposal: {
+          ...storylineProposal,
+          status: 'accepted',
+          decidedAt: '2026-01-01T00:00:05.000Z',
+        },
+        project: projectAfterProposalAcceptance(),
+        applied: true,
+      })
+    );
+    renderStudio();
+
+    fireEvent.click(
+      await screen.findByRole('button', { name: 'conversation.creativeStudio.workspace.proposals.accept' })
+    );
+
+    await waitFor(() =>
+      expect(mocks.directorDraftRequest?.prompt).toBe(
+        'conversation.creativeStudio.workspace.proposals.continueJourneyPrompt'
+      )
+    );
+    expect(mocks.bridge.prepareProjectReferences.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.prepareSubmission.invoke).not.toHaveBeenCalled();
+    expect(mocks.bridge.confirmSubmission.invoke).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('studio-spend-gate')).toBeNull();
+  });
+
   it('adds the committed next action to the newest accepted Director receipt after exact status arrives', async () => {
     const acceptedProject = projectReadyForProduction();
     acceptedProject.revision = 4;
@@ -8480,15 +8735,23 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     );
 
     const receipt = await findProposalReceipt('accepted');
-    expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
+    expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames');
+
+    mockSupportedProject(acceptedProject);
+    mocks.bridge.projectWorkspaceStatusFixture.invoke.mockResolvedValue(
+      ok({ ...workspaceStatus(acceptedProject), projectRevision: acceptedProject.revision - 1 })
+    );
+    act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
+
+    await waitFor(() => expect(mocks.bridge.getProjectWorkspace.invoke).toHaveBeenCalledTimes(2));
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
 
     mockSupportedProject(acceptedProject);
     act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
 
     await waitFor(() => {
       const currentReceipt = document.querySelector<HTMLElement>('[data-studio-proposal-receipt="accepted"]');
-      expect(currentReceipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
-      expect(currentReceipt).toHaveTextContent('conversation.creativeStudio.workspace.views.board');
+      expect(currentReceipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames');
     });
     expect(
       screen.getByRole('navigation', { name: 'conversation.creativeStudio.workspace.views.title' })
@@ -8502,7 +8765,7 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     );
     await waitFor(() =>
       expect(document.querySelector('[data-studio-next-action-announcement]')).toHaveTextContent(
-        'conversation.creativeStudio.workspace.views.guidance.nextInView'
+        'conversation.creativeStudio.workspace.views.guidance.action.frames'
       )
     );
 
@@ -8538,7 +8801,11 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     mocks.bridge.getProjectStatus.invoke.mockClear();
     mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(blockedStatus));
     act(() => mocks.listeners.projectUpdated?.({ projectId: acceptedProject.id, projectRevision: 4 }));
-    await waitFor(() => expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement());
+    await waitFor(() =>
+      expect(document.querySelector('[data-studio-next-action-announcement]')).toHaveTextContent(
+        'conversation.creativeStudio.workspace.views.guidance.action.frames'
+      )
+    );
 
     mocks.bridge.getProjectStatus.invoke.mockClear();
     mocks.bridge.getProjectStatus.invoke.mockResolvedValueOnce(ok(projectStatus(acceptedProject)));
@@ -8550,7 +8817,9 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
         'true'
       )
     );
-    expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
+    expect(document.querySelector('[data-studio-next-action-announcement]')).toHaveTextContent(
+      'conversation.creativeStudio.workspace.views.guidance.action.frames'
+    );
 
     const changedProject = { ...acceptedProject, revision: 5, updatedAt: '2026-01-01T00:00:06.000Z' };
     mockSupportedProject(changedProject);
@@ -9186,12 +9455,10 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     await waitFor(() => expect(mocks.bridge.getProjectStatus.invoke).toHaveBeenCalled());
     if (expectsGuidance) {
       await waitFor(() =>
-        expect(receipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView')
+        expect(receipt).toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames')
       );
-      expect(receipt).toHaveTextContent('conversation.creativeStudio.workspace.views.board');
     } else {
-      expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.nextInView');
-      expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.board');
+      expect(receipt).not.toHaveTextContent('conversation.creativeStudio.workspace.views.guidance.action.frames');
     }
     expect(document.querySelector('[data-studio-next-action-announcement]')).toBeEmptyDOMElement();
   });
@@ -9782,26 +10049,32 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
     }
   );
 
-  it('prefills an editable exact-ID re-propose turn without applying or sending it', async () => {
-    const advanced = { ...project(), revision: 4 };
-    const stale = staleProposal(proposal(), 4);
-    mockSupportedProject(advanced);
-    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([stale], 4)));
+  it('keeps the selected proposal exact but private when several proposal cards are visible', async () => {
+    const authority = { ...project(), revision: 4 };
+    const first = staleProposal(proposal(), 4);
+    const second = staleProposal({ ...proposal(), id: 'proposal_2' }, 4);
+    mockSupportedProject(authority);
+    mocks.bridge.listProposals.invoke.mockResolvedValue(ok(proposalCatalog([first, second], 4)));
     renderStudio('/studio/project_1/board');
-    await screen.findByTestId('studio-proposal-proposal_1');
+    fireEvent.click((await screen.findByTestId('studio-terminal-proposals')).querySelector('button')!);
+    await screen.findByTestId('studio-proposal-proposal_2');
     const directorToggle = document.querySelector<HTMLButtonElement>('[data-studio-director-toggle]')!;
     expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
     fireEvent.click(directorToggle);
     await waitFor(() => expect(directorToggle).toHaveAttribute('aria-expanded', 'true'));
     fireEvent.click(
-      within(screen.getByTestId('studio-proposal-proposal_1')).getByRole('button', {
+      within(screen.getByTestId('studio-proposal-proposal_2')).getByRole('button', {
         name: 'conversation.creativeStudio.workspace.proposals.requestUpdated',
       })
     );
 
     await waitFor(() => expect(mocks.directorDraftRequest).not.toBeNull());
-    expect(mocks.directorDraftRequest?.prompt).toContain('proposals.reproposalPrompt');
-    expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1');
+    expect(mocks.directorDraftRequest).toMatchObject({
+      prompt: 'conversation.creativeStudio.workspace.proposals.reproposalPrompt',
+      proposalTargetId: 'proposal_2',
+    });
+    expect(mocks.directorDraftRequest?.prompt).not.toContain('proposal_2');
+    expect(mocks.directorDraftRequest?.prompt).not.toContain('proposal_1');
     expect(directorToggle).toHaveAttribute('aria-expanded', 'true');
     expect(mocks.bridge.acceptProposal.invoke).not.toHaveBeenCalled();
     expect(mocks.bridge.rejectProposal.invoke).not.toHaveBeenCalled();
@@ -9843,7 +10116,8 @@ describe('StudioPage schema-5 cutover', { timeout: STUDIO_PAGE_DOM_TIMEOUT_MS },
       })
     );
 
-    await waitFor(() => expect(mocks.directorDraftRequest?.prompt).toContain('proposal_1'));
+    await waitFor(() => expect(mocks.directorDraftRequest?.proposalTargetId).toBe('proposal_1'));
+    expect(mocks.directorDraftRequest?.prompt).not.toContain('proposal_1');
     expect(mocks.bridge.applyAuthoringBatch.invoke).toHaveBeenCalledWith({
       projectId: 'project_1',
       expectedRevision: 3,

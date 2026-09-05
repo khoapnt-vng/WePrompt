@@ -881,6 +881,9 @@
     "workspace": {
       "views": {
         "references": "參考圖",
+        "table": "故事線",
+        "board": "畫面與影片",
+        "cut": "剪輯",
         "status": {
           "next": "下一步"
         },
@@ -888,8 +891,31 @@
           "noReferences": "未規劃任何參考圖工作，因此可以跳過此檢視。",
           "noStoryboard": "分鏡中還沒有 Beat 或 Shot。",
           "noTakes": "{{view}} 中目前還沒有鏡次 — {{total}} 個 Shot 中已有 {{current}} 個準備就緒。",
+          "frameProgress": "製作級畫面：{{current}} / {{total}} 已就緒。",
+          "videoProgress": "影片鏡次：{{current}} / {{total}} 已就緒。",
           "nextInView": "下一步：繼續在 {{view}} 中操作。",
-          "nextStage": "下一步：在專案設定中完成 {{stage}}。"
+          "nextStage": "下一步：在專案設定中完成 {{stage}}。",
+          "action": {
+            "filmSetup": "先完成創作簡報並選擇圖像和影片引擎，再建立故事。",
+            "storyline": "先與 Director 確認創作方向，再建立並核准故事線和鏡頭計畫，然後製作視覺參考圖。",
+            "references": "產生剩餘的 {{remaining}} 個視覺參考圖，並確保每個都有目前圖像。",
+            "bindings": "為剩餘的 {{remaining}} 個 Shot 逐一指派目前參考圖，或明確選擇不使用參考圖。",
+            "frames": "產生剩餘的 {{remaining}} 個目前高擬真畫面，再逐一檢查是否符合各 Shot 的視覺目標。",
+            "promoteFrame": "在產生影片鏡次前，將剩餘的 {{remaining}} 個已檢查畫面設為硬切後開始之影片的首幀。",
+            "videos": "產生剩餘的 {{remaining}} 個影片鏡次。硬切後開始的 Shot 使用所選首幀；相連的 Shot 從所選剪輯點顯示的前一 Shot 精確末幀繼續。",
+            "finishCut": "完成剪輯：匯出前檢查節奏、連續性和聲音。",
+            "reviewCut": "所有影片鏡次都已就緒。匯出前請開啟剪輯並檢查完整序列。"
+          },
+          "cta": {
+            "filmSetup": "開啟影片設定",
+            "storyline": "開啟故事線",
+            "references": "開啟參考圖",
+            "bindings": "檢查鏡頭參考圖",
+            "frames": "開啟畫面產生",
+            "promoteFrame": "檢查影片首幀",
+            "videos": "開啟影片產生",
+            "cut": "開啟剪輯"
+          }
         }
       },
       "referenceWorkflow": {
@@ -950,14 +976,14 @@
             "activeAssetConsumerRetained": "保留的 Shot {{shotId}} 的{{purpose}}工作正在使用這張照片。工作解決前，照片會保持鎖定。",
             "activeAssetConsumerOther": "{{purpose}}工作（{{jobId}}）正在使用這張照片。工作解決前，照片會保持鎖定。",
             "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}工作已在供應商完成，但結果未能下載。請在此重試；復原成功前，照片會保持鎖定。",
-            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從 Board 垃圾桶還原 Shot 以檢查復原；復原成功前，照片會保持鎖定。",
-            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 內 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從 Board 垃圾桶還原 Beat 以檢查復原；復原成功前，照片會保持鎖定。",
+            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從已刪除項目中還原 Shot 以檢查復原；復原成功前，照片會保持鎖定。",
+            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 內 Shot {{shotId}} 的{{purpose}}工作已在供應商完成，但結果未能下載。請從已刪除項目中還原 Beat 以檢查復原；復原成功前，照片會保持鎖定。",
             "downloadRecoveryOther": "{{purpose}}工作（{{jobId}}）已在供應商完成，但結果未能下載。請在此重試；復原成功前，照片會保持鎖定。",
             "invalidAuthority": "目前照片的參考資料不一致。請重新載入專案並檢查此參考，再嘗試移除。",
-            "reviewInBoard": "在 Board 中檢查"
+            "reviewInBoard": "在畫面與影片中檢查"
           }
         },
-        "description": "先產生角色的目前標準圖，再產生重複出現的背景圖。產生分鏡或首幀之前，請將目前參考圖明確綁定到每個鏡頭。",
+        "description": "先產生角色的目前標準圖，再產生重複出現的背景圖。產生高擬真畫面或首幀之前，請將目前參考圖明確綁定到每個鏡頭。",
         "generationScope": "產生範圍",
         "characters": {
           "title": "角色",
@@ -1000,7 +1026,7 @@
         "currentProgress": "已產生 {{current}} / {{total}} 個參考",
         "bindings": {
           "title": "Shot 綁定",
-          "description": "選擇每個 Shot 的 Board 面板和首格所使用的確切目前角色與背景。",
+          "description": "選擇每個 Shot 的高擬真畫面和首幀所使用的確切目前角色與背景。",
           "empty": "沒有需要綁定的使用中 Shot。",
           "shot": "Shot {{position}}",
           "unassigned": "此 Shot 尚未決定參考。",
@@ -1049,23 +1075,23 @@
         },
         "columns": {
           "length": "合計",
-          "panel": "分鏡",
+          "panel": "畫面",
           "story": "故事"
         },
         "plannedPending": "暫無計畫總時長",
         "panel": {
-          "openDetails": "開啟 {{title}} 的分鏡",
-          "closeDetails": "關閉 {{title}} 的分鏡",
+          "openDetails": "開啟 {{title}} 的畫面",
+          "closeDetails": "關閉 {{title}} 的畫面",
           "cardLabel": "Shot {{position}}：{{status}}",
           "shotDetails": "鏡頭 {{position}} 詳細資料",
-          "head": "鏈首",
+          "head": "從首幀開始",
           "status": {
-            "missing": "未繪製",
+            "missing": "未產生",
             "current": "目前",
             "stale": "已過期",
             "statusPending": "狀態待定",
             "queued": "已排入佇列",
-            "drawing": "繪製中",
+            "drawing": "產生中",
             "needsAttention": "需要處理",
             "failed": "失敗",
             "cancelled": "已取消"
@@ -1105,37 +1131,40 @@
         }
       },
       "board": {
+        "ariaLabel": "畫面與影片製作",
         "controls": {
-          "label": "導演分鏡控制",
-          "progress": "已繪製 {{drawn}} / {{total}} 個分鏡",
-          "progressLabel": "分鏡板完成度",
+          "label": "畫面與影片製作",
+          "progress": "{{current}} / {{total}} 個高保真畫面已就緒",
+          "progressLabel": "高保真畫面完成度",
+          "videoProgress": "{{current}} / {{total}} 個影片鏡次已就緒",
+          "videoProgressLabel": "影片鏡次完成度",
           "staleCount": "{{count}} 個已過期",
           "busyCount": "{{count}} 個進行中",
-          "stop": "停止繪製",
-          "stopNote": "停止操作會在可能的情況下要求取消。已完成的分鏡和已產生的費用會保留。",
-          "drawNext": "繪製下一批（{{count}}）"
+          "stop": "停止畫面產生",
+          "stopNote": "停止操作會在可能的情況下要求取消。已完成的畫面和已產生的費用會保留。",
+          "drawNext": "產生下一批畫面（{{count}}）"
         },
         "panel": {
-          "beatActions": "導演分鏡控制 · {{title}}",
-          "drawMissing": "繪製缺漏項目（{{count}}）",
-          "redrawBeat": "重新繪製 Beat · 付費",
+          "beatActions": "{{title}} 的操作",
+          "drawMissing": "產生缺漏畫面（{{count}}）",
+          "redrawBeat": "重新產生 Beat 畫面 · 付費",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "redrawShot": "重新繪製 Shot {{position}} · 付費",
-          "useAsFirstFrame": "將 Shot {{position}} 分鏡用作首幀",
+          "redrawShot": "重新產生 Shot {{position}} 畫面 · 付費",
+          "useAsFirstFrame": "將 Shot {{position}} 畫面用作影片首幀",
           "status": {
-            "missing": "未繪製",
+            "missing": "未產生",
             "current": "目前",
             "stale": "已過期",
             "statusPending": "狀態待定",
             "queued": "已排入佇列",
-            "drawing": "繪製中",
+            "drawing": "產生中",
             "needsAttention": "需要處理",
             "failed": "失敗",
             "cancelled": "已取消"
           }
         },
-        "statusUnavailable": "目前的 Board 順序不完整或不明確。請重新整理專案後再檢查 Shot 卡片。",
-        "renderedCount": "{{total}} 個中已算繪 {{count}} 個",
+        "statusUnavailable": "目前的 Shot 順序不完整或不明確。請重新整理專案後再檢查 Shot 卡片。",
+        "renderedCount": "{{count}} / {{total}} 個影片鏡次已就緒",
         "staleCount": "{{count}} 個已過時的 Shot",
         "staleCount_one": "{{count}} 個已過時的 Shot",
         "staleCount_other": "{{count}} 個已過時的 Shot",
@@ -1148,14 +1177,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "目前的 Shot 影片",
           "stale": "已過時",
-          "chainHead": "鏡頭鏈起點",
+          "chainHead": "從首幀開始",
           "chainAfter": "接在 {{beat}}.{{shot}} 之後",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "此專案修訂版的阻擋詳情無法使用。",
           "blocker": {
             "heading": "受以下因素阻擋",
-            "referenceBindingTable": "產生前必須在 Table 中修正參考圖綁定。",
-            "reviewOnTable": "在 Table 中檢查參考圖",
+            "referenceBindingTable": "產生前必須在故事線中修正參考圖選擇。",
+            "reviewOnTable": "在故事線中檢查參考圖",
             "cause": {
               "routeInventoryUnavailable": "引擎清單無法使用。",
               "routeNotSelected": "尚未選擇產生引擎。",
@@ -1288,7 +1317,8 @@
         "saveAndRequestUpdated": "儲存並準備更新提案",
         "reviewRuleDrafts": "檢查規則草稿",
         "reviewRuleDraftsFirst": "接受此規則提案前，請檢查或捨棄本機規則草稿。",
-        "reproposalPrompt": "請為我剛選取的提案準備更新版本。僅在內部使用 {{proposalId}} 來識別它，不要在回覆中提及此參照或任何技術步驟。",
+        "reproposalPrompt": "請為我剛選取的提案準備更新版本。",
+        "continueJourneyPrompt": "請根據目前 Studio 狀態繼續，並引導我完成下一步。",
         "chatDecisionBusy": "另一個審核操作仍在進行中。",
         "chatDirty": "核准此提案前，請儲存或重設與它衝突的草稿。",
         "chatNoPending": "目前沒有待處理的導演提案。",
@@ -1323,7 +1353,7 @@
           "aspectRatio": "長寬比",
           "resolution": "解析度",
           "targetDurationSeconds": "目標時長",
-          "boardStyle": "Board 風格",
+          "boardStyle": "視覺風格",
           "title": "標題",
           "story": "故事",
           "targetSeconds": "Beat 目標",
@@ -1366,7 +1396,7 @@
           "origin": {
             "generated": "已生成",
             "imported": "已匯入",
-            "board": "分鏡",
+            "board": "高擬真畫面",
             "inherited": "來自鏡頭 {{shot}}"
           },
           "current": "目前",
@@ -1476,8 +1506,8 @@
           "reviewSever": "審閱硬切…",
           "reviewRejoin": "審閱重新銜接…",
           "reviewSeverDescription": "硬切會讓鏡頭 {{shot}} 從符合條件的首幀開始；如有需要，會建立一個新首幀。確認後，將替換此鏡頭及其後所有連續鏡頭，直到下一個硬切。",
-          "reviewRejoinDescription": "重新銜接鏡頭 {{shot}} 會清除其首幀選擇，並使用鏡頭 {{previous}} 經裁剪後的最後一幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的連續鏡頭送交提供者。",
-          "segmentHead": "鏈首 · 從首幀開始",
+          "reviewRejoinDescription": "將鏡頭 {{shot}} 連接到前一鏡頭會清除其首幀選擇，並使用鏡頭 {{previous}} 在所選剪輯點的精確末幀。確認後，免費的畫面擷取可能會先完成，再將此鏡頭及其後直到下一個硬切的相連鏡頭送交產生。",
+          "segmentHead": "硬切後 · 從首幀開始",
           "continuous": "承接鏡頭 {{position}} 的最後一幀"
         },
         "coverage": {
@@ -1544,7 +1574,7 @@
       "controls": {
         "briefAndRulesTitle": "影片設定",
         "undoLabel": {
-          "promote_board_panel": "將分鏡用作首幀",
+          "promote_board_panel": "將畫面用作影片首幀",
           "set_reference_plan": "參考計畫",
           "amend_reference_plan": "新增背景",
           "set_reference_label": "參考名稱",
@@ -1560,29 +1590,31 @@
       "gate": {
         "predecessorVideoRetry": "確認前請檢查繼承的精確起始幀和 Shooting script。僅當首次供應商嘗試明確失敗時，才會預留一次自動重試。首次嘗試費用為 {{lower}}；確認的最高費用為 {{upper}}。",
         "purpose": {
-          "board_still": "分鏡",
+          "board_still": "高擬真畫面",
           "reference_image": "參考影像"
         },
         "promotion": {
-          "title": "將分鏡用作首幀",
-          "summary": "將 Shot {{shotId}} 的目前導演分鏡提升為首幀。此操作不會變更該 Shot 的連續性邊界。",
-          "impactNone": "沒有目前畫面依賴此幀。",
-          "impactIntro": "以下 {{count}} 個目前畫面仍可播放，但會變為已過期：",
-          "impactItem": "Shot {{shotId}} 的目前畫面",
-          "optionsLabel": "選擇如何處理目前畫面",
-          "promoteOnly": "僅提升 — 保留可播放但已過期的畫面",
+          "title": "使用此畫面",
+          "shotLocation": "Beat {{beatPosition}}「{{beatTitle}}」 · Shot {{shotPosition}}",
+          "shotFallback": "所選 Shot",
+          "summary": "將此畫面用作 {{shot}} 的影片首幀。此操作不會改變該 Shot 與前一 Shot 的連接方式。",
+          "impactNone": "沒有現有影片鏡次依賴此畫面。",
+          "impactIntro": "受影響的影片鏡次：{{count}} 個。它們仍可播放。此重新產生報價僅適用於片段中第一個 Shot 的目前鏡次。",
+          "impactItem": "{{shot}} 的影片鏡次",
+          "optionsLabel": "選擇是否立即重新產生此 Shot",
+          "promoteOnly": "僅使用此畫面 — 保留現有影片鏡次",
           "freePrice": "$0",
-          "promoteAndRerender": "提升並檢視確切的重新算圖工作",
+          "promoteAndRerender": "使用此畫面並檢查重新產生",
           "priceAfterReview": "下一步顯示價格",
-          "promoteOnlyAction": "免費提升",
-          "reviewPaidAction": "檢視重新算圖價格",
-          "paidUnavailable": "此片段的目前畫面過多，無法一次付費確認。仍可選擇僅提升。",
-          "headline": "提升 + 重新算圖 {{count}} 個 · {{cost}}",
-          "requiredWork": "所列重新算圖項目正是此次提升會使其過期的目前畫面。不包含缺漏的涵蓋內容。",
-          "confirm": "確認提升 + 重新算圖 {{count}} 個 · {{cost}}",
-          "promoted": "分鏡已提升。現有畫面仍可播放，並已標記為過期。",
-          "promoting": "正在提升分鏡…",
-          "confirmed": "分鏡已提升，並已開始重新算圖確認的畫面。",
+          "promoteOnlyAction": "使用此畫面 · $0",
+          "reviewPaidAction": "檢查重新產生價格",
+          "paidUnavailable": "此片段的現有影片鏡次過多，無法一次付費確認。仍可使用此畫面而不重新產生。",
+          "headline": "使用畫面 + 重新產生影片（{{count}} 個） · {{cost}}",
+          "requiredWork": "後續相連的 Shot 會等待前一個 Shot 新選定的結束幀，然後各自產生新報價供您審閱。",
+          "confirm": "使用畫面 + 重新產生目前影片（{{count}}）· {{cost}}",
+          "promoted": "畫面已選定。現有影片鏡次仍可播放，並已標記為待檢查。",
+          "promoting": "正在使用畫面…",
+          "confirmed": "畫面已選定，並已開始重新產生已確認的影片鏡次。",
           "close": "關閉"
         },
         "headline_one": "{{count}} 次生成 · {{cost}}",
@@ -1599,8 +1631,8 @@
         "continuity": {
           "severTitle": "審閱硬切",
           "rejoinTitle": "審閱重新銜接",
-          "severSummary": "此估價會將該鏡頭設為鏈頭，重用符合條件的首幀或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
-          "rejoinSummary": "此估價會清除該鏡頭的首幀選擇，並將其重新銜接到經裁剪的前序畫面。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片。",
+          "severSummary": "此估價會讓該鏡頭在硬切後開始，重用符合條件的首幀或在需要時建立一個，並替換直到下一個硬切之前所有受影響的影片。",
+          "rejoinSummary": "此估價會清除該鏡頭的首幀選擇，並將其連接到前一鏡頭在所選剪輯點的精確末幀。確認後，免費的畫面擷取可能會先完成，再送交直到下一個硬切之前的替換影片進行產生。",
           "severHeadline": "硬切 · {{count}} 次必要生成 · {{cost}}",
           "severHeadline_one": "硬切 · {{count}} 次必要生成 · {{cost}}",
           "severHeadline_other": "硬切 · {{count}} 次必要生成 · {{cost}}",

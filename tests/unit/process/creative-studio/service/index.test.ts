@@ -3901,6 +3901,7 @@ describe('CreativeStudioServiceV2', () => {
           boardPanels: boardJobs.map((job) => ({
             shotId: job.target.kind === 'shot' ? job.target.shotId : null,
             assetId: null,
+            newSpendSeedAssetId: null,
             producerJobId: null,
             latestJobId: job.id,
             staleCauses: [],
@@ -5967,7 +5968,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(admit).not.toHaveBeenCalled();
   });
 
-  it('atomically pins an exact Board panel and authorizes only selected takes in its segment', async () => {
+  it('atomically pins an exact Board panel and authorizes only its current segment head', async () => {
     const { project, board } = makeBoardPromotionProject();
     const harness = makeHarness(project);
     const boardBefore = structuredClone({
@@ -5989,10 +5990,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(prepared.withCascade).toBeNull();
     expect(
       prepared.baseOnly.baseItems.map(({ target, purpose }) => [target.kind === 'shot' ? target.shotId : null, purpose])
-    ).toEqual([
-      ['clip_1', 'video_take'],
-      ['clip_2', 'video_take'],
-    ]);
+    ).toEqual([['clip_1', 'video_take']]);
 
     await expect(
       harness.service.confirmSubmission({
@@ -6027,15 +6025,6 @@ describe('CreativeStudioServiceV2', () => {
         status: 'queued_local',
         requestSnapshot: expect.objectContaining({
           conditioningInput: { kind: 'seed_still', assetId: board.id },
-        }),
-      }),
-      expect.objectContaining({
-        target: { kind: 'shot', shotId: 'clip_2' },
-        purpose: 'video_take',
-        status: 'waiting_for_conditioning',
-        requestPlan: expect.objectContaining({
-          kind: 'after_take_selection',
-          dependency: expect.objectContaining({ kind: 'authorized_predecessor', predecessorShotId: 'clip_1' }),
         }),
       }),
     ]);
@@ -7757,8 +7746,22 @@ describe('CreativeStudioServiceV2', () => {
       { shotId: 'clip_2', jobIds: [] },
     ]);
     expect(workspace.boardPanels).toEqual([
-      { shotId: 'clip_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-      { shotId: 'clip_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+      {
+        shotId: 'clip_1',
+        assetId: null,
+        newSpendSeedAssetId: null,
+        producerJobId: null,
+        latestJobId: null,
+        staleCauses: [],
+      },
+      {
+        shotId: 'clip_2',
+        assetId: null,
+        newSpendSeedAssetId: null,
+        producerJobId: null,
+        latestJobId: null,
+        staleCauses: [],
+      },
     ]);
     expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();

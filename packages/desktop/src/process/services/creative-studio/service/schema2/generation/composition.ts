@@ -123,7 +123,7 @@ const instructionProfile = (
   source: StudioGenerationCompositionInputSnapshotV2['source']
 ): string => {
   if (!ADAPTER_IDS.has(route.adapterId)) throw new TypeError('route.adapterId is invalid');
-  if (purpose === 'board_still') return `${route.adapterId}.board-still.v1`;
+  if (purpose === 'board_still') return `${route.adapterId}.board-still.v2`;
   if (purpose === 'seed_still') return `${route.adapterId}.seed-still.v1`;
   if (purpose === 'video_take') return `${route.adapterId}.video-take.v1`;
   if (source.kind !== 'project_reference') throw new TypeError('reference_image requires a reference source');
@@ -139,7 +139,7 @@ const referenceOutputInstruction = (kind: 'character' | 'background'): string =>
 
 const shotOutputInstruction = (purpose: Exclude<StudioJobPurpose, 'reference_image'>): string => {
   if (purpose === 'board_still') {
-    return 'Create exactly one production storyboard panel for exactly this Shot. Do not create a grid, contact sheet, split frame, caption, label, border, or UI.';
+    return "Create exactly one production-ready first-frame image for exactly this Shot. Depict the Shot's opening moment and state: show the composition, subjects, poses, camera position, and environment at the exact instant from which the authored action and camera movement begin, not a representative midpoint or ending. Render a final high-fidelity image suitable for direct promotion to the Shot's first frame. Do not lower detail or treat this as a disposable planning panel. Do not use a sketch, line-art, colour-key, storyboard, animatic, rough-concept, or placeholder aesthetic unless the authored final visual language explicitly requires that aesthetic as the finished production style. Do not create a grid, contact sheet, split frame, caption, label, border, or UI.";
   }
   if (purpose === 'seed_still') {
     return 'Create exactly one production-ready first-frame still for this Shot. Do not add captions, borders, UI, or alternate panels.';
@@ -147,11 +147,14 @@ const shotOutputInstruction = (purpose: Exclude<StudioJobPurpose, 'reference_ima
   return 'Create exactly one continuous video take for this Shot. Follow the authored movement, camera, performance, sound, and dialogue details without adding captions, borders, or UI.';
 };
 
+/**
+ * Validates the persisted legacy style while keeping it from degrading new Board output.
+ * board-still.v2 retains the enum as frozen schema history, but every value now receives the
+ * same production-fidelity direction from the project's authored intent and current references.
+ */
 const boardStyleInstruction = (style: StudioBoardStyleV2): string => {
   if (!STUDIO_BOARD_STYLES_V2.includes(style)) throw new TypeError('boardStyle is invalid');
-  if (style === 'grey_tone') return 'Use a restrained grey-tone storyboard drawing with clear staging and silhouettes.';
-  if (style === 'line_art') return 'Use clean line-art with sparse shading and clear staging and silhouettes.';
-  return 'Use a simplified colour-key treatment with a limited palette and clear staging and silhouettes.';
+  return "Follow the project's final intended visual language from the Project Brief, Rules, Story, Shooting Script, and any Approved References. Render at full production fidelity with fully resolved lighting, materials, textures, depth, and fine detail, suitable for direct use as this Shot's first frame.";
 };
 
 const composePrompt = (inputs: StudioGenerationCompositionInputSnapshotV2): string => {
@@ -192,7 +195,7 @@ const composePrompt = (inputs: StudioGenerationCompositionInputSnapshotV2): stri
     ...(rules.length === 0 ? [] : [rules]),
     ...sourceSections,
     ...(referenceGuidance.length === 0 ? [] : [`APPROVED REFERENCES\n${referenceGuidance.join('\n')}`]),
-    ...(inputs.boardStyle === null ? [] : [`BOARD STYLE\n${boardStyleInstruction(inputs.boardStyle)}`]),
+    ...(inputs.boardStyle === null ? [] : [`PRODUCTION VISUAL DIRECTION\n${boardStyleInstruction(inputs.boardStyle)}`]),
     `RENDER SETTINGS\n${settings.join('\n')}`,
     `OUTPUT\n${output}`,
   ];

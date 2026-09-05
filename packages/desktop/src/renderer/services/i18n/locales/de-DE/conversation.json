@@ -882,6 +882,9 @@
     "workspace": {
       "views": {
         "references": "Referenzen",
+        "table": "Handlung",
+        "board": "Frames & Video",
+        "cut": "Schnitt",
         "status": {
           "next": "Als Nächstes"
         },
@@ -889,8 +892,31 @@
           "noReferences": "Es ist keine Referenzarbeit geplant, daher kann diese Ansicht übersprungen werden.",
           "noStoryboard": "Das Storyboard enthält noch keine Beats oder Shots.",
           "noTakes": "In {{view}} gibt es noch keine aktuellen Takes — {{current}} von {{total}} Shots sind bereit.",
+          "frameProgress": "Produktionsreife Frames: {{current}} von {{total}} bereit.",
+          "videoProgress": "Video-Takes: {{current}} von {{total}} bereit.",
           "nextInView": "Als Nächstes: in {{view}} fortfahren.",
-          "nextStage": "Als Nächstes: {{stage}} in den Projekteinstellungen abschließen."
+          "nextStage": "Als Nächstes: {{stage}} in den Projekteinstellungen abschließen.",
+          "action": {
+            "filmSetup": "Briefing abschließen und Bild- sowie Video-Engine wählen, bevor die Handlung entsteht.",
+            "storyline": "Stimme die kreative Richtung mit dem Director ab. Erstelle und bestätige danach die Handlung und den Shot-Plan, bevor visuelle Referenzen entstehen.",
+            "references": "Die übrigen {{remaining}} visuellen Referenzen generieren und sicherstellen, dass jede ein aktuelles Bild hat.",
+            "bindings": "Weisen Sie jedem der übrigen {{remaining}} Shots aktuelle Referenzen zu oder wählen Sie ausdrücklich keine Referenzen.",
+            "frames": "Generieren Sie die übrigen {{remaining}} aktuellen Hi-Fi-Frames und prüfen Sie jeden als visuelles Ziel seines Shots.",
+            "promoteFrame": "Verwenden Sie die übrigen {{remaining}} geprüften Frames als erste Frames für Videos, die nach einem Schnitt beginnen.",
+            "videos": "Generieren Sie die übrigen {{remaining}} Video-Takes. Shots nach einem Schnitt verwenden den gewählten ersten Frame; verbundene Shots setzen mit dem exakten letzten Frame am gewählten Schnittpunkt fort.",
+            "finishCut": "Den Schnitt fertigstellen: Timing, Kontinuität und Ton vor dem Export prüfen.",
+            "reviewCut": "Alle Video-Takes sind bereit. Den Schnitt öffnen und die fertige Sequenz vor dem Export prüfen."
+          },
+          "cta": {
+            "filmSetup": "Film-Setup öffnen",
+            "storyline": "Handlung öffnen",
+            "references": "Referenzen öffnen",
+            "bindings": "Shot-Referenzen prüfen",
+            "frames": "Frame-Generierung öffnen",
+            "promoteFrame": "Erste Video-Frames prüfen",
+            "videos": "Video-Generierung öffnen",
+            "cut": "Schnitt öffnen"
+          }
         }
       },
       "referenceWorkflow": {
@@ -951,14 +977,14 @@
             "activeAssetConsumerRetained": "„{{purpose}}“ für den aufbewahrten Shot {{shotId}} verwendet genau dieses Foto. Es bleibt gesperrt, solange der Auftrag ungelöst ist.",
             "activeAssetConsumerOther": "Der Auftrag „{{purpose}}“ ({{jobId}}) verwendet genau dieses Foto. Es bleibt gesperrt, solange der Auftrag ungelöst ist.",
             "downloadRecovery": "„{{purpose}}“ für Beat {{beatPosition}}, Shot {{shotPosition}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Wiederhole den Download hier; das Foto bleibt gesperrt, bis die Wiederherstellung erfolgreich ist.",
-            "downloadRecoveryRetainedShot": "„{{purpose}}“ für den aufbewahrten Shot {{shotId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Shot aus dem Board-Papierkorb wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
-            "downloadRecoveryRetainedBeat": "„{{purpose}}“ für Shot {{shotId}} im aufbewahrten Beat {{beatId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Beat aus dem Board-Papierkorb wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
+            "downloadRecoveryRetainedShot": "„{{purpose}}“ für den aufbewahrten Shot {{shotId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Shot aus den entfernten Elementen wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
+            "downloadRecoveryRetainedBeat": "„{{purpose}}“ für Shot {{shotId}} im aufbewahrten Beat {{beatId}} wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Stelle den Beat aus den entfernten Elementen wieder her, um die Wiederherstellung zu prüfen; das Foto bleibt bis zum Erfolg gesperrt.",
             "downloadRecoveryOther": "Der Auftrag „{{purpose}}“ ({{jobId}}) wurde beim Anbieter abgeschlossen, aber das Ergebnis wurde nicht heruntergeladen. Wiederhole den Download hier; das Foto bleibt gesperrt, bis die Wiederherstellung erfolgreich ist.",
             "invalidAuthority": "Die Referenzdaten des aktuellen Fotos sind inkonsistent. Lade das Projekt neu und prüfe diese Referenz, bevor du das Entfernen erneut versuchst.",
-            "reviewInBoard": "Im Board prüfen"
+            "reviewInBoard": "Unter „Frames & Video“ prüfen"
           }
         },
-        "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie das Board oder das erste Bild generieren.",
+        "description": "Erzeugen Sie zuerst kanonische Charakterbilder und danach Bilder wiederkehrender Hintergründe. Binden Sie die aktuellen Referenzen an jeden Shot, bevor Sie den produktionsreifen Frame oder das erste Bild generieren.",
         "generationScope": "Generierungsumfang",
         "characters": {
           "title": "Charaktere",
@@ -1001,7 +1027,7 @@
         "currentProgress": "{{current}} von {{total}} Referenzen erzeugt",
         "bindings": {
           "title": "Shot-Zuordnungen",
-          "description": "Wähle die exakten aktuellen Figuren und den Hintergrund, die jeder Shot für Board-Panel und erstes Bild verwendet.",
+          "description": "Wähle die exakten aktuellen Figuren und den Hintergrund, die jeder Shot für seinen produktionsreifen Frame und sein erstes Bild verwendet.",
           "empty": "Es gibt keine aktiven Shots zum Zuordnen.",
           "shot": "Shot {{position}}",
           "unassigned": "Für diesen Shot wurde noch keine Referenzentscheidung getroffen.",
@@ -1050,23 +1076,23 @@
         },
         "columns": {
           "length": "Summe",
-          "panel": "Panel",
+          "panel": "Frame",
           "story": "Story"
         },
         "plannedPending": "Keine geplante Summe",
         "panel": {
-          "openDetails": "Board-Panels für {{title}} öffnen",
-          "closeDetails": "Board-Panels für {{title}} schließen",
+          "openDetails": "Frames für {{title}} öffnen",
+          "closeDetails": "Frames für {{title}} schließen",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Details zu Shot {{position}}",
-          "head": "Kettenanfang",
+          "head": "Beginnt mit erstem Bild",
           "status": {
-            "missing": "Nicht gezeichnet",
+            "missing": "Nicht generiert",
             "current": "Aktuell",
             "stale": "Veraltet",
             "statusPending": "Status ausstehend",
             "queued": "In Warteschlange",
-            "drawing": "Wird gezeichnet",
+            "drawing": "Wird generiert",
             "needsAttention": "Eingriff erforderlich",
             "failed": "Fehlgeschlagen",
             "cancelled": "Abgebrochen"
@@ -1106,37 +1132,40 @@
         }
       },
       "board": {
+        "ariaLabel": "Frame- und Video-Produktion",
         "controls": {
-          "label": "Director-Board-Steuerung",
-          "progress": "{{drawn}} von {{total}} Panels gezeichnet",
-          "progressLabel": "Board-Fortschritt",
+          "label": "Frame- und Video-Produktion",
+          "progress": "{{current}} von {{total}} Hi-Fi-Frames bereit",
+          "progressLabel": "Hi-Fi-Frame-Fortschritt",
+          "videoProgress": "{{current}} von {{total}} Video-Takes bereit",
+          "videoProgressLabel": "Video-Take-Fortschritt",
           "staleCount": "{{count}} veraltet",
           "busyCount": "{{count}} in Arbeit",
-          "stop": "Zeichnen stoppen",
-          "stopNote": "Stopp fordert, soweit möglich, den Abbruch an. Fertige Panels und bereits angefallene Kosten bleiben bestehen.",
-          "drawNext": "Nächsten Stapel zeichnen ({{count}})"
+          "stop": "Frame-Generierung stoppen",
+          "stopNote": "Stopp fordert, soweit möglich, den Abbruch an. Fertige Frames und bereits angefallene Kosten bleiben bestehen.",
+          "drawNext": "Nächste Frames generieren ({{count}})"
         },
         "panel": {
-          "beatActions": "Director-Board-Steuerung · {{title}}",
-          "drawMissing": "Fehlende zeichnen ({{count}})",
-          "redrawBeat": "Beat neu zeichnen · kostenpflichtig",
+          "beatActions": "Aktionen für {{title}}",
+          "drawMissing": "Fehlende Frames generieren ({{count}})",
+          "redrawBeat": "Beat-Frames neu generieren · kostenpflichtig",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "redrawShot": "Shot {{position}} neu zeichnen · kostenpflichtig",
-          "useAsFirstFrame": "Panel von Shot {{position}} als erstes Bild verwenden",
+          "redrawShot": "Frame von Shot {{position}} neu generieren · kostenpflichtig",
+          "useAsFirstFrame": "Frame von Shot {{position}} als ersten Video-Frame verwenden",
           "status": {
-            "missing": "Nicht gezeichnet",
+            "missing": "Nicht generiert",
             "current": "Aktuell",
             "stale": "Veraltet",
             "statusPending": "Status ausstehend",
             "queued": "In Warteschlange",
-            "drawing": "Wird gezeichnet",
+            "drawing": "Wird generiert",
             "needsAttention": "Eingriff erforderlich",
             "failed": "Fehlgeschlagen",
             "cancelled": "Abgebrochen"
           }
         },
-        "statusUnavailable": "Die aktuelle Reihenfolge im Board ist unvollständig oder nicht eindeutig. Aktualisiere das Projekt, bevor du die Shot-Kacheln prüfst.",
-        "renderedCount": "{{count}} von {{total}} gerendert",
+        "statusUnavailable": "Die aktuelle Shot-Reihenfolge ist unvollständig oder nicht eindeutig. Aktualisiere das Projekt, bevor du die Shot-Karten prüfst.",
+        "renderedCount": "{{count}} von {{total}} Video-Takes bereit",
         "staleCount": "{{count}} veraltete Shots",
         "staleCount_one": "{{count}} veralteter Shot",
         "staleCount_other": "{{count}} veraltete Shots",
@@ -1149,14 +1178,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "Aktuelles Shot-Video",
           "stale": "Veraltet",
-          "chainHead": "Kettenanfang",
+          "chainHead": "Beginnt mit erstem Bild",
           "chainAfter": "Nach {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "Blockerdetails sind für diese Projektversion nicht verfügbar.",
           "blocker": {
             "heading": "Blockiert durch",
-            "referenceBindingTable": "Die Referenzzuordnung muss vor der Generierung in der Table korrigiert werden.",
-            "reviewOnTable": "Referenzen in der Table prüfen",
+            "referenceBindingTable": "Die Referenzauswahl muss vor der Generierung in der Handlung korrigiert werden.",
+            "reviewOnTable": "Referenzen in der Handlung prüfen",
             "cause": {
               "routeInventoryUnavailable": "Das Engine-Inventar ist nicht verfügbar.",
               "routeNotSelected": "Es ist keine Generierungs-Engine ausgewählt.",
@@ -1289,7 +1318,8 @@
         "saveAndRequestUpdated": "Speichern und aktualisierten Vorschlag vorbereiten",
         "reviewRuleDrafts": "Regelentwürfe prüfen",
         "reviewRuleDraftsFirst": "Prüfe oder verwirf den lokalen Regelentwurf, bevor du diesen Regelvorschlag annimmst.",
-        "reproposalPrompt": "Erstelle eine aktualisierte Fassung des von mir ausgewählten Vorschlags. Verwende {{proposalId}} nur zur internen Zuordnung und erwähne weder diese Referenz noch technische Schritte in deiner Antwort.",
+        "reproposalPrompt": "Erstelle eine aktualisierte Fassung des von mir ausgewählten Vorschlags.",
+        "continueJourneyPrompt": "Fahre mit dem aktuellen Studio-Status fort und führe mich zum nächsten Schritt.",
         "chatDecisionBusy": "Eine andere geprüfte Aktion läuft noch.",
         "chatDirty": "Speichere oder verwirf die Entwürfe, die mit diesem Vorschlag kollidieren, bevor du ihn annimmst.",
         "chatNoPending": "Es gibt keinen ausstehenden Regievorschlag.",
@@ -1324,7 +1354,7 @@
           "aspectRatio": "Seitenverhältnis",
           "resolution": "Auflösung",
           "targetDurationSeconds": "Zieldauer",
-          "boardStyle": "Board-Stil",
+          "boardStyle": "Visueller Stil",
           "title": "Titel",
           "story": "Story",
           "targetSeconds": "Beat-Ziel",
@@ -1367,7 +1397,7 @@
           "origin": {
             "generated": "Generiert",
             "imported": "Importiert",
-            "board": "Storyboard",
+            "board": "Produktionsreifer Frame",
             "inherited": "Aus Shot {{shot}}"
           },
           "current": "Aktuell",
@@ -1477,8 +1507,8 @@
           "reviewSever": "Harten Schnitt prüfen…",
           "reviewRejoin": "Wiederverknüpfung prüfen…",
           "reviewSeverDescription": "Ein harter Schnitt lässt Shot {{shot}} mit einem geeigneten ersten Bild beginnen und erstellt bei Bedarf eines. Die Bestätigung ersetzt diesen Shot und alle fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt.",
-          "reviewRejoinDescription": "Beim Wiederverknüpfen von Shot {{shot}} wird die Auswahl des ersten Bildes gelöscht und das letzte, schnittgenaue Bild von Shot {{previous}} verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die fortlaufenden nachfolgenden Shots bis zum nächsten harten Schnitt übermittelt werden.",
-          "segmentHead": "Kettenanfang · Beginnt mit dem ersten Bild",
+          "reviewRejoinDescription": "Beim Verbinden von Shot {{shot}} mit dem vorherigen Shot wird die Auswahl des ersten Bildes gelöscht und exakt das letzte Bild von Shot {{previous}} am gewählten Schnittpunkt verwendet. Nach der Bestätigung kann die kostenlose Bildextraktion abgeschlossen werden, bevor dieser Shot und die verbundenen nachfolgenden Shots bis zum nächsten harten Schnitt zur Generierung gesendet werden.",
+          "segmentHead": "Nach hartem Schnitt · Beginnt mit dem ersten Bild",
           "continuous": "Setzt das letzte Bild von Shot {{position}} fort"
         },
         "coverage": {
@@ -1545,7 +1575,7 @@
       "controls": {
         "briefAndRulesTitle": "Film-Einrichtung",
         "undoLabel": {
-          "promote_board_panel": "Panel als erstes Bild verwenden",
+          "promote_board_panel": "Frame als erstes Videobild verwenden",
           "set_reference_plan": "Referenzplan",
           "amend_reference_plan": "Hintergrund hinzufügen",
           "set_reference_label": "Referenzname",
@@ -1561,29 +1591,31 @@
       "gate": {
         "predecessorVideoRetry": "Prüfe vor der Bestätigung das exakte übernommene Startbild und das Shooting script. Ein automatischer Wiederholungsversuch wird nur reserviert, wenn der erste Anbieter-Versuch eindeutig fehlschlägt. Die ersten Versuche kosten {{lower}}; der bestätigte Höchstbetrag ist {{upper}}.",
         "purpose": {
-          "board_still": "Board-Panel",
+          "board_still": "Produktionsreifer Frame",
           "reference_image": "Referenzbild"
         },
         "promotion": {
-          "title": "Panel als erstes Bild verwenden",
-          "summary": "Verwende das aktuelle Board-Panel von Shot {{shotId}} als erstes Bild. Die Kontinuitätsgrenze des Shots ändert sich dadurch nicht.",
-          "impactNone": "Keine aktuellen Bilder hängen von diesem Bild ab.",
-          "impactIntro": "{{count}} aktuelle Bilder bleiben abspielbar, werden aber veraltet:",
-          "impactItem": "Aktuelles Bild von Shot {{shotId}}",
-          "optionsLabel": "Wähle, wie aktuelle Bilder behandelt werden sollen",
-          "promoteOnly": "Nur verwenden — abspielbare, veraltete Bilder behalten",
+          "title": "Diesen Frame verwenden",
+          "shotLocation": "Beat {{beatPosition}} „{{beatTitle}}“ · Shot {{shotPosition}}",
+          "shotFallback": "der ausgewählte Shot",
+          "summary": "Diesen Frame als ersten Video-Frame für {{shot}} verwenden. Dadurch ändert sich nicht, wie der Shot an den vorherigen anschließt.",
+          "impactNone": "Keine vorhandenen Video-Takes hängen von diesem Frame ab.",
+          "impactIntro": "Betroffene Video-Takes: {{count}}. Sie bleiben abspielbar. Für diese Schätzung zur Neugenerierung kommt nur der aktuelle Take des ersten Shots im Segment infrage.",
+          "impactItem": "Video-Take von {{shot}}",
+          "optionsLabel": "Wählen Sie, ob dieser Shot jetzt neu generiert werden soll",
+          "promoteOnly": "Nur diesen Frame verwenden — vorhandene Video-Takes behalten",
           "freePrice": "$0",
-          "promoteAndRerender": "Verwenden und genaue Neu-Renderings prüfen",
+          "promoteAndRerender": "Diesen Frame verwenden und Neugenerierung prüfen",
           "priceAfterReview": "Preis wird als Nächstes angezeigt",
-          "promoteOnlyAction": "Für $0 verwenden",
-          "reviewPaidAction": "Preis der Neu-Renderings prüfen",
-          "paidUnavailable": "Dieses Segment hat zu viele aktuelle Bilder für eine einzige kostenpflichtige Bestätigung. Die kostenlose Verwendung bleibt verfügbar.",
-          "headline": "Verwenden + {{count}} Neu-Renderings · {{cost}}",
-          "requiredWork": "Die aufgeführten Neu-Renderings entsprechen genau den aktuellen Bildern, die durch diese Verwendung veraltet werden. Fehlende Abdeckung ist nicht enthalten.",
-          "confirm": "Verwendung + {{count}} Neu-Renderings bestätigen · {{cost}}",
-          "promoted": "Panel wurde verwendet. Vorhandene Bilder bleiben abspielbar und sind als veraltet markiert.",
-          "promoting": "Panel wird als erstes Bild verwendet…",
-          "confirmed": "Panel wurde verwendet und die Neu-Renderings der bestätigten Bilder wurden gestartet.",
+          "promoteOnlyAction": "Diesen Frame verwenden · $0",
+          "reviewPaidAction": "Preis der Neugenerierung prüfen",
+          "paidUnavailable": "Dieses Segment hat zu viele vorhandene Video-Takes für eine einzige kostenpflichtige Bestätigung. Der Frame kann weiterhin ohne Neugenerierung verwendet werden.",
+          "headline": "Frame verwenden + Video-Neugenerierung ({{count}}) · {{cost}}",
+          "requiredWork": "Spätere verbundene Shots warten auf das neu ausgewählte Schlussbild des jeweils vorherigen Shots. Anschließend erhält jeder Shot eine neue Schätzung zur Prüfung.",
+          "confirm": "Frame verwenden + aktuelles Video neu generieren ({{count}}) · {{cost}}",
+          "promoted": "Frame ausgewählt. Vorhandene Video-Takes bleiben abspielbar und sind zur Prüfung markiert.",
+          "promoting": "Frame wird verwendet…",
+          "confirmed": "Frame ausgewählt und Neugenerierung der bestätigten Video-Takes gestartet.",
           "close": "Schließen"
         },
         "headline_one": "{{count}} Generierung · {{cost}}",
@@ -1600,8 +1632,8 @@
         "continuity": {
           "severTitle": "Harten Schnitt prüfen",
           "rejoinTitle": "Wiederverknüpfung prüfen",
-          "severSummary": "Diese Schätzung macht diesen Shot zum Kettenanfang, verwendet ein geeignetes erstes Bild oder erstellt bei Bedarf eines und ersetzt alle betroffenen Videos bis zum nächsten harten Schnitt.",
-          "rejoinSummary": "Diese Schätzung löscht die Auswahl des ersten Bildes dieses Shots und verbindet ihn mit dem schnittgenauen Vorgängerbild. Die kostenlose Bildextraktion kann nach der Bestätigung abgeschlossen werden, bevor Ersatzvideos bis zum nächsten harten Schnitt übermittelt werden.",
+          "severSummary": "Diese Schätzung lässt diesen Shot nach einem harten Schnitt beginnen, verwendet ein geeignetes erstes Bild oder erstellt bei Bedarf eines und ersetzt alle betroffenen Videos bis zum nächsten harten Schnitt.",
+          "rejoinSummary": "Diese Schätzung löscht die Auswahl des ersten Bildes dieses Shots und verbindet ihn mit dem exakten letzten Bild des vorherigen Shots am gewählten Schnittpunkt. Die kostenlose Bildextraktion kann nach der Bestätigung abgeschlossen werden, bevor Ersatzvideos bis zum nächsten harten Schnitt zur Generierung gesendet werden.",
           "severHeadline": "Harter Schnitt · {{count}} erforderliche Generierungen · {{cost}}",
           "severHeadline_one": "Harter Schnitt · {{count}} erforderliche Generierung · {{cost}}",
           "severHeadline_other": "Harter Schnitt · {{count}} erforderliche Generierungen · {{cost}}",

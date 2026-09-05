@@ -1344,7 +1344,7 @@ describe('Studio Director V2 read-query contracts', () => {
     }
   });
 
-  it('accepts a detailed status spanning every remedy lane and nested diagnostic shape', () => {
+  it('accepts legacy and current detailed status shots while rejecting malformed current seed authority', () => {
     const result = validProjectStatusV2(true);
     result.catalogVersion = null;
     result.advisories = [
@@ -1606,6 +1606,19 @@ describe('Studio Director V2 read-query contracts', () => {
     } as const;
 
     expect(parseReceiptV2(receipt)).toEqual({ status: 'valid', record: receipt });
+
+    const currentReceipt = structuredClone(receipt);
+    Object.assign(currentReceipt.result.detail!.shots[0]!, { newSpendSeedAssetId: 'seed_1' });
+    Object.assign(currentReceipt.result.detail!.shots[1]!, { newSpendSeedAssetId: null });
+    expect(parseReceiptV2(currentReceipt)).toEqual({ status: 'valid', record: currentReceipt });
+
+    const malformedSeed = structuredClone(currentReceipt);
+    Object.assign(malformedSeed.result.detail!.shots[0]!, { newSpendSeedAssetId: '../unsafe' });
+    expect(parseReceiptV2(malformedSeed)).toEqual({ status: 'invalid' });
+
+    const mixedShape = structuredClone(currentReceipt);
+    Object.assign(mixedShape.result.detail!.shots[0]!, { hiddenSeedAuthority: 'seed_1' });
+    expect(parseReceiptV2(mixedShape)).toEqual({ status: 'invalid' });
   });
 
   it.each([

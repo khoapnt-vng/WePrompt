@@ -346,6 +346,27 @@ const addSucceededBoardPanel = (project: StudioProjectV2, shotId: string, assetI
   return job;
 };
 
+const markBoardPanelHistoricalV1 = (project: StudioProjectV2, assetId: string): void => {
+  const asset = project.assets[assetId];
+  const job = asset?.producerJobId === null ? undefined : project.jobs[asset?.producerJobId ?? ''];
+  if (asset === undefined || job === undefined || job.requestPlan.kind !== 'resolved' || job.requestSnapshot === null) {
+    throw new Error('Historical Board fixture requires one resolved producer');
+  }
+  const compositions = new Set([
+    job.composition,
+    job.requestPlan.snapshot.composition,
+    job.requestSnapshot.composition,
+  ]);
+  for (const frozenComposition of compositions) {
+    frozenComposition.inputs.instructionProfile = 'weprompt-image-v1.board-still.v1';
+    frozenComposition.prompt = frozenComposition.prompt.replace(
+      'weprompt-image-v1.board-still.v2',
+      'weprompt-image-v1.board-still.v1'
+    );
+  }
+  asset.compositionDigest = studioGenerationCompositionDigestV2(job.composition);
+};
+
 const addSucceededPrimary = (
   project: StudioProjectV2,
   authorizationId: string,
@@ -429,9 +450,30 @@ describe('projectStudioWorkspaceStatusV2', () => {
       undoTop: { entryId: 'mutation_7', sourceRevision: 7, label: 'edit_shot' },
       dirtyShots: [],
       boardPanels: [
-        { shotId: 'shot_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-        { shotId: 'shot_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-        { shotId: 'shot_3', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+        {
+          shotId: 'shot_1',
+          assetId: null,
+          newSpendSeedAssetId: null,
+          producerJobId: null,
+          latestJobId: null,
+          staleCauses: [],
+        },
+        {
+          shotId: 'shot_2',
+          assetId: null,
+          newSpendSeedAssetId: null,
+          producerJobId: null,
+          latestJobId: null,
+          staleCauses: [],
+        },
+        {
+          shotId: 'shot_3',
+          assetId: null,
+          newSpendSeedAssetId: null,
+          producerJobId: null,
+          latestJobId: null,
+          staleCauses: [],
+        },
       ],
       cascadeProgress: [],
     });
@@ -456,6 +498,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     expect(exactKeys(status.boardPanels[0]!)).toEqual([
       'assetId',
       'latestJobId',
+      'newSpendSeedAssetId',
       'producerJobId',
       'shotId',
       'staleCauses',
@@ -530,6 +573,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
       {
         shotId: 'shot_1',
         assetId: 'board_1',
+        newSpendSeedAssetId: null,
         producerJobId: producer.id,
         latestJobId: producer.id,
         staleCauses: [],
@@ -545,6 +589,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
     addJob(project, redraw);
     expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]).toMatchObject({
       assetId: 'board_1',
+      newSpendSeedAssetId: null,
       producerJobId: producer.id,
       latestJobId: redraw.id,
       staleCauses: [],
@@ -556,6 +601,49 @@ describe('projectStudioWorkspaceStatusV2', () => {
       'request_out_of_date',
       'route_out_of_date',
     ]);
+  });
+
+  it('reports the ordinary image seed that new video spend would accept', () => {
+    const project = makeProject(['shot_1']);
+    const imported = addAsset(project, 'shot_1', 'seed_imported', 'image', 'imports');
+    const generated = addAsset(project, 'shot_1', 'seed_generated', 'image', 'assets');
+    const shot = project.shots.shot_1!;
+
+    shot.seedStillId = imported.id;
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBe(imported.id);
+
+    shot.seedStillId = generated.id;
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBe(generated.id);
+
+    shot.seedStillId = null;
+    shot.dismissedSeedStillIds.push(generated.id);
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBe(imported.id);
+  });
+
+  it('reports only a fresh v2 promoted Board seed for new video spend', () => {
+    const project = makeProject(['shot_1']);
+    project.brief = 'A paper boat crosses a flooded street.';
+    project.boardStyle = 'grey_tone';
+    project.imageRouteId = 'route_board';
+    project.beats.beat_1!.story = 'The paper boat drifts past a curb in rainy sodium-vapour dusk.';
+    project.shots.shot_1!.shootingScript = 'Wide, low angle on the boat.';
+    const promoted = addSucceededBoardPanel(project, 'shot_1', 'board_promoted');
+    project.shots.shot_1!.seedStillId = 'board_promoted';
+
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBe('board_promoted');
+
+    addSucceededBoardPanel(project, 'shot_1', 'board_unpromoted_redraw');
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]).toMatchObject({
+      assetId: 'board_unpromoted_redraw',
+      newSpendSeedAssetId: 'board_promoted',
+    });
+
+    markBoardPanelHistoricalV1(project, promoted.outputAssetIdsByRole.primary!);
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBeNull();
+
+    project.shots.shot_1!.seedStillId = 'board_unpromoted_redraw';
+    project.beats.beat_1!.story = 'The authored Story changed after the redraw.';
+    expect(projectStudioWorkspaceStatusV2(project).boardPanels[0]?.newSpendSeedAssetId).toBeNull();
   });
 
   it('keeps a missing Board panel free of producer and stale causes after a failed draw', () => {
@@ -574,6 +662,7 @@ describe('projectStudioWorkspaceStatusV2', () => {
       {
         shotId: 'shot_1',
         assetId: null,
+        newSpendSeedAssetId: null,
         producerJobId: null,
         latestJobId: failed.id,
         staleCauses: [],

@@ -882,6 +882,9 @@
     "workspace": {
       "views": {
         "references": "Referencias",
+        "table": "Historia",
+        "board": "Fotogramas y vídeo",
+        "cut": "Montaje",
         "status": {
           "next": "Siguiente"
         },
@@ -889,8 +892,31 @@
           "noReferences": "No se ha previsto ningún trabajo con referencias, así que puedes omitir esta vista.",
           "noStoryboard": "El guion gráfico aún no contiene Beats ni Shots.",
           "noTakes": "Todavía no hay tomas actuales en {{view}} — {{current}} de {{total}} Shots están listos.",
+          "frameProgress": "Fotogramas de producción: {{current}} de {{total}} listos.",
+          "videoProgress": "Tomas de vídeo: {{current}} de {{total}} listas.",
           "nextInView": "A continuación: continúa en {{view}}.",
-          "nextStage": "A continuación: completa {{stage}} en la configuración del proyecto."
+          "nextStage": "A continuación: completa {{stage}} en la configuración del proyecto.",
+          "action": {
+            "filmSetup": "Completa el brief y elige los motores de imagen y vídeo antes de construir la historia.",
+            "storyline": "Acuerda la dirección creativa con el Director. Después, crea y aprueba la historia y el plan de Shots antes de crear referencias visuales.",
+            "references": "Genera las {{remaining}} referencias visuales restantes y comprueba que cada una tenga una imagen actual.",
+            "bindings": "Asigna referencias actuales a cada uno de los {{remaining}} Shots restantes o elige explícitamente no usar referencias.",
+            "frames": "Genera los {{remaining}} fotogramas actuales de alta fidelidad restantes y revisa cada uno como objetivo visual de su Shot.",
+            "promoteFrame": "Antes de generar tomas de vídeo, usa los {{remaining}} fotogramas revisados restantes como primeros fotogramas de los vídeos que comienzan después de un corte.",
+            "videos": "Genera las {{remaining}} tomas de vídeo restantes. Los Shots que comienzan después de un corte usan el primer fotograma elegido; los Shots conectados continúan desde el último fotograma exacto mostrado en el punto de edición elegido.",
+            "finishCut": "Termina el montaje: revisa ritmo, continuidad y sonido antes de exportar.",
+            "reviewCut": "Todas las tomas de vídeo están listas. Abre el montaje y revisa la secuencia final antes de exportar."
+          },
+          "cta": {
+            "filmSetup": "Abrir configuración",
+            "storyline": "Abrir historia",
+            "references": "Abrir referencias",
+            "bindings": "Revisar referencias de Shots",
+            "frames": "Abrir generación de fotogramas",
+            "promoteFrame": "Revisar primeros fotogramas de vídeo",
+            "videos": "Abrir generación de vídeo",
+            "cut": "Abrir montaje"
+          }
         }
       },
       "referenceWorkflow": {
@@ -951,14 +977,14 @@
             "activeAssetConsumerRetained": "{{purpose}} del Shot conservado {{shotId}} usa exactamente esta foto. Permanecerá bloqueada mientras el trabajo siga sin resolverse.",
             "activeAssetConsumerOther": "El trabajo {{purpose}} ({{jobId}}) usa exactamente esta foto. Permanecerá bloqueada mientras el trabajo siga sin resolverse.",
             "downloadRecovery": "{{purpose}} de Beat {{beatPosition}}, Shot {{shotPosition}} terminó en el proveedor, pero el resultado no se descargó. Reintenta aquí; la foto permanecerá bloqueada hasta que la recuperación finalice correctamente.",
-            "downloadRecoveryRetainedShot": "{{purpose}} del Shot conservado {{shotId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Shot desde la Papelera de Board para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
-            "downloadRecoveryRetainedBeat": "{{purpose}} del Shot {{shotId}} dentro del Beat conservado {{beatId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Beat desde la Papelera de Board para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
+            "downloadRecoveryRetainedShot": "{{purpose}} del Shot conservado {{shotId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Shot desde los elementos eliminados para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} del Shot {{shotId}} dentro del Beat conservado {{beatId}} terminó en el proveedor, pero el resultado no se descargó. Restaura el Beat desde los elementos eliminados para revisar la recuperación; la foto permanecerá bloqueada hasta que finalice correctamente.",
             "downloadRecoveryOther": "El trabajo {{purpose}} ({{jobId}}) terminó en el proveedor, pero el resultado no se descargó. Reintenta aquí; la foto permanecerá bloqueada hasta que la recuperación finalice correctamente.",
             "invalidAuthority": "Los datos de referencia de la foto actual son incoherentes. Vuelve a cargar el proyecto y revisa esta referencia antes de intentar eliminarla de nuevo.",
-            "reviewInBoard": "Revisar en Board"
+            "reviewInBoard": "Revisar en Fotogramas y vídeo"
           }
         },
-        "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar el Board o el primer fotograma.",
+        "description": "Genera primero las imágenes canónicas de los personajes y después las imágenes de los fondos recurrentes. Vincula las referencias actuales a cada Shot antes de generar su fotograma listo para producción o su primer fotograma.",
         "generationScope": "Alcance de la generación",
         "characters": {
           "title": "Personajes",
@@ -1001,7 +1027,7 @@
         "currentProgress": "{{current}} de {{total}} referencias generadas",
         "bindings": {
           "title": "Vínculos de Shots",
-          "description": "Elige los personajes y el fondo actuales exactos que usa cada Shot para su panel del Board y primer fotograma.",
+          "description": "Elige los personajes y el fondo actuales exactos que usa cada Shot para su fotograma listo para producción y su primer fotograma.",
           "empty": "No hay Shots activos que vincular.",
           "shot": "Shot {{position}}",
           "unassigned": "Este Shot aún no tiene una decisión de referencias.",
@@ -1050,23 +1076,23 @@
         },
         "columns": {
           "length": "Suma",
-          "panel": "Panel",
+          "panel": "Fotograma",
           "story": "Historia"
         },
         "plannedPending": "Sin suma planificada",
         "panel": {
-          "openDetails": "Abrir paneles del Board de {{title}}",
-          "closeDetails": "Cerrar paneles del Board de {{title}}",
+          "openDetails": "Abrir fotogramas de {{title}}",
+          "closeDetails": "Cerrar fotogramas de {{title}}",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Detalles del Shot {{position}}",
-          "head": "Inicio de cadena",
+          "head": "Comienza con el primer fotograma",
           "status": {
-            "missing": "Sin dibujar",
+            "missing": "Sin generar",
             "current": "Actual",
             "stale": "Obsoleto",
             "statusPending": "Estado pendiente",
             "queued": "En cola",
-            "drawing": "Dibujando",
+            "drawing": "Generando",
             "needsAttention": "Requiere atención",
             "failed": "Fallido",
             "cancelled": "Cancelado"
@@ -1106,37 +1132,40 @@
         }
       },
       "board": {
+        "ariaLabel": "Producción de fotogramas y vídeo",
         "controls": {
-          "label": "Controles del Board del Director",
-          "progress": "{{drawn}} de {{total}} paneles dibujados",
-          "progressLabel": "Progreso del Board",
+          "label": "Producción de fotogramas y vídeo",
+          "progress": "{{current}} de {{total}} fotogramas de alta fidelidad listos",
+          "progressLabel": "Progreso de fotogramas de alta fidelidad",
+          "videoProgress": "{{current}} de {{total}} tomas de vídeo listas",
+          "videoProgressLabel": "Progreso de tomas de vídeo",
           "staleCount": "{{count}} obsoletos",
           "busyCount": "{{count}} en curso",
-          "stop": "Detener el dibujo",
-          "stopNote": "Detener solicita la cancelación cuando es posible. Los paneles completados y los cargos ya incurridos se conservan.",
-          "drawNext": "Dibujar siguiente lote ({{count}})"
+          "stop": "Detener generación de fotogramas",
+          "stopNote": "Detener solicita la cancelación cuando es posible. Los fotogramas completados y los cargos ya incurridos se conservan.",
+          "drawNext": "Generar siguientes fotogramas ({{count}})"
         },
         "panel": {
-          "beatActions": "Controles del Board del Director · {{title}}",
-          "drawMissing": "Dibujar faltantes ({{count}})",
-          "redrawBeat": "Redibujar Beat · de pago",
+          "beatActions": "Acciones para {{title}}",
+          "drawMissing": "Generar fotogramas faltantes ({{count}})",
+          "redrawBeat": "Regenerar fotogramas del Beat · de pago",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "redrawShot": "Redibujar Shot {{position}} · de pago",
-          "useAsFirstFrame": "Usar el panel de Shot {{position}} como primer fotograma",
+          "redrawShot": "Regenerar fotograma de Shot {{position}} · de pago",
+          "useAsFirstFrame": "Usar el fotograma de Shot {{position}} como primer fotograma del vídeo",
           "status": {
-            "missing": "Sin dibujar",
+            "missing": "Sin generar",
             "current": "Actual",
             "stale": "Obsoleto",
             "statusPending": "Estado pendiente",
             "queued": "En cola",
-            "drawing": "Dibujando",
+            "drawing": "Generando",
             "needsAttention": "Requiere atención",
             "failed": "Fallido",
             "cancelled": "Cancelado"
           }
         },
-        "statusUnavailable": "El orden actual del Board está incompleto o es ambiguo. Actualiza el proyecto antes de revisar las tarjetas de Shot.",
-        "renderedCount": "{{count}} de {{total}} renderizados",
+        "statusUnavailable": "El orden actual de los Shots está incompleto o es ambiguo. Actualiza el proyecto antes de revisar las tarjetas de Shot.",
+        "renderedCount": "{{count}} de {{total}} tomas de vídeo listas",
         "staleCount": "{{count}} Shots desactualizados",
         "staleCount_one": "{{count}} Shot desactualizado",
         "staleCount_other": "{{count}} Shots desactualizados",
@@ -1149,14 +1178,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "Vídeo actual del Shot",
           "stale": "Desactualizado",
-          "chainHead": "Inicio de la cadena",
+          "chainHead": "Comienza con el primer fotograma",
           "chainAfter": "Después de {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "Los detalles de los bloqueos no están disponibles para esta revisión del proyecto.",
           "blocker": {
             "heading": "Bloqueado por",
-            "referenceBindingTable": "La vinculación de referencias debe corregirse en Table antes de generar.",
-            "reviewOnTable": "Revisar referencias en Table",
+            "referenceBindingTable": "Las referencias elegidas deben corregirse en Historia antes de generar.",
+            "reviewOnTable": "Revisar referencias en Historia",
             "cause": {
               "routeInventoryUnavailable": "El inventario de motores no está disponible.",
               "routeNotSelected": "No se ha seleccionado un motor de generación.",
@@ -1289,7 +1318,8 @@
         "saveAndRequestUpdated": "Guardar y preparar propuesta actualizada",
         "reviewRuleDrafts": "Revisar borradores de reglas",
         "reviewRuleDraftsFirst": "Revisa o descarta el borrador de regla local antes de aceptar esta propuesta de regla.",
-        "reproposalPrompt": "Prepara una versión actualizada de la propuesta que seleccioné. Usa {{proposalId}} solo para identificarla internamente y no menciones esta referencia ni pasos técnicos en tu respuesta.",
+        "reproposalPrompt": "Prepara una versión actualizada de la propuesta que seleccioné.",
+        "continueJourneyPrompt": "Continúa desde el estado actual de Studio y guíame al siguiente paso.",
         "chatDecisionBusy": "Otra acción revisada sigue en curso.",
         "chatDirty": "Guarda o restablece los borradores que entran en conflicto con esta propuesta antes de aprobarla.",
         "chatNoPending": "No hay ninguna propuesta del Director pendiente.",
@@ -1324,7 +1354,7 @@
           "aspectRatio": "Relación de aspecto",
           "resolution": "Resolución",
           "targetDurationSeconds": "Duración objetivo",
-          "boardStyle": "Estilo del Board",
+          "boardStyle": "Estilo visual",
           "title": "Título",
           "story": "Historia",
           "targetSeconds": "Objetivo del Beat",
@@ -1367,7 +1397,7 @@
           "origin": {
             "generated": "Generado",
             "imported": "Importado",
-            "board": "Guion gráfico",
+            "board": "Fotograma listo para producción",
             "inherited": "Del plano {{shot}}"
           },
           "current": "Actual",
@@ -1477,8 +1507,8 @@
           "reviewSever": "Revisar corte directo…",
           "reviewRejoin": "Revisar reconexión…",
           "reviewSeverDescription": "Un corte directo hace que la toma {{shot}} comience desde un primer fotograma válido y crea uno si es necesario. Al confirmar, se sustituyen esta toma y todas las tomas posteriores continuas hasta el siguiente corte directo.",
-          "reviewRejoinDescription": "Al reconectar la toma {{shot}}, se borra su selección de primer fotograma y se usa el último fotograma de la toma {{previous}}, ajustado al recorte. Tras confirmar, la extracción gratuita del fotograma puede terminar antes de enviar esta toma y las tomas posteriores continuas hasta el siguiente corte directo.",
-          "segmentHead": "Inicio de la cadena · Empieza desde el primer fotograma",
+          "reviewRejoinDescription": "Al conectar la toma {{shot}} con la anterior, se borra su selección de primer fotograma y se usa el último fotograma exacto de la toma {{previous}} en el punto de edición elegido. Tras confirmar, la extracción gratuita del fotograma puede terminar antes de enviar esta toma y las tomas posteriores conectadas para su generación hasta el siguiente corte directo.",
+          "segmentHead": "Después de un corte directo · Empieza desde el primer fotograma",
           "continuous": "Continúa desde el último fotograma del plano {{position}}"
         },
         "coverage": {
@@ -1545,7 +1575,7 @@
       "controls": {
         "briefAndRulesTitle": "Configuración de la película",
         "undoLabel": {
-          "promote_board_panel": "Usar panel como primer fotograma",
+          "promote_board_panel": "Usar fotograma como primer fotograma del vídeo",
           "set_reference_plan": "plan de referencias",
           "amend_reference_plan": "añadir fondo",
           "set_reference_label": "nombre de referencia",
@@ -1561,29 +1591,31 @@
       "gate": {
         "predecessorVideoRetry": "Revisa el fotograma inicial heredado exacto y el Shooting script antes de confirmar. Se reserva un reintento automático solo si el primer intento del proveedor falla de forma inequívoca. Los primeros intentos cuestan {{lower}}; el máximo confirmado es {{upper}}.",
         "purpose": {
-          "board_still": "Panel del Board",
+          "board_still": "Fotograma listo para producción",
           "reference_image": "Imagen de referencia"
         },
         "promotion": {
-          "title": "Usar panel como primer fotograma",
-          "summary": "Promueve el panel actual del Board de Shot {{shotId}} a primer fotograma. Esto no cambia el límite de continuidad del Shot.",
-          "impactNone": "Ninguna imagen actual depende de este fotograma.",
-          "impactIntro": "Imágenes actuales que seguirán reproduciéndose pero quedarán obsoletas: {{count}}",
-          "impactItem": "Imagen actual de Shot {{shotId}}",
-          "optionsLabel": "Elige cómo tratar las imágenes actuales",
-          "promoteOnly": "Solo promover — conservar las imágenes obsoletas reproducibles",
+          "title": "Usar este fotograma",
+          "shotLocation": "Beat {{beatPosition}} «{{beatTitle}}» · Shot {{shotPosition}}",
+          "shotFallback": "el Shot seleccionado",
+          "summary": "Usa este fotograma como primer fotograma del vídeo de {{shot}}. Esto no cambia cómo se conecta el Shot con el anterior.",
+          "impactNone": "Ninguna toma de vídeo existente depende de este fotograma.",
+          "impactIntro": "Tomas de vídeo afectadas: {{count}}. Seguirán disponibles para reproducir. Solo la toma actual del primer Shot del segmento puede incluirse en esta estimación de regeneración.",
+          "impactItem": "Toma de vídeo de {{shot}}",
+          "optionsLabel": "Elige si quieres regenerar este Shot ahora",
+          "promoteOnly": "Usar solo este fotograma — conservar las tomas de vídeo existentes",
           "freePrice": "$0",
-          "promoteAndRerender": "Promover y revisar el trabajo exacto de regeneración",
+          "promoteAndRerender": "Usar este fotograma y revisar la regeneración",
           "priceAfterReview": "El precio se muestra a continuación",
-          "promoteOnlyAction": "Promover por $0",
+          "promoteOnlyAction": "Usar este fotograma · $0",
           "reviewPaidAction": "Revisar el precio de regeneración",
-          "paidUnavailable": "Este segmento tiene demasiadas imágenes actuales para una sola confirmación de pago. La opción de solo promover sigue disponible.",
-          "headline": "Promover + regenerar tomas ({{count}}) · {{cost}}",
-          "requiredWork": "Las regeneraciones indicadas son exactamente las imágenes actuales que esta promoción deja obsoletas. No se incluye la cobertura que falta.",
-          "confirm": "Confirmar promoción + regenerar tomas ({{count}}) · {{cost}}",
-          "promoted": "Panel promovido. Las imágenes existentes siguen reproduciéndose y se marcan como obsoletas.",
-          "promoting": "Promoviendo panel…",
-          "confirmed": "Panel promovido y regeneración iniciada para las imágenes confirmadas.",
+          "paidUnavailable": "Este segmento tiene demasiadas tomas de vídeo existentes para una sola confirmación de pago. Aún puedes usar este fotograma sin regenerarlas.",
+          "headline": "Usar fotograma + regenerar vídeo ({{count}}) · {{cost}}",
+          "requiredWork": "Los Shots conectados posteriores esperan el nuevo fotograma final seleccionado del Shot anterior. Después, cada uno recibe una nueva estimación para que la revises.",
+          "confirm": "Usar fotograma + regenerar el vídeo actual ({{count}}) · {{cost}}",
+          "promoted": "Fotograma seleccionado. Las tomas de vídeo existentes siguen reproduciéndose y quedan marcadas para revisión.",
+          "promoting": "Usando fotograma…",
+          "confirmed": "Fotograma seleccionado y regeneración iniciada para las tomas de vídeo confirmadas.",
           "close": "Cerrar"
         },
         "headline_one": "{{count}} generación · {{cost}}",
@@ -1600,8 +1632,8 @@
         "continuity": {
           "severTitle": "Revisar corte directo",
           "rejoinTitle": "Revisar reconexión",
-          "severSummary": "Esta estimación convierte esta toma en inicio de cadena, reutiliza un primer fotograma válido o crea uno si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
-          "rejoinSummary": "Esta estimación borra la selección de primer fotograma de esta toma y la reconecta al fotograma anterior ajustado al recorte. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución hasta el siguiente corte directo.",
+          "severSummary": "Esta estimación hace que la toma comience después de un corte directo, reutiliza un primer fotograma válido o crea uno si hace falta y sustituye todos los vídeos afectados hasta el siguiente corte directo.",
+          "rejoinSummary": "Esta estimación borra la selección de primer fotograma de esta toma y la conecta al último fotograma exacto de la toma anterior en el punto de edición elegido. La extracción gratuita del fotograma puede terminar tras confirmar y antes de enviar los vídeos de sustitución para su generación hasta el siguiente corte directo.",
           "severHeadline": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",
           "severHeadline_one": "Corte directo · {{count}} generación obligatoria · {{cost}}",
           "severHeadline_other": "Corte directo · {{count}} generaciones obligatorias · {{cost}}",

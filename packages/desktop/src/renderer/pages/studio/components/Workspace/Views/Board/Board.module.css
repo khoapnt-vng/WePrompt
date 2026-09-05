@@ -334,6 +334,17 @@
   gap: 5px;
 }
 
+.boardProgressGroup {
+  display: grid;
+  min-inline-size: 0;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 8px 14px;
+}
+
+.boardProgressGroup .boardProgressFacts {
+  grid-column: 1 / -1;
+}
+
 .boardProgressText {
   color: var(--text-primary);
   font-family: var(--font-mono);
@@ -743,6 +754,14 @@
   .boardControls {
     grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
+  }
+
+  .boardProgressGroup {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .boardProgressGroup .boardProgressFacts {
+    grid-column: auto;
   }
 
   .boardPrimaryAction {

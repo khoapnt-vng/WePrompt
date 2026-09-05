@@ -881,6 +881,9 @@
     "workspace": {
       "views": {
         "references": "リファレンス",
+        "table": "ストーリーライン",
+        "board": "フレームと動画",
+        "cut": "カット",
         "status": {
           "next": "次へ"
         },
@@ -888,8 +891,31 @@
           "noReferences": "参照作業は予定されていないため、このビューはスキップできます。",
           "noStoryboard": "ストーリーボードにはまだ Beat も Shot もありません。",
           "noTakes": "{{view}} にはまだ現在のテイクがありません — {{total}} 個の Shot のうち {{current}} 個が準備できています。",
+          "frameProgress": "制作品質フレーム：{{total}} 個中 {{current}} 個が準備完了。",
+          "videoProgress": "動画テイク：{{total}} 個中 {{current}} 個が準備完了。",
           "nextInView": "次へ：{{view}} で作業を続けてください。",
-          "nextStage": "次へ：プロジェクト設定で {{stage}} を完了してください。"
+          "nextStage": "次へ：プロジェクト設定で {{stage}} を完了してください。",
+          "action": {
+            "filmSetup": "ストーリーを作る前に、ブリーフを完成させ、画像と動画のエンジンを選択してください。",
+            "storyline": "まずDirectorとクリエイティブの方向性に合意し、その後、ビジュアルリファレンスを作る前にストーリーラインとショット計画を作成して承認してください。",
+            "references": "残り {{remaining}} 個のビジュアルリファレンスを生成し、それぞれに現在の画像があることを確認してください。",
+            "bindings": "残り {{remaining}} 個の各 Shot に現在のリファレンスを割り当てるか、リファレンスなしを明示的に選択してください。",
+            "frames": "残り {{remaining}} 個の現在の高精細フレームを生成し、それぞれを Shot のビジュアル目標として確認してください。",
+            "promoteFrame": "残り {{remaining}} 個の確認済みフレームを、カット後に始まる動画の最初のフレームとして使用してください。",
+            "videos": "残り {{remaining}} 個の動画テイクを生成してください。カット後に始まる Shot は選択した最初のフレームを使い、接続された Shot は選択した編集点に表示される直前の Shot の正確な最終フレームから続きます。",
+            "finishCut": "カットを仕上げ、書き出し前にテンポ、連続性、音を確認してください。",
+            "reviewCut": "すべての動画テイクが準備できました。書き出し前にカットを開いて完成シーケンスを確認してください。"
+          },
+          "cta": {
+            "filmSetup": "映像設定を開く",
+            "storyline": "ストーリーラインを開く",
+            "references": "リファレンスを開く",
+            "bindings": "ショットのリファレンスを確認",
+            "frames": "フレーム生成を開く",
+            "promoteFrame": "動画の最初のフレームを確認",
+            "videos": "動画生成を開く",
+            "cut": "カットを開く"
+          }
         }
       },
       "referenceWorkflow": {
@@ -950,14 +976,14 @@
             "activeAssetConsumerRetained": "保持されているShot {{shotId}}の{{purpose}}がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
             "activeAssetConsumerOther": "{{purpose}}ジョブ（{{jobId}}）がこの写真を使用しています。ジョブが未解決の間はロックされたままです。",
             "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
-            "downloadRecoveryRetainedShot": "保持されているShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからShotを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
-            "downloadRecoveryRetainedBeat": "保持されているBeat {{beatId}}内のShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。BoardのBinからBeatを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedShot": "保持されているShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。削除済み項目からShotを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
+            "downloadRecoveryRetainedBeat": "保持されているBeat {{beatId}}内のShot {{shotId}}の{{purpose}}はプロバイダーで完了しましたが、結果をダウンロードできませんでした。削除済み項目からBeatを復元して復旧を確認してください。復旧に成功するまで写真はロックされたままです。",
             "downloadRecoveryOther": "{{purpose}}ジョブ（{{jobId}}）はプロバイダーで完了しましたが、結果をダウンロードできませんでした。ここで再試行してください。復旧に成功するまで写真はロックされたままです。",
             "invalidAuthority": "現在の写真のリファレンスデータに不整合があります。プロジェクトを再読み込みし、このリファレンスを確認してから、もう一度削除してください。",
-            "reviewInBoard": "Boardで確認"
+            "reviewInBoard": "フレームと動画で確認"
           }
         },
-        "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。Board または最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
+        "description": "まずキャラクターの正規画像を生成し、次に繰り返し登場する背景画像を生成します。制作に使えるフレームまたは最初のフレームを生成する前に、現在のリファレンスを各 Shot に割り当ててください。",
         "generationScope": "生成範囲",
         "characters": {
           "title": "キャラクター",
@@ -1000,7 +1026,7 @@
         "currentProgress": "{{total}} 件中 {{current}} 件のリファレンスを生成済み",
         "bindings": {
           "title": "Shot のバインド",
-          "description": "各 Shot が Board パネルと最初のフレームで使う、現在のキャラクターと背景を正確に選択します。",
+          "description": "各 Shot が制作に使えるフレームと最初のフレームで使う、現在のキャラクターと背景を正確に選択します。",
           "empty": "バインドするアクティブな Shot はありません。",
           "shot": "Shot {{position}}",
           "unassigned": "この Shot のリファレンスはまだ決定されていません。",
@@ -1049,23 +1075,23 @@
         },
         "columns": {
           "length": "合計",
-          "panel": "パネル",
+          "panel": "フレーム",
           "story": "ストーリー"
         },
         "plannedPending": "計画合計なし",
         "panel": {
-          "openDetails": "{{title}}のボードパネルを開く",
-          "closeDetails": "{{title}}のボードパネルを閉じる",
+          "openDetails": "{{title}}のフレームを開く",
+          "closeDetails": "{{title}}のフレームを閉じる",
           "cardLabel": "Shot {{position}}：{{status}}",
           "shotDetails": "ショット{{position}}の詳細",
-          "head": "チェーン先頭",
+          "head": "最初のフレームから開始",
           "status": {
-            "missing": "未作成",
+            "missing": "未生成",
             "current": "最新",
             "stale": "古い",
             "statusPending": "ステータス待ち",
             "queued": "待機中",
-            "drawing": "描画中",
+            "drawing": "生成中",
             "needsAttention": "要確認",
             "failed": "失敗",
             "cancelled": "キャンセル済み"
@@ -1105,37 +1131,40 @@
         }
       },
       "board": {
+        "ariaLabel": "フレームと動画の制作",
         "controls": {
-          "label": "ディレクター・ボードの操作",
-          "progress": "{{total}}枚中{{drawn}}枚を作成済み",
-          "progressLabel": "ボードの完成度",
+          "label": "フレームと動画の制作",
+          "progress": "高品質フレーム：{{total}} 個中 {{current}} 個が準備完了",
+          "progressLabel": "高品質フレームの完成度",
+          "videoProgress": "動画テイク：{{total}} 個中 {{current}} 個が準備完了",
+          "videoProgressLabel": "動画テイクの完成度",
           "staleCount": "古いパネル {{count}}件",
           "busyCount": "進行中 {{count}}件",
-          "stop": "描画を停止",
-          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのパネルと発生済みの料金はそのまま残ります。",
-          "drawNext": "次のバッチを描画 ({{count}})"
+          "stop": "フレーム生成を停止",
+          "stopNote": "可能な場合は停止時にキャンセルを要求します。完成済みのフレームと発生済みの料金はそのまま残ります。",
+          "drawNext": "次のフレームを生成 ({{count}})"
         },
         "panel": {
-          "beatActions": "ディレクター・ボードの操作 · {{title}}",
-          "drawMissing": "未作成を描画 ({{count}})",
-          "redrawBeat": "Beatを再描画 · 有料",
+          "beatActions": "{{title}}の操作",
+          "drawMissing": "不足フレームを生成 ({{count}})",
+          "redrawBeat": "Beatのフレームを再生成 · 有料",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "redrawShot": "Shot {{position}}を再描画 · 有料",
-          "useAsFirstFrame": "Shot {{position}}のパネルを最初のフレームに使用",
+          "redrawShot": "Shot {{position}}のフレームを再生成 · 有料",
+          "useAsFirstFrame": "Shot {{position}}のフレームを動画の最初のフレームに使用",
           "status": {
-            "missing": "未作成",
+            "missing": "未生成",
             "current": "最新",
             "stale": "古い",
             "statusPending": "ステータス待ち",
             "queued": "待機中",
-            "drawing": "描画中",
+            "drawing": "生成中",
             "needsAttention": "要確認",
             "failed": "失敗",
             "cancelled": "キャンセル済み"
           }
         },
-        "statusUnavailable": "現在のBoardの順序は不完全か不明確です。Shotタイルを確認する前にプロジェクトを更新してください。",
-        "renderedCount": "{{total}}個中{{count}}個をレンダリング済み",
+        "statusUnavailable": "現在の Shot の順序は不完全か不明確です。Shot カードを確認する前にプロジェクトを更新してください。",
+        "renderedCount": "動画テイク：{{total}} 個中 {{count}} 個が準備完了",
         "staleCount": "古くなったShot {{count}}個",
         "staleCount_one": "古くなったShot {{count}}個",
         "staleCount_other": "古くなったShot {{count}}個",
@@ -1148,14 +1177,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "現在のShot動画",
           "stale": "古い",
-          "chainHead": "チェーンの先頭",
+          "chainHead": "最初のフレームから開始",
           "chainAfter": "{{beat}}.{{shot}}の後",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "このプロジェクトリビジョンではブロッカーの詳細を利用できません。",
           "blocker": {
             "heading": "次の理由でブロック",
-            "referenceBindingTable": "生成前にTableでリファレンスの割り当てを修正する必要があります。",
-            "reviewOnTable": "Tableでリファレンスを確認",
+            "referenceBindingTable": "生成前にストーリーラインでリファレンスの選択を修正する必要があります。",
+            "reviewOnTable": "ストーリーラインでリファレンスを確認",
             "cause": {
               "routeInventoryUnavailable": "エンジン一覧を利用できません。",
               "routeNotSelected": "生成エンジンが選択されていません。",
@@ -1288,7 +1317,8 @@
         "saveAndRequestUpdated": "保存して更新した提案を準備",
         "reviewRuleDrafts": "ルールの下書きを確認",
         "reviewRuleDraftsFirst": "このルール提案を承認する前に、ローカルのルール下書きを確認または破棄してください。",
-        "reproposalPrompt": "選択した提案の更新版を準備してください。{{proposalId}} は内部での識別にのみ使用し、この参照や技術的な手順を返信に含めないでください。",
+        "reproposalPrompt": "選択した提案の更新版を準備してください。",
+        "continueJourneyPrompt": "現在の Studio の状態から続けて、次のステップへ案内してください。",
         "chatDecisionBusy": "別のレビュー操作が進行中です。",
         "chatDirty": "この提案と競合する下書きを保存またはリセットしてから承認してください。",
         "chatNoPending": "操作できる保留中のディレクター提案はありません。",
@@ -1323,7 +1353,7 @@
           "aspectRatio": "アスペクト比",
           "resolution": "解像度",
           "targetDurationSeconds": "目標時間",
-          "boardStyle": "Board スタイル",
+          "boardStyle": "ビジュアルスタイル",
           "title": "タイトル",
           "story": "ストーリー",
           "targetSeconds": "Beat の目標",
@@ -1366,7 +1396,7 @@
           "origin": {
             "generated": "生成",
             "imported": "読み込み",
-            "board": "絵コンテ",
+            "board": "制作に使えるフレーム",
             "inherited": "ショット {{shot}} から"
           },
           "current": "現在",
@@ -1476,8 +1506,8 @@
           "reviewSever": "ハードカットを確認…",
           "reviewRejoin": "再接続を確認…",
           "reviewSeverDescription": "ハードカットにするとショット {{shot}} は有効な最初のフレームから始まり、必要なら新しい最初のフレームが作成されます。確定すると、このショットから次のハードカットまでの連続する全ショットが差し替えられます。",
-          "reviewRejoinDescription": "ショット {{shot}} を再接続すると最初のフレームの選択が解除され、ショット {{previous}} のトリム後の最終フレームが使われます。確定後、無料のフレーム抽出が完了してから、このショットと次のハードカットまでの連続ショットがプロバイダーへ送信される場合があります。",
-          "segmentHead": "チェーンの先頭 · 最初のフレームから開始",
+          "reviewRejoinDescription": "ショット {{shot}} を直前のショットに接続すると最初のフレームの選択が解除され、選択した編集点にあるショット {{previous}} の正確な最終フレームが使われます。確定後、無料のフレーム抽出が完了してから、このショットと次のハードカットまで接続されたショットが生成に送られる場合があります。",
+          "segmentHead": "ハードカット後 · 最初のフレームから開始",
           "continuous": "ショット{{position}}の最終フレームから続く"
         },
         "coverage": {
@@ -1544,7 +1574,7 @@
       "controls": {
         "briefAndRulesTitle": "映画設定",
         "undoLabel": {
-          "promote_board_panel": "パネルを最初のフレームに使用",
+          "promote_board_panel": "フレームを動画の最初のフレームに使用",
           "set_reference_plan": "リファレンス計画",
           "amend_reference_plan": "背景を追加",
           "set_reference_label": "リファレンス名",
@@ -1560,29 +1590,31 @@
       "gate": {
         "predecessorVideoRetry": "確定する前に、継承した正確な開始フレームと Shooting script を確認してください。最初のプロバイダー試行が明確に失敗した場合に限り、自動再試行1回分が予約されます。最初の試行費用は {{lower}}、確定する上限は {{upper}} です。",
         "purpose": {
-          "board_still": "ボードパネル",
+          "board_still": "制作に使えるフレーム",
           "reference_image": "リファレンス画像"
         },
         "promotion": {
-          "title": "パネルを最初のフレームに使用",
-          "summary": "Shot {{shotId}}の現在のボードパネルを最初のフレームに昇格します。Shotの連続性境界は変更されません。",
-          "impactNone": "このフレームに依存する現在の映像はありません。",
-          "impactIntro": "現在の映像 {{count}}件は再生可能なままですが、古い状態になります：",
-          "impactItem": "Shot {{shotId}}の現在の映像",
-          "optionsLabel": "現在の映像の処理方法を選択",
-          "promoteOnly": "昇格のみ — 再生可能な古い映像を保持",
+          "title": "このフレームを使用",
+          "shotLocation": "Beat {{beatPosition}}「{{beatTitle}}」 · Shot {{shotPosition}}",
+          "shotFallback": "選択した Shot",
+          "summary": "このフレームを {{shot}} の動画の最初のフレームとして使用します。前の Shot とのつながり方は変わりません。",
+          "impactNone": "このフレームに依存する既存の動画テイクはありません。",
+          "impactIntro": "影響を受ける動画テイク：{{count}} 件。引き続き再生できます。この再生成見積もりの対象になるのは、セグメント先頭の Shot の現在のテイクだけです。",
+          "impactItem": "{{shot}} の動画テイク",
+          "optionsLabel": "この Shot を今すぐ再生成するか選択",
+          "promoteOnly": "このフレームのみ使用 — 既存の動画テイクを保持",
           "freePrice": "$0",
-          "promoteAndRerender": "昇格して正確な再生成作業を確認",
+          "promoteAndRerender": "このフレームを使用して再生成を確認",
           "priceAfterReview": "次に価格を表示",
-          "promoteOnlyAction": "$0で昇格",
+          "promoteOnlyAction": "このフレームを使用 · $0",
           "reviewPaidAction": "再生成の価格を確認",
-          "paidUnavailable": "このセグメントには現在の映像が多すぎるため、1回の有料確認では処理できません。昇格のみは引き続き利用できます。",
-          "headline": "昇格 + {{count}}件の再生成 · {{cost}}",
-          "requiredWork": "表示された再生成は、この昇格によって古くなる現在の映像と完全に一致します。不足しているカバレッジは含まれません。",
-          "confirm": "昇格 + {{count}}件の再生成を確認 · {{cost}}",
-          "promoted": "パネルを昇格しました。既存の映像は再生可能なまま、古い状態としてマークされます。",
-          "promoting": "パネルを昇格中…",
-          "confirmed": "パネルを昇格し、確認した映像の再生成を開始しました。",
+          "paidUnavailable": "このセグメントには既存の動画テイクが多すぎるため、1回の有料確認では処理できません。再生成せずにこのフレームを使用することはできます。",
+          "headline": "フレームを使用 + 動画を再生成（{{count}}件） · {{cost}}",
+          "requiredWork": "後続の接続された Shot は、直前の Shot で新たに選択された終了フレームを待ちます。その後、Shot ごとに新しい見積もりが提示され、確認できます。",
+          "confirm": "フレームを使用 + 現在の動画を再生成（{{count}}）· {{cost}}",
+          "promoted": "フレームを選択しました。既存の動画テイクは再生可能なまま、確認対象としてマークされます。",
+          "promoting": "フレームを使用中…",
+          "confirmed": "フレームを選択し、確認した動画テイクの再生成を開始しました。",
           "close": "閉じる"
         },
         "headline_one": "生成 {{count}} 件 · {{cost}}",
@@ -1599,8 +1631,8 @@
         "continuity": {
           "severTitle": "ハードカットを確認",
           "rejoinTitle": "再接続を確認",
-          "severSummary": "この見積もりでは、このショットをチェーンの先頭にし、有効な最初のフレームを再利用するか必要に応じて作成し、次のハードカットまでの影響を受ける全動画を差し替えます。",
-          "rejoinSummary": "この見積もりでは、このショットの最初のフレームの選択を解除してトリム後の前ショットのフレームに再接続します。確定後、無料のフレーム抽出が完了してから、次のハードカットまでの差し替え動画が送信される場合があります。",
+          "severSummary": "この見積もりでは、このショットをハードカット後に開始し、有効な最初のフレームを再利用するか必要に応じて作成し、次のハードカットまでの影響を受ける全動画を差し替えます。",
+          "rejoinSummary": "この見積もりでは、このショットの最初のフレームの選択を解除し、選択した編集点にある直前のショットの正確な最終フレームに接続します。確定後、無料のフレーム抽出が完了してから、次のハードカットまでの差し替え動画が生成に送られる場合があります。",
           "severHeadline": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
           "severHeadline_one": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",
           "severHeadline_other": "ハードカット · 必須生成 {{count}} 件 · {{cost}}",

@@ -887,6 +887,9 @@
     "workspace": {
       "views": {
         "references": "Referências",
+        "table": "História",
+        "board": "Quadros e vídeo",
+        "cut": "Corte",
         "status": {
           "next": "Próximo"
         },
@@ -894,8 +897,31 @@
           "noReferences": "Nenhum trabalho com referências está planejado, então esta visualização pode ser ignorada.",
           "noStoryboard": "Ainda não há Beats nem Shots no storyboard.",
           "noTakes": "Ainda não há tomadas atuais em {{view}} — {{current}} de {{total}} Shots estão prontos.",
+          "frameProgress": "Quadros de produção: {{current}} de {{total}} prontos.",
+          "videoProgress": "Tomadas de vídeo: {{current}} de {{total}} prontas.",
           "nextInView": "Próximo: continue em {{view}}.",
-          "nextStage": "Próximo: conclua {{stage}} nas configurações do projeto."
+          "nextStage": "Próximo: conclua {{stage}} nas configurações do projeto.",
+          "action": {
+            "filmSetup": "Conclua o briefing e escolha os mecanismos de imagem e vídeo antes de criar a história.",
+            "storyline": "Alinhe a direção criativa com o Director. Depois, crie e aprove a história e o plano de Shots antes de criar referências visuais.",
+            "references": "Gere as {{remaining}} referências visuais restantes e confira se cada uma tem uma imagem atual.",
+            "bindings": "Atribua referências atuais a cada um dos {{remaining}} Shots restantes ou escolha explicitamente não usar referências.",
+            "frames": "Gere os {{remaining}} quadros atuais de alta fidelidade restantes e revise cada um como alvo visual do Shot.",
+            "promoteFrame": "Antes de gerar tomadas de vídeo, use os {{remaining}} quadros revisados restantes como primeiros quadros dos vídeos que começam após um corte.",
+            "videos": "Gere as {{remaining}} tomadas de vídeo restantes. Shots que começam após um corte usam o primeiro quadro escolhido; Shots conectados continuam a partir do último quadro exato mostrado no ponto de edição escolhido.",
+            "finishCut": "Finalize o corte: revise ritmo, continuidade e som antes de exportar.",
+            "reviewCut": "Todas as tomadas de vídeo estão prontas. Abra o corte e revise a sequência final antes de exportar."
+          },
+          "cta": {
+            "filmSetup": "Abrir configuração",
+            "storyline": "Abrir história",
+            "references": "Abrir referências",
+            "bindings": "Revisar referências dos Shots",
+            "frames": "Abrir geração de quadros",
+            "promoteFrame": "Revisar primeiros quadros de vídeo",
+            "videos": "Abrir geração de vídeo",
+            "cut": "Abrir corte"
+          }
         }
       },
       "referenceWorkflow": {
@@ -956,14 +982,14 @@
             "activeAssetConsumerRetained": "{{purpose}} do Shot preservado {{shotId}} usa exatamente esta foto. Ela permanece bloqueada enquanto o trabalho não for resolvido.",
             "activeAssetConsumerOther": "O trabalho de {{purpose}} ({{jobId}}) usa exatamente esta foto. Ela permanece bloqueada enquanto o trabalho não for resolvido.",
             "downloadRecovery": "{{purpose}} do Beat {{beatPosition}}, Shot {{shotPosition}} terminou no provedor, mas o resultado não foi baixado. Tente novamente aqui; a foto permanece bloqueada até a recuperação ter sucesso.",
-            "downloadRecoveryRetainedShot": "{{purpose}} do Shot preservado {{shotId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Shot da Lixeira do Board para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
-            "downloadRecoveryRetainedBeat": "{{purpose}} do Shot {{shotId}} dentro do Beat preservado {{beatId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Beat da Lixeira do Board para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
+            "downloadRecoveryRetainedShot": "{{purpose}} do Shot preservado {{shotId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Shot dos itens removidos para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} do Shot {{shotId}} dentro do Beat preservado {{beatId}} terminou no provedor, mas o resultado não foi baixado. Restaure o Beat dos itens removidos para revisar a recuperação; a foto permanece bloqueada até ela ter sucesso.",
             "downloadRecoveryOther": "O trabalho de {{purpose}} ({{jobId}}) terminou no provedor, mas o resultado não foi baixado. Tente novamente aqui; a foto permanece bloqueada até a recuperação ter sucesso.",
             "invalidAuthority": "Os dados de referência da foto atual estão inconsistentes. Recarregue o projeto e revise esta referência antes de tentar removê-la novamente.",
-            "reviewInBoard": "Revisar no Board"
+            "reviewInBoard": "Revisar em Quadros e vídeo"
           }
         },
-        "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar o Board ou o primeiro quadro.",
+        "description": "Gere primeiro as imagens canônicas dos personagens e depois as imagens dos cenários recorrentes. Vincule as referências atuais a cada Shot antes de gerar seu quadro pronto para produção ou seu primeiro quadro.",
         "generationScope": "Escopo da geração",
         "characters": {
           "title": "Personagens",
@@ -1006,7 +1032,7 @@
         "currentProgress": "{{current}} de {{total}} referências geradas",
         "bindings": {
           "title": "Vínculos dos Shots",
-          "description": "Escolha os personagens e o fundo atuais exatos usados por cada Shot no painel do Board e no primeiro quadro.",
+          "description": "Escolha os personagens e o fundo atuais exatos usados por cada Shot no quadro pronto para produção e no primeiro quadro.",
           "empty": "Não há Shots ativos para vincular.",
           "shot": "Shot {{position}}",
           "unassigned": "Este Shot ainda não tem uma decisão de referências.",
@@ -1055,23 +1081,23 @@
         },
         "columns": {
           "length": "Soma",
-          "panel": "Painel",
+          "panel": "Quadro",
           "story": "História"
         },
         "plannedPending": "Sem soma planejada",
         "panel": {
-          "openDetails": "Abrir painéis do Board de {{title}}",
-          "closeDetails": "Fechar painéis do Board de {{title}}",
+          "openDetails": "Abrir quadros de {{title}}",
+          "closeDetails": "Fechar quadros de {{title}}",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Detalhes do Shot {{position}}",
-          "head": "Início da cadeia",
+          "head": "Começa com o primeiro quadro",
           "status": {
-            "missing": "Não desenhado",
+            "missing": "Não gerado",
             "current": "Atual",
             "stale": "Desatualizado",
             "statusPending": "Status pendente",
             "queued": "Na fila",
-            "drawing": "Desenhando",
+            "drawing": "Gerando",
             "needsAttention": "Requer atenção",
             "failed": "Falhou",
             "cancelled": "Cancelado"
@@ -1111,37 +1137,40 @@
         }
       },
       "board": {
+        "ariaLabel": "Produção de quadros e vídeo",
         "controls": {
-          "label": "Controles do Board do Diretor",
-          "progress": "{{drawn}} de {{total}} painéis desenhados",
-          "progressLabel": "Conclusão do Board",
+          "label": "Produção de quadros e vídeo",
+          "progress": "{{current}} de {{total}} quadros em alta fidelidade prontos",
+          "progressLabel": "Conclusão dos quadros em alta fidelidade",
+          "videoProgress": "{{current}} de {{total}} tomadas de vídeo prontas",
+          "videoProgressLabel": "Conclusão das tomadas de vídeo",
           "staleCount": "{{count}} desatualizados",
           "busyCount": "{{count}} em andamento",
-          "stop": "Parar desenho",
-          "stopNote": "Parar solicita o cancelamento quando possível. Os painéis concluídos e as cobranças já incorridas permanecem.",
-          "drawNext": "Desenhar próximo lote ({{count}})"
+          "stop": "Parar geração de quadros",
+          "stopNote": "Parar solicita o cancelamento quando possível. Os quadros concluídos e as cobranças já incorridas permanecem.",
+          "drawNext": "Gerar próximos quadros ({{count}})"
         },
         "panel": {
-          "beatActions": "Controles do Board do Diretor · {{title}}",
-          "drawMissing": "Desenhar ausentes ({{count}})",
-          "redrawBeat": "Redesenhar Beat · pago",
+          "beatActions": "Ações para {{title}}",
+          "drawMissing": "Gerar quadros ausentes ({{count}})",
+          "redrawBeat": "Regenerar quadros do Beat · pago",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "redrawShot": "Redesenhar Shot {{position}} · pago",
-          "useAsFirstFrame": "Usar o painel do Shot {{position}} como primeiro quadro",
+          "redrawShot": "Regenerar quadro do Shot {{position}} · pago",
+          "useAsFirstFrame": "Usar o quadro do Shot {{position}} como primeiro quadro do vídeo",
           "status": {
-            "missing": "Não desenhado",
+            "missing": "Não gerado",
             "current": "Atual",
             "stale": "Desatualizado",
             "statusPending": "Status pendente",
             "queued": "Na fila",
-            "drawing": "Desenhando",
+            "drawing": "Gerando",
             "needsAttention": "Requer atenção",
             "failed": "Falhou",
             "cancelled": "Cancelado"
           }
         },
-        "statusUnavailable": "A ordem atual do Board está incompleta ou ambígua. Atualize o projeto antes de revisar os cartões de Shot.",
-        "renderedCount": "{{count}} de {{total}} renderizados",
+        "statusUnavailable": "A ordem atual dos Shots está incompleta ou ambígua. Atualize o projeto antes de revisar os cartões de Shot.",
+        "renderedCount": "{{count}} de {{total}} tomadas de vídeo prontas",
         "staleCount": "{{count}} Shots desatualizados",
         "staleCount_one": "{{count}} Shot desatualizado",
         "staleCount_other": "{{count}} Shots desatualizados",
@@ -1154,14 +1183,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "Vídeo atual do Shot",
           "stale": "Desatualizado",
-          "chainHead": "Início da cadeia",
+          "chainHead": "Começa com o primeiro quadro",
           "chainAfter": "Depois de {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "Os detalhes dos bloqueios não estão disponíveis para esta revisão do projeto.",
           "blocker": {
             "heading": "Bloqueado por",
-            "referenceBindingTable": "A vinculação de referências precisa ser corrigida na Table antes da geração.",
-            "reviewOnTable": "Revisar referências na Table",
+            "referenceBindingTable": "As referências escolhidas precisam ser corrigidas em História antes da geração.",
+            "reviewOnTable": "Revisar referências em História",
             "cause": {
               "routeInventoryUnavailable": "A lista de mecanismos não está disponível.",
               "routeNotSelected": "Nenhum mecanismo de geração foi selecionado.",
@@ -1294,7 +1323,8 @@
         "saveAndRequestUpdated": "Salvar e preparar proposta atualizada",
         "reviewRuleDrafts": "Revisar rascunhos de regras",
         "reviewRuleDraftsFirst": "Revise ou descarte o rascunho de regra local antes de aceitar esta proposta de regra.",
-        "reproposalPrompt": "Prepare uma versão atualizada da proposta que selecionei. Use {{proposalId}} apenas para identificá-la internamente e não mencione essa referência nem etapas técnicas na resposta.",
+        "reproposalPrompt": "Prepare uma versão atualizada da proposta que selecionei.",
+        "continueJourneyPrompt": "Continue a partir do estado atual do Studio e me guie até a próxima etapa.",
         "chatDecisionBusy": "Outra ação revisada ainda está em andamento.",
         "chatDirty": "Salve ou redefina os rascunhos que entram em conflito com esta proposta antes de aprová-la.",
         "chatNoPending": "Não há proposta pendente do Diretor para processar.",
@@ -1329,7 +1359,7 @@
           "aspectRatio": "Proporção",
           "resolution": "Resolução",
           "targetDurationSeconds": "Duração alvo",
-          "boardStyle": "Estilo do Board",
+          "boardStyle": "Estilo visual",
           "title": "Título",
           "story": "História",
           "targetSeconds": "Meta do Beat",
@@ -1372,7 +1402,7 @@
           "origin": {
             "generated": "Gerado",
             "imported": "Importado",
-            "board": "Storyboard",
+            "board": "Quadro pronto para produção",
             "inherited": "Do plano {{shot}}"
           },
           "current": "Atual",
@@ -1482,8 +1512,8 @@
           "reviewSever": "Revisar corte seco…",
           "reviewRejoin": "Revisar reconexão…",
           "reviewSeverDescription": "Um corte seco faz a Tomada {{shot}} começar com um primeiro quadro válido e cria um se necessário. A confirmação substitui esta Tomada e todas as Tomadas contínuas seguintes até o próximo corte seco.",
-          "reviewRejoinDescription": "Ao reconectar a Tomada {{shot}}, sua seleção de primeiro quadro é removida e o último quadro da Tomada {{previous}}, ajustado ao corte, é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas contínuas seguintes até o próximo corte seco.",
-          "segmentHead": "Início da cadeia · Começa no primeiro quadro",
+          "reviewRejoinDescription": "Ao conectar a Tomada {{shot}} à anterior, sua seleção de primeiro quadro é removida e o último quadro exato da Tomada {{previous}} no ponto de edição escolhido é usado. Após a confirmação, a extração gratuita do quadro pode terminar antes do envio desta Tomada e das Tomadas conectadas seguintes para geração até o próximo corte seco.",
+          "segmentHead": "Após um corte seco · Começa no primeiro quadro",
           "continuous": "Continua do último quadro do Plano {{position}}"
         },
         "coverage": {
@@ -1550,7 +1580,7 @@
       "controls": {
         "briefAndRulesTitle": "Configuração do filme",
         "undoLabel": {
-          "promote_board_panel": "Usar painel como primeiro quadro",
+          "promote_board_panel": "Usar quadro como primeiro quadro do vídeo",
           "set_reference_plan": "plano de referências",
           "amend_reference_plan": "adicionar cenário",
           "set_reference_label": "nome da referência",
@@ -1566,29 +1596,31 @@
       "gate": {
         "predecessorVideoRetry": "Revise o quadro inicial herdado exato e o Shooting script antes de confirmar. Uma nova tentativa automática fica reservada somente se a primeira tentativa do provedor falhar de forma inequívoca. As primeiras tentativas custam {{lower}}; o máximo confirmado é {{upper}}.",
         "purpose": {
-          "board_still": "Painel do Board",
+          "board_still": "Quadro pronto para produção",
           "reference_image": "Imagem de referência"
         },
         "promotion": {
-          "title": "Usar painel como primeiro quadro",
-          "summary": "Promova o painel atual do Board do Shot {{shotId}} a primeiro quadro. Isso não altera o limite de continuidade do Shot.",
-          "impactNone": "Nenhuma imagem atual depende deste quadro.",
-          "impactIntro": "Imagens atuais que continuarão reproduzíveis, mas ficarão desatualizadas: {{count}}",
-          "impactItem": "Imagem atual do Shot {{shotId}}",
-          "optionsLabel": "Escolha como tratar as imagens atuais",
-          "promoteOnly": "Apenas promover — manter imagens reproduzíveis e desatualizadas",
+          "title": "Usar este quadro",
+          "shotLocation": "Beat {{beatPosition}} “{{beatTitle}}” · Shot {{shotPosition}}",
+          "shotFallback": "o Shot selecionado",
+          "summary": "Use este quadro como primeiro quadro do vídeo de {{shot}}. Isso não muda como o Shot se conecta ao anterior.",
+          "impactNone": "Nenhuma tomada de vídeo existente depende deste quadro.",
+          "impactIntro": "Tomadas de vídeo afetadas: {{count}}. Elas continuam disponíveis para reprodução. Apenas a tomada atual do primeiro Shot do segmento pode entrar nesta estimativa de regeneração.",
+          "impactItem": "Tomada de vídeo de {{shot}}",
+          "optionsLabel": "Escolha se deseja regenerar este Shot agora",
+          "promoteOnly": "Usar somente este quadro — manter as tomadas de vídeo existentes",
           "freePrice": "$0",
-          "promoteAndRerender": "Promover e revisar o trabalho exato de nova renderização",
+          "promoteAndRerender": "Usar este quadro e revisar a regeneração",
           "priceAfterReview": "Preço exibido a seguir",
-          "promoteOnlyAction": "Promover por $0",
-          "reviewPaidAction": "Revisar preço da nova renderização",
-          "paidUnavailable": "Este segmento tem imagens atuais demais para uma única confirmação paga. A opção de apenas promover continua disponível.",
-          "headline": "Promover + renderizar takes novamente ({{count}}) · {{cost}}",
-          "requiredWork": "As novas renderizações listadas são exatamente as imagens atuais que esta promoção torna desatualizadas. A cobertura ausente não está incluída.",
-          "confirm": "Confirmar promoção + renderizar takes novamente ({{count}}) · {{cost}}",
-          "promoted": "Painel promovido. As imagens existentes continuam reproduzíveis e são marcadas como desatualizadas.",
-          "promoting": "Promovendo painel…",
-          "confirmed": "Painel promovido e nova renderização iniciada para as imagens confirmadas.",
+          "promoteOnlyAction": "Usar este quadro · $0",
+          "reviewPaidAction": "Revisar preço da regeneração",
+          "paidUnavailable": "Este segmento tem tomadas de vídeo existentes demais para uma única confirmação paga. Ainda é possível usar este quadro sem regenerá-las.",
+          "headline": "Usar quadro + regenerar vídeo ({{count}}) · {{cost}}",
+          "requiredWork": "Os Shots conectados seguintes aguardam o novo quadro final selecionado do Shot anterior. Depois, cada um recebe uma nova estimativa para sua análise.",
+          "confirm": "Usar quadro + regenerar o vídeo atual ({{count}}) · {{cost}}",
+          "promoted": "Quadro selecionado. As tomadas de vídeo existentes continuam reproduzíveis e são marcadas para revisão.",
+          "promoting": "Usando quadro…",
+          "confirmed": "Quadro selecionado e regeneração iniciada para as tomadas de vídeo confirmadas.",
           "close": "Fechar"
         },
         "headline_one": "{{count}} geração · {{cost}}",
@@ -1605,8 +1637,8 @@
         "continuity": {
           "severTitle": "Revisar corte seco",
           "rejoinTitle": "Revisar reconexão",
-          "severSummary": "Esta estimativa torna esta Tomada o início da cadeia, reutiliza um primeiro quadro válido ou cria um se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
-          "rejoinSummary": "Esta estimativa remove a seleção de primeiro quadro desta Tomada e a reconecta ao quadro anterior ajustado ao corte. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição até o próximo corte seco.",
+          "severSummary": "Esta estimativa faz a Tomada começar após um corte seco, reutiliza um primeiro quadro válido ou cria um se necessário e substitui todos os vídeos afetados até o próximo corte seco.",
+          "rejoinSummary": "Esta estimativa remove a seleção de primeiro quadro desta Tomada e a conecta ao último quadro exato da Tomada anterior no ponto de edição escolhido. A extração gratuita do quadro pode terminar após a confirmação e antes do envio dos vídeos de substituição para geração até o próximo corte seco.",
           "severHeadline": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",
           "severHeadline_one": "Corte seco · {{count}} geração obrigatória · {{cost}}",
           "severHeadline_other": "Corte seco · {{count}} gerações obrigatórias · {{cost}}",

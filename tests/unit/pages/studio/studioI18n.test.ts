@@ -157,8 +157,27 @@ const localizedWorkspaceProgressKeys = [
   'views.guidance.noReferences',
   'views.guidance.noStoryboard',
   'views.guidance.noTakes',
+  'views.guidance.frameProgress',
+  'views.guidance.videoProgress',
   'views.guidance.nextInView',
   'views.guidance.nextStage',
+  'views.guidance.action.filmSetup',
+  'views.guidance.action.storyline',
+  'views.guidance.action.references',
+  'views.guidance.action.bindings',
+  'views.guidance.action.frames',
+  'views.guidance.action.promoteFrame',
+  'views.guidance.action.videos',
+  'views.guidance.action.finishCut',
+  'views.guidance.action.reviewCut',
+  'views.guidance.cta.filmSetup',
+  'views.guidance.cta.storyline',
+  'views.guidance.cta.references',
+  'views.guidance.cta.bindings',
+  'views.guidance.cta.frames',
+  'views.guidance.cta.promoteFrame',
+  'views.guidance.cta.videos',
+  'views.guidance.cta.cut',
 ] as const;
 
 const loadConversation = (locale: string): JsonObject =>
@@ -350,6 +369,8 @@ const localizedBoardControlKeys = [
   'board.controls.label',
   'board.controls.progress',
   'board.controls.progressLabel',
+  'board.controls.videoProgress',
+  'board.controls.videoProgressLabel',
   'board.controls.staleCount',
   'board.controls.busyCount',
   'board.controls.stop',
@@ -947,6 +968,7 @@ const expectedLeaves = [
   'proposals.reviewRuleDrafts',
   'proposals.reviewRuleDraftsFirst',
   'proposals.reproposalPrompt',
+  'proposals.continueJourneyPrompt',
   'proposals.chatAccepted',
   'proposals.chatRejected',
   'proposals.chatNoPending',
@@ -1105,6 +1127,8 @@ const expectedLeaves = [
   'gate.continuity.severConfirmed',
   'gate.continuity.rejoinConfirmed',
   'gate.promotion.title',
+  'gate.promotion.shotLocation',
+  'gate.promotion.shotFallback',
   'gate.promotion.summary',
   'gate.promotion.impactNone',
   'gate.promotion.impactIntro',
@@ -1309,6 +1333,7 @@ const localizedBoardKeys = [
   ...localizedBoardControlKeys,
   ...localizedBoardPanelKeys,
   ...localizedTableReorderKeys,
+  'board.ariaLabel',
   'table.authoring.label',
   'table.authoring.coverageGap',
   'table.authoring.coverageGap_one',
@@ -1343,6 +1368,8 @@ const localizedBoardKeys = [
 const localizedBoardPromotionKeys = [
   'controls.undoLabel.promote_board_panel',
   'gate.promotion.title',
+  'gate.promotion.shotLocation',
+  'gate.promotion.shotFallback',
   'gate.promotion.summary',
   'gate.promotion.impactNone',
   'gate.promotion.impactIntro',
@@ -1434,6 +1461,7 @@ const localizedWorkspaceKeys = [
   'proposals.reviewRuleDrafts',
   'proposals.reviewRuleDraftsFirst',
   'proposals.reproposalPrompt',
+  'proposals.continueJourneyPrompt',
   'proposals.chatAccepted',
   'proposals.chatRejected',
   'proposals.chatNoPending',
@@ -1471,6 +1499,9 @@ const localizedWorkspaceKeys = [
   'proposals.field.placement',
   'proposals.field.order',
   'views.references',
+  'views.table',
+  'views.board',
+  'views.cut',
   ...localizedWorkspaceProgressKeys,
   'editorFolderExport.action',
   'editorFolderExport.actionWithSlates',
@@ -1700,8 +1731,7 @@ describe('Creative Studio workspace translations', () => {
       'proposals.unlabelledItem': 'Unlabelled item',
       'proposals.requestUpdated': 'Prepare updated proposal',
       'proposals.saveAndRequestUpdated': 'Save and prepare updated proposal',
-      'proposals.reproposalPrompt':
-        'Prepare an updated version of the proposal I selected. Use {{proposalId}} only to identify it internally, and do not mention this reference or any technical steps in your reply.',
+      'proposals.reproposalPrompt': 'Prepare an updated version of the proposal I selected.',
       'proposals.chatMultiplePending':
         'More than one Director proposal is ready. Use the action buttons on the proposal you mean.',
       'proposals.authorityUnavailable':
@@ -1713,9 +1743,9 @@ describe('Creative Studio workspace translations', () => {
       expect(localized['proposals.chatMultiplePending'], locale).not.toMatch(
         /PROPOSAL_ID|\/approve|\/reject|accept|reject/iu
       );
-      expect(localized['proposals.reproposalPrompt'], locale).toMatch(/\{\{proposalId\}\}/u);
+      expect(placeholders(localized['proposals.reproposalPrompt']!), locale).toEqual([]);
       expect(localized['proposals.reproposalPrompt'], locale).not.toMatch(
-        /studio_get_proposal|read_storyboard|rebase|revision/iu
+        /\bproposal(?:_| )?id\b|PROPOSAL_ID|studio_get_proposal|read_storyboard|rebase|revision|\/approve|\/reject/iu
       );
     }
   });
@@ -1774,7 +1804,7 @@ describe('Creative Studio workspace translations', () => {
     }
   });
 
-  it('keeps the exact Director Board Table copy and spend purpose in en-US', () => {
+  it('keeps the exact Storyline and frame-production copy and spend purpose in en-US', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
@@ -1793,69 +1823,131 @@ describe('Creative Studio workspace translations', () => {
         'A hand-authored Shot starts with references unassigned and requires review before paid generation.',
       'table.reorder.announcement': 'Moved {{title}} from position {{from}} to {{to}} of {{total}}.',
       'table.reorder.failed': 'Beat order was not changed.',
-      'table.columns.panel': 'Panel',
-      'board.controls.label': 'Director Board controls',
-      'board.controls.progress': '{{drawn}} of {{total}} panels drawn',
-      'board.controls.progressLabel': 'Board completeness',
+      'table.columns.panel': 'Frame',
+      'board.ariaLabel': 'Frame and video production',
+      'board.controls.label': 'Frame and video production',
+      'board.controls.progress': '{{current}} of {{total}} hi-fi frames ready',
+      'board.controls.progressLabel': 'Hi-fi frame completeness',
+      'board.controls.videoProgress': '{{current}} of {{total}} video takes ready',
+      'board.controls.videoProgressLabel': 'Video take completeness',
       'board.controls.staleCount': '{{count}} stale',
       'board.controls.busyCount': '{{count}} in progress',
-      'board.controls.stop': 'Stop drawing',
+      'board.controls.stop': 'Stop frame generation',
       'board.controls.stopNote':
-        'Stop requests cancellation where possible. Completed panels and charges already incurred remain.',
-      'board.controls.drawNext': 'Draw next batch ({{count}})',
+        'Stop requests cancellation where possible. Completed frames and charges already incurred remain.',
+      'board.controls.drawNext': 'Generate next frames ({{count}})',
       'board.panel.beatActions': 'Actions for {{title}}',
-      'board.panel.drawMissing': 'Draw missing ({{count}})',
-      'board.panel.redrawBeat': 'Redraw Beat · paid',
+      'board.panel.drawMissing': 'Generate missing frames ({{count}})',
+      'board.panel.redrawBeat': 'Regenerate Beat frames · paid',
       'board.panel.cardLabel': 'Shot {{position}}: {{status}}',
-      'board.panel.redrawShot': 'Redraw Shot {{position}} · paid',
-      'table.panel.openDetails': 'Open Board panels for {{title}}',
-      'table.panel.closeDetails': 'Close Board panels for {{title}}',
+      'board.panel.redrawShot': 'Regenerate Shot {{position}} frame · paid',
+      'table.panel.openDetails': 'Open frames for {{title}}',
+      'table.panel.closeDetails': 'Close frames for {{title}}',
       'table.panel.cardLabel': 'Shot {{position}}: {{status}}',
       'table.panel.shotDetails': 'Shot {{position}} details',
-      'table.panel.head': 'Chain head',
-      'table.panel.status.missing': 'Not drawn',
+      'table.panel.head': 'Starts with first frame',
+      'table.panel.status.missing': 'Not generated',
       'table.panel.status.current': 'Current',
       'table.panel.status.stale': 'Stale',
       'table.panel.status.statusPending': 'Status pending',
       'table.panel.status.queued': 'Queued',
-      'table.panel.status.drawing': 'Drawing',
+      'table.panel.status.drawing': 'Generating',
       'table.panel.status.needsAttention': 'Needs attention',
       'table.panel.status.failed': 'Failed',
       'table.panel.status.cancelled': 'Cancelled',
-      'gate.purpose.board_still': 'Board panel',
+      'gate.purpose.board_still': 'Production-ready frame',
     });
   });
 
-  it('keeps the exact Board-panel promotion copy in en-US', () => {
+  it('keeps the exact first-frame selection copy in en-US', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'controls.undoLabel.promote_board_panel': 'Use panel as first frame',
-      'board.panel.useAsFirstFrame': 'Use Shot {{position}} panel as first frame',
-      'gate.promotion.title': 'Use panel as first frame',
+      'controls.undoLabel.promote_board_panel': 'Use frame as video first frame',
+      'board.panel.useAsFirstFrame': 'Use Shot {{position}} frame as video first frame',
+      'gate.promotion.title': 'Use this frame',
+      'gate.promotion.shotLocation': 'Beat {{beatPosition}} “{{beatTitle}}” · Shot {{shotPosition}}',
+      'gate.promotion.shotFallback': 'the selected Shot',
       'gate.promotion.summary':
-        'Promote the current Board panel for Shot {{shotId}}. This does not change the Shot’s continuity boundary.',
-      'gate.promotion.impactNone': 'No current pictures depend on this frame.',
-      'gate.promotion.impactIntro': '{{count}} current picture(s) will remain playable but become stale:',
-      'gate.promotion.impactItem': 'Shot {{shotId}} current picture',
-      'gate.promotion.optionsLabel': 'Choose how to handle current pictures',
-      'gate.promotion.promoteOnly': 'Promote only — keep playable, stale pictures',
+        'Use this frame as the video first frame for {{shot}}. This does not change how the Shot connects to the one before it.',
+      'gate.promotion.impactNone': 'No existing video takes depend on this frame.',
+      'gate.promotion.impactIntro':
+        'Affected video takes: {{count}}. They stay playable. Only the current take for the first Shot in the segment is eligible for this regeneration quote.',
+      'gate.promotion.impactItem': '{{shot}} video take',
+      'gate.promotion.optionsLabel': 'Choose whether to regenerate this Shot now',
+      'gate.promotion.promoteOnly': 'Use this frame only — keep existing video takes',
       'gate.promotion.freePrice': '$0',
-      'gate.promotion.promoteAndRerender': 'Promote and review exact rerender work',
+      'gate.promotion.promoteAndRerender': 'Use this frame and review regeneration',
       'gate.promotion.priceAfterReview': 'Price shown next',
-      'gate.promotion.promoteOnlyAction': 'Promote for $0',
-      'gate.promotion.reviewPaidAction': 'Review rerender price',
+      'gate.promotion.promoteOnlyAction': 'Use this frame · $0',
+      'gate.promotion.reviewPaidAction': 'Review regeneration price',
       'gate.promotion.paidUnavailable':
-        'This segment has too many current pictures for one paid confirmation. Promote-only remains available.',
-      'gate.promotion.headline': 'Promote + {{count}} rerender(s) · {{cost}}',
+        'This segment has too many existing video takes for one paid confirmation. Using this frame without regenerating remains available.',
+      'gate.promotion.headline': 'Use frame + video regeneration ({{count}}) · {{cost}}',
       'gate.promotion.requiredWork':
-        'The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.',
-      'gate.promotion.confirm': 'Confirm promotion + {{count}} rerender(s) · {{cost}}',
-      'gate.promotion.promoted': 'Panel promoted. Existing pictures remain playable and are marked stale.',
-      'gate.promotion.promoting': 'Promoting panel…',
-      'gate.promotion.confirmed': 'Panel promoted and rerendering started for the confirmed pictures.',
+        'Later connected Shots wait for the newly selected ending frame from the Shot before them. Each then gets a new price for your review.',
+      'gate.promotion.confirm': 'Use frame + regenerate current video ({{count}}) · {{cost}}',
+      'gate.promotion.promoted': 'Frame selected. Existing video takes remain playable and are marked for review.',
+      'gate.promotion.promoting': 'Using frame…',
+      'gate.promotion.confirmed': 'Frame selected and regeneration started for the confirmed video takes.',
       'gate.promotion.close': 'Close',
     });
+  });
+
+  it('keeps the visible journey and edit-point video handoff explicit in en-US', () => {
+    const leaves = flattenLeaves(englishWorkspace);
+
+    expect(leaves).toMatchObject({
+      'views.guidance.action.storyline':
+        'Agree the creative direction with the Director, then build and approve the storyline and shot plan before creating visual references.',
+      'views.guidance.action.references':
+        'Generate the remaining {{remaining}} visual references and make sure each has a current image.',
+      'views.guidance.action.frames':
+        'Generate the remaining {{remaining}} current hi-fi frames, then review each as its Shot’s visual target.',
+      'views.guidance.action.promoteFrame':
+        'Use the remaining {{remaining}} reviewed frames as the first frames for videos that start after a cut.',
+      'views.guidance.action.videos':
+        'Generate the remaining {{remaining}} video takes. Shots after a cut use their chosen first frames; connected Shots continue from the exact last frame shown at the chosen edit point.',
+      'views.guidance.cta.promoteFrame': 'Review video first frames',
+    });
+  });
+
+  it('keeps active journey copy free of internal production labels in every locale', () => {
+    const activeJourneyKeys = [
+      'views.guidance.action.promoteFrame',
+      'views.guidance.action.videos',
+      'referenceWorkflow.description',
+      'referenceWorkflow.bindings.description',
+      'referenceWorkflow.panel.removalBlocker.downloadRecoveryRetainedShot',
+      'referenceWorkflow.panel.removalBlocker.downloadRecoveryRetainedBeat',
+      'referenceWorkflow.panel.removalBlocker.reviewInBoard',
+      'table.columns.panel',
+      'table.panel.openDetails',
+      'table.panel.closeDetails',
+      'table.panel.head',
+      'board.panel.beatActions',
+      'board.statusUnavailable',
+      'board.shot.chainHead',
+      'board.shot.blocker.referenceBindingTable',
+      'board.shot.blocker.reviewOnTable',
+      'beatPanel.chain.reviewRejoinDescription',
+      'beatPanel.chain.segmentHead',
+      'beatPanel.firstFrames.origin.board',
+      'proposals.field.boardStyle',
+      'controls.undoLabel.promote_board_panel',
+      'gate.continuity.severSummary',
+      'gate.continuity.rejoinSummary',
+      'gate.purpose.board_still',
+      'gate.promotion.promoteOnly',
+    ] as const;
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      const activeJourneyCopy = activeJourneyKeys.map((key) => leaves[key]).join('\n');
+      expect(activeJourneyCopy, locale).not.toMatch(
+        /\b(?:Board|Table|panel|chain[- ]head|trim-aware|promote[- ]only)\b/iu
+      );
+    }
   });
 
   it('keeps exact Shot-binding and quote-readout copy in en-US', () => {
@@ -1865,7 +1957,7 @@ describe('Creative Studio workspace translations', () => {
       'controls.undoLabel.set_shot_reference_binding': 'Shot reference binding',
       'referenceWorkflow.bindings.title': 'Shot bindings',
       'referenceWorkflow.bindings.description':
-        'Choose the exact current characters and background each Shot uses for its Board panel and first frame.',
+        'Choose the exact current characters and background each Shot uses for its production-ready frame and first frame.',
       'referenceWorkflow.bindings.unassigned': 'This Shot has no reference decision yet.',
       'referenceWorkflow.bindings.invalid':
         'This saved binding is no longer valid. Choose current references and save it again.',
@@ -2009,7 +2101,7 @@ describe('Creative Studio workspace translations', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
     expect(leaves).toMatchObject({
-      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the first frame',
+      'beatPanel.chain.segmentHead': 'After a hard cut · Starts from the first frame',
       'beatPanel.chain.continuous': 'Continues from Shot {{position}}’s last frame',
     });
     expect(placeholders(leaves['beatPanel.chain.continuous']!)).toEqual(['position']);
@@ -2259,6 +2351,7 @@ describe('Creative Studio workspace translations', () => {
       expect(localizedTitle, locale).toBeTypeOf('string');
       expect(Object.keys(localizedLeaves).toSorted(), locale).toEqual(localizedWorkspaceKeys.toSorted());
       expect(localizedLeaves['controls.briefAndRulesTitle'], locale).toBe(localizedTitle);
+      expect(localizedLeaves['board.ariaLabel'], locale).toBe(localizedLeaves['board.controls.label']);
       const storyName = localizedLeaves['beatPanel.fields.story'];
       const storyGuidance = localizedLeaves['beatPanel.fieldGuidance.story'];
       expect(storyGuidance?.startsWith(`${storyName} · `), `${locale}:story`).toBe(true);
@@ -2408,8 +2501,8 @@ describe('Creative Studio workspace translations', () => {
       'beatPanel.chain.reviewSeverDescription':
         'A hard cut makes Shot {{shot}} start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.',
       'beatPanel.chain.reviewRejoinDescription':
-        'Rejoining Shot {{shot}} clears its first-frame selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.',
-      'beatPanel.chain.segmentHead': 'Head of the chain · Starts from the first frame',
+        'Connecting Shot {{shot}} to the previous Shot clears its first-frame selection and uses the exact last frame of Shot {{previous}} at its chosen edit point. After confirmation, free frame extraction may finish before this Shot and its connected downstream Shots are sent for generation through the next hard cut.',
+      'beatPanel.chain.segmentHead': 'After a hard cut · Starts from the first frame',
       'beatPanel.coverage.segmentState.renderingStill': 'Rendering · Showing the first frame',
       'beatPanel.seeds.label': 'First frames for Shot {{index}}',
       'beatPanel.seeds.title': 'First frames',
@@ -2446,9 +2539,9 @@ describe('Creative Studio workspace translations', () => {
       'controls.cascadeReason.choose_seed':
         'Choose the authorized first frame to continue without another cost confirmation.',
       'gate.continuity.severSummary':
-        'This estimate makes this Shot a chain head, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.',
+        'This estimate starts this Shot after a hard cut, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.',
       'gate.continuity.rejoinSummary':
-        'This estimate clears this Shot’s first-frame selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.',
+        'This estimate clears this Shot’s first-frame selection and connects it to the exact last frame of the previous Shot at its chosen edit point. Free frame extraction may finish after confirmation, before replacement videos are sent for generation through the next hard cut.',
       'gate.continuity.severConfirmed':
         'Hard cut confirmed. Review the Shot for first-frame progress, replacement progress, or any required recovery.',
       'gate.purpose.seed_still': 'First frame',

@@ -1307,8 +1307,8 @@
       "views": {
         "title": "Workspace views",
         "references": "References",
-        "table": "Table",
-        "board": "Board",
+        "table": "Storyline",
+        "board": "Frames & Video",
         "cut": "Cut",
         "status": {
           "next": "Next"
@@ -1317,8 +1317,31 @@
           "noReferences": "No reference work is planned, so this view can be skipped.",
           "noStoryboard": "There are no Beats or Shots in the storyboard yet.",
           "noTakes": "{{view}} has no current takes yet — {{current}} of {{total}} Shots are ready.",
+          "frameProgress": "Production-ready frames: {{current}} of {{total}} ready.",
+          "videoProgress": "Video takes: {{current}} of {{total}} ready.",
           "nextInView": "Next: continue in {{view}}.",
-          "nextStage": "Next: finish {{stage}} in Project settings."
+          "nextStage": "Next: finish {{stage}} in Project settings.",
+          "action": {
+            "filmSetup": "Complete the brief and choose the image and video engines before building the story.",
+            "storyline": "Agree the creative direction with the Director, then build and approve the storyline and shot plan before creating visual references.",
+            "references": "Generate the remaining {{remaining}} visual references and make sure each has a current image.",
+            "bindings": "Assign current references to each of the remaining {{remaining}} Shots, or explicitly choose no references.",
+            "frames": "Generate the remaining {{remaining}} current hi-fi frames, then review each as its Shot’s visual target.",
+            "promoteFrame": "Use the remaining {{remaining}} reviewed frames as the first frames for videos that start after a cut.",
+            "videos": "Generate the remaining {{remaining}} video takes. Shots after a cut use their chosen first frames; connected Shots continue from the exact last frame shown at the chosen edit point.",
+            "finishCut": "Finish the Cut: review timing, continuity, and sound before export.",
+            "reviewCut": "All video takes are ready. Open Cut to review the finished sequence before export."
+          },
+          "cta": {
+            "filmSetup": "Open film setup",
+            "storyline": "Open storyline",
+            "references": "Open references",
+            "bindings": "Review shot references",
+            "frames": "Open frame generation",
+            "promoteFrame": "Review video first frames",
+            "videos": "Open video generation",
+            "cut": "Open Cut"
+          }
         }
       },
       "referenceWorkflow": {
@@ -1379,14 +1402,14 @@
             "activeAssetConsumerRetained": "{{purpose}} for retained Shot {{shotId}} is using this exact photo. It remains locked while that job is unresolved.",
             "activeAssetConsumerOther": "{{purpose}} job {{jobId}} is using this exact photo. It remains locked while that job is unresolved.",
             "downloadRecovery": "{{purpose}} for Beat {{beatPosition}}, Shot {{shotPosition}} finished at the provider, but its result did not download. Retry here; this photo remains locked until recovery succeeds.",
-            "downloadRecoveryRetainedShot": "{{purpose}} for retained Shot {{shotId}} finished at the provider, but its result did not download. Restore the Shot from the Board Bin to review recovery; this photo remains locked until recovery succeeds.",
-            "downloadRecoveryRetainedBeat": "{{purpose}} for Shot {{shotId}} inside retained Beat {{beatId}} finished at the provider, but its result did not download. Restore the Beat from the Board Bin to review recovery; this photo remains locked until recovery succeeds.",
+            "downloadRecoveryRetainedShot": "{{purpose}} for retained Shot {{shotId}} finished at the provider, but its result did not download. Restore the Shot from removed items to review recovery; this photo remains locked until recovery succeeds.",
+            "downloadRecoveryRetainedBeat": "{{purpose}} for Shot {{shotId}} inside retained Beat {{beatId}} finished at the provider, but its result did not download. Restore the Beat from removed items to review recovery; this photo remains locked until recovery succeeds.",
             "downloadRecoveryOther": "{{purpose}} job {{jobId}} finished at the provider, but its result did not download. Retry here; this photo remains locked until recovery succeeds.",
             "invalidAuthority": "The current photo's reference data is inconsistent. Reload the project and review this reference before trying removal again.",
-            "reviewInBoard": "Review in Board"
+            "reviewInBoard": "Review in Frames & Video"
           }
         },
-        "description": "Generate canonical character images first, then recurring-background images. Bind the current references to each Shot before Board or first-frame generation.",
+        "description": "Generate canonical character images first, then recurring-background images. Bind the current references to each Shot before generating its production-ready frame or first frame.",
         "generationScope": "Generation scope",
         "characters": {
           "title": "Characters",
@@ -1429,7 +1452,7 @@
         "currentProgress": "{{current}} of {{total}} references generated",
         "bindings": {
           "title": "Shot bindings",
-          "description": "Choose the exact current characters and background each Shot uses for its Board panel and first frame.",
+          "description": "Choose the exact current characters and background each Shot uses for its production-ready frame and first frame.",
           "empty": "There are no active Shots to bind.",
           "shot": "Shot {{position}}",
           "unassigned": "This Shot has no reference decision yet.",
@@ -1447,7 +1470,7 @@
           "announcement": "Moved {{title}} from position {{from}} to {{to}} of {{total}}.",
           "failed": "Beat order was not changed."
         },
-        "label": "Beat table",
+        "label": "Storyline beats",
         "authoring": {
           "label": "Story authoring and recovery",
           "coverageGap": "{{count}} of {{total}} Beats have no Shots",
@@ -1466,23 +1489,23 @@
           "position": "#",
           "beat": "Beat",
           "shots": "Shots",
-          "panel": "Panel",
+          "panel": "Frame",
           "length": "Sum",
           "story": "Story"
         },
         "panel": {
-          "openDetails": "Open Board panels for {{title}}",
-          "closeDetails": "Close Board panels for {{title}}",
+          "openDetails": "Open frames for {{title}}",
+          "closeDetails": "Close frames for {{title}}",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Shot {{position}} details",
-          "head": "Chain head",
+          "head": "Starts with first frame",
           "status": {
-            "missing": "Not drawn",
+            "missing": "Not generated",
             "current": "Current",
             "stale": "Stale",
             "statusPending": "Status pending",
             "queued": "Queued",
-            "drawing": "Drawing",
+            "drawing": "Generating",
             "needsAttention": "Needs attention",
             "failed": "Failed",
             "cancelled": "Cancelled"
@@ -1510,36 +1533,38 @@
       },
       "board": {
         "controls": {
-          "label": "Director Board controls",
-          "progress": "{{drawn}} of {{total}} panels drawn",
-          "progressLabel": "Board completeness",
+          "label": "Frame and video production",
+          "progress": "{{current}} of {{total}} hi-fi frames ready",
+          "progressLabel": "Hi-fi frame completeness",
+          "videoProgress": "{{current}} of {{total}} video takes ready",
+          "videoProgressLabel": "Video take completeness",
           "staleCount": "{{count}} stale",
           "busyCount": "{{count}} in progress",
-          "stop": "Stop drawing",
-          "stopNote": "Stop requests cancellation where possible. Completed panels and charges already incurred remain.",
-          "drawNext": "Draw next batch ({{count}})"
+          "stop": "Stop frame generation",
+          "stopNote": "Stop requests cancellation where possible. Completed frames and charges already incurred remain.",
+          "drawNext": "Generate next frames ({{count}})"
         },
         "panel": {
           "beatActions": "Actions for {{title}}",
-          "drawMissing": "Draw missing ({{count}})",
-          "redrawBeat": "Redraw Beat · paid",
+          "drawMissing": "Generate missing frames ({{count}})",
+          "redrawBeat": "Regenerate Beat frames · paid",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "redrawShot": "Redraw Shot {{position}} · paid",
-          "useAsFirstFrame": "Use Shot {{position}} panel as first frame",
+          "redrawShot": "Regenerate Shot {{position}} frame · paid",
+          "useAsFirstFrame": "Use Shot {{position}} frame as video first frame",
           "status": {
-            "missing": "Not drawn",
+            "missing": "Not generated",
             "current": "Current",
             "stale": "Stale",
             "statusPending": "Status pending",
             "queued": "Queued",
-            "drawing": "Drawing",
+            "drawing": "Generating",
             "needsAttention": "Needs attention",
             "failed": "Failed",
             "cancelled": "Cancelled"
           }
         },
-        "statusUnavailable": "The current Board order is incomplete or ambiguous. Refresh the project before reviewing Shot tiles.",
-        "renderedCount": "{{count}} of {{total}} rendered",
+        "statusUnavailable": "The current Shot order is incomplete or ambiguous. Refresh the project before reviewing Shot cards.",
+        "renderedCount": "{{count}} of {{total}} video takes ready",
         "staleCount": "{{count}} stale Shots",
         "staleCount_one": "{{count}} stale Shot",
         "staleCount_other": "{{count}} stale Shots",
@@ -1552,14 +1577,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "Current Shot video",
           "stale": "Stale",
-          "chainHead": "Chain head",
+          "chainHead": "Starts with first frame",
           "chainAfter": "After {{beat}}.{{shot}}",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "Blocker details are unavailable for this project revision.",
           "blocker": {
             "heading": "Blocked by",
-            "referenceBindingTable": "Reference binding must be fixed on the Table before generation.",
-            "reviewOnTable": "Review references on Table",
+            "referenceBindingTable": "Reference choices must be fixed in Storyline before generation.",
+            "reviewOnTable": "Review references in Storyline",
             "cause": {
               "routeInventoryUnavailable": "Engine inventory is unavailable.",
               "routeNotSelected": "A generation engine is not selected.",
@@ -1603,7 +1628,7 @@
             }
           }
         },
-        "ariaLabel": "Beat board",
+        "ariaLabel": "Frame and video production",
         "openBeat": "Open {{title}}",
         "selectedBeat": "Selected Beat",
         "ordinal": "{{index}}",
@@ -1789,8 +1814,8 @@
         "latestAttemptFailed": "Latest attempt failed"
       },
       "beatPanel": {
-        "title": "Beat panel — {{title}}",
-        "label": "Beat panel for {{title}}",
+        "title": "Beat details — {{title}}",
+        "label": "Beat details for {{title}}",
         "untitledBeat": "Untitled Beat {{index}}",
         "beatPosition": "Beat {{index}} of {{total}}",
         "previousBeat": "Previous Beat",
@@ -1826,8 +1851,8 @@
           "reviewSever": "Review hard cut…",
           "reviewRejoin": "Review rejoin…",
           "reviewSeverDescription": "A hard cut makes Shot {{shot}} start from an eligible first frame, creating one if needed. Confirming replaces this Shot and each continuous downstream Shot through the next hard cut.",
-          "reviewRejoinDescription": "Rejoining Shot {{shot}} clears its first-frame selection and uses Shot {{previous}}’s trim-aware last frame. After confirmation, free frame extraction may finish before this Shot and its continuous downstream Shots are dispatched through the next hard cut.",
-          "segmentHead": "Head of the chain · Starts from the first frame",
+          "reviewRejoinDescription": "Connecting Shot {{shot}} to the previous Shot clears its first-frame selection and uses the exact last frame of Shot {{previous}} at its chosen edit point. After confirmation, free frame extraction may finish before this Shot and its connected downstream Shots are sent for generation through the next hard cut.",
+          "segmentHead": "After a hard cut · Starts from the first frame",
           "continuous": "Continues from Shot {{position}}’s last frame",
           "systemContinuityStale": "Continuity is out of date",
           "generationOutOfDate": "Generated work is out of date"
@@ -1925,7 +1950,7 @@
           "origin": {
             "generated": "Generated",
             "imported": "Imported",
-            "board": "Board",
+            "board": "Production-ready frame",
             "inherited": "From Shot {{shot}}"
           },
           "current": "Current",
@@ -2192,7 +2217,8 @@
         "saveAndRequestUpdated": "Save and prepare updated proposal",
         "reviewRuleDrafts": "Review rule drafts",
         "reviewRuleDraftsFirst": "Review or discard the local rule draft before accepting this rule proposal.",
-        "reproposalPrompt": "Prepare an updated version of the proposal I selected. Use {{proposalId}} only to identify it internally, and do not mention this reference or any technical steps in your reply.",
+        "reproposalPrompt": "Prepare an updated version of the proposal I selected.",
+        "continueJourneyPrompt": "Continue from the current Studio status and guide me to the next step.",
         "chatDecisionBusy": "Another reviewed action is still in progress.",
         "chatDirty": "Save or reset the drafts that conflict with this proposal before approving it.",
         "chatNoPending": "There is no pending Director proposal to act on.",
@@ -2231,7 +2257,7 @@
           "aspectRatio": "Aspect ratio",
           "resolution": "Resolution",
           "targetDurationSeconds": "Target duration",
-          "boardStyle": "Board style",
+          "boardStyle": "Visual style",
           "title": "Title",
           "story": "Story",
           "targetSeconds": "Beat target",
@@ -2324,7 +2350,7 @@
           "apply_coverage": "apply coverage",
           "set_hard_cut": "change continuity",
           "set_seed_still": "choose first frame",
-          "promote_board_panel": "Use panel as first frame",
+          "promote_board_panel": "Use frame as video first frame",
           "trim_shot": "trim shot",
           "reorder_bin": "reorder Bin",
           "set_routes": "generation routes",
@@ -2379,8 +2405,8 @@
         "continuity": {
           "severTitle": "Review hard cut",
           "rejoinTitle": "Review rejoin",
-          "severSummary": "This estimate makes this Shot a chain head, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.",
-          "rejoinSummary": "This estimate clears this Shot’s first-frame selection and rejoins it to the trim-aware predecessor frame. Free frame extraction may finish after confirmation, before replacement videos are dispatched through the next hard cut.",
+          "severSummary": "This estimate starts this Shot after a hard cut, reuses an eligible first frame or creates one if needed, and replaces every affected video through the next hard cut.",
+          "rejoinSummary": "This estimate clears this Shot’s first-frame selection and connects it to the exact last frame of the previous Shot at its chosen edit point. Free frame extraction may finish after confirmation, before replacement videos are sent for generation through the next hard cut.",
           "severHeadline": "Hard cut · {{count}} required generations · {{cost}}",
           "severHeadline_one": "Hard cut · {{count}} required generation · {{cost}}",
           "severHeadline_other": "Hard cut · {{count}} required generations · {{cost}}",
@@ -2399,25 +2425,27 @@
           "rejoinConfirmed": "Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery."
         },
         "promotion": {
-          "title": "Use panel as first frame",
-          "summary": "Promote the current Board panel for Shot {{shotId}}. This does not change the Shot’s continuity boundary.",
-          "impactNone": "No current pictures depend on this frame.",
-          "impactIntro": "{{count}} current picture(s) will remain playable but become stale:",
-          "impactItem": "Shot {{shotId}} current picture",
-          "optionsLabel": "Choose how to handle current pictures",
-          "promoteOnly": "Promote only — keep playable, stale pictures",
+          "title": "Use this frame",
+          "shotLocation": "Beat {{beatPosition}} “{{beatTitle}}” · Shot {{shotPosition}}",
+          "shotFallback": "the selected Shot",
+          "summary": "Use this frame as the video first frame for {{shot}}. This does not change how the Shot connects to the one before it.",
+          "impactNone": "No existing video takes depend on this frame.",
+          "impactIntro": "Affected video takes: {{count}}. They stay playable. Only the current take for the first Shot in the segment is eligible for this regeneration quote.",
+          "impactItem": "{{shot}} video take",
+          "optionsLabel": "Choose whether to regenerate this Shot now",
+          "promoteOnly": "Use this frame only — keep existing video takes",
           "freePrice": "$0",
-          "promoteAndRerender": "Promote and review exact rerender work",
+          "promoteAndRerender": "Use this frame and review regeneration",
           "priceAfterReview": "Price shown next",
-          "promoteOnlyAction": "Promote for $0",
-          "reviewPaidAction": "Review rerender price",
-          "paidUnavailable": "This segment has too many current pictures for one paid confirmation. Promote-only remains available.",
-          "headline": "Promote + {{count}} rerender(s) · {{cost}}",
-          "requiredWork": "The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.",
-          "confirm": "Confirm promotion + {{count}} rerender(s) · {{cost}}",
-          "promoted": "Panel promoted. Existing pictures remain playable and are marked stale.",
-          "promoting": "Promoting panel…",
-          "confirmed": "Panel promoted and rerendering started for the confirmed pictures.",
+          "promoteOnlyAction": "Use this frame · $0",
+          "reviewPaidAction": "Review regeneration price",
+          "paidUnavailable": "This segment has too many existing video takes for one paid confirmation. Using this frame without regenerating remains available.",
+          "headline": "Use frame + video regeneration ({{count}}) · {{cost}}",
+          "requiredWork": "Later connected Shots wait for the newly selected ending frame from the Shot before them. Each then gets a new price for your review.",
+          "confirm": "Use frame + regenerate current video ({{count}}) · {{cost}}",
+          "promoted": "Frame selected. Existing video takes remain playable and are marked for review.",
+          "promoting": "Using frame…",
+          "confirmed": "Frame selected and regeneration started for the confirmed video takes.",
           "close": "Close"
         },
         "rateCardSource": "This estimate comes from the app's configured rate card, not a provider response.",
@@ -2427,7 +2455,7 @@
           "required": "Required"
         },
         "purpose": {
-          "board_still": "Board panel",
+          "board_still": "Production-ready frame",
           "seed_still": "First frame",
           "video_take": "Video",
           "reference_image": "Reference image"

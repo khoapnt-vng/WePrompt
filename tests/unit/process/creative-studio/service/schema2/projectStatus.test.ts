@@ -9,6 +9,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   STUDIO_FILM_EXPORT_FRAME_RATE,
+  STUDIO_MAX_SHOTS_PER_BEAT,
+  STUDIO_MAX_SHOTS_PER_PROJECT,
   STUDIO_PROJECT_STATUS_STAGE_ORDER_V2,
   type StudioAssetV2,
   type StudioFrameExtraction,
@@ -26,7 +28,13 @@ import {
   type StudioSpendAuthorization,
 } from '@/common/types/project/creativeStudioTypes';
 import { createEmptyStudioProjectV2, projectStudioStatusV2 } from '@/process/services/creative-studio/service/schema2';
-import { createStudioFrameExtractionId } from '@/process/services/creative-studio/service/schema2/generation';
+import {
+  composeStudioGenerationV2,
+  createStudioBoardGenerationRequestPlan,
+  createStudioFrameExtractionId,
+  deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
+} from '@/process/services/creative-studio/service/schema2/generation';
 
 const timestamp = '2026-08-27T00:00:00.000Z';
 const digest = 'a'.repeat(64);
@@ -376,6 +384,99 @@ const addBoardImage = (value: StudioProjectV2, shotId: string, id: string): Stud
   value.shots[shotId]!.assetIds.push(id);
   value.shots[shotId]!.boardAssetId = id;
   return asset;
+};
+
+const addCurrentBoardImage = (
+  value: StudioProjectV2,
+  shotId: string,
+  id: string
+): { asset: StudioAssetV2; producer: StudioJobV2 } => {
+  const asset = addBoardImage(value, shotId, id);
+  const producer = value.jobs[asset.producerJobId!];
+  const beat = Object.values(value.beats).find((candidate) => candidate.shotOrder.includes(shotId));
+  const targetShot = value.shots[shotId];
+  if (
+    producer === undefined ||
+    beat === undefined ||
+    targetShot === undefined ||
+    value.boardStyle === null ||
+    value.imageRouteId === null
+  ) {
+    throw new Error('Current Board fixture setup is incomplete');
+  }
+  const imageProvider = {
+    providerId: 'provider_1',
+    adapterId: 'weprompt-image-v1' as const,
+    model: 'image_model',
+  };
+  const source = {
+    kind: 'shot' as const,
+    beatId: beat.id,
+    story: beat.story,
+    shotId,
+    shootingScript: targetShot.shootingScript,
+  };
+  const requestPlan = createStudioBoardGenerationRequestPlan({
+    composition: composeStudioGenerationV2({
+      projectRevision: value.revision,
+      brief: value.brief,
+      rules: value.rules,
+      source,
+      purpose: 'board_still',
+      referenceInputs: [],
+      aspectRatio: value.aspectRatio,
+      resolution: value.resolution,
+      route: imageProvider,
+      boardStyle: value.boardStyle,
+      instructionProfile: deriveStudioInstructionProfileV2(imageProvider, 'board_still', source),
+    }),
+  });
+  producer.provider = imageProvider;
+  producer.providerJobId = `remote_${producer.id}`;
+  producer.purpose = 'board_still';
+  producer.composition = requestPlan.snapshot.composition;
+  producer.requestPlan = requestPlan;
+  producer.requestSnapshot = requestPlan.snapshot;
+  producer.spendReceipt = {
+    authorizationId: producer.authorizationId,
+    itemId: producer.authorizationItemId,
+    jobId: producer.id,
+    purpose: 'board_still',
+    routeId: value.imageRouteId,
+    currency: 'USD',
+    rateUnit: 'generation',
+    rateMinorUnits: 1,
+    durationSeconds: null,
+    generationCount: 1,
+    totalMinorUnits: 1,
+  };
+  const authorization = value.spendAuthorizations.find((candidate) => candidate.id === producer.authorizationId);
+  const item = authorization?.baseItems.find((candidate) => candidate.id === producer.authorizationItemId);
+  if (authorization === undefined || item === undefined) throw new Error('Current Board authorization is missing');
+  item.purpose = 'board_still';
+  item.routeId = value.imageRouteId;
+  item.requestPlan = requestPlan;
+  item.rateUnit = 'generation';
+  item.rateMinorUnits = 1;
+  authorization.lowerMinorUnits = 1;
+  authorization.upperMinorUnits = 1;
+  authorization.providerBindings = [{ itemId: item.id, provider: imageProvider }];
+  asset.compositionDigest = studioGenerationCompositionDigestV2(producer.composition);
+  return { asset, producer };
+};
+
+const markBoardImageHistoricalV1 = (asset: StudioAssetV2, producer: StudioJobV2): void => {
+  producer.composition.inputs.instructionProfile = 'weprompt-image-v1.board-still.v1';
+  producer.composition.prompt = producer.composition.prompt
+    .replace(
+      'Instruction profile: weprompt-image-v1.board-still.v2',
+      'Instruction profile: weprompt-image-v1.board-still.v1'
+    )
+    .replace(
+      /PRODUCTION VISUAL DIRECTION\n[\s\S]*?\n\nRENDER SETTINGS/,
+      'BOARD STYLE\nUse a restrained grey-tone storyboard drawing with clear staging and silhouettes.\n\nRENDER SETTINGS'
+    );
+  asset.compositionDigest = studioGenerationCompositionDigestV2(producer.composition);
 };
 
 const unavailableRoute = (
@@ -1366,6 +1467,7 @@ describe('projectStudioStatusV2', () => {
     const explicitStatus = projectStudioStatusV2(explicit, readyRoutes(), { detail: true });
     expect(stage(explicitStatus, 'brief').state).toBe('not_started');
     expect(explicitStatus.detail?.shots[0]?.seedStillAssetId).toBe('seed_explicit');
+    expect(explicitStatus.detail?.shots[0]?.newSpendSeedAssetId).toBe('seed_explicit');
 
     const value = project();
     addBeat(value, [shot('shot_1', 30)]);
@@ -1376,6 +1478,7 @@ describe('projectStudioStatusV2', () => {
     const status = projectStudioStatusV2(value, readyRoutes(), { detail: true });
     expect(stage(status, 'production').blockers).toEqual([]);
     expect(status.detail?.shots[0]?.seedStillAssetId).toBe('seed_A');
+    expect(status.detail?.shots[0]?.newSpendSeedAssetId).toBe('seed_A');
   });
 
   it('distinguishes an authorized seed selection from paid seed generation and rejects a dismissed Board pin', () => {
@@ -1590,15 +1693,155 @@ describe('projectStudioStatusV2', () => {
     });
   });
 
-  it('counts a canonical Board independently, accepts an explicit Board seed, and reports Cut target drift', () => {
+  it('counts a fresh board-still.v2 panel as the current Board picture', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const { producer } = addCurrentBoardImage(value, 'shot_1', 'board_current');
+
+    expect(producer.composition.inputs.instructionProfile).toBe('weprompt-image-v1.board-still.v2');
+    expect(projectStudioStatusV2(value, readyRoutes()).boards).toEqual({ currentPictureCount: 1, shotCount: 1 });
+  });
+
+  it('keeps a v2 Board picture current when only inert legacy style metadata changes', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    addCurrentBoardImage(value, 'shot_1', 'board_current');
+    value.boardStyle = 'line_art';
+
+    expect(projectStudioStatusV2(value, readyRoutes()).boards).toEqual({ currentPictureCount: 1, shotCount: 1 });
+  });
+
+  it('counts every fresh Board picture at the maximum supported project size', () => {
+    const value = project();
+    value.beatOrder = [];
+    const shotIds: string[] = [];
+    for (let beatIndex = 0; shotIds.length < STUDIO_MAX_SHOTS_PER_PROJECT; beatIndex += 1) {
+      const beatId = `beat_${beatIndex + 1}`;
+      const remaining = STUDIO_MAX_SHOTS_PER_PROJECT - shotIds.length;
+      const beatShotIds = Array.from(
+        { length: Math.min(STUDIO_MAX_SHOTS_PER_BEAT, remaining) },
+        (_, shotIndex) => `shot_${beatIndex * STUDIO_MAX_SHOTS_PER_BEAT + shotIndex + 1}`
+      );
+      value.beatOrder.push(beatId);
+      value.beats[beatId] = {
+        id: beatId,
+        title: `Beat ${beatIndex + 1}`,
+        story: `Story for Beat ${beatIndex + 1}.`,
+        targetSeconds: null,
+        shotOrder: beatShotIds,
+      };
+      for (const shotId of beatShotIds) value.shots[shotId] = shot(shotId);
+      shotIds.push(...beatShotIds);
+    }
+    for (const shotId of shotIds) addCurrentBoardImage(value, shotId, `board_${shotId}`);
+
+    expect(projectStudioStatusV2(value, readyRoutes()).boards).toEqual({
+      currentPictureCount: STUDIO_MAX_SHOTS_PER_PROJECT,
+      shotCount: STUDIO_MAX_SHOTS_PER_PROJECT,
+    });
+  });
+
+  it('excludes a historical board-still.v1 panel from the current Board picture count', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const { asset, producer } = addCurrentBoardImage(value, 'shot_1', 'board_historical');
+    markBoardImageHistoricalV1(asset, producer);
+    value.shots.shot_1!.seedStillId = asset.id;
+
+    expect(value.shots.shot_1!.boardAssetId).toBe(asset.id);
+    const status = projectStudioStatusV2(value, readyRoutes(), { detail: true });
+    expect(status.boards).toEqual({ currentPictureCount: 0, shotCount: 1 });
+    expect(status.detail?.shots[0]).toMatchObject({
+      seedStillAssetId: asset.id,
+      newSpendSeedAssetId: null,
+    });
+  });
+
+  it('proposes a current seed still after a head video fails with only a historical v1 Board seed', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const { asset, producer } = addCurrentBoardImage(value, 'shot_1', 'board_historical');
+    markBoardImageHistoricalV1(asset, producer);
+    value.shots.shot_1!.seedStillId = asset.id;
+    addVideoAttempt(value, 'shot_1', 'failed_with_historical_seed', 'failed', {
+      code: 'provider_unavailable',
+      messageKey: 'safe',
+    });
+
+    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'production').blockers[0]).toMatchObject({
+      cause: 'generation_provider_unavailable',
+      remedy: {
+        kind: 'proposal',
+        prepare: { baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }] },
+      },
+    });
+  });
+
+  it('keeps a running head video in progress when it was authorized from a historical v1 Board seed', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const { asset, producer } = addCurrentBoardImage(value, 'shot_1', 'board_historical');
+    markBoardImageHistoricalV1(asset, producer);
+    value.shots.shot_1!.seedStillId = asset.id;
+    addVideoAttempt(value, 'shot_1', 'running_with_historical_seed', 'running');
+
+    expect(stage(projectStudioStatusV2(value, readyRoutes()), 'production')).toMatchObject({
+      state: 'in_progress',
+      blockers: [],
+      summary: { activeJobCount: 1 },
+    });
+  });
+
+  it('lets a running replacement seed supersede terminal video status for a historical v1 Board seed', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const { asset, producer } = addCurrentBoardImage(value, 'shot_1', 'board_historical');
+    markBoardImageHistoricalV1(asset, producer);
+    value.shots.shot_1!.seedStillId = asset.id;
+    addVideoAttempt(value, 'shot_1', 'failed_with_historical_seed', 'failed', {
+      code: 'provider_unavailable',
+      messageKey: 'safe',
+    });
+    const replacementSeed = addSeedAttempt(value, 'shot_1', 'replacement_seed', 'running');
+
+    const status = projectStudioStatusV2(value, readyRoutes(), { detail: true });
+    expect(stage(status, 'production')).toMatchObject({
+      state: 'in_progress',
+      blockers: [],
+      summary: { activeJobCount: 1 },
+    });
+    expect(status.detail?.shots[0]?.latestGenerationJob).toEqual({
+      jobId: replacementSeed.id,
+      purpose: 'seed_still',
+      status: 'running',
+      errorCode: null,
+    });
+  });
+
+  it('keeps an older promoted fresh v2 Board seed eligible after an unpromoted redraw', () => {
+    const value = project();
+    addBeat(value, [shot('shot_1', 30)]);
+    const promoted = addCurrentBoardImage(value, 'shot_1', 'board_promoted').asset;
+    value.shots.shot_1!.seedStillId = promoted.id;
+    value.shots.shot_1!.supersededBoardAssetIds.push(promoted.id);
+    addCurrentBoardImage(value, 'shot_1', 'board_unpromoted_redraw');
+
+    expect(projectStudioStatusV2(value, readyRoutes(), { detail: true }).detail?.shots[0]).toMatchObject({
+      seedStillAssetId: promoted.id,
+      newSpendSeedAssetId: promoted.id,
+    });
+  });
+
+  it('counts an exact-current Board independently, accepts an explicit Board seed, and reports Cut target drift', () => {
     const value = project();
     addBeat(value, [shot('shot_1', 29)]);
-    addBoardImage(value, 'shot_1', 'board_1');
+    addCurrentBoardImage(value, 'shot_1', 'board_1');
     value.shots.shot_1!.seedStillId = 'board_1';
     addVideoAttempt(value, 'shot_1', 'cut_drift', 'succeeded', null, true);
     const status = projectStudioStatusV2(value, readyRoutes(), { detail: true });
     expect(status.boards).toEqual({ currentPictureCount: 1, shotCount: 1 });
     expect(status.detail?.shots[0]?.seedStillAssetId).toBe('board_1');
+    expect(status.detail?.shots[0]?.newSpendSeedAssetId).toBe('board_1');
     expect(stage(status, 'cut')).toMatchObject({ state: 'in_progress', summary: { structurallyPlayable: true } });
     expect(status.advisories).toContainEqual({
       cause: 'target_duration_mismatch',

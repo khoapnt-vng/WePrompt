@@ -881,6 +881,9 @@
     "workspace": {
       "views": {
         "references": "参考图",
+        "table": "故事线",
+        "board": "画面与视频",
+        "cut": "剪辑",
         "status": {
           "next": "下一步"
         },
@@ -888,8 +891,31 @@
           "noReferences": "没有计划任何参考图工作，因此可以跳过此视图。",
           "noStoryboard": "故事板中还没有 Beat 或 Shot。",
           "noTakes": "{{view}} 中还没有当前镜次 — {{total}} 个 Shot 中有 {{current}} 个已准备就绪。",
+          "frameProgress": "制作级画面：{{current}} / {{total}} 已就绪。",
+          "videoProgress": "视频镜次：{{current}} / {{total}} 已就绪。",
           "nextInView": "下一步：继续在 {{view}} 中操作。",
-          "nextStage": "下一步：在项目设置中完成 {{stage}}。"
+          "nextStage": "下一步：在项目设置中完成 {{stage}}。",
+          "action": {
+            "filmSetup": "先完成创作简报并选择图像和视频引擎，再构建故事。",
+            "storyline": "先与 Director 确认创作方向，再构建并批准故事线和镜头计划，然后创建视觉参考图。",
+            "references": "生成剩余的 {{remaining}} 个视觉参考图，并确保每个都有当前图像。",
+            "bindings": "为剩余的 {{remaining}} 个 Shot 逐一分配当前参考图，或明确选择不使用参考图。",
+            "frames": "生成剩余的 {{remaining}} 个当前高保真画面，再逐一检查是否符合各 Shot 的视觉目标。",
+            "promoteFrame": "在生成视频镜次前，将剩余的 {{remaining}} 个已检查画面设为硬切后开始的视频的首帧。",
+            "videos": "生成剩余的 {{remaining}} 个视频镜次。硬切后开始的 Shot 使用所选首帧；相连的 Shot 从所选剪辑点显示的前一 Shot 精确末帧继续。",
+            "finishCut": "完成剪辑：导出前检查节奏、连续性和声音。",
+            "reviewCut": "所有视频镜次都已就绪。导出前请打开剪辑并检查完整序列。"
+          },
+          "cta": {
+            "filmSetup": "打开影片设置",
+            "storyline": "打开故事线",
+            "references": "打开参考图",
+            "bindings": "检查镜头参考图",
+            "frames": "打开画面生成",
+            "promoteFrame": "检查视频首帧",
+            "videos": "打开视频生成",
+            "cut": "打开剪辑"
+          }
         }
       },
       "referenceWorkflow": {
@@ -950,14 +976,14 @@
             "activeAssetConsumerRetained": "保留的 Shot {{shotId}} 的{{purpose}}任务正在使用这张照片。任务解决前，照片会保持锁定。",
             "activeAssetConsumerOther": "{{purpose}}任务（{{jobId}}）正在使用这张照片。任务解决前，照片会保持锁定。",
             "downloadRecovery": "Beat {{beatPosition}}、Shot {{shotPosition}}的{{purpose}}任务已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
-            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Shot 以检查恢复操作；恢复成功前，照片会保持锁定。",
-            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 内 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从 Board 废纸篓恢复 Beat 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedShot": "保留的 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从已删除项目中恢复 Shot 以检查恢复操作；恢复成功前，照片会保持锁定。",
+            "downloadRecoveryRetainedBeat": "保留的 Beat {{beatId}} 内 Shot {{shotId}} 的{{purpose}}任务已在提供商完成，但结果未能下载。请从已删除项目中恢复 Beat 以检查恢复操作；恢复成功前，照片会保持锁定。",
             "downloadRecoveryOther": "{{purpose}}任务（{{jobId}}）已在提供商完成，但结果未能下载。请在此重试；恢复成功前，照片会保持锁定。",
             "invalidAuthority": "当前照片的参考数据不一致。请重新加载项目并检查此参考，然后再尝试移除。",
-            "reviewInBoard": "在 Board 中检查"
+            "reviewInBoard": "在画面与视频中检查"
           }
         },
-        "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成分镜或首帧之前，请将当前参考图明确绑定到每个镜头。",
+        "description": "先生成角色的当前标准图，再生成重复出现的背景图。生成高保真画面或首帧之前，请将当前参考图明确绑定到每个镜头。",
         "generationScope": "生成范围",
         "characters": {
           "title": "角色",
@@ -1000,7 +1026,7 @@
         "currentProgress": "已生成 {{current}} / {{total}} 个参考",
         "bindings": {
           "title": "Shot 绑定",
-          "description": "选择每个 Shot 的 Board 面板和首帧所使用的确切当前角色与背景。",
+          "description": "选择每个 Shot 的高保真画面和首帧所使用的确切当前角色与背景。",
           "empty": "没有需要绑定的活动 Shot。",
           "shot": "Shot {{position}}",
           "unassigned": "此 Shot 尚未作出参考选择。",
@@ -1049,23 +1075,23 @@
         },
         "columns": {
           "length": "合计",
-          "panel": "分镜",
+          "panel": "画面",
           "story": "故事"
         },
         "plannedPending": "暂无计划总时长",
         "panel": {
-          "openDetails": "打开 {{title}} 的分镜",
-          "closeDetails": "关闭 {{title}} 的分镜",
+          "openDetails": "打开 {{title}} 的画面",
+          "closeDetails": "关闭 {{title}} 的画面",
           "cardLabel": "Shot {{position}}：{{status}}",
           "shotDetails": "镜头 {{position}} 详情",
-          "head": "链首",
+          "head": "从首帧开始",
           "status": {
-            "missing": "未绘制",
+            "missing": "未生成",
             "current": "当前",
             "stale": "已过期",
             "statusPending": "状态待定",
             "queued": "已排队",
-            "drawing": "绘制中",
+            "drawing": "生成中",
             "needsAttention": "需要处理",
             "failed": "失败",
             "cancelled": "已取消"
@@ -1105,37 +1131,40 @@
         }
       },
       "board": {
+        "ariaLabel": "画面与视频制作",
         "controls": {
-          "label": "导演分镜控制",
-          "progress": "已绘制 {{drawn}} / {{total}} 个分镜",
-          "progressLabel": "分镜板完成度",
+          "label": "画面与视频制作",
+          "progress": "{{current}} / {{total}} 个高保真画面已就绪",
+          "progressLabel": "高保真画面完成度",
+          "videoProgress": "{{current}} / {{total}} 个视频镜次已就绪",
+          "videoProgressLabel": "视频镜次完成度",
           "staleCount": "{{count}} 个已过期",
           "busyCount": "{{count}} 个进行中",
-          "stop": "停止绘制",
-          "stopNote": "停止操作会在可能的情况下请求取消。已完成的分镜和已经产生的费用会保留。",
-          "drawNext": "绘制下一批（{{count}}）"
+          "stop": "停止画面生成",
+          "stopNote": "停止操作会在可能的情况下请求取消。已完成的画面和已经产生的费用会保留。",
+          "drawNext": "生成下一批画面（{{count}}）"
         },
         "panel": {
-          "beatActions": "导演分镜控制 · {{title}}",
-          "drawMissing": "绘制缺失项（{{count}}）",
-          "redrawBeat": "重新绘制 Beat · 付费",
+          "beatActions": "{{title}} 的操作",
+          "drawMissing": "生成缺失画面（{{count}}）",
+          "redrawBeat": "重新生成 Beat 画面 · 付费",
           "cardLabel": "Shot {{position}}：{{status}}",
-          "redrawShot": "重新绘制 Shot {{position}} · 付费",
-          "useAsFirstFrame": "将 Shot {{position}} 分镜用作首帧",
+          "redrawShot": "重新生成 Shot {{position}} 画面 · 付费",
+          "useAsFirstFrame": "将 Shot {{position}} 画面用作视频首帧",
           "status": {
-            "missing": "未绘制",
+            "missing": "未生成",
             "current": "当前",
             "stale": "已过期",
             "statusPending": "状态待定",
             "queued": "已排队",
-            "drawing": "绘制中",
+            "drawing": "生成中",
             "needsAttention": "需要处理",
             "failed": "失败",
             "cancelled": "已取消"
           }
         },
-        "statusUnavailable": "当前 Board 顺序不完整或不明确。请刷新项目后再检查 Shot 卡片。",
-        "renderedCount": "{{total}} 个中已渲染 {{count}} 个",
+        "statusUnavailable": "当前 Shot 顺序不完整或不明确。请刷新项目后再检查 Shot 卡片。",
+        "renderedCount": "{{count}} / {{total}} 个视频镜次已就绪",
         "staleCount": "{{count}} 个已过时的 Shot",
         "staleCount_one": "{{count}} 个已过时的 Shot",
         "staleCount_other": "{{count}} 个已过时的 Shot",
@@ -1148,14 +1177,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "当前 Shot 视频",
           "stale": "已过时",
-          "chainHead": "镜头链起点",
+          "chainHead": "从首帧开始",
           "chainAfter": "接在 {{beat}}.{{shot}} 之后",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "此项目修订版的阻塞详情不可用。",
           "blocker": {
             "heading": "受以下因素阻止",
-            "referenceBindingTable": "生成前必须在 Table 中修正参考图绑定。",
-            "reviewOnTable": "在 Table 中检查参考图",
+            "referenceBindingTable": "生成前必须在故事线中修正参考图选择。",
+            "reviewOnTable": "在故事线中检查参考图",
             "cause": {
               "routeInventoryUnavailable": "引擎列表不可用。",
               "routeNotSelected": "尚未选择生成引擎。",
@@ -1288,7 +1317,8 @@
         "saveAndRequestUpdated": "保存并准备更新提案",
         "reviewRuleDrafts": "检查规则草稿",
         "reviewRuleDraftsFirst": "接受此规则提案前，请检查或丢弃本地规则草稿。",
-        "reproposalPrompt": "请为我刚选择的提案准备更新版本。仅在内部使用 {{proposalId}} 来识别它，不要在回复中提及此引用或任何技术步骤。",
+        "reproposalPrompt": "请为我刚选择的提案准备更新版本。",
+        "continueJourneyPrompt": "请根据当前 Studio 状态继续，并引导我完成下一步。",
         "chatDecisionBusy": "另一个审核操作仍在进行中。",
         "chatDirty": "批准此提案前，请保存或重置与它冲突的草稿。",
         "chatNoPending": "当前没有待处理的导演提案。",
@@ -1323,7 +1353,7 @@
           "aspectRatio": "宽高比",
           "resolution": "分辨率",
           "targetDurationSeconds": "目标时长",
-          "boardStyle": "Board 风格",
+          "boardStyle": "视觉风格",
           "title": "标题",
           "story": "故事",
           "targetSeconds": "Beat 目标",
@@ -1366,7 +1396,7 @@
           "origin": {
             "generated": "已生成",
             "imported": "已导入",
-            "board": "分镜",
+            "board": "高保真画面",
             "inherited": "来自镜头 {{shot}}"
           },
           "current": "当前",
@@ -1476,8 +1506,8 @@
           "reviewSever": "审阅硬切…",
           "reviewRejoin": "审阅重新衔接…",
           "reviewSeverDescription": "硬切会让镜头 {{shot}} 从符合条件的首帧开始；如有需要，会创建一个新首帧。确认后，将替换此镜头及其后所有连续镜头，直到下一个硬切。",
-          "reviewRejoinDescription": "重新衔接镜头 {{shot}} 会清除其首帧选择，并使用镜头 {{previous}} 经裁剪后的最后一帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的连续镜头提交给提供商。",
-          "segmentHead": "链首 · 从首帧开始",
+          "reviewRejoinDescription": "将镜头 {{shot}} 连接到前一镜头会清除其首帧选择，并使用镜头 {{previous}} 在所选剪辑点的精确末帧。确认后，免费的帧提取可能会先完成，再将此镜头及其后直到下一个硬切的相连镜头提交生成。",
+          "segmentHead": "硬切后 · 从首帧开始",
           "continuous": "承接镜头 {{position}} 的最后一帧"
         },
         "coverage": {
@@ -1544,7 +1574,7 @@
       "controls": {
         "briefAndRulesTitle": "影片设置",
         "undoLabel": {
-          "promote_board_panel": "将分镜用作首帧",
+          "promote_board_panel": "将画面用作视频首帧",
           "set_reference_plan": "参考计划",
           "amend_reference_plan": "添加背景",
           "set_reference_label": "参考名称",
@@ -1560,29 +1590,31 @@
       "gate": {
         "predecessorVideoRetry": "确认前请审查继承的精确起始帧和 Shooting script。仅当首次提供商尝试明确失败时，才会预留一次自动重试。首次尝试费用为 {{lower}}；确认的最高费用为 {{upper}}。",
         "purpose": {
-          "board_still": "分镜",
+          "board_still": "高保真画面",
           "reference_image": "参考图像"
         },
         "promotion": {
-          "title": "将分镜用作首帧",
-          "summary": "将 Shot {{shotId}} 的当前导演分镜提升为首帧。此操作不会更改该 Shot 的连续性边界。",
-          "impactNone": "没有当前画面依赖此帧。",
-          "impactIntro": "以下 {{count}} 个当前画面仍可播放，但会变为已过期：",
-          "impactItem": "Shot {{shotId}} 的当前画面",
-          "optionsLabel": "选择如何处理当前画面",
-          "promoteOnly": "仅提升 — 保留可播放但已过期的画面",
+          "title": "使用此画面",
+          "shotLocation": "Beat {{beatPosition}}“{{beatTitle}}” · Shot {{shotPosition}}",
+          "shotFallback": "所选 Shot",
+          "summary": "将此画面用作 {{shot}} 的视频首帧。此操作不会改变该 Shot 与前一 Shot 的连接方式。",
+          "impactNone": "没有现有视频镜次依赖此画面。",
+          "impactIntro": "受影响的视频镜次：{{count}} 个。它们仍可播放。此重新生成报价仅适用于片段中第一个 Shot 的当前镜次。",
+          "impactItem": "{{shot}} 的视频镜次",
+          "optionsLabel": "选择是否立即重新生成此 Shot",
+          "promoteOnly": "仅使用此画面 — 保留现有视频镜次",
           "freePrice": "$0",
-          "promoteAndRerender": "提升并查看确切的重新渲染任务",
+          "promoteAndRerender": "使用此画面并检查重新生成",
           "priceAfterReview": "下一步显示价格",
-          "promoteOnlyAction": "免费提升",
-          "reviewPaidAction": "查看重新渲染价格",
-          "paidUnavailable": "此片段的当前画面过多，无法一次付费确认。仍可选择仅提升。",
-          "headline": "提升 + 重新渲染 {{count}} 个 · {{cost}}",
-          "requiredWork": "所列重新渲染项正是此次提升会使其过期的当前画面。不包括缺失的覆盖内容。",
-          "confirm": "确认提升 + 重新渲染 {{count}} 个 · {{cost}}",
-          "promoted": "分镜已提升。现有画面仍可播放，并已标记为过期。",
-          "promoting": "正在提升分镜…",
-          "confirmed": "分镜已提升，并已开始重新渲染确认的画面。",
+          "promoteOnlyAction": "使用此画面 · $0",
+          "reviewPaidAction": "检查重新生成价格",
+          "paidUnavailable": "此片段的现有视频镜次过多，无法一次付费确认。仍可使用此画面而不重新生成。",
+          "headline": "使用画面 + 重新生成视频（{{count}} 个） · {{cost}}",
+          "requiredWork": "后续相连的 Shot 会等待前一个 Shot 新选定的结束帧，然后分别生成新的报价供您审阅。",
+          "confirm": "使用画面 + 重新生成当前视频（{{count}}）· {{cost}}",
+          "promoted": "画面已选定。现有视频镜次仍可播放，并已标记为待检查。",
+          "promoting": "正在使用画面…",
+          "confirmed": "画面已选定，并已开始重新生成已确认的视频镜次。",
           "close": "关闭"
         },
         "headline_one": "{{count}} 次生成 · {{cost}}",
@@ -1599,8 +1631,8 @@
         "continuity": {
           "severTitle": "审阅硬切",
           "rejoinTitle": "审阅重新衔接",
-          "severSummary": "此报价会将该镜头设为链头，复用符合条件的首帧或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
-          "rejoinSummary": "此报价会清除该镜头的首帧选择，并将其重新衔接到经裁剪的前序帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频。",
+          "severSummary": "此报价会让该镜头在硬切后开始，复用符合条件的首帧或在需要时创建一个，并替换直到下一个硬切之前所有受影响的视频。",
+          "rejoinSummary": "此报价会清除该镜头的首帧选择，并将其连接到前一镜头在所选剪辑点的精确末帧。确认后，免费的帧提取可能会先完成，再提交直到下一个硬切之前的替换视频进行生成。",
           "severHeadline": "硬切 · {{count}} 次必需生成 · {{cost}}",
           "severHeadline_one": "硬切 · {{count}} 次必需生成 · {{cost}}",
           "severHeadline_other": "硬切 · {{count}} 次必需生成 · {{cost}}",

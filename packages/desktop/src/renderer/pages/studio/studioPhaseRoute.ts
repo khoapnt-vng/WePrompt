@@ -15,6 +15,7 @@ export { STUDIO_VIEWS, type StudioView };
 const viewStorageKey = (projectId: string): string => `aionui:creative-studio:last-view:${projectId}`;
 const referencesOpenedStorageKey = (projectId: string): string =>
   `aionui:creative-studio:references-opened:${projectId}`;
+const cutOpenedStorageKey = (projectId: string): string => `aionui:creative-studio:cut-opened:${projectId}`;
 
 const resolveStorage = (storage?: Storage): Storage | null => {
   if (storage !== undefined) return storage;
@@ -38,9 +39,9 @@ export function studioProjectPath(projectId: string): string {
   return `/studio/${encodeURIComponent(projectId)}`;
 }
 
-/** A new reference plan precedes the script; a project without one still begins at the Table. */
-export function defaultStudioView(hasReferenceWork = false): StudioView {
-  return hasReferenceWork ? 'references' : 'table';
+/** The visible journey begins at the Table; exact progress may then open first-time reference work. */
+export function defaultStudioView(_hasReferenceWork = false): StudioView {
+  return 'table';
 }
 
 export function readLastStudioView(projectId: string, storage?: Storage): StudioView | null {
@@ -83,5 +84,23 @@ export function markStudioReferencesOpened(projectId: string, storage?: Storage)
     resolveStorage(storage)?.setItem(referencesOpenedStorageKey(projectId), '1');
   } catch {
     // The page also carries an in-memory fence when storage is unavailable.
+  }
+}
+
+/** A Cut opening is valid only for the exact ordered set of current video takes that was shown. */
+export function hasOpenedStudioCut(projectId: string, signature: string, storage?: Storage): boolean {
+  try {
+    return resolveStorage(storage)?.getItem(cutOpenedStorageKey(projectId)) === signature;
+  } catch {
+    return false;
+  }
+}
+
+/** Renderer-local visit memory; changing any current take changes the signature and reopens the handoff. */
+export function markStudioCutOpened(projectId: string, signature: string, storage?: Storage): void {
+  try {
+    resolveStorage(storage)?.setItem(cutOpenedStorageKey(projectId), signature);
+  } catch {
+    // Visit memory is a best-effort renderer-local enhancement.
   }
 }

@@ -773,29 +773,30 @@ const validatesConditioningDetailV2 = (value: unknown): boolean => {
         (conditioning.recordStatus === 'failed' ? conditioning.errorCode !== null : conditioning.errorCode === null);
 };
 
+const LEGACY_SHOT_DETAIL_KEYS_V2 = new Set([
+  'beatId',
+  'shotId',
+  'beatPosition',
+  'shotPosition',
+  'seedStillAssetId',
+  'videoAssetId',
+  'latestGenerationJob',
+  'binding',
+  'conditioning',
+]);
+const SHOT_DETAIL_KEYS_V2 = new Set([...LEGACY_SHOT_DETAIL_KEYS_V2, 'newSpendSeedAssetId']);
+
 const validatesShotDetailV2 = (value: unknown): boolean => {
   const shot = snapshotDataRecordV2(value);
   return (
     shot !== null &&
-    hasExactKeysV2(
-      shot,
-      new Set([
-        'beatId',
-        'shotId',
-        'beatPosition',
-        'shotPosition',
-        'seedStillAssetId',
-        'videoAssetId',
-        'latestGenerationJob',
-        'binding',
-        'conditioning',
-      ])
-    ) &&
+    (hasExactKeysV2(shot, LEGACY_SHOT_DETAIL_KEYS_V2) || hasExactKeysV2(shot, SHOT_DETAIL_KEYS_V2)) &&
     isSafeStudioDirectorId(shot.beatId) &&
     isSafeStudioDirectorId(shot.shotId) &&
     isNonnegativeSafeIntegerV2(shot.beatPosition) &&
     isNonnegativeSafeIntegerV2(shot.shotPosition) &&
     isNullableSafeIdV2(shot.seedStillAssetId) &&
+    (!Object.hasOwn(shot, 'newSpendSeedAssetId') || isNullableSafeIdV2(shot.newSpendSeedAssetId)) &&
     isNullableSafeIdV2(shot.videoAssetId) &&
     validatesLatestJobV2(shot.latestGenerationJob, new Set(['seed_still', 'video_take'])) &&
     validatesBindingDetailV2(shot.binding) &&

@@ -31,7 +31,11 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2 } from './chain';
 import { createStudioFrameExtractionId } from './generation';
-import { resolveStudioCanonicalBoardAssetV2 } from './generation/boardPanel';
+import {
+  resolveStudioCanonicalBoardAssetV2,
+  resolveStudioFreshBoardAssetV2,
+  resolveStudioNewSpendSeedAssetV2,
+} from './generation/boardPanel';
 import { resolveStudioReferenceBindingV2 } from './generation/referenceBinding';
 import { projectStudioWorkspaceStatusV2 } from './workspaceStatus';
 
@@ -50,6 +54,8 @@ const HEALTHY_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
   'queued_remote',
   'running',
 ]);
+
+const TERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set(['succeeded', 'failed', 'cancelled']);
 
 const SUBMISSION_REFUSED_CODES: ReadonlySet<StudioJobErrorV2['code']> = new Set([
   'provider_unavailable',
@@ -884,7 +890,8 @@ const currentRecoveryBase = (
         rootShotId: candidate.id,
         choice: {
           target: { kind: 'shot', shotId: candidate.id },
-          purpose: effectiveSeedAsset(project, candidate) === null ? 'seed_still' : 'video_take',
+          purpose:
+            resolveStudioNewSpendSeedAssetV2(project, beat.id, candidate.id) === null ? 'seed_still' : 'video_take',
         },
       };
     }
@@ -1048,6 +1055,7 @@ const deriveProductionStage = (
     const shot = ownValue(project.shots, location.shotId)!;
     const take = canonicalCurrentTake(project, shot);
     const seed = effectiveSeedAsset(project, shot);
+    const newSpendSeed = resolveStudioNewSpendSeedAssetV2(project, location.beatId, location.shotId);
     const startsSegment = location.shotIndex === 0 || shot.chainBreak === 'hard_cut';
     if (take !== null) currentTakeCount += 1;
     const videoJobs = currentJobs.get(location.shotId) ?? [];
@@ -1055,7 +1063,12 @@ const deriveProductionStage = (
     const currentVideo = latestJob(videoJobs);
     const currentSeed = latestJob(seedJobs);
     const latestGenerationJob = latestJob([...seedJobs, ...videoJobs]);
-    const authority = startsSegment && seed === null ? currentSeed : currentVideo;
+    const currentVideoIsNonterminal = currentVideo !== null && !TERMINAL_JOB_STATUSES.has(currentVideo.status);
+    const legacyAuthority = startsSegment && seed === null ? currentSeed : currentVideo;
+    const authority =
+      startsSegment && newSpendSeed === null && !currentVideoIsNonterminal && currentSeed !== null
+        ? currentSeed
+        : legacyAuthority;
     const current = authority?.status === 'succeeded' || authority?.status === 'cancelled' ? null : authority;
     if (current !== null) anyCurrentLineage = true;
     activeJobCount += [...videoJobs, ...seedJobs].filter((job) => HEALTHY_JOB_STATUSES.has(job.status)).length;
@@ -1067,6 +1080,7 @@ const deriveProductionStage = (
         beatPosition: location.beatPosition,
         shotPosition: location.shotPosition,
         seedStillAssetId: seed?.id ?? null,
+        newSpendSeedAssetId: newSpendSeed?.id ?? null,
         videoAssetId: take?.id ?? null,
         latestGenerationJob:
           latestGenerationJob === null
@@ -1088,7 +1102,7 @@ const deriveProductionStage = (
       const blocker =
         current !== null
           ? failureBlockerForShot(project, current, location, paidPrepareAdmissible)
-          : startsSegment && seed === null && paidPrepareAdmissible
+          : startsSegment && newSpendSeed === null && paidPrepareAdmissible
             ? {
                 cause: 'seed_generation_required' as const,
                 where: shotWhere(location, null),
@@ -1156,7 +1170,7 @@ const deriveProductionStage = (
     if (
       current === null &&
       startsSegment &&
-      seed === null &&
+      newSpendSeed === null &&
       paidPrepareAdmissible &&
       attemptedRecoveryRootShotIds.has(location.shotId)
     ) {
@@ -1339,7 +1353,7 @@ export const projectStudioStatusV2 = (
     return (
       shot !== undefined &&
       shot.boardAssetId !== null &&
-      resolveStudioCanonicalBoardAssetV2(project, shot, shot.boardAssetId) !== null
+      resolveStudioFreshBoardAssetV2(project, location.beatId, shot.id, shot.boardAssetId) !== null
     );
   }).length;
   if (!STUDIO_PROJECT_STATUS_STAGE_ORDER_V2.every((id, index) => stages[index]?.id === id)) {

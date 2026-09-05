@@ -10,7 +10,12 @@ import {
   type StudioProjectStatusStageIdV2,
   type StudioProjectStatusV2,
 } from '@/common/types/project/creativeStudioTypes';
-import type { WorkspaceBeatProjection, WorkspaceProjection, WorkspaceShotProjection } from '../../workspaceProjection';
+import {
+  workspaceShotHasFreshCurrentTake,
+  type WorkspaceBeatProjection,
+  type WorkspaceProjection,
+  type WorkspaceShotProjection,
+} from '../../workspaceProjection';
 import { deriveWorkspaceShotStatus, type WorkspaceShotStatus } from '../shotStatus';
 
 export const BOARD_SHOT_TILE_MAX_BLOCKERS = 12;
@@ -38,6 +43,7 @@ export type BoardShotTile = {
   explicitSeedAssetId: string | null;
   promotionBlocked: boolean;
   seedAuthorizationLocked: boolean;
+  hasFreshCurrentTake: boolean;
   status: WorkspaceShotStatus;
   chain: BoardShotTileChain;
   media: BoardShotTileMedia;
@@ -223,7 +229,7 @@ export const deriveBoardShotTiles = (
       const shot = beat.shots[shotIndex]!;
       const position = positionByShotId.get(shot.id)!;
       const statusWord = deriveWorkspaceShotStatus(shot, conditioningFailureIds.has(shot.id));
-      if (shot.currentPicture !== null) renderedCount += 1;
+      if (shot.currentPicture !== null && !statusWord.stale) renderedCount += 1;
       if (statusWord.stale) staleCount += 1;
       if (shot.videoGenerationInFlight || shot.seedGenerationInFlight) inFlightCount += 1;
       if (!shot.segmentHead && shotIndex === 0) return null;
@@ -250,6 +256,7 @@ export const deriveBoardShotTiles = (
             (segmentShot) => segmentShot.segmentState.kind === 'status_pending' || segmentShot.videoGenerationBlocked
           ),
         seedAuthorizationLocked,
+        hasFreshCurrentTake: workspaceShotHasFreshCurrentTake(shot),
         status: statusWord,
         chain: shot.segmentHead
           ? { kind: 'head' }

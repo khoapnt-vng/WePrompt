@@ -883,6 +883,9 @@
     "workspace": {
       "views": {
         "references": "Referanslar",
+        "table": "Hikâye",
+        "board": "Kareler ve Video",
+        "cut": "Kurgu",
         "status": {
           "next": "Sonraki"
         },
@@ -890,8 +893,31 @@
           "noReferences": "Herhangi bir referans çalışması planlanmadığı için bu görünümü atlayabilirsiniz.",
           "noStoryboard": "Storyboard’da henüz Beat veya Shot yok.",
           "noTakes": "{{view}} görünümünde henüz güncel çekim yok — {{total}} Shot'ın {{current}} tanesi hazır.",
+          "frameProgress": "Prodüksiyon kalitesinde kareler: {{total}} kareden {{current}} tanesi hazır.",
+          "videoProgress": "Video çekimleri: {{total}} çekimden {{current}} tanesi hazır.",
           "nextInView": "Sonraki: {{view}} görünümünde devam edin.",
-          "nextStage": "Sonraki: Proje ayarlarında {{stage}} aşamasını tamamlayın."
+          "nextStage": "Sonraki: Proje ayarlarında {{stage}} aşamasını tamamlayın.",
+          "action": {
+            "filmSetup": "Hikâyeyi oluşturmadan önce özeti tamamlayın ve görüntü ile video motorlarını seçin.",
+            "storyline": "Önce Director ile yaratıcı yön üzerinde anlaşın; ardından görsel referansları oluşturmadan önce hikâyeyi ve Shot planını hazırlayıp onaylayın.",
+            "references": "Kalan {{remaining}} görsel referansı üretin ve her birinin güncel görüntüsü olduğunu kontrol edin.",
+            "bindings": "Kalan {{remaining}} Shot'ın her birine güncel referansları atayın veya açıkça referans kullanmamayı seçin.",
+            "frames": "Kalan {{remaining}} güncel yüksek kaliteli kareyi üretin, ardından her birini Shot'ın görsel hedefi olarak inceleyin.",
+            "promoteFrame": "Kalan {{remaining}} incelenmiş kareyi, kesmeden sonra başlayan videoların ilk karesi olarak kullanın.",
+            "videos": "Kalan {{remaining}} video çekimini üretin. Kesmeden sonra başlayan Shot'lar seçilen ilk karelerini kullanır; bağlı Shot'lar seçilen kurgu noktasında görünen önceki Shot'ın tam son karesinden devam eder.",
+            "finishCut": "Kurguyu tamamlayın: dışa aktarmadan önce tempo, devamlılık ve sesi kontrol edin.",
+            "reviewCut": "Tüm video çekimleri hazır. Dışa aktarmadan önce kurguyu açıp tamamlanmış sekansı inceleyin."
+          },
+          "cta": {
+            "filmSetup": "Film ayarlarını aç",
+            "storyline": "Hikâyeyi aç",
+            "references": "Referansları aç",
+            "bindings": "Shot referanslarını incele",
+            "frames": "Kare üretimini aç",
+            "promoteFrame": "Video ilk karelerini incele",
+            "videos": "Video üretimini aç",
+            "cut": "Kurguyu aç"
+          }
         }
       },
       "referenceWorkflow": {
@@ -952,14 +978,14 @@
             "activeAssetConsumerRetained": "Saklanan Shot {{shotId}} için {{purpose}} tam olarak bu fotoğrafı kullanıyor. İş çözümlenene kadar fotoğraf kilitli kalır.",
             "activeAssetConsumerOther": "{{purpose}} işi ({{jobId}}) tam olarak bu fotoğrafı kullanıyor. İş çözümlenene kadar fotoğraf kilitli kalır.",
             "downloadRecovery": "Beat {{beatPosition}}, Shot {{shotPosition}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Buradan yeniden deneyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
-            "downloadRecoveryRetainedShot": "Saklanan Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Shot’ı Board Çöp Kutusu’ndan geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
-            "downloadRecoveryRetainedBeat": "Saklanan Beat {{beatId}} içindeki Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Beat’i Board Çöp Kutusu’ndan geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "downloadRecoveryRetainedShot": "Saklanan Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Shot’ı kaldırılan öğelerden geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
+            "downloadRecoveryRetainedBeat": "Saklanan Beat {{beatId}} içindeki Shot {{shotId}} için {{purpose}} sağlayıcıda tamamlandı ancak sonuç indirilemedi. Kurtarmayı incelemek için Beat’i kaldırılan öğelerden geri yükleyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
             "downloadRecoveryOther": "{{purpose}} işi ({{jobId}}) sağlayıcıda tamamlandı ancak sonuç indirilemedi. Buradan yeniden deneyin; kurtarma başarılı olana kadar fotoğraf kilitli kalır.",
             "invalidAuthority": "Geçerli fotoğrafın referans verileri tutarsız. Projeyi yeniden yükleyin ve kaldırmayı tekrar denemeden önce bu referansı inceleyin.",
-            "reviewInBoard": "Board’da incele"
+            "reviewInBoard": "Kareler ve Video’da incele"
           }
         },
-        "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Board veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
+        "description": "Önce karakterlerin kanonik görsellerini, ardından yinelenen arka plan görsellerini oluşturun. Prodüksiyona hazır kare veya ilk kare oluşturulmadan önce güncel referansları her Shot'a bağlayın.",
         "generationScope": "Oluşturma kapsamı",
         "characters": {
           "title": "Karakterler",
@@ -1002,7 +1028,7 @@
         "currentProgress": "{{total}} referansın {{current}} tanesi oluşturuldu",
         "bindings": {
           "title": "Shot bağlamaları",
-          "description": "Her Shot’ın Board paneli ve ilk karesi için kullanacağı güncel karakterleri ve arka planı tam olarak seçin.",
+          "description": "Her Shot’ın prodüksiyona hazır karesi ve ilk karesi için kullanacağı güncel karakterleri ve arka planı tam olarak seçin.",
           "empty": "Bağlanacak etkin Shot yok.",
           "shot": "Shot {{position}}",
           "unassigned": "Bu Shot için henüz referans kararı verilmedi.",
@@ -1051,23 +1077,23 @@
         },
         "columns": {
           "length": "Toplam",
-          "panel": "Panel",
+          "panel": "Kare",
           "story": "Hikâye"
         },
         "plannedPending": "Planlanan toplam yok",
         "panel": {
-          "openDetails": "{{title}} için pano panellerini aç",
-          "closeDetails": "{{title}} için pano panellerini kapat",
+          "openDetails": "{{title}} karelerini aç",
+          "closeDetails": "{{title}} karelerini kapat",
           "cardLabel": "Shot {{position}}: {{status}}",
           "shotDetails": "Shot {{position}} ayrıntıları",
-          "head": "Zincir başlangıcı",
+          "head": "İlk kareyle başlar",
           "status": {
-            "missing": "Çizilmedi",
+            "missing": "Üretilmedi",
             "current": "Güncel",
             "stale": "Eski",
             "statusPending": "Durum bekleniyor",
             "queued": "Kuyrukta",
-            "drawing": "Çiziliyor",
+            "drawing": "Üretiliyor",
             "needsAttention": "İlgilenilmesi gerekiyor",
             "failed": "Başarısız",
             "cancelled": "İptal edildi"
@@ -1107,37 +1133,40 @@
         }
       },
       "board": {
+        "ariaLabel": "Kare ve video prodüksiyonu",
         "controls": {
-          "label": "Yönetmen panosu denetimleri",
-          "progress": "{{total}} panelden {{drawn}} tanesi çizildi",
-          "progressLabel": "Pano tamamlanma durumu",
+          "label": "Kare ve video prodüksiyonu",
+          "progress": "{{total}} yüksek kaliteli kareden {{current}} tanesi hazır",
+          "progressLabel": "Yüksek kaliteli kare tamamlanma durumu",
+          "videoProgress": "{{total}} video çekiminden {{current}} tanesi hazır",
+          "videoProgressLabel": "Video çekimi tamamlanma durumu",
           "staleCount": "{{count}} eski",
           "busyCount": "{{count}} işlemde",
-          "stop": "Çizimi durdur",
-          "stopNote": "Durdurma, mümkün olduğunda iptal talebinde bulunur. Tamamlanan paneller ve oluşmuş ücretler korunur.",
-          "drawNext": "Sonraki grubu çiz ({{count}})"
+          "stop": "Kare üretimini durdur",
+          "stopNote": "Durdurma, mümkün olduğunda iptal talebinde bulunur. Tamamlanan kareler ve oluşmuş ücretler korunur.",
+          "drawNext": "Sonraki kareleri üret ({{count}})"
         },
         "panel": {
-          "beatActions": "Yönetmen panosu denetimleri · {{title}}",
-          "drawMissing": "Eksikleri çiz ({{count}})",
-          "redrawBeat": "Beat'i yeniden çiz · ücretli",
+          "beatActions": "{{title}} için işlemler",
+          "drawMissing": "Eksik kareleri üret ({{count}})",
+          "redrawBeat": "Beat karelerini yeniden üret · ücretli",
           "cardLabel": "Shot {{position}}: {{status}}",
-          "redrawShot": "Shot {{position}} öğesini yeniden çiz · ücretli",
-          "useAsFirstFrame": "Shot {{position}} panelini ilk kare olarak kullan",
+          "redrawShot": "Shot {{position}} karesini yeniden üret · ücretli",
+          "useAsFirstFrame": "Shot {{position}} karesini videonun ilk karesi olarak kullan",
           "status": {
-            "missing": "Çizilmedi",
+            "missing": "Üretilmedi",
             "current": "Güncel",
             "stale": "Eski",
             "statusPending": "Durum bekleniyor",
             "queued": "Kuyrukta",
-            "drawing": "Çiziliyor",
+            "drawing": "Üretiliyor",
             "needsAttention": "İlgilenilmesi gerekiyor",
             "failed": "Başarısız",
             "cancelled": "İptal edildi"
           }
         },
-        "statusUnavailable": "Geçerli Board sırası eksik veya belirsiz. Shot kartlarını incelemeden önce projeyi yenileyin.",
-        "renderedCount": "{{total}} öğenin {{count}} tanesi render edildi",
+        "statusUnavailable": "Geçerli Shot sırası eksik veya belirsiz. Shot kartlarını incelemeden önce projeyi yenileyin.",
+        "renderedCount": "{{total}} video çekiminden {{count}} tanesi hazır",
         "staleCount": "{{count}} eski Shot",
         "staleCount_one": "{{count}} eski Shot",
         "staleCount_other": "{{count}} eski Shot",
@@ -1150,14 +1179,14 @@
           "position": "{{beat}}.{{shot}}",
           "videoPreview": "Geçerli Shot videosu",
           "stale": "Eski",
-          "chainHead": "Zincir başlangıcı",
+          "chainHead": "İlk kareyle başlar",
           "chainAfter": "{{beat}}.{{shot}} sonrasında",
           "duration": "{{seconds, number(maximumFractionDigits: 1; useGrouping: false)}}s",
           "statusUnavailable": "Bu proje revizyonu için engel ayrıntıları kullanılamıyor.",
           "blocker": {
             "heading": "Engelleyen nedenler",
-            "referenceBindingTable": "Referans bağlama, oluşturmadan önce Table’da düzeltilmelidir.",
-            "reviewOnTable": "Referansları Table’da incele",
+            "referenceBindingTable": "Referans seçimleri, oluşturmadan önce Hikâye’de düzeltilmelidir.",
+            "reviewOnTable": "Referansları Hikâye’de incele",
             "cause": {
               "routeInventoryUnavailable": "Motor listesi kullanılamıyor.",
               "routeNotSelected": "Bir üretim motoru seçilmemiş.",
@@ -1290,7 +1319,8 @@
         "saveAndRequestUpdated": "Kaydet ve güncel öneriyi hazırla",
         "reviewRuleDrafts": "Kural taslaklarını gözden geçir",
         "reviewRuleDraftsFirst": "Bu kural önerisini kabul etmeden önce yerel kural taslağını gözden geçirin veya silin.",
-        "reproposalPrompt": "Seçtiğim önerinin güncellenmiş bir sürümünü hazırlayın. {{proposalId}} değerini yalnızca içeride tanımlamak için kullanın; yanıtınızda bu referanstan veya teknik adımlardan söz etmeyin.",
+        "reproposalPrompt": "Seçtiğim önerinin güncellenmiş bir sürümünü hazırlayın.",
+        "continueJourneyPrompt": "Mevcut Studio durumundan devam edin ve beni sonraki adıma yönlendirin.",
         "chatDecisionBusy": "Başka bir incelenmiş işlem hâlâ sürüyor.",
         "chatDirty": "Bu öneriyle çakışan taslakları onaylamadan önce kaydedin veya sıfırlayın.",
         "chatNoPending": "İşlem yapılacak bekleyen bir Yönetmen önerisi yok.",
@@ -1325,7 +1355,7 @@
           "aspectRatio": "En-boy oranı",
           "resolution": "Çözünürlük",
           "targetDurationSeconds": "Hedef süre",
-          "boardStyle": "Board stili",
+          "boardStyle": "Görsel stil",
           "title": "Başlık",
           "story": "Hikâye",
           "targetSeconds": "Beat hedefi",
@@ -1368,7 +1398,7 @@
           "origin": {
             "generated": "Üretildi",
             "imported": "İçe aktarıldı",
-            "board": "Storyboard",
+            "board": "Prodüksiyona hazır kare",
             "inherited": "Çekim {{shot}} kaynağından"
           },
           "current": "Geçerli",
@@ -1478,8 +1508,8 @@
           "reviewSever": "Sert kesmeyi incele…",
           "reviewRejoin": "Yeniden bağlanmayı incele…",
           "reviewSeverDescription": "Sert kesme, Çekim {{shot}} için uygun bir ilk kareyle başlangıç yapar ve gerekirse yeni bir tane oluşturur. Onaylandığında bu Çekim ve sonraki sert kesmeye kadar devam eden tüm çekimler değiştirilir.",
-          "reviewRejoinDescription": "Çekim {{shot}} yeniden bağlandığında ilk kare seçimi temizlenir ve Çekim {{previous}} için kırpmaya göre son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar devam eden çekimler sağlayıcıya gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
-          "segmentHead": "Zincirin başı · İlk kareden başlar",
+          "reviewRejoinDescription": "Çekim {{shot}} önceki çekime bağlandığında ilk kare seçimi temizlenir ve seçilen kurgu noktasındaki Çekim {{previous}} için tam son kare kullanılır. Onaydan sonra bu Çekim ve sonraki sert kesmeye kadar bağlı çekimler üretime gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
+          "segmentHead": "Sert kesmeden sonra · İlk kareden başlar",
           "continuous": "{{position}}. çekimin son karesinden devam eder"
         },
         "coverage": {
@@ -1546,7 +1576,7 @@
       "controls": {
         "briefAndRulesTitle": "Film kurulumu",
         "undoLabel": {
-          "promote_board_panel": "Paneli ilk kare olarak kullan",
+          "promote_board_panel": "Kareyi videonun ilk karesi olarak kullan",
           "set_reference_plan": "referans planı",
           "amend_reference_plan": "arka plan ekle",
           "set_reference_label": "referans adı",
@@ -1562,29 +1592,31 @@
       "gate": {
         "predecessorVideoRetry": "Onaylamadan önce devralınan kesin başlangıç karesini ve Shooting script'i inceleyin. Yalnızca ilk sağlayıcı denemesi kesin biçimde başarısız olursa bir otomatik yeniden deneme ayrılır. İlk denemelerin maliyeti {{lower}}; onaylanan üst sınır {{upper}}.",
         "purpose": {
-          "board_still": "Pano paneli",
+          "board_still": "Prodüksiyona hazır kare",
           "reference_image": "Referans görüntüsü"
         },
         "promotion": {
-          "title": "Paneli ilk kare olarak kullan",
-          "summary": "Shot {{shotId}} için geçerli pano panelini ilk kareye yükseltin. Bu işlem Shot'ın devamlılık sınırını değiştirmez.",
-          "impactNone": "Hiçbir geçerli görüntü bu kareye bağlı değil.",
-          "impactIntro": "{{count}} geçerli görüntü oynatılabilir kalacak ancak eski duruma gelecek:",
-          "impactItem": "Shot {{shotId}} geçerli görüntüsü",
-          "optionsLabel": "Geçerli görüntülerin nasıl ele alınacağını seçin",
-          "promoteOnly": "Yalnızca yükselt — oynatılabilir eski görüntüleri koru",
+          "title": "Bu kareyi kullan",
+          "shotLocation": "Beat {{beatPosition}} “{{beatTitle}}” · Shot {{shotPosition}}",
+          "shotFallback": "seçili Shot",
+          "summary": "Bu kareyi {{shot}} videosunun ilk karesi olarak kullanın. Bu, Shot'ın önceki Shot'a bağlanma biçimini değiştirmez.",
+          "impactNone": "Hiçbir mevcut video çekimi bu kareye bağlı değil.",
+          "impactIntro": "Etkilenen video çekimleri: {{count}}. Oynatılabilir durumda kalırlar. Bu yeniden üretim tahminine yalnızca segmentteki ilk Shot'un mevcut çekimi dahil edilebilir.",
+          "impactItem": "{{shot}} video çekimi",
+          "optionsLabel": "Bu Shot'un şimdi yeniden üretilip üretilmeyeceğini seçin",
+          "promoteOnly": "Yalnızca bu kareyi kullan — mevcut video çekimlerini koru",
           "freePrice": "$0",
-          "promoteAndRerender": "Yükselt ve tam yeniden oluşturma işini incele",
+          "promoteAndRerender": "Bu kareyi kullan ve yeniden üretimi incele",
           "priceAfterReview": "Fiyat sonraki adımda gösterilir",
-          "promoteOnlyAction": "$0 karşılığında yükselt",
-          "reviewPaidAction": "Yeniden oluşturma fiyatını incele",
-          "paidUnavailable": "Bu segmentte tek bir ücretli onay için çok fazla geçerli görüntü var. Yalnızca yükseltme seçeneği kullanılabilir.",
-          "headline": "Yükselt + {{count}} yeniden oluşturma · {{cost}}",
-          "requiredWork": "Listelenen yeniden oluşturmalar, bu yükseltmenin eskiteceği geçerli görüntülerin tam karşılığıdır. Eksik kapsam dahil değildir.",
-          "confirm": "Yükseltme + {{count}} yeniden oluşturmayı onayla · {{cost}}",
-          "promoted": "Panel yükseltildi. Mevcut görüntüler oynatılabilir kalır ve eski olarak işaretlenir.",
-          "promoting": "Panel yükseltiliyor…",
-          "confirmed": "Panel yükseltildi ve onaylanan görüntüler için yeniden oluşturma başlatıldı.",
+          "promoteOnlyAction": "Bu kareyi kullan · $0",
+          "reviewPaidAction": "Yeniden üretim fiyatını incele",
+          "paidUnavailable": "Bu segmentte tek bir ücretli onay için çok fazla mevcut video çekimi var. Bu kareyi yeniden üretim yapmadan kullanma seçeneği kullanılabilir durumda kalır.",
+          "headline": "Kareyi kullan + video yeniden üretimi ({{count}}) · {{cost}}",
+          "requiredWork": "Sonraki bağlı Shot'lar, kendilerinden önceki Shot'un yeni seçilen son karesini bekler. Ardından her biri için incelemeniz amacıyla yeni bir tahmin hazırlanır.",
+          "confirm": "Kareyi kullan + mevcut videoyu yeniden üret ({{count}}) · {{cost}}",
+          "promoted": "Kare seçildi. Mevcut video çekimleri oynatılabilir kalır ve inceleme için işaretlenir.",
+          "promoting": "Kare kullanılıyor…",
+          "confirmed": "Kare seçildi ve onaylanan video çekimleri için yeniden üretim başlatıldı.",
           "close": "Kapat"
         },
         "headline_one": "{{count}} üretim · {{cost}}",
@@ -1601,8 +1633,8 @@
         "continuity": {
           "severTitle": "Sert kesmeyi incele",
           "rejoinTitle": "Yeniden bağlanmayı incele",
-          "severSummary": "Bu tahmin, bu Çekimi zincir başı yapar, uygun bir ilk kareyi yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
-          "rejoinSummary": "Bu tahmin, bu Çekimin ilk kare seçimini temizler ve kırpmaya göre önceki kareye yeniden bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
+          "severSummary": "Bu tahmin, bu Çekimi sert bir kesmeden sonra başlatır, uygun bir ilk kareyi yeniden kullanır veya gerekirse oluşturur ve sonraki sert kesmeye kadar etkilenen tüm videoları değiştirir.",
+          "rejoinSummary": "Bu tahmin, bu Çekimin ilk kare seçimini temizler ve seçilen kurgu noktasındaki önceki Çekimin tam son karesine bağlar. Onaydan sonra, sonraki sert kesmeye kadar ikame videolar üretime gönderilmeden önce ücretsiz kare çıkarma tamamlanabilir.",
           "severHeadline": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
           "severHeadline_one": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",
           "severHeadline_other": "Sert kesme · {{count}} zorunlu üretim · {{cost}}",

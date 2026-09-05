@@ -15,19 +15,29 @@ import { STUDIO_VIEWS, studioViewPath, type StudioView } from '@/renderer/pages/
 import { DirectorRail, type DirectorProposalChatIntent } from './DirectorRail';
 import type { WorkspaceProjectEditAuthority } from './Views/viewTypes';
 import styles from './Workspace.module.css';
-import type { StudioBarStats, StudioWorkspaceProgress, StudioWorkspaceViewProgress } from './workspaceProjection';
+import type {
+  StudioBarStats,
+  StudioWorkspaceNextActionKind,
+  StudioWorkspaceProgress,
+  StudioWorkspaceViewProgress,
+} from './workspaceProjection';
 
 export type WorkspaceShellProps = {
   project: StudioRendererProjectV2;
   activeView: StudioView;
   workspaceProgress?: StudioWorkspaceProgress | null;
   nextActionText?: string | null;
+  nextActionLabel?: string | null;
+  nextActionKind?: StudioWorkspaceNextActionKind | null;
+  nextActionView?: StudioView | null;
+  onOpenFilmSetup?: () => void;
   stats?: StudioBarStats;
   reviewedOutputs?: readonly WorkspaceReviewedOutput[];
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   directorDraftRequest?: WorkspaceDirectorDraftRequest | null;
   onDirectorDraftRequestConsumed?: (requestId: number) => void;
   directorPendingProposalCount?: number;
+  directorPendingProposalIds?: readonly string[];
   directorProposalTargetId?: string;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
@@ -221,6 +231,8 @@ export type WorkspaceDirectorDraftRequest = {
   requestId: number;
   projectId: string;
   prompt: string;
+  /** Exact proposal authority carried privately; never interpolate it into the visible prompt. */
+  proposalTargetId: string | null;
 };
 
 export type WorkspaceShellHandle = {
@@ -294,10 +306,9 @@ const storeRailWidth = (width: number): void => {
 };
 
 /**
- * Where the Director is useful, per the division of labour: it acts before the picture exists and the
- * human decides after it does. References and the Table are pre-picture views and the rail opens
- * there; the Board and the Cut are judgements about pixels and motion the Director cannot see, so it
- * starts shut.
+ * Pre-picture work opens with the Director. Pixel- and motion-review views stay unobstructed by
+ * default, especially when the rail becomes a compact overlay; the persistent handoff card remains
+ * visible and an explicit per-view preference still wins in either direction.
  */
 export const railCollapsedDefaultForView = (view: StudioView): boolean => view === 'board' || view === 'cut';
 
@@ -347,12 +358,17 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     activeView,
     workspaceProgress = null,
     nextActionText = null,
+    nextActionLabel = null,
+    nextActionKind = null,
+    nextActionView = null,
+    onOpenFilmSetup,
     stats,
     reviewedOutputs,
     onDirectorProposalIntent,
     directorDraftRequest,
     onDirectorDraftRequestConsumed,
     directorPendingProposalCount = 0,
+    directorPendingProposalIds,
     directorProposalTargetId,
     renderAction,
     onRenameProject,
@@ -521,6 +537,18 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
         ? null
         : t('conversation.creativeStudio.workspace.views.guidance.noStoryboard');
     }
+    if (view === 'board' && workspaceProgress !== null) {
+      const production = workspaceProgress.production;
+      return production.currentVideoCount === 0 && production.currentFrameCount < production.shotCount
+        ? t('conversation.creativeStudio.workspace.views.guidance.frameProgress', {
+            current: production.currentFrameCount,
+            total: production.shotCount,
+          })
+        : t('conversation.creativeStudio.workspace.views.guidance.videoProgress', {
+            current: production.currentVideoCount,
+            total: production.shotCount,
+          });
+    }
     if (progress.currentCount === 0 && progress.totalCount > 0) {
       return t('conversation.creativeStudio.workspace.views.guidance.noTakes', {
         view: viewLabel(view),
@@ -669,6 +697,7 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
           project={project}
           reviewedOutputs={reviewedOutputs}
           pendingProposalCount={directorPendingProposalCount}
+          pendingProposalIds={directorPendingProposalIds}
           pendingProposalTargetId={directorProposalTargetId}
           onProposalIntent={onDirectorProposalIntent}
           draftRequest={directorDraftRequest}
@@ -755,7 +784,22 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
                   {activeViewEmptyText === null ? null : (
                     <p className={styles.viewGuidanceEmpty}>{activeViewEmptyText}</p>
                   )}
-                  {nextActionText === null ? null : <p className={styles.viewGuidanceNext}>{nextActionText}</p>}
+                  {nextActionText === null ? null : (
+                    <div className={styles.viewGuidanceAction} data-studio-next-action={nextActionKind ?? undefined}>
+                      <p className={styles.viewGuidanceNext}>{nextActionText}</p>
+                      {nextActionLabel === null ? null : nextActionView === null ? (
+                        onOpenFilmSetup === undefined ? null : (
+                          <Button size='small' type='primary' onClick={onOpenFilmSetup}>
+                            {nextActionLabel}
+                          </Button>
+                        )
+                      ) : nextActionView === activeView ? null : (
+                        <Link className={styles.viewGuidanceLink} to={studioViewPath(project.id, nextActionView)}>
+                          {nextActionLabel}
+                        </Link>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
               {children}

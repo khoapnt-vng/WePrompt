@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
 import type { StudioProjectStatusStageIdV2, StudioProjectStatusV2 } from '@/common/types/project/creativeStudioTypes';
-import { deriveStudioWorkspaceProgress } from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
+import {
+  deriveStudioWorkspaceProgress,
+  studioCutOpenedSignature,
+  studioWorkspaceProductionFacts,
+  type WorkspaceProjection,
+} from '@/renderer/pages/studio/components/Workspace/workspaceProjection';
 
 const status = (): StudioProjectStatusV2 => ({
   projectId: 'project_1',
@@ -96,13 +101,259 @@ const sparseArray = <Value>(): Value[] => {
   return values;
 };
 
+const cutReviewProjection = (): WorkspaceProjection =>
+  ({
+    projectId: 'project_1',
+    projectRevision: 4,
+    workspaceStatusReady: true,
+    activeShotIds: ['shot_1'],
+    activeBeats: [
+      {
+        id: 'beat_1',
+        title: 'Opening',
+        shots: [
+          {
+            id: 'shot_1',
+            segmentHead: true,
+            currentPicture: { assetId: 'take_1' },
+            trimInSeconds: null,
+            trimOutSeconds: null,
+            playedDurationSeconds: 4,
+            chainBreak: 'hard_cut',
+            dirtyCauses: [],
+          },
+        ],
+      },
+    ],
+    boardPanels: [{ shotId: 'shot_1', newSpendSeedAssetId: null, freshness: 'current' }],
+    cut: {
+      orderReady: true,
+      beats: [
+        {
+          id: 'beat_1',
+          title: 'Opening',
+          shotCount: 1,
+          durationKind: 'actual',
+          durationSeconds: 4,
+          coverAssetId: null,
+        },
+      ],
+      filmDurationSeconds: 4,
+      targetDurationSeconds: 4,
+      bed: { status: 'none', assetId: null },
+    },
+  }) as unknown as WorkspaceProjection;
+
+describe('studioCutOpenedSignature', () => {
+  it('changes for every review-relevant Cut input', () => {
+    const projection = cutReviewProjection();
+    const original = studioCutOpenedSignature(projection);
+    expect(original).not.toBeNull();
+
+    const changedSignature = (change: (copy: WorkspaceProjection) => void): string | null => {
+      const copy = structuredClone(projection);
+      change(copy);
+      return studioCutOpenedSignature(copy);
+    };
+
+    expect(changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.currentPicture!.assetId = 'take_2'))).not.toBe(
+      original
+    );
+    expect(changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.trimInSeconds = 0.25))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.trimOutSeconds = 0.5))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.playedDurationSeconds = 3.25))).not.toBe(
+      original
+    );
+    expect(changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.chainBreak = 'none'))).not.toBe(original);
+    expect(
+      changedSignature((copy) => (copy.activeBeats[0]!.shots[0]!.dirtyCauses = ['generation_out_of_date']))
+    ).not.toBe(original);
+    expect(
+      changedSignature(
+        (copy) =>
+          (copy.cut.bed = {
+            status: 'ready',
+            assetId: 'bed_1',
+            sourceDurationSeconds: 30,
+            fadeOutStartSeconds: 3,
+            fadeOutEndSeconds: 4,
+          })
+      )
+    ).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.targetDurationSeconds = 5))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.filmDurationSeconds = 3.5))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.id = 'beat_2'))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.title = 'New opening'))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.shotCount = 2))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.durationKind = 'target'))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.durationSeconds = 5))).not.toBe(original);
+    expect(changedSignature((copy) => (copy.cut.beats[0]!.coverAssetId = 'cover_2'))).not.toBe(original);
+  });
+
+  it('derives exact partial-production facts from ordered Shots and Board panels', () => {
+    const projection = cutReviewProjection();
+    projection.activeShotIds.push('shot_2');
+    projection.activeBeats[0]!.shots.push({
+      ...projection.activeBeats[0]!.shots[0]!,
+      id: 'shot_2',
+      segmentHead: false,
+      currentPicture: null,
+      playedDurationSeconds: null,
+      dirtyCauses: [],
+    });
+    projection.boardPanels.push({
+      ...projection.boardPanels[0]!,
+      shotId: 'shot_2',
+      assetId: 'legacy_panel_2',
+      freshness: 'stale',
+    });
+
+    expect(studioWorkspaceProductionFacts(projection)).toEqual({
+      projectId: 'project_1',
+      projectRevision: 4,
+      shotCount: 2,
+      currentFrameCount: 1,
+      currentTakeCount: 1,
+      requiredFrameCount: 1,
+      readyRequiredFrameCount: 0,
+      handledRequiredFrameCount: 0,
+      needsCurrentFrameForIncompleteShot: true,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+    });
+  });
+
+  it('treats a stale selected segment-head take as incomplete frame work', () => {
+    const projection = cutReviewProjection();
+    projection.activeBeats[0]!.shots[0]!.dirtyCauses = ['generation_out_of_date'];
+    projection.boardPanels[0] = {
+      ...projection.boardPanels[0]!,
+      assetId: null,
+      producerJobId: null,
+      freshness: 'missing',
+    };
+
+    expect(studioWorkspaceProductionFacts(projection)).toEqual({
+      projectId: 'project_1',
+      projectRevision: 4,
+      shotCount: 1,
+      currentFrameCount: 0,
+      currentTakeCount: 1,
+      requiredFrameCount: 1,
+      readyRequiredFrameCount: 0,
+      handledRequiredFrameCount: 0,
+      needsCurrentFrameForIncompleteShot: true,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+    });
+  });
+
+  it('counts a current chain-head panel when Main confirms its selected first frame is reusable', () => {
+    const projection = cutReviewProjection();
+    projection.activeBeats[0]!.shots[0]!.currentPicture = null;
+    projection.activeBeats[0]!.shots[0]!.playedDurationSeconds = null;
+    projection.boardPanels[0] = {
+      ...projection.boardPanels[0]!,
+      assetId: 'board_1',
+      newSpendSeedAssetId: null,
+    };
+
+    expect(studioWorkspaceProductionFacts(projection)).toMatchObject({
+      requiredFrameCount: 1,
+      readyRequiredFrameCount: 1,
+      handledRequiredFrameCount: 0,
+      needsCurrentFrameForIncompleteShot: false,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: true,
+    });
+
+    projection.boardPanels[0]!.newSpendSeedAssetId = 'older_imported_seed';
+    expect(studioWorkspaceProductionFacts(projection)).toMatchObject({
+      requiredFrameCount: 1,
+      readyRequiredFrameCount: 1,
+      handledRequiredFrameCount: 1,
+      needsCurrentFrameForIncompleteShot: false,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+    });
+
+    projection.boardPanels[0]!.newSpendSeedAssetId = 'board_1';
+    expect(studioWorkspaceProductionFacts(projection)).toMatchObject({
+      requiredFrameCount: 1,
+      readyRequiredFrameCount: 1,
+      handledRequiredFrameCount: 1,
+      needsCurrentFrameForIncompleteShot: false,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+    });
+  });
+});
+
 describe('deriveStudioWorkspaceProgress', () => {
+  it('starts an empty authored project at Storyline before reference planning', () => {
+    const empty = status();
+    const storyboard = empty.stages.find((candidate) => candidate.id === 'storyboard')!;
+    storyboard.state = 'not_started';
+    storyboard.summary = {
+      stage: 'storyboard',
+      beatCount: 0,
+      shotCount: 0,
+      authoredShotCount: 0,
+      plannedSeconds: 0,
+      targetSeconds: 18,
+    };
+    const bindings = empty.stages.find((candidate) => candidate.id === 'bindings')!;
+    bindings.state = 'not_started';
+    bindings.summary = { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 };
+    empty.stages.find((candidate) => candidate.id === 'production')!.summary = {
+      stage: 'production',
+      currentTakeCount: 0,
+      shotCount: 0,
+      activeJobCount: 0,
+    };
+    empty.stages.find((candidate) => candidate.id === 'cut')!.summary = {
+      stage: 'cut',
+      currentTakeCount: 0,
+      shotCount: 0,
+      durationSeconds: null,
+      targetSeconds: 18,
+      structurallyPlayable: false,
+    };
+    empty.boards = { currentPictureCount: 0, shotCount: 0 };
+    empty.advisories = [{ cause: 'next_action', stage: 'storyboard' }];
+
+    expect(deriveStudioWorkspaceProgress(empty, 'project_1', 4)).toMatchObject({
+      nextAction: { kind: 'storyline', stage: 'storyboard', view: 'table' },
+      views: { table: { readiness: 'not_started', recommended: true } },
+    });
+  });
+
+  it('hands an accepted storyline to canonical References before bindings or frames', () => {
+    const referencesPending = status();
+    const references = referencesPending.stages.find((candidate) => candidate.id === 'references')!;
+    references.state = 'in_progress';
+    references.summary = { stage: 'references', plannedCount: 3, approvedCount: 1 };
+    referencesPending.advisories = [{ cause: 'next_action', stage: 'references' }];
+
+    expect(deriveStudioWorkspaceProgress(referencesPending, 'project_1', 4)).toMatchObject({
+      nextAction: {
+        kind: 'references',
+        stage: 'references',
+        view: 'references',
+        currentCount: 1,
+        totalCount: 3,
+      },
+      views: { references: { recommended: true } },
+    });
+  });
+
   it('distinguishes the useful Table from three empty peers and recommends Board', () => {
     const progress = deriveStudioWorkspaceProgress(status(), 'project_1', 4);
 
     expect(progress).toEqual(
       expect.objectContaining({
-        nextAction: { stage: 'production', view: 'board' },
+        nextAction: {
+          kind: 'frames',
+          stage: 'production',
+          view: 'board',
+          currentCount: 0,
+          totalCount: 4,
+        },
         views: expect.objectContaining({
           references: expect.objectContaining({ readiness: 'empty', recommended: false }),
           table: expect.objectContaining({ readiness: 'ready', recommended: false }),
@@ -127,11 +378,17 @@ describe('deriveStudioWorkspaceProgress', () => {
     const withPanels = status();
     withPanels.boards.currentPictureCount = 4;
 
-    expect(deriveStudioWorkspaceProgress(withPanels, 'project_1', 4)?.views.board).toMatchObject({
-      readiness: 'ready',
-      recommended: true,
-      currentCount: 0,
-      totalCount: 4,
+    expect(deriveStudioWorkspaceProgress(withPanels, 'project_1', 4)).toMatchObject({
+      nextAction: { kind: 'videos', currentCount: 0, totalCount: 4 },
+      production: { currentFrameCount: 4, currentVideoCount: 0, shotCount: 4 },
+      views: {
+        board: {
+          readiness: 'ready',
+          recommended: true,
+          currentCount: 0,
+          totalCount: 4,
+        },
+      },
     });
   });
 
@@ -151,7 +408,7 @@ describe('deriveStudioWorkspaceProgress', () => {
     });
   });
 
-  it('tracks in-progress and complete production without inventing another action', () => {
+  it('tracks in-progress production and explicitly hands complete video coverage to Cut', () => {
     const inProgress = status();
     const production = inProgress.stages.find((candidate) => candidate.id === 'production')!;
     production.state = 'in_progress';
@@ -166,10 +423,9 @@ describe('deriveStudioWorkspaceProgress', () => {
       targetSeconds: 18,
       structurallyPlayable: false,
     };
-    expect(deriveStudioWorkspaceProgress(inProgress, 'project_1', 4)?.views.board).toMatchObject({
-      readiness: 'ready',
-      recommended: true,
-      currentCount: 2,
+    expect(deriveStudioWorkspaceProgress(inProgress, 'project_1', 4)).toMatchObject({
+      nextAction: { kind: 'videos', view: 'board', currentCount: 2, totalCount: 4 },
+      views: { board: { readiness: 'ready', recommended: true, currentCount: 2 } },
     });
 
     const complete = status();
@@ -188,12 +444,208 @@ describe('deriveStudioWorkspaceProgress', () => {
       structurallyPlayable: true,
     };
     expect(deriveStudioWorkspaceProgress(complete, 'project_1', 4)).toMatchObject({
-      nextAction: null,
-      views: { board: { readiness: 'ready', recommended: false }, cut: { readiness: 'ready' } },
+      nextAction: { kind: 'review_cut', stage: 'cut', view: 'cut' },
+      production: { currentFrameCount: 0, currentVideoCount: 4, shotCount: 4 },
+      views: {
+        board: { readiness: 'ready', recommended: false },
+        cut: { readiness: 'ready', recommended: true },
+      },
     });
   });
 
-  it('does not recommend around blockers and keeps the blocked view inspectable', () => {
+  it('keeps stale current takes in video review instead of describing them as Cut-ready', () => {
+    const stale = status();
+    stale.advisories = [
+      {
+        cause: 'current_take_stale',
+        stage: 'production',
+        shotId: 'shot_2',
+        staleCauses: ['generation_out_of_date'],
+      },
+    ];
+    const production = stale.stages.find((candidate) => candidate.id === 'production')!;
+    production.state = 'complete';
+    production.summary = { stage: 'production', currentTakeCount: 4, shotCount: 4, activeJobCount: 0 };
+    const cut = stale.stages.find((candidate) => candidate.id === 'cut')!;
+    cut.state = 'complete';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 4,
+      shotCount: 4,
+      durationSeconds: 18,
+      targetSeconds: 18,
+      structurallyPlayable: true,
+    };
+
+    expect(deriveStudioWorkspaceProgress(stale, 'project_1', 4)).toMatchObject({
+      nextAction: { kind: 'videos', stage: 'production', view: 'board', currentCount: 3, totalCount: 4 },
+      production: { currentVideoCount: 3, shotCount: 4 },
+      views: {
+        board: { currentCount: 3, recommended: true },
+        cut: { recommended: false },
+      },
+    });
+  });
+
+  it('requires a fresh frame for every unfinished Shot in partially migrated production', () => {
+    const partial = status();
+    partial.boards.currentPictureCount = 1;
+    const production = partial.stages.find((candidate) => candidate.id === 'production')!;
+    production.state = 'in_progress';
+    production.summary = { stage: 'production', currentTakeCount: 1, shotCount: 4, activeJobCount: 0 };
+    const cut = partial.stages.find((candidate) => candidate.id === 'cut')!;
+    cut.state = 'in_progress';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 1,
+      shotCount: 4,
+      durationSeconds: null,
+      targetSeconds: 18,
+      structurallyPlayable: false,
+    };
+
+    expect(
+      deriveStudioWorkspaceProgress(partial, 'project_1', 4, {
+        projectId: 'project_1',
+        projectRevision: 4,
+        shotCount: 4,
+        currentFrameCount: 1,
+        currentTakeCount: 1,
+        requiredFrameCount: 3,
+        readyRequiredFrameCount: 1,
+        handledRequiredFrameCount: 1,
+        needsCurrentFrameForIncompleteShot: true,
+        needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+      })
+    ).toMatchObject({
+      nextAction: { kind: 'frames', stage: 'production', view: 'board', currentCount: 1, totalCount: 3 },
+      views: { board: { recommended: true } },
+    });
+  });
+
+  it('counts a current unselected head as drawn while missing frames still come first', () => {
+    const partial = status();
+    partial.boards.currentPictureCount = 1;
+    const production = partial.stages.find((candidate) => candidate.id === 'production')!;
+    production.state = 'in_progress';
+    production.summary = { stage: 'production', currentTakeCount: 1, shotCount: 4, activeJobCount: 0 };
+    const cut = partial.stages.find((candidate) => candidate.id === 'cut')!;
+    cut.state = 'in_progress';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 1,
+      shotCount: 4,
+      durationSeconds: null,
+      targetSeconds: 18,
+      structurallyPlayable: false,
+    };
+
+    expect(
+      deriveStudioWorkspaceProgress(partial, 'project_1', 4, {
+        projectId: 'project_1',
+        projectRevision: 4,
+        shotCount: 4,
+        currentFrameCount: 1,
+        currentTakeCount: 1,
+        requiredFrameCount: 3,
+        readyRequiredFrameCount: 1,
+        handledRequiredFrameCount: 0,
+        needsCurrentFrameForIncompleteShot: true,
+        needsCurrentBoardPromotionForIncompleteSegmentHead: true,
+      })
+    ).toMatchObject({
+      nextAction: { kind: 'frames', currentCount: 1, totalCount: 3 },
+    });
+  });
+
+  it('names first-frame selection as its own step before recommending video generation', () => {
+    const partial = status();
+    partial.boards.currentPictureCount = 3;
+    const production = partial.stages.find((candidate) => candidate.id === 'production')!;
+    production.state = 'in_progress';
+    production.summary = { stage: 'production', currentTakeCount: 1, shotCount: 4, activeJobCount: 0 };
+    const cut = partial.stages.find((candidate) => candidate.id === 'cut')!;
+    cut.state = 'in_progress';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 1,
+      shotCount: 4,
+      durationSeconds: null,
+      targetSeconds: 18,
+      structurallyPlayable: false,
+    };
+    const facts = {
+      projectId: 'project_1',
+      projectRevision: 4,
+      shotCount: 4,
+      currentFrameCount: 3,
+      currentTakeCount: 1,
+      requiredFrameCount: 3,
+      readyRequiredFrameCount: 3,
+      handledRequiredFrameCount: 2,
+      needsCurrentFrameForIncompleteShot: false,
+      needsCurrentBoardPromotionForIncompleteSegmentHead: true,
+    };
+
+    expect(deriveStudioWorkspaceProgress(partial, 'project_1', 4, facts)).toMatchObject({
+      nextAction: { kind: 'promote_frame', view: 'board', currentCount: 2, totalCount: 3 },
+    });
+
+    expect(
+      deriveStudioWorkspaceProgress(partial, 'project_1', 4, {
+        ...facts,
+        handledRequiredFrameCount: 3,
+        needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+      })
+    ).toMatchObject({ nextAction: { kind: 'videos', view: 'board', currentCount: 1, totalCount: 4 } });
+  });
+
+  it('routes a stale selected segment-head take with no current frame back to truthful frame work', () => {
+    const stale = status();
+    stale.boards.currentPictureCount = 0;
+    stale.advisories = [
+      {
+        cause: 'current_take_stale',
+        stage: 'production',
+        shotId: 'shot_1',
+        staleCauses: ['generation_out_of_date'],
+      },
+    ];
+    const production = stale.stages.find((candidate) => candidate.id === 'production')!;
+    production.state = 'complete';
+    production.summary = { stage: 'production', currentTakeCount: 4, shotCount: 4, activeJobCount: 0 };
+    const cut = stale.stages.find((candidate) => candidate.id === 'cut')!;
+    cut.state = 'complete';
+    cut.summary = {
+      stage: 'cut',
+      currentTakeCount: 4,
+      shotCount: 4,
+      durationSeconds: 18,
+      targetSeconds: 18,
+      structurallyPlayable: true,
+    };
+
+    expect(
+      deriveStudioWorkspaceProgress(stale, 'project_1', 4, {
+        projectId: 'project_1',
+        projectRevision: 4,
+        shotCount: 4,
+        currentFrameCount: 0,
+        currentTakeCount: 4,
+        requiredFrameCount: 1,
+        readyRequiredFrameCount: 0,
+        handledRequiredFrameCount: 0,
+        needsCurrentFrameForIncompleteShot: true,
+        needsCurrentBoardPromotionForIncompleteSegmentHead: false,
+      })
+    ).toMatchObject({
+      nextAction: { kind: 'frames', stage: 'production', view: 'board', currentCount: 0, totalCount: 1 },
+      production: { currentVideoCount: 3, shotCount: 4 },
+      views: { board: { recommended: true }, cut: { recommended: false } },
+    });
+  });
+
+  it('keeps a blocked action visible without gating any view', () => {
     const blocked = status();
     blocked.advisories = [];
     blocked.blockerCount = 1;
@@ -208,8 +660,8 @@ describe('deriveStudioWorkspaceProgress', () => {
     ];
 
     expect(deriveStudioWorkspaceProgress(blocked, 'project_1', 4)).toMatchObject({
-      nextAction: null,
-      views: { board: { readiness: 'ready', state: 'blocked', recommended: false } },
+      nextAction: { kind: 'frames', stage: 'production', view: 'board' },
+      views: { board: { readiness: 'ready', state: 'blocked', recommended: true } },
     });
   });
 
@@ -221,7 +673,7 @@ describe('deriveStudioWorkspaceProgress', () => {
     });
 
     expect(deriveStudioWorkspaceProgress(blocked, 'project_1', 4)).toMatchObject({
-      nextAction: null,
+      nextAction: { kind: 'film_setup', stage: 'engines', view: null },
       views: {
         references: { recommended: false },
         table: { recommended: false },

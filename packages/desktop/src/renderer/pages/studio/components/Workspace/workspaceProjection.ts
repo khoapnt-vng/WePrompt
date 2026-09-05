@@ -1224,6 +1224,7 @@ const boardJobs = (project: StudioRendererProjectV2, shot: StudioShot): StudioRe
 const pendingBoardPanel = (project: StudioRendererProjectV2, shot: StudioShot): WorkspaceBoardPanelProjection => ({
   shotId: shot.id,
   assetId: validBoardAssetId(project, shot),
+  newSpendSeedAssetId: null,
   producerJobId: null,
   latestJobId: null,
   staleCauses: [],
@@ -1298,6 +1299,8 @@ const exactBoardPanel = (
   if (
     row.shotId !== shot.id ||
     (row.assetId !== null && !isSafeStudioId(row.assetId)) ||
+    (row.newSpendSeedAssetId !== null &&
+      (!isSafeStudioId(row.newSpendSeedAssetId) || row.newSpendSeedAssetId !== effectiveSeedStillId(project, shot))) ||
     (row.producerJobId !== null && !isSafeStudioId(row.producerJobId)) ||
     (row.latestJobId !== null && !isSafeStudioId(row.latestJobId)) ||
     !hasExactBoardStaleCauses(row.staleCauses)
@@ -1314,6 +1317,7 @@ const exactBoardPanel = (
     return {
       shotId: row.shotId,
       assetId: null,
+      newSpendSeedAssetId: row.newSpendSeedAssetId,
       producerJobId: null,
       latestJobId: row.latestJobId,
       staleCauses: [],
@@ -1346,6 +1350,7 @@ const exactBoardPanel = (
   return {
     shotId: row.shotId,
     assetId: row.assetId,
+    newSpendSeedAssetId: row.newSpendSeedAssetId,
     producerJobId: row.producerJobId,
     latestJobId: row.latestJobId,
     staleCauses: [...row.staleCauses],
@@ -1589,8 +1594,10 @@ export const projectWorkspace = (
   const memberships = projectBeatMemberships(project, identityCounts);
   const owners = projectShotOwners(project, memberships, identityCounts);
   const boardPanels = projectBoardPanels(project, matchedWorkspaceStatus, activeShotIds);
+  const exactWorkspaceStatusReady =
+    matchedWorkspaceStatus !== null && boardPanels.every((panel) => panel.freshness !== 'status_pending');
   const statusFacts: WorkspaceProjectionStatusFacts = {
-    workspaceStatusReady: matchedWorkspaceStatus !== null,
+    workspaceStatusReady: exactWorkspaceStatusReady,
     chainStatusReady: matchedChainStatus !== null,
     dirtyCausesByShotId,
     dirtyShotIds,
@@ -1686,7 +1693,7 @@ export const projectWorkspace = (
     unscriptedShotIds: activeBeats.flatMap((beat) =>
       beat.shots.filter((shot) => shot.shootingScript.trim() === '').map((shot) => shot.id)
     ),
-    workspaceStatusReady: matchedWorkspaceStatus !== null,
+    workspaceStatusReady: exactWorkspaceStatusReady,
     chainStatusReady: matchedChainStatus !== null,
     requestShapeLocked:
       matchedWorkspaceStatus?.parkEligibility.some((row) =>
@@ -1763,9 +1770,138 @@ export type StudioWorkspaceViewProgress = {
   recommended: boolean;
 };
 
+export type StudioWorkspaceNextActionKind =
+  | 'film_setup'
+  | 'storyline'
+  | 'references'
+  | 'bindings'
+  | 'frames'
+  | 'promote_frame'
+  | 'videos'
+  | 'finish_cut'
+  | 'review_cut';
+
+export type StudioWorkspaceNextAction = {
+  kind: StudioWorkspaceNextActionKind;
+  stage: StudioProjectStatusStageIdV2;
+  view: StudioView | null;
+  currentCount: number;
+  totalCount: number;
+};
+
+export type StudioWorkspaceProductionFacts = {
+  projectId: string;
+  projectRevision: number;
+  shotCount: number;
+  currentFrameCount: number;
+  currentTakeCount: number;
+  requiredFrameCount: number;
+  readyRequiredFrameCount: number;
+  handledRequiredFrameCount: number;
+  /** A stale selected take is incomplete here and may still require a replacement frame. */
+  needsCurrentFrameForIncompleteShot: boolean;
+  /** A reusable current panel must be promoted before an incomplete chain head can be rendered. */
+  needsCurrentBoardPromotionForIncompleteSegmentHead: boolean;
+};
+
 export type StudioWorkspaceProgress = {
   views: Record<StudioView, StudioWorkspaceViewProgress>;
-  nextAction: { stage: StudioProjectStatusStageIdV2; view: StudioView | null } | null;
+  production: {
+    currentFrameCount: number;
+    currentVideoCount: number;
+    shotCount: number;
+  };
+  nextAction: StudioWorkspaceNextAction;
+};
+
+/** A selected take is preserved production work only while exact status reports no stale cause. */
+export const workspaceShotHasFreshCurrentTake = (
+  shot: Pick<WorkspaceShotProjection, 'currentPicture' | 'dirtyCauses'>
+): boolean => shot.currentPicture !== null && shot.dirtyCauses.length === 0;
+
+/**
+ * Reduces the exact renderer projection to the production facts Main status cannot express per Shot.
+ * A stale selected take does not preserve a Shot, and a stale panel is not a usable replacement frame.
+ */
+export const studioWorkspaceProductionFacts = (
+  projection: WorkspaceProjection | null
+): StudioWorkspaceProductionFacts | null => {
+  if (projection === null || !projection.workspaceStatusReady) return null;
+  const shots = projection.activeBeats.flatMap((beat) => beat.shots);
+  if (
+    shots.length !== projection.activeShotIds.length ||
+    projection.boardPanels.length !== projection.activeShotIds.length ||
+    new Set(projection.activeShotIds).size !== projection.activeShotIds.length ||
+    shots.some((shot, index) => shot.id !== projection.activeShotIds[index]) ||
+    projection.boardPanels.some(
+      (panel, index) => panel.shotId !== projection.activeShotIds[index] || panel.freshness === 'status_pending'
+    )
+  ) {
+    return null;
+  }
+  const frameRequiredIndexes = shots.flatMap((shot, index) => (workspaceShotHasFreshCurrentTake(shot) ? [] : [index]));
+  const handledRequiredFrameIndexes = frameRequiredIndexes.filter((index) => {
+    const shot = shots[index]!;
+    const panel = projection.boardPanels[index]!;
+    return panel.freshness === 'current' && (!shot.segmentHead || panel.newSpendSeedAssetId !== null);
+  });
+  return {
+    projectId: projection.projectId,
+    projectRevision: projection.projectRevision,
+    shotCount: shots.length,
+    currentFrameCount: projection.boardPanels.filter((panel) => panel.freshness === 'current').length,
+    currentTakeCount: shots.filter((shot) => shot.currentPicture !== null).length,
+    requiredFrameCount: frameRequiredIndexes.length,
+    readyRequiredFrameCount: frameRequiredIndexes.filter(
+      (index) => projection.boardPanels[index]!.freshness === 'current'
+    ).length,
+    handledRequiredFrameCount: handledRequiredFrameIndexes.length,
+    needsCurrentFrameForIncompleteShot: frameRequiredIndexes.some(
+      (index) => projection.boardPanels[index]!.freshness !== 'current'
+    ),
+    needsCurrentBoardPromotionForIncompleteSegmentHead: frameRequiredIndexes.some(
+      (index) =>
+        shots[index]!.segmentHead &&
+        projection.boardPanels[index]!.freshness === 'current' &&
+        projection.boardPanels[index]!.newSpendSeedAssetId === null
+    ),
+  };
+};
+
+/** A change to anything the owner reviews in Cut invalidates the renderer-local opening marker. */
+export const studioCutOpenedSignature = (projection: WorkspaceProjection | null): string | null => {
+  if (projection === null || !projection.cut.orderReady || projection.activeShotIds.length === 0) return null;
+  const shots = projection.activeBeats.flatMap((beat) => beat.shots);
+  if (
+    shots.length !== projection.activeShotIds.length ||
+    shots.some((shot, index) => shot.id !== projection.activeShotIds[index] || shot.currentPicture === null)
+  ) {
+    return null;
+  }
+  return JSON.stringify({
+    cut: {
+      targetDurationSeconds: projection.cut.targetDurationSeconds,
+      filmDurationSeconds: projection.cut.filmDurationSeconds,
+      beats: projection.cut.beats.map((beat) => ({
+        id: beat.id,
+        title: beat.title,
+        shotCount: beat.shotCount,
+        durationKind: beat.durationKind,
+        durationSeconds: beat.durationSeconds,
+        coverAssetId: beat.coverAssetId,
+      })),
+      bed: projection.cut.bed,
+    },
+    shots: shots.map((shot) => ({
+      id: shot.id,
+      assetId: shot.currentPicture!.assetId,
+      trimInSeconds: shot.trimInSeconds,
+      trimOutSeconds: shot.trimOutSeconds,
+      playedDurationSeconds: shot.playedDurationSeconds,
+      chainBreak: shot.chainBreak,
+      dirtyCauses: shot.dirtyCauses.toSorted(),
+    })),
+  });
 };
 
 const statusStage = <Stage extends StudioProjectStatusStageIdV2>(
@@ -2100,28 +2236,12 @@ const validWorkspaceAdvisory = (value: unknown): boolean => {
   return new Set(advisory.staleCauses).size === advisory.staleCauses.length;
 };
 
-const viewForStatusStage = (stageId: StudioProjectStatusStageIdV2): StudioView | null => {
-  switch (stageId) {
-    case 'references':
-      return 'references';
-    case 'storyboard':
-    case 'bindings':
-      return 'table';
-    case 'production':
-      return 'board';
-    case 'cut':
-      return 'cut';
-    case 'brief':
-    case 'engines':
-      return null;
-  }
-};
-
 /** Maps exact Main status to honest, non-gating view progress. Unknown or inconsistent authority stays neutral. */
 export const deriveStudioWorkspaceProgress = (
   status: StudioProjectStatusV2 | null,
   projectId: string,
-  projectRevision: number
+  projectRevision: number,
+  productionFacts: StudioWorkspaceProductionFacts | null = null
 ): StudioWorkspaceProgress | null => {
   const exact = exactStudioProjectStatusV2(status, projectId, projectRevision);
   if (exact === null) return null;
@@ -2238,6 +2358,50 @@ export const deriveStudioWorkspaceProgress = (
     return null;
   }
 
+  if (
+    productionFacts !== null &&
+    (productionFacts.projectId !== projectId ||
+      productionFacts.projectRevision !== projectRevision ||
+      !validStatusCount(productionFacts.shotCount) ||
+      !validStatusCount(productionFacts.currentFrameCount) ||
+      !validStatusCount(productionFacts.currentTakeCount) ||
+      !validStatusCount(productionFacts.requiredFrameCount) ||
+      !validStatusCount(productionFacts.readyRequiredFrameCount) ||
+      !validStatusCount(productionFacts.handledRequiredFrameCount) ||
+      productionFacts.shotCount !== production.summary.shotCount ||
+      productionFacts.currentFrameCount !== exact.boards.currentPictureCount ||
+      productionFacts.currentTakeCount !== production.summary.currentTakeCount ||
+      productionFacts.requiredFrameCount > productionFacts.shotCount ||
+      productionFacts.readyRequiredFrameCount > productionFacts.requiredFrameCount ||
+      productionFacts.readyRequiredFrameCount > productionFacts.currentFrameCount ||
+      productionFacts.handledRequiredFrameCount > productionFacts.requiredFrameCount ||
+      productionFacts.handledRequiredFrameCount > productionFacts.currentFrameCount ||
+      productionFacts.handledRequiredFrameCount > productionFacts.readyRequiredFrameCount ||
+      typeof productionFacts.needsCurrentFrameForIncompleteShot !== 'boolean' ||
+      typeof productionFacts.needsCurrentBoardPromotionForIncompleteSegmentHead !== 'boolean')
+  ) {
+    return null;
+  }
+
+  const staleTakeAdvisories = exact.advisories.filter((advisory) => advisory.cause === 'current_take_stale');
+  const staleTakeShotIds = new Set(staleTakeAdvisories.map((advisory) => advisory.shotId));
+  if (
+    staleTakeShotIds.size !== staleTakeAdvisories.length ||
+    staleTakeShotIds.size > production.summary.currentTakeCount
+  ) {
+    return null;
+  }
+  const readyVideoCount = production.summary.currentTakeCount - staleTakeShotIds.size;
+  if (
+    productionFacts !== null &&
+    productionFacts.requiredFrameCount !== production.summary.shotCount - readyVideoCount
+  ) {
+    return null;
+  }
+  const frameActionCurrentCount = productionFacts?.readyRequiredFrameCount ?? exact.boards.currentPictureCount;
+  const promotionActionCurrentCount = productionFacts?.handledRequiredFrameCount ?? exact.boards.currentPictureCount;
+  const frameActionTotalCount = productionFacts?.requiredFrameCount ?? exact.boards.shotCount;
+
   const expectedNextStage =
     exact.blockerCount === 0 ? exact.stages.find((candidate) => candidate.state !== 'complete') : undefined;
   const nextActions = exact.advisories.filter((advisory) => advisory.cause === 'next_action');
@@ -2248,10 +2412,92 @@ export const deriveStudioWorkspaceProgress = (
   ) {
     return null;
   }
-  const nextAction =
-    expectedNextStage === undefined
-      ? null
-      : { stage: expectedNextStage.id, view: viewForStatusStage(expectedNextStage.id) };
+  // Main reports storage/generation stages in schema order. The workspace translates those facts
+  // into the owner's production journey: author the story before deriving canonical references,
+  // then make reusable hi-fi frames before spending on motion. A blocked stage stays the next
+  // action so its remedy remains visible; this never gates or changes free navigation.
+  let nextAction: StudioWorkspaceNextAction;
+  if (brief.state !== 'complete' || engines.state !== 'complete') {
+    nextAction = {
+      kind: 'film_setup',
+      stage: brief.state !== 'complete' ? 'brief' : 'engines',
+      view: null,
+      currentCount: 0,
+      totalCount: 1,
+    };
+  } else if (storyboard.state !== 'complete') {
+    nextAction = {
+      kind: 'storyline',
+      stage: 'storyboard',
+      view: 'table',
+      currentCount: storyboard.summary.authoredShotCount,
+      totalCount: storyboard.summary.shotCount,
+    };
+  } else if (references.state !== 'complete') {
+    nextAction = {
+      kind: 'references',
+      stage: 'references',
+      view: 'references',
+      currentCount: references.summary.approvedCount,
+      totalCount: references.summary.plannedCount,
+    };
+  } else if (bindings.state !== 'complete') {
+    nextAction = {
+      kind: 'bindings',
+      stage: 'bindings',
+      view: 'table',
+      currentCount: bindings.summary.readyShotCount,
+      totalCount: bindings.summary.shotCount,
+    };
+  } else if (productionFacts?.needsCurrentFrameForIncompleteShot === true) {
+    nextAction = {
+      kind: 'frames',
+      stage: 'production',
+      view: 'board',
+      currentCount: frameActionCurrentCount,
+      totalCount: frameActionTotalCount,
+    };
+  } else if (productionFacts?.needsCurrentBoardPromotionForIncompleteSegmentHead === true) {
+    nextAction = {
+      kind: 'promote_frame',
+      stage: 'production',
+      view: 'board',
+      currentCount: promotionActionCurrentCount,
+      totalCount: frameActionTotalCount,
+    };
+  } else if (staleTakeShotIds.size > 0) {
+    nextAction = {
+      kind: 'videos',
+      stage: 'production',
+      view: 'board',
+      currentCount: readyVideoCount,
+      totalCount: production.summary.shotCount,
+    };
+  } else if (production.state === 'complete') {
+    nextAction = {
+      kind: cut.state === 'complete' ? 'review_cut' : 'finish_cut',
+      stage: 'cut',
+      view: 'cut',
+      currentCount: cut.summary.currentTakeCount,
+      totalCount: cut.summary.shotCount,
+    };
+  } else if (production.summary.currentTakeCount === 0 && exact.boards.currentPictureCount < exact.boards.shotCount) {
+    nextAction = {
+      kind: 'frames',
+      stage: 'production',
+      view: 'board',
+      currentCount: frameActionCurrentCount,
+      totalCount: frameActionTotalCount,
+    };
+  } else {
+    nextAction = {
+      kind: 'videos',
+      stage: 'production',
+      view: 'board',
+      currentCount: readyVideoCount,
+      totalCount: production.summary.shotCount,
+    };
+  }
   const tableStage =
     storyboard.state !== 'complete' ? storyboard : bindings.state !== 'complete' ? bindings : storyboard;
   const boardHasContent =
@@ -2265,7 +2511,7 @@ export const deriveStudioWorkspaceProgress = (
     cut.summary.structurallyPlayable ||
     cut.state === 'in_progress' ||
     cut.state === 'blocked';
-  const recommendedView = nextAction?.view ?? null;
+  const recommendedView = nextAction.view;
 
   return {
     views: {
@@ -2295,7 +2541,7 @@ export const deriveStudioWorkspaceProgress = (
         stage: 'production',
         state: production.state,
         readiness: boardHasContent ? 'ready' : 'not_started',
-        currentCount: production.summary.currentTakeCount,
+        currentCount: readyVideoCount,
         totalCount: production.summary.shotCount,
         recommended: recommendedView === 'board',
       },
@@ -2307,6 +2553,11 @@ export const deriveStudioWorkspaceProgress = (
         totalCount: cut.summary.shotCount,
         recommended: recommendedView === 'cut',
       },
+    },
+    production: {
+      currentFrameCount: exact.boards.currentPictureCount,
+      currentVideoCount: readyVideoCount,
+      shotCount: production.summary.shotCount,
     },
     nextAction,
   };

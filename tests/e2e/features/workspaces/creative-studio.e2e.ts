@@ -1014,7 +1014,7 @@ const captureCutViewportReference = async (
 
   const navigation = page.locator(viewNavigationSelector);
   const [tableLinkBox, cutLinkBox] = await Promise.all([
-    navigation.getByRole('link', { name: 'Table', exact: true }).boundingBox(),
+    navigation.getByRole('link', { name: 'Storyline', exact: true }).boundingBox(),
     navigation.getByRole('link', { name: 'Cut', exact: true }).boundingBox(),
   ]);
   if (tableLinkBox === null || cutLinkBox === null) {
@@ -1517,9 +1517,9 @@ const exerciseRenderedShotViewportLifecycle = async (page: Page, reference: Stud
   await takeScreenshot(page, `creative-studio/gate-3/table-${reference.screenshotSuffix}.png`);
 
   const navigation = page.locator(viewNavigationSelector);
-  await navigation.getByRole('link', { name: 'Board', exact: true }).click();
+  await navigation.getByRole('link', { name: 'Frames & Video', exact: true }).click();
   await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
-  const board = page.getByRole('list', { name: 'Beat board' });
+  const board = page.getByRole('list', { name: 'Frames and video production' });
   const beatCard = board.locator(`[data-beat-id="${beatId}"]`);
   const openBeat = beatCard.getByRole('button', { name: 'Open Landing', exact: true });
   await expect(openBeat).toBeVisible();
@@ -1706,7 +1706,7 @@ test.describe('Creative Studio workspace', () => {
   test.describe.configure({ timeout: 60_000 });
   test.skip(process.env.AIONUI_E2E_TEST !== '1', 'Creative Studio E2E requires an isolated test profile.');
 
-  test('creates and reloads a Beat/Shot project across the shared Table, Board, and Cut routes', async ({
+  test('creates and reloads a Beat/Shot project across the shared Storyline, Frames & Video, and Cut routes', async ({
     electronApp,
     page,
   }) => {
@@ -1735,7 +1735,13 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.locator('[data-studio-bar-blockers]')).toHaveText(initialBlockerCopy);
 
     const navigation = page.locator(viewNavigationSelector);
-    await expect(navigation.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
+    expect(await navigation.getByRole('link').allTextContents()).toEqual([
+      'Storyline',
+      'References',
+      'Frames & Video',
+      'Cut',
+    ]);
+    await expect(navigation.getByRole('link', { name: 'Storyline' })).toHaveAttribute('aria-current', 'page');
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     await expectProjectConfigurationOutsideActiveView(page);
 
@@ -1769,7 +1775,7 @@ test.describe('Creative Studio workspace', () => {
     await renameButton.hover();
     await expect(renameButton).not.toHaveCSS('border-bottom-color', 'rgba(0, 0, 0, 0)');
 
-    await navigation.getByRole('link', { name: 'Board' }).click();
+    await navigation.getByRole('link', { name: 'Frames & Video' }).click();
     await expect(page).toHaveURL(/#\/studio\/[^/]+\/board$/);
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
     await expectProjectConfigurationOutsideActiveView(page);
@@ -1842,7 +1848,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.getByRole('button', { name: /prepare estimate|confirm .*generation/i })).toHaveCount(0);
   });
 
-  test('runs the Ming, Mei, and dai-pai-dong reference trench through exact Board and video dispatch', async ({
+  test('runs the Ming, Mei, and dai-pai-dong reference trench through exact frame and video dispatch', async ({
     electronApp,
     page,
   }) => {
@@ -1985,7 +1991,7 @@ test.describe('Creative Studio workspace', () => {
     expect(planned.referenceOrder).toEqual([mingId, meiId, backgroundId]);
     await page.locator(viewNavigationSelector).getByRole('link', { name: 'References', exact: true }).click();
     const referencesView = page.locator('[data-studio-references-view]');
-    await expect(referencesView.getByRole('button', { name: 'Continue to Table', exact: true })).toHaveCount(0);
+    await expect(referencesView.getByRole('button', { name: 'Continue to Storyline', exact: true })).toHaveCount(0);
 
     const providerCallsBeforeBlockedBackground = await readStudioE2EProviderCallCounts(userDataDirectory);
     await expect(
@@ -2185,7 +2191,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(referencesView.locator('[data-reference-id]')).toHaveCount(3);
     await expect(referencesView.locator('[data-shot-binding-status]')).toHaveCount(0);
 
-    await navigation.getByRole('link', { name: 'Table', exact: true }).click();
+    await navigation.getByRole('link', { name: 'Storyline', exact: true }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     const beatRow = page.locator(`[data-beat-id="${beatId}"]`);
     await expect(beatRow.locator('[data-grid-column-name="story"]')).toContainText(beatStory);
@@ -2214,9 +2220,9 @@ test.describe('Creative Studio workspace', () => {
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table', {
       timeout: studioFakeMediaTimeoutMs,
     });
-    await page.locator(viewNavigationSelector).getByRole('link', { name: 'Board', exact: true }).click();
+    await page.locator(viewNavigationSelector).getByRole('link', { name: 'Frames & Video', exact: true }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
-    const drawNextBoardBatch = page.getByRole('button', { name: 'Draw next batch (2)', exact: true });
+    const drawNextBoardBatch = page.getByRole('button', { name: 'Generate next frames (2)', exact: true });
     await expect(drawNextBoardBatch).toBeEnabled({ timeout: studioFakeMediaTimeoutMs });
     await drawNextBoardBatch.click();
     const boardGate = page.locator('[data-testid="studio-spend-gate"]');
@@ -2464,7 +2470,7 @@ test.describe('Creative Studio workspace', () => {
     );
   });
 
-  test('traverses the 24-Beat Table without mutating the project or paid work', async ({ electronApp, page }) => {
+  test('traverses the 24-Beat Storyline without mutating the project or paid work', async ({ electronApp, page }) => {
     const projectBrief = `A 24-beat keyboard story ${Date.now()}.`;
 
     await navigateTo(page, ROUTES.studio);
@@ -2611,9 +2617,9 @@ test.describe('Creative Studio workspace', () => {
     const providerCallsBeforeNavigation =
       process.env.AIONUI_E2E_STUDIO_FAKE === '1' ? await readStudioE2EProviderCallCounts(userDataDirectory) : null;
     const navigation = page.locator(viewNavigationSelector);
-    await navigation.getByRole('link', { name: 'Board' }).click();
+    await navigation.getByRole('link', { name: 'Frames & Video' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'board');
-    const board = page.getByRole('list', { name: 'Beat board' });
+    const board = page.getByRole('list', { name: 'Frames and video production' });
     const boardCards = board.locator(':scope > [data-beat-id]');
     const firstBoardCard = boardCards.nth(0);
     const selectedBoardCard = boardCards.nth(23);
@@ -2623,7 +2629,7 @@ test.describe('Creative Studio workspace', () => {
 
     await expect(directorToggle).toHaveAttribute('aria-expanded', 'false');
     await expect(boardCards).toHaveCount(24);
-    await expect(page.getByRole('group', { name: 'Board card size' })).toHaveCount(0);
+    await expect(page.getByRole('group', { name: 'Frame card size' })).toHaveCount(0);
     await expect(board).not.toHaveAttribute('data-card-size');
     await expect(firstBoardCard.getByRole('button')).toHaveCount(2);
     await expect(firstBoardActions).toBeVisible();
@@ -2725,7 +2731,9 @@ test.describe('Creative Studio workspace', () => {
     expect(await titleStyle()).toEqual(titleStyleBeforeHover);
     await firstBoardOpener.focus();
     await page.keyboard.press('Tab');
-    await expect(firstBoardActions.getByRole('button', { name: 'Draw missing (8) · 1. Table beat 01' })).toBeFocused();
+    await expect(
+      firstBoardActions.getByRole('button', { name: 'Generate missing frames (8) · 1. Table beat 01' })
+    ).toBeFocused();
     await page.keyboard.press('Shift+Tab');
     await expect(firstBoardOpener).toBeFocused();
     await expectBoardGeometry('rtl');
@@ -2751,7 +2759,7 @@ test.describe('Creative Studio workspace', () => {
     await expect(selectedBoardOpener).toHaveAttribute('aria-current', 'true');
     await navigation.getByRole('link', { name: 'Cut' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'cut');
-    await navigation.getByRole('link', { name: 'Table' }).click();
+    await navigation.getByRole('link', { name: 'Storyline' }).click();
     await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
     await expect(page.getByRole('grid', { name: 'Beat table' }).getByRole('row').nth(24)).toHaveAttribute(
       'aria-selected',
@@ -3067,12 +3075,12 @@ test.describe('Creative Studio workspace', () => {
       await seededPanel.getByRole('button', { name: 'Close' }).click();
 
       const seededNavigation = page.locator(viewNavigationSelector);
-      await seededNavigation.getByRole('link', { name: 'Board' }).click();
+      await seededNavigation.getByRole('link', { name: 'Frames & Video' }).click();
       const seededBeatCard = page.locator(`[data-beat-id="${beatId}"]`);
       await expect(seededBeatCard.getByRole('button', { name: 'Move to Bin' })).toHaveCount(0);
       await expect(page.locator('[data-studio-bin]')).toContainText('The Bin is empty.');
       await takeScreenshot(page, 'creative-studio/gate-3/refusal-beat-inflight-blockers.png');
-      await seededNavigation.getByRole('link', { name: 'Table' }).click();
+      await seededNavigation.getByRole('link', { name: 'Storyline' }).click();
       await expect(page.locator(activeViewSelector)).toHaveAttribute('data-studio-view', 'table');
 
       await invokeStudioBridge<StudioRendererProjectCommitResultV2>(page, 'apply-authoring-batch', {

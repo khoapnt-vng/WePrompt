@@ -206,11 +206,13 @@ vi.mock('react-i18next', () => ({
 
 import {
   DirectorRail,
+  buildStudioSelectedProposalPin,
   forgetDirectorConversationStart,
   hasExactDirectorAuthoritySnapshot,
   hasExactDirectorMcpSnapshot,
   hasSafeRouteCatalog,
   parseDirectorProposalChatIntent,
+  STUDIO_SELECTED_PROPOSAL_PIN_ID,
 } from '@/renderer/pages/studio/components/Workspace/DirectorRail';
 
 const provider = {
@@ -805,29 +807,127 @@ describe('DirectorRail', () => {
     expect(harness.send).not.toHaveBeenCalled();
   });
 
-  it('prefills one editable exact-ID re-propose turn without sending it', async () => {
+  it('installs an exact tool-only proposal target before prefilling a friendly editable turn', async () => {
     const bound = exactConversation('conversation_bound');
     harness.conversations = [bound];
     harness.getProject.mockResolvedValue(supportedProject('conversation_bound'));
-    const prompt = 'Inspect proposal Proposal_EXACT-7 and draft a replacement.';
+    const prompt = 'Prepare an updated version of the proposal I selected.';
+    const onDraftRequestConsumed = vi.fn();
     const { rerender } = render(
       <DirectorRail
         project={project({ briefConversationId: 'conversation_bound' })}
-        draftRequest={{ requestId: 1, projectId: 'project_1', prompt }}
+        pendingProposalIds={['Proposal_EXACT-7']}
+        draftRequest={{ requestId: 1, projectId: 'project_1', prompt, proposalTargetId: 'Proposal_EXACT-7' }}
+        onDraftRequestConsumed={onDraftRequestConsumed}
       />
     );
 
     await screen.findByRole('textbox', { name: 'Director composer' });
+    await waitFor(() => expect(harness.update).toHaveBeenCalledOnce());
     await waitFor(() => expect(harness.prefill).toHaveBeenCalledWith('conversation_bound', prompt));
+    const pins = harness.update.mock.calls[0][0].updates.extra.context_handoff.pinned_context;
+    const targetPin = pins.find((pin: { id: string }) => pin.id === STUDIO_SELECTED_PROPOSAL_PIN_ID);
+    expect(targetPin.content).toContain('Proposal_EXACT-7');
+    expect(targetPin.content).toMatch(/tool-only/i);
+    expect(targetPin.content).toMatch(/never repeat/i);
+    expect(harness.update.mock.invocationCallOrder[0]).toBeLessThan(harness.prefill.mock.invocationCallOrder[0]!);
+    expect(onDraftRequestConsumed).toHaveBeenCalledWith(1);
+    expect(prompt).not.toContain('Proposal_EXACT-7');
     expect(harness.send).not.toHaveBeenCalled();
 
     rerender(
       <DirectorRail
         project={project({ briefConversationId: 'conversation_bound' })}
-        draftRequest={{ requestId: 1, projectId: 'project_1', prompt }}
+        pendingProposalIds={['Proposal_EXACT-7']}
+        draftRequest={{ requestId: 1, projectId: 'project_1', prompt, proposalTargetId: 'Proposal_EXACT-7' }}
+        onDraftRequestConsumed={onDraftRequestConsumed}
       />
     );
     expect(harness.prefill).toHaveBeenCalledTimes(1);
+
+    rerender(<DirectorRail project={project({ briefConversationId: 'conversation_bound' })} pendingProposalIds={[]} />);
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(2));
+    expect(
+      harness.update.mock.calls[1][0].updates.extra.context_handoff.pinned_context.some(
+        (pin: { id: string }) => pin.id === STUDIO_SELECTED_PROPOSAL_PIN_ID
+      )
+    ).toBe(false);
+  });
+
+  it.each([
+    ['unsafe', 'proposal with spaces', ['proposal with spaces']],
+    ['not pending', 'proposal_other', ['proposal_current']],
+  ])('does not install or prefill a %s proposal target', async (_case, proposalTargetId, pendingProposalIds) => {
+    const bound = exactConversation('conversation_bound');
+    harness.conversations = [bound];
+    harness.getProject.mockResolvedValue(supportedProject('conversation_bound'));
+    const onDraftRequestConsumed = vi.fn();
+    render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_bound' })}
+        pendingProposalIds={pendingProposalIds}
+        draftRequest={{
+          requestId: 1,
+          projectId: 'project_1',
+          prompt: 'Prepare an updated version of my selected proposal.',
+          proposalTargetId,
+        }}
+        onDraftRequestConsumed={onDraftRequestConsumed}
+      />
+    );
+
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    await act(async () => undefined);
+    expect(harness.update).not.toHaveBeenCalled();
+    expect(harness.prefill).not.toHaveBeenCalled();
+    expect(onDraftRequestConsumed).not.toHaveBeenCalled();
+  });
+
+  it('does not prefill a proposal-target draft when context installation fails', async () => {
+    const bound = exactConversation('conversation_bound');
+    harness.conversations = [bound];
+    harness.getProject.mockResolvedValue(supportedProject('conversation_bound'));
+    harness.update.mockResolvedValue(false);
+    const onDraftRequestConsumed = vi.fn();
+    render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_bound' })}
+        pendingProposalIds={['proposal_1']}
+        draftRequest={{
+          requestId: 1,
+          projectId: 'project_1',
+          prompt: 'Prepare an updated version of my selected proposal.',
+          proposalTargetId: 'proposal_1',
+        }}
+        onDraftRequestConsumed={onDraftRequestConsumed}
+      />
+    );
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledOnce());
+    expect(harness.prefill).not.toHaveBeenCalled();
+    expect(onDraftRequestConsumed).not.toHaveBeenCalled();
+  });
+
+  it('keeps ordinary draft prefills independent of proposal context installation', async () => {
+    const bound = exactConversation('conversation_bound');
+    harness.conversations = [bound];
+    harness.getProject.mockResolvedValue(supportedProject('conversation_bound'));
+    const prompt = 'Help me review this frame.';
+    render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_bound' })}
+        draftRequest={{ requestId: 1, projectId: 'project_1', prompt, proposalTargetId: null }}
+      />
+    );
+
+    await waitFor(() => expect(harness.prefill).toHaveBeenCalledWith('conversation_bound', prompt));
+    expect(harness.update).not.toHaveBeenCalled();
+  });
+
+  it('builds no selected-proposal pin from an unsafe identifier', () => {
+    expect(buildStudioSelectedProposalPin('proposal_1', 10)?.id).toBe(STUDIO_SELECTED_PROPOSAL_PIN_ID);
+    expect(buildStudioSelectedProposalPin('proposal one', 10)).toBeNull();
+    expect(buildStudioSelectedProposalPin('x'.repeat(257), 10)).toBeNull();
   });
 
   it('leaves ordinary messages and messages with attachments on the normal chat path', async () => {
@@ -2006,7 +2106,7 @@ describe('DirectorRail', () => {
     );
   });
 
-  it('preserves context-handoff metadata and user pins while replacing the Studio rules pin', async () => {
+  it('preserves context-handoff metadata and user pins while replacing both Studio-owned pins', async () => {
     const conversation = exactConversation('conversation_director', {
       context_handoff: {
         revision: 4,
@@ -2024,6 +2124,14 @@ describe('DirectorRail', () => {
             id: 'studio_brief_rules',
             title: 'Project rules',
             content: 'STALE',
+            source: 'manual',
+            created_at: 1,
+            updated_at: 1,
+          },
+          {
+            id: STUDIO_SELECTED_PROPOSAL_PIN_ID,
+            title: 'Selected proposal (tool only)',
+            content: 'STALE proposal_old',
             source: 'manual',
             created_at: 1,
             updated_at: 1,
@@ -2046,6 +2154,13 @@ describe('DirectorRail', () => {
             },
           ],
         })}
+        pendingProposalIds={['proposal_old', 'proposal_new']}
+        draftRequest={{
+          requestId: 1,
+          projectId: 'project_1',
+          prompt: 'Prepare an updated version of my selected proposal.',
+          proposalTargetId: 'proposal_new',
+        }}
       />
     );
 
@@ -2055,7 +2170,120 @@ describe('DirectorRail', () => {
     const handoff = payload.updates.extra.context_handoff;
     expect(handoff.revision).toBe(4);
     expect(handoff.context_file_path).toBe('/tmp/context.md');
-    expect(handoff.pinned_context.map((pin: { id: string }) => pin.id)).toEqual(['user_pin', 'studio_brief_rules']);
+    expect(handoff.pinned_context.map((pin: { id: string }) => pin.id)).toEqual([
+      'user_pin',
+      'studio_brief_rules',
+      STUDIO_SELECTED_PROPOSAL_PIN_ID,
+    ]);
     expect(handoff.pinned_context[1].content).toContain('No competitor logos.');
+    expect(handoff.pinned_context[2].content).toContain('proposal_new');
+    expect(handoff.pinned_context[2].content).not.toContain('proposal_old');
+  });
+
+  it('removes a persisted selected-proposal pin when its target is no longer pending', async () => {
+    const target = buildStudioSelectedProposalPin('proposal_resolved', 1)!;
+    const conversation = exactConversation('conversation_director', {
+      context_handoff: {
+        revision: 4,
+        pinned_context: [
+          {
+            id: 'user_pin',
+            title: 'User pin',
+            content: 'Keep this.',
+            source: 'manual',
+            created_at: 1,
+            updated_at: 1,
+          },
+          target,
+        ],
+      },
+    });
+    harness.conversations = [conversation];
+    render(<DirectorRail project={project({ briefConversationId: conversation.id })} pendingProposalIds={[]} />);
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledOnce());
+    const handoff = harness.update.mock.calls[0][0].updates.extra.context_handoff;
+    expect(handoff.revision).toBe(4);
+    expect(handoff.pinned_context.map((pin: { id: string }) => pin.id)).toEqual(['user_pin']);
+  });
+
+  it('serializes target replacement and prefills only the newest exact proposal', async () => {
+    const firstUpdate = deferred<boolean>();
+    harness.update.mockReset().mockReturnValueOnce(firstUpdate.promise).mockResolvedValue(true);
+    const conversation = exactConversation('conversation_director');
+    harness.conversations = [conversation];
+    const rendered = render(
+      <DirectorRail
+        project={project({ briefConversationId: conversation.id })}
+        pendingProposalIds={['proposal_first', 'proposal_second']}
+        draftRequest={{
+          requestId: 1,
+          projectId: 'project_1',
+          prompt: 'Prepare the first selected proposal again.',
+          proposalTargetId: 'proposal_first',
+        }}
+      />
+    );
+    await waitFor(() => expect(harness.update).toHaveBeenCalledOnce());
+
+    rendered.rerender(
+      <DirectorRail
+        project={project({ briefConversationId: conversation.id })}
+        pendingProposalIds={['proposal_first', 'proposal_second']}
+        draftRequest={{
+          requestId: 2,
+          projectId: 'project_1',
+          prompt: 'Prepare the newly selected proposal again.',
+          proposalTargetId: 'proposal_second',
+        }}
+      />
+    );
+    expect(harness.update).toHaveBeenCalledOnce();
+    await act(async () => firstUpdate.resolve(true));
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(2));
+    await waitFor(() =>
+      expect(harness.prefill).toHaveBeenCalledWith(conversation.id, 'Prepare the newly selected proposal again.')
+    );
+
+    const replacementPins = harness.update.mock.calls[1][0].updates.extra.context_handoff.pinned_context;
+    const targetPin = replacementPins.find((pin: { id: string }) => pin.id === STUDIO_SELECTED_PROPOSAL_PIN_ID);
+    expect(targetPin.content).toContain('proposal_second');
+    expect(targetPin.content).not.toContain('proposal_first');
+    expect(harness.prefill).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the private proposal target from the prior Director when the project changes', async () => {
+    const conversation = exactConversation('conversation_director');
+    harness.conversations = [conversation];
+    const rendered = render(
+      <DirectorRail
+        project={project({ briefConversationId: conversation.id })}
+        pendingProposalIds={['proposal_1']}
+        draftRequest={{
+          requestId: 1,
+          projectId: 'project_1',
+          prompt: 'Prepare the selected proposal again.',
+          proposalTargetId: 'proposal_1',
+        }}
+      />
+    );
+    await waitFor(() => expect(harness.prefill).toHaveBeenCalledOnce());
+
+    harness.hasLoaded = false;
+    rendered.rerender(
+      <DirectorRail
+        project={project({ id: 'project_2', name: 'Second film', briefConversationId: null })}
+        pendingProposalIds={[]}
+      />
+    );
+
+    await waitFor(() => expect(harness.update).toHaveBeenCalledTimes(2));
+    const cleanup = harness.update.mock.calls[1][0];
+    expect(cleanup.id).toBe(conversation.id);
+    expect(
+      cleanup.updates.extra.context_handoff.pinned_context.some(
+        (pin: { id: string }) => pin.id === STUDIO_SELECTED_PROPOSAL_PIN_ID
+      )
+    ).toBe(false);
   });
 });

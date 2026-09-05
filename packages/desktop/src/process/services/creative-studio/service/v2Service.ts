@@ -2105,12 +2105,14 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
     if (segmentShotIds.length === 0 || deriveStudioInboundShotReferencesV2(project, segmentShotIds).length > 0) {
       return null;
     }
-    return segmentShotIds.filter((shotId) => {
-      const shot = ownValue(project.shots, shotId);
-      if (shot?.videoAssetId === null || shot === undefined) return false;
-      const asset = ownValue(project.assets, shot.videoAssetId);
-      return asset !== undefined && isCanonicalStudioGeneratedTakeV2(asset, project.id, shot);
-    });
+    // A paid Board promotion stops at its segment head. Downstream work is intentionally left for a
+    // fresh quote after this take is selected and its exact endpoint is available for conditioning.
+    const promotedShot = ownValue(project.shots, promotion.shotId);
+    if (promotedShot?.videoAssetId === null || promotedShot === undefined) return [];
+    const asset = ownValue(project.assets, promotedShot.videoAssetId);
+    return asset !== undefined && isCanonicalStudioGeneratedTakeV2(asset, project.id, promotedShot)
+      ? [promotedShot.id]
+      : [];
   };
 
   const buildConfirmedProject = (
