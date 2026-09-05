@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "Елемент без назви",
+        "waitingCount": "Пропозицій режисера на розгляді: {{count}}",
+        "waitingCount_one": "Пропозицій режисера на розгляді: {{count}}",
+        "waitingCount_other": "Пропозицій режисера на розгляді: {{count}}",
         "mutationCount": "Запропоновано змін: {{count}}",
         "mutationCount_one": "Запропоновано {{count}} зміну",
         "mutationCount_other": "Запропоновано змін: {{count}}",

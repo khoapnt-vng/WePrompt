@@ -4472,7 +4472,7 @@ describe('schema-2 creative studio project store', { timeout: STORE_TIMEOUT_MS }
 
     notifyChange?.(`${project.id}/brief.md`);
 
-    await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith(project.id));
+    await vi.waitFor(() => expect(listener).toHaveBeenCalledExactlyOnceWith(project.id, project.revision + 1));
     await expect(store.getProjectV2(project.id)).resolves.toEqual({
       status: 'supported',
       project: expect.objectContaining({ brief: 'Watched external Brief', revision: project.revision + 1 }),

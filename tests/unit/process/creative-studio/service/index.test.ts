@@ -3085,7 +3085,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.listProposalsV2).toHaveBeenCalledExactlyOnceWith('project_v2');
     expect(harness.acceptProposalV2).toHaveBeenCalledTimes(2);
     expect(harness.rejectProposalV2).toHaveBeenCalledExactlyOnceWith('project_v2', harness.proposal.id);
-    expect(harness.onProjectUpdated).toHaveBeenCalledTimes(1);
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith('project_v2', accepted.project.revision);
 
     await expect(
       harness.service.listProposals({ projectId: 'project_v2', extra: true } as never)

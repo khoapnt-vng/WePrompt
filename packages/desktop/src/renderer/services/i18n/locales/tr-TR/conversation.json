@@ -1233,6 +1233,9 @@
       },
       "proposals": {
         "unlabelledItem": "Etiketsiz öğe",
+        "waitingCount": "İnceleme bekleyen {{count}} Yönetmen önerisi",
+        "waitingCount_one": "İnceleme bekleyen {{count}} Yönetmen önerisi",
+        "waitingCount_other": "İnceleme bekleyen {{count}} Yönetmen önerisi",
         "mutationCount": "Önerilen {{count}} düzenleme",
         "mutationCount_one": "Önerilen {{count}} düzenleme",
         "mutationCount_other": "Önerilen {{count}} düzenleme",

@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "Элемент без названия",
+        "waitingCount": "Предложений режиссёра на рассмотрении: {{count}}",
+        "waitingCount_one": "Предложений режиссёра на рассмотрении: {{count}}",
+        "waitingCount_other": "Предложений режиссёра на рассмотрении: {{count}}",
         "mutationCount": "Предложено правок: {{count}}",
         "mutationCount_one": "Предложена {{count}} правка",
         "mutationCount_other": "Предложено правок: {{count}}",

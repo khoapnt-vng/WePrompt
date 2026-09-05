@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "ラベルのない項目",
+        "waitingCount": "ディレクターの提案 {{count}} 件が確認待ちです",
+        "waitingCount_one": "ディレクターの提案 {{count}} 件が確認待ちです",
+        "waitingCount_other": "ディレクターの提案 {{count}} 件が確認待ちです",
         "mutationCount": "{{count}} 件の編集案",
         "mutationCount_one": "{{count}} 件の編集案",
         "mutationCount_other": "{{count}} 件の編集案",

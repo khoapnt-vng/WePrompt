@@ -34,7 +34,11 @@ import {
   type StudioRendererReferenceGenerationHandoffV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { StudioLibrary } from './components/Library';
-import { DirectorProposals, type DirectorProposalsProps } from './components/Shell/DirectorProposals';
+import {
+  DirectorProposalReceipt,
+  DirectorProposals,
+  type DirectorProposalsProps,
+} from './components/Shell/DirectorProposals';
 import type { DirectorProposalChatIntent } from './components/Workspace/DirectorRail';
 import {
   SpendGateModal,
@@ -107,6 +111,13 @@ type StudioProposalAuthoritySnapshot = {
 
 type StudioProposalAuthorityState = 'ready' | 'stale' | 'unavailable' | 'refreshing';
 
+type StudioProposalDecisionReceipt = {
+  projectId: string;
+  proposalId: string;
+  status: 'accepted' | 'rejected';
+  decidedAt: string;
+};
+
 type StudioReviewedActionTarget = {
   kind: 'proposal' | 'reference_request' | 'handoff';
   id: string;
@@ -116,6 +127,24 @@ type StudioReviewedActionLatch = {
   token: number;
   target: StudioReviewedActionTarget | null;
 };
+
+const DIRECTOR_PROPOSAL_INBOX_ID = 'studio-director-proposal-inbox';
+
+const studioTimelineTimestamp = (value: string, fallback: number): number => {
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : fallback;
+};
+
+const isCanonicalStudioTimestamp = (value: string | null): value is string => {
+  if (value === null) return false;
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) && new Date(timestamp).toISOString() === value;
+};
+
+const isCanonicalStudioTimestampAtOrAfter = (value: string | null, earliest: string): value is string =>
+  isCanonicalStudioTimestamp(value) &&
+  isCanonicalStudioTimestamp(earliest) &&
+  Date.parse(value) >= Date.parse(earliest);
 
 const shotCapabilityItemsForDraft = (draft: SpendGateDraft): StudioGenerationCapabilityItemV2[] =>
   'baseChoices' in draft
@@ -332,13 +361,32 @@ const StudioProjectPage: React.FC<{
     referenceErrorMessageKey,
     workspaceErrorMessageKey,
     routeErrorMessageKey,
+    beginProposalDecisionReconciliation,
     refetchProjectWorkspace,
+    reconcileProjectWorkspace,
     refetchProposals,
     refetchReferences,
     refetchRoutes,
     refetchExports,
     installExportCatalog,
   } = useStudioProject(projectId);
+  const [recentProposalDecisions, setRecentProposalDecisions] = useState<StudioProposalDecisionReceipt[]>([]);
+  const [proposalReceiptFocusId, setProposalReceiptFocusId] = useState<string | null>(null);
+  const [proposalDecisionAnnouncement, setProposalDecisionAnnouncement] =
+    useState<StudioProposalDecisionReceipt | null>(null);
+  const currentRecentProposalDecisions = useMemo(
+    () => recentProposalDecisions.filter((receipt) => receipt.projectId === projectId),
+    [projectId, recentProposalDecisions]
+  );
+  const pendingProposals = useMemo(() => {
+    const decidedIds = new Set(currentRecentProposalDecisions.map((receipt) => receipt.proposalId));
+    return proposals.filter((candidate) => !decidedIds.has(candidate.id));
+  }, [currentRecentProposalDecisions, proposals]);
+  useEffect(() => {
+    setRecentProposalDecisions([]);
+    setProposalReceiptFocusId(null);
+    setProposalDecisionAnnouncement(null);
+  }, [projectId]);
   const [reviewedAction, setReviewedAction] = useState<StudioReviewedActionLatch | null>(null);
   const reviewedActionRef = useRef<StudioReviewedActionLatch | null>(null);
   const reviewedActionSequenceRef = useRef(0);
@@ -3626,7 +3674,7 @@ const StudioProjectPage: React.FC<{
       target: StudioRendererProposalV2,
       authority: StudioProposalAuthoritySnapshot,
       draftErrorMode: 'card' | 'chat' = 'card'
-    ): Promise<boolean> => {
+    ): Promise<StudioProposalDecisionReceipt | null> => {
       if (decision === 'accept') {
         if (target.review.status !== 'ready' || target.baseRevision !== authority.project.revision) {
           setActionErrorMessageKey(
@@ -3634,7 +3682,7 @@ const StudioProjectPage: React.FC<{
               ? 'conversation.creativeStudio.workspace.proposals.chatStale'
               : 'conversation.creativeStudio.workspace.proposals.reviewUnavailable'
           );
-          return false;
+          return null;
         }
         // Refreshing authority is asynchronous. Read the live draft fence at the final synchronous
         // boundary immediately before invoking Main so a draft created during refresh cannot be
@@ -3648,32 +3696,116 @@ const StudioProjectPage: React.FC<{
                 ? 'conversation.creativeStudio.workspace.proposals.saveBeforeApply'
                 : 'conversation.creativeStudio.workspace.proposals.reviewRuleDraftsFirst'
           );
-          return false;
-        }
-        const result = await ipcBridge.creativeStudio.acceptProposal.invoke({
-          projectId: authority.project.id,
-          proposalId: target.id,
-        });
-        if (result.ok === false) {
-          setActionErrorMessageKey(result.error.messageKey);
-          await refreshProposalAuthority();
-          return false;
-        }
-      } else {
-        const result = await ipcBridge.creativeStudio.rejectProposal.invoke({
-          projectId: authority.project.id,
-          proposalId: target.id,
-        });
-        if (result.ok === false) {
-          setActionErrorMessageKey(result.error.messageKey);
-          await refreshProposalAuthority();
-          return false;
+          return null;
         }
       }
-      await refreshProposalAuthority();
-      return true;
+
+      const proposalDecisionReconciliation = beginProposalDecisionReconciliation(
+        target.id,
+        decision === 'accept' ? target.baseRevision + 1 : null
+      );
+      let decidedProposal: {
+        id: string;
+        projectId: string;
+        status: 'accepted' | 'rejected';
+        decidedAt: string;
+      };
+      let projectRevisionAfterDecision: number | null = null;
+      let reconcileAcceptedReplay = false;
+      try {
+        if (decision === 'accept') {
+          const result = await ipcBridge.creativeStudio.acceptProposal.invoke({
+            projectId: authority.project.id,
+            proposalId: target.id,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            await refreshProposalAuthority();
+            return null;
+          }
+          if (
+            result.data.proposal.id !== target.id ||
+            result.data.proposal.projectId !== authority.project.id ||
+            result.data.proposal.status !== 'accepted' ||
+            !isCanonicalStudioTimestampAtOrAfter(result.data.proposal.decidedAt, target.createdAt) ||
+            typeof result.data.applied !== 'boolean' ||
+            result.data.project.id !== authority.project.id ||
+            !Number.isSafeInteger(result.data.project.revision) ||
+            result.data.project.revision < authority.project.revision + 1 ||
+            (result.data.applied &&
+              (result.data.project.revision !== authority.project.revision + 1 ||
+                result.data.project.updatedAt !== result.data.proposal.decidedAt))
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            await refreshProposalAuthority();
+            return null;
+          }
+          decidedProposal = {
+            id: result.data.proposal.id,
+            projectId: result.data.proposal.projectId,
+            status: 'accepted',
+            decidedAt: result.data.proposal.decidedAt,
+          };
+          projectRevisionAfterDecision = authority.project.revision + 1;
+          reconcileAcceptedReplay = !result.data.applied;
+        } else {
+          const result = await ipcBridge.creativeStudio.rejectProposal.invoke({
+            projectId: authority.project.id,
+            proposalId: target.id,
+          });
+          if (result.ok === false) {
+            setActionErrorMessageKey(result.error.messageKey);
+            await refreshProposalAuthority();
+            return null;
+          }
+          if (
+            result.data.id !== target.id ||
+            result.data.projectId !== authority.project.id ||
+            result.data.status !== 'rejected' ||
+            !isCanonicalStudioTimestampAtOrAfter(result.data.decidedAt, target.createdAt)
+          ) {
+            setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
+            await refreshProposalAuthority();
+            return null;
+          }
+          decidedProposal = {
+            id: result.data.id,
+            projectId: result.data.projectId,
+            status: 'rejected',
+            decidedAt: result.data.decidedAt,
+          };
+        }
+        proposalDecisionReconciliation.markCommitted(projectRevisionAfterDecision);
+        const receipt: StudioProposalDecisionReceipt = {
+          projectId: decidedProposal.projectId,
+          proposalId: decidedProposal.id,
+          status: decidedProposal.status,
+          decidedAt: decidedProposal.decidedAt,
+        };
+        setRecentProposalDecisions((current) => [
+          ...current.filter(
+            (candidate) => candidate.projectId === receipt.projectId && candidate.proposalId !== receipt.proposalId
+          ),
+          receipt,
+        ]);
+        setProposalDecisionAnnouncement(receipt);
+        if (draftErrorMode === 'card') setProposalReceiptFocusId(receipt.proposalId);
+        if (reconcileAcceptedReplay) void reconcileProjectWorkspace();
+        // Native project/proposal update events reconcile the wider workspace. The durable receipt
+        // remains authoritative meanwhile, without adding a second read that could hang the reviewed
+        // action latch after the command has already succeeded.
+        return receipt;
+      } finally {
+        proposalDecisionReconciliation.finish();
+      }
     },
-    [proposalDraftBlocker, refreshProposalAuthority, setActionErrorMessageKey]
+    [
+      beginProposalDecisionReconciliation,
+      proposalDraftBlocker,
+      reconcileProjectWorkspace,
+      refreshProposalAuthority,
+      setActionErrorMessageKey,
+    ]
   );
 
   const decideProposalFromCard = useCallback(
@@ -3697,7 +3829,9 @@ const StudioProjectPage: React.FC<{
           setActionErrorMessageKey('conversation.creativeStudio.workspace.proposals.chatProposalNotFound');
           return false;
         }
-        return await performProposalDecision(decision, target, authority);
+        const receipt = await performProposalDecision(decision, target, authority);
+        if (receipt === null) return false;
+        return true;
       } catch {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         await refreshProposalAuthority();
@@ -3774,14 +3908,7 @@ const StudioProjectPage: React.FC<{
           );
           return;
         }
-        const succeeded = await performProposalDecision(intent.decision, target, authority, 'chat');
-        if (succeeded) {
-          setActionErrorMessageKey(
-            intent.decision === 'accept'
-              ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
-              : 'conversation.creativeStudio.workspace.proposals.chatRejected'
-          );
-        }
+        await performProposalDecision(intent.decision, target, authority, 'chat');
       } catch {
         setActionErrorMessageKey('conversation.creativeStudio.workspace.errors.storage');
         await refreshProposalAuthority();
@@ -3821,7 +3948,7 @@ const StudioProjectPage: React.FC<{
       }
       setActionErrorMessageKey(null);
       try {
-        const visibleTarget = proposals.find(
+        const visibleTarget = pendingProposals.find(
           (candidate) =>
             candidate.id === proposalId && candidate.projectId === projectId && candidate.status === 'pending'
         );
@@ -3859,7 +3986,7 @@ const StudioProjectPage: React.FC<{
       beginReviewedAction,
       finishReviewedAction,
       projectId,
-      proposals,
+      pendingProposals,
       queueUpdatedProposalDraft,
       refreshProposalAuthority,
       saveAllDrafts,
@@ -4198,7 +4325,8 @@ const StudioProjectPage: React.FC<{
     cardReferenceRequests: DirectorProposalsProps['referenceRequests'],
     cardHandoffs: DirectorProposalsProps['referenceGenerationHandoffs'],
     cardProposalErrorMessageKey: string | null = null,
-    cardReferenceErrorMessageKey: string | null = null
+    cardReferenceErrorMessageKey: string | null = null,
+    proposalInboxId?: string
   ): React.ReactNode => (
     <DirectorProposals
       project={project}
@@ -4212,6 +4340,7 @@ const StudioProjectPage: React.FC<{
       proposalDraftBlocker={proposalDraftBlocker}
       proposalErrorMessageKey={cardProposalErrorMessageKey}
       referenceErrorMessageKey={cardReferenceErrorMessageKey}
+      proposalInboxId={proposalInboxId}
       onAcceptProposal={acceptProposalFromCard}
       onRejectProposal={rejectProposalFromCard}
       onRequestUpdatedProposal={requestUpdatedProposal}
@@ -4227,8 +4356,57 @@ const StudioProjectPage: React.FC<{
       reviewBlockedMessageKey={handoffReviewBlockedMessageKey}
     />
   );
-  const proposalInbox = directorReviewCard(proposals, [], [], proposalErrorMessageKey);
+  const projectTimelineFallback = studioTimelineTimestamp(project.updatedAt, 0);
+  const pendingProposalTimestamp = pendingProposals.reduce(
+    (latest, proposal) => Math.max(latest, studioTimelineTimestamp(proposal.createdAt, projectTimelineFallback)),
+    projectTimelineFallback
+  );
+  const proposalDecisionReceipts = new Map<string, StudioProposalDecisionReceipt>();
+  if (proposalCatalog?.projectId === project.id) {
+    for (const proposal of proposalCatalog.proposals) {
+      if ((proposal.status === 'accepted' || proposal.status === 'rejected') && proposal.decidedAt !== null) {
+        proposalDecisionReceipts.set(proposal.id, {
+          projectId: proposal.projectId,
+          proposalId: proposal.id,
+          status: proposal.status,
+          decidedAt: proposal.decidedAt,
+        });
+      }
+    }
+  }
+  for (const receipt of currentRecentProposalDecisions) {
+    proposalDecisionReceipts.set(receipt.proposalId, receipt);
+  }
   const reviewedDirectorOutputs: WorkspaceReviewedOutput[] = [
+    ...(pendingProposals.length === 0 && proposalErrorMessageKey === null
+      ? []
+      : [
+          {
+            id: 'proposal-inbox',
+            createdAt: pendingProposalTimestamp,
+            content: directorReviewCard(
+              pendingProposals,
+              [],
+              [],
+              proposalErrorMessageKey,
+              null,
+              DIRECTOR_PROPOSAL_INBOX_ID
+            ),
+          },
+        ]),
+    ...[...proposalDecisionReceipts.values()].map((receipt) => {
+      return {
+        id: `proposal-receipt-${receipt.proposalId}-${receipt.status}`,
+        createdAt: studioTimelineTimestamp(receipt.decidedAt, projectTimelineFallback),
+        content: (
+          <DirectorProposalReceipt
+            focusOnMount={proposalReceiptFocusId === receipt.proposalId}
+            status={receipt.status}
+            onFocused={() => setProposalReceiptFocusId(null)}
+          />
+        ),
+      };
+    }),
     ...referenceRequests.map((request) => ({
       id: `reference-request-${request.id}`,
       createdAt: Date.parse(request.createdAt),
@@ -4252,13 +4430,25 @@ const StudioProjectPage: React.FC<{
 
   return (
     <>
+      <span aria-atomic='true' aria-live='polite' className='sr-only' data-studio-proposal-decision-announcement>
+        {proposalDecisionAnnouncement?.projectId !== project.id ? null : (
+          <span key={proposalDecisionAnnouncement.proposalId}>
+            {t(
+              proposalDecisionAnnouncement.status === 'accepted'
+                ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
+                : 'conversation.creativeStudio.workspace.proposals.chatRejected'
+            )}
+          </span>
+        )}
+      </span>
       <WorkspaceShell
         ref={workspaceShellRef}
         project={project}
         onDirectorProposalIntent={decideProposalFromDirectorChat}
         directorDraftRequest={directorDraftRequest}
         onDirectorDraftRequestConsumed={consumeDirectorDraftRequest}
-        proposalInbox={proposalInbox}
+        directorPendingProposalCount={pendingProposals.length}
+        directorProposalTargetId={pendingProposals.length === 0 ? undefined : DIRECTOR_PROPOSAL_INBOX_ID}
         activeView={activeView}
         stats={projection === null ? undefined : buildStudioBarStats(projection, projectStatus)}
         renderAction={

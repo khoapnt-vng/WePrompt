@@ -904,6 +904,9 @@ const expectedLeaves = [
   'library.composer.empty',
   'proposals.title',
   'proposals.unlabelledItem',
+  'proposals.waitingCount',
+  'proposals.waitingCount_one',
+  'proposals.waitingCount_other',
   'proposals.ownerBeat',
   'proposals.before',
   'proposals.after',
@@ -1379,6 +1382,9 @@ const localizedWorkspaceKeys = [
   ...localizedShotComposerKeys,
   ...localizedReferencesPanelKeys,
   'proposals.unlabelledItem',
+  'proposals.waitingCount',
+  'proposals.waitingCount_one',
+  'proposals.waitingCount_other',
   'proposals.mutationCount',
   'proposals.mutationCount_one',
   'proposals.mutationCount_other',
@@ -1722,6 +1728,21 @@ describe('Creative Studio workspace translations', () => {
     }
   });
 
+  it('localizes the pending Director proposal count in all twelve locales', () => {
+    expect(flattenLeaves(englishWorkspace)).toMatchObject({
+      'proposals.waitingCount': '{{count}} Director proposals waiting',
+      'proposals.waitingCount_one': '{{count}} Director proposal waiting',
+      'proposals.waitingCount_other': '{{count}} Director proposals waiting',
+    });
+
+    for (const locale of i18nConfig.supportedLanguages) {
+      const leaves = flattenLeaves(workspaceOf(loadConversation(locale))!);
+      for (const key of ['proposals.waitingCount', 'proposals.waitingCount_one', 'proposals.waitingCount_other']) {
+        expect(placeholders(leaves[key]!), `${locale}:${key}`).toEqual(['count']);
+      }
+    }
+  });
+
   it('defines one exact undo label for every mutation operation that can be persisted', () => {
     const leaves = flattenLeaves(englishWorkspace);
 
@@ -2028,7 +2049,7 @@ describe('Creative Studio workspace translations', () => {
       .filter((key) => key.endsWith('_one'))
       .map((key) => key.slice(0, -'_one'.length));
 
-    expect(pluralBases).toHaveLength(27);
+    expect(pluralBases).toHaveLength(28);
     for (const base of pluralBases) {
       expect(leaves[`${base}_other`], `${base}_other`).toBeTypeOf('string');
       expect(placeholders(leaves[`${base}_one`]!)).toEqual(placeholders(leaves[`${base}_other`]!));

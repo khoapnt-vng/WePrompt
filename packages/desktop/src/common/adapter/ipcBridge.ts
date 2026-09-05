@@ -1433,7 +1433,7 @@ export const creativeStudio = {
   flushUnsavedWork: bridge.buildRendererQuery<StudioFlushUnsavedWorkResult>('creative-studio.flush-unsaved-work', {
     saved: false,
   }),
-  projectUpdated: bridge.buildEmitter<{ projectId: string }>('studio.project-updated'),
+  projectUpdated: bridge.buildEmitter<{ projectId: string; projectRevision?: number }>('studio.project-updated'),
   proposalUpdated: bridge.buildEmitter<{ projectId: string; proposalId: string }>('studio.proposal-updated'),
   referenceUpdated: bridge.buildEmitter<{ projectId: string; requestId: string }>('studio.reference-updated'),
 };

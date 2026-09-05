@@ -3064,6 +3064,25 @@ describe('AionrsChat human-submit bridge', () => {
     });
   });
 
+  it('renders the optional pre-composer slot after the transcript and before the send box', () => {
+    render(
+      <AionrsChat
+        conversation_id='director-chat'
+        workspace='/tmp/director'
+        modelSelection={modelSelection}
+        beforeComposer={<div data-testid='director-before-composer'>Pending proposal strip</div>}
+      />
+    );
+
+    const transcript = screen.getByTestId('aionrs-message-list');
+    const hint = screen.getByTestId('kb-stale-hint');
+    const beforeComposer = screen.getByTestId('director-before-composer');
+    const sendBox = screen.getByTestId('aionrs-chat-sendbox');
+    expect(transcript.compareDocumentPosition(beforeComposer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(hint.compareDocumentPosition(beforeComposer) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(beforeComposer.compareDocumentPosition(sendBox) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+  });
+
   it('leaves ordinary chats unintercepted when the optional bridge is absent', () => {
     render(<AionrsChat conversation_id='ordinary-chat' workspace='/tmp/ordinary' modelSelection={modelSelection} />);
 

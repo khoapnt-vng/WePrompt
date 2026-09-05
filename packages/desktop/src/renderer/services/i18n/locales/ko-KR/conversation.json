@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "이름 없는 항목",
+        "waitingCount": "검토 대기 중인 디렉터 제안 {{count}}개",
+        "waitingCount_one": "검토 대기 중인 디렉터 제안 {{count}}개",
+        "waitingCount_other": "검토 대기 중인 디렉터 제안 {{count}}개",
         "mutationCount": "제안된 편집 {{count}}개",
         "mutationCount_one": "제안된 편집 {{count}}개",
         "mutationCount_other": "제안된 편집 {{count}}개",

@@ -101,11 +101,13 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
     conversation,
     beforeSend,
     inlineItems,
+    beforeComposer,
   }: {
     conversation_id: string;
     conversation: TChatConversation;
     beforeSend?: (input: { message: string; hasAttachments: boolean }) => boolean | Promise<boolean>;
     inlineItems?: readonly { id: string; createdAt: number; content: React.ReactNode }[];
+    beforeComposer?: React.ReactNode;
   }) => {
     harness.renderedChatConversation = conversation;
     harness.beforeSend = beforeSend;
@@ -117,12 +119,15 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/AionrsChat', () => ({
       };
     }, []);
     return (
-      <div data-testid='message-list-content'>
-        {inlineItems?.map((item) => (
-          <div data-studio-director-reviewed-output key={item.id}>
-            {item.content}
-          </div>
-        ))}
+      <div data-testid='aionrs-chat'>
+        <div data-testid='message-list-content'>
+          {inlineItems?.map((item) => (
+            <div data-studio-director-reviewed-output key={item.id}>
+              {item.content}
+            </div>
+          ))}
+        </div>
+        {beforeComposer}
         <label>
           Director composer
           <input
@@ -181,12 +186,21 @@ vi.mock('react-i18next', () => ({
         'Creative Studio could not complete the Director attachment. Retry to recover it safely.',
       'conversation.creativeStudio.workspace.director.noModelConfigured':
         'Configure a text model before starting the Creative Director.',
+      'conversation.creativeStudio.workspace.proposals.reviewDetails': 'Review proposal details',
       'conversation.creativeStudio.workspace.errors.storage': 'Creative Studio could not read or save this workspace.',
       'conversation.creativeStudio.workspace.errors.staleProject':
         'The project changed elsewhere. Review the current Director before retrying.',
       'conversation.creativeStudio.errors.storage': 'Creative Studio could not update its local data.',
     };
-    return { t: (key: string) => english[key] ?? key };
+    return {
+      t: (key: string, options?: { count?: number }) => {
+        if (key === 'conversation.creativeStudio.workspace.proposals.waitingCount') {
+          const count = options?.count ?? 0;
+          return `${count} Director proposal${count === 1 ? '' : 's'} waiting`;
+        }
+        return english[key] ?? key;
+      },
+    };
   },
 }));
 
@@ -1234,6 +1248,73 @@ describe('DirectorRail', () => {
       'data-conversation-id',
       'conversation_winner'
     );
+  });
+
+  it('places the localized pending-proposal strip before the composer and reviews its exact target', async () => {
+    harness.conversations = [exactConversation()];
+    const scrollIntoView = vi.fn();
+    render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_director' })}
+        reviewedOutputs={[
+          {
+            id: 'pending-proposals',
+            createdAt: 1,
+            content: (
+              <section
+                id='director-proposals'
+                ref={(node) => {
+                  if (node !== null) node.scrollIntoView = scrollIntoView;
+                }}
+                tabIndex={-1}
+              >
+                Proposal review surface
+              </section>
+            ),
+          },
+        ]}
+        pendingProposalCount={2}
+        pendingProposalTargetId='director-proposals'
+        collapsed={false}
+        contentId='director-content'
+      />
+    );
+
+    const composer = await screen.findByRole('textbox', { name: 'Director composer' });
+    const transcript = screen.getByTestId('message-list-content');
+    const strip = screen.getByRole('region', { name: '2 Director proposals waiting' });
+    const composerOwner = composer.closest('label');
+    expect(composerOwner).not.toBeNull();
+    expect(transcript.compareDocumentPosition(strip) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(strip.compareDocumentPosition(composerOwner!) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(strip).toHaveTextContent('2 Director proposals waiting');
+    expect(screen.getByRole('button', { name: 'Review proposal details' })).toHaveAttribute(
+      'aria-controls',
+      'director-proposals'
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'Review proposal details' }));
+
+    const proposalTarget = document.getElementById('director-proposals');
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(proposalTarget).toHaveFocus();
+  });
+
+  it('omits the pending-proposal strip when the pending count is zero', async () => {
+    harness.conversations = [exactConversation()];
+    render(
+      <DirectorRail
+        project={project({ briefConversationId: 'conversation_director' })}
+        pendingProposalCount={0}
+        pendingProposalTargetId='director-proposals'
+        collapsed={false}
+        contentId='director-content'
+      />
+    );
+
+    await screen.findByRole('textbox', { name: 'Director composer' });
+    expect(document.querySelector('[data-studio-director-pending-proposals]')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Review proposal details' })).toBeNull();
   });
 
   it('reuses a reciprocal owner and collapsing never unmounts it or loses composer focus state', async () => {

@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "مورد بدون نام",
+        "waitingCount": "پیشنهادهای کارگردان در انتظار: {{count}}",
+        "waitingCount_one": "پیشنهادهای کارگردان در انتظار: {{count}}",
+        "waitingCount_other": "پیشنهادهای کارگردان در انتظار: {{count}}",
         "mutationCount": "{{count}} ویرایش پیشنهادی",
         "mutationCount_one": "{{count}} ویرایش پیشنهادی",
         "mutationCount_other": "{{count}} ویرایش پیشنهادی",

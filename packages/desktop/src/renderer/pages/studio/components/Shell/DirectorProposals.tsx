@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Card } from '@arco-design/web-react';
+import { Badge, Button, Card } from '@arco-design/web-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -16,6 +16,7 @@ import type {
 } from '@/common/types/project/creativeStudioTypes';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 import { DirectorProposalCard } from './DirectorProposalCard';
+import styles from './DirectorProposals.module.css';
 
 export type DirectorProposalsProps = {
   project: StudioRendererProjectV2;
@@ -29,6 +30,7 @@ export type DirectorProposalsProps = {
   proposalDraftBlocker?: (proposal: StudioRendererProposalV2) => 'workspace' | 'rules' | null;
   proposalErrorMessageKey?: string | null;
   referenceErrorMessageKey?: string | null;
+  proposalInboxId?: string;
   onAcceptProposal: (proposalId: string) => Promise<void>;
   onRejectProposal: (proposalId: string) => Promise<void>;
   onRequestUpdatedProposal?: (proposalId: string, saveWorkspaceDrafts: boolean) => Promise<void>;
@@ -42,6 +44,67 @@ export type DirectorProposalsProps = {
   onDismissHandoff: (handoff: StudioRendererReferenceGenerationHandoffV2) => Promise<void>;
   gateLocked?: boolean;
   reviewBlockedMessageKey?: string | null;
+};
+
+export type DirectorProposalReceiptProps = {
+  status: 'accepted' | 'rejected';
+  focusOnMount?: boolean;
+  onFocused?: () => void;
+};
+
+/** A compact Director-timeline receipt. A stable live region outside the remountable rail announces new decisions. */
+export const DirectorProposalReceipt: React.FC<DirectorProposalReceiptProps> = ({
+  status,
+  focusOnMount = false,
+  onFocused,
+}) => {
+  const { t } = useTranslation();
+  const receiptRef = React.useRef<HTMLDivElement>(null);
+  const onFocusedRef = React.useRef(onFocused);
+  React.useLayoutEffect(() => {
+    onFocusedRef.current = onFocused;
+  }, [onFocused]);
+  React.useLayoutEffect(() => {
+    if (!focusOnMount) return;
+    const receipt = receiptRef.current;
+    if (receipt === null) return;
+    const focusReceipt = (): boolean => {
+      if (receipt.closest('[inert], [aria-hidden="true"]') !== null) return false;
+      receipt.scrollIntoView({ block: 'nearest' });
+      receipt.focus({ preventScroll: true });
+      if (document.activeElement !== receipt) return false;
+      onFocusedRef.current?.();
+      return true;
+    };
+    if (focusReceipt() || typeof MutationObserver === 'undefined') return;
+    const observer = new MutationObserver(() => {
+      if (focusReceipt()) observer.disconnect();
+    });
+    observer.observe(receipt.closest('[data-studio-director-rail]') ?? document.body, {
+      attributes: true,
+      subtree: true,
+      attributeFilter: ['aria-hidden', 'class', 'inert', 'style'],
+    });
+    return () => observer.disconnect();
+  }, [focusOnMount]);
+
+  return (
+    <div
+      ref={receiptRef}
+      className={styles.receipt}
+      data-studio-proposal-receipt={status}
+      tabIndex={focusOnMount ? -1 : undefined}
+    >
+      <Badge
+        status={status === 'accepted' ? 'success' : 'default'}
+        text={t(
+          status === 'accepted'
+            ? 'conversation.creativeStudio.workspace.proposals.chatAccepted'
+            : 'conversation.creativeStudio.workspace.proposals.chatRejected'
+        )}
+      />
+    </div>
+  );
 };
 
 export const pendingDirectorProposals = (proposals: readonly StudioRendererProposalV2[]): StudioRendererProposalV2[] =>
@@ -82,6 +145,7 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   proposalDraftBlocker = () => null,
   proposalErrorMessageKey = null,
   referenceErrorMessageKey = null,
+  proposalInboxId,
   onAcceptProposal,
   onRejectProposal,
   onRequestUpdatedProposal = async () => undefined,
@@ -128,7 +192,12 @@ export const DirectorProposals: React.FC<DirectorProposalsProps> = ({
   }
 
   return (
-    <section aria-label={t('conversation.creativeStudio.workspace.review.title')}>
+    <section
+      aria-label={t('conversation.creativeStudio.workspace.review.title')}
+      data-studio-director-proposal-inbox={proposalInboxId === undefined ? undefined : true}
+      id={proposalInboxId}
+      tabIndex={proposalInboxId === undefined ? undefined : -1}
+    >
       <h2>{t('conversation.creativeStudio.workspace.review.title')}</h2>
       {proposalErrorMessageKey !== null ? <div role='alert'>{t(proposalErrorMessageKey)}</div> : null}
       {referenceErrorMessageKey !== null ? <div role='alert'>{t(referenceErrorMessageKey)}</div> : null}

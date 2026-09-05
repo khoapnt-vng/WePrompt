@@ -130,6 +130,28 @@
   min-inline-size: 0;
 }
 
+.pendingProposalStrip {
+  display: flex;
+  min-inline-size: 0;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border: 1px solid var(--color-border-2);
+  border-radius: 8px;
+  padding-block: 8px;
+  padding-inline: 10px;
+  color: var(--color-text-2);
+  background: var(--color-fill-1);
+}
+
+.pendingProposalLabel {
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+}
+
 .notice p {
   margin: 0;
   overflow-wrap: anywhere;

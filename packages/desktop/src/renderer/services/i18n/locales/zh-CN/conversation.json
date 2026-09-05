@@ -1231,6 +1231,9 @@
       },
       "proposals": {
         "unlabelledItem": "未命名项目",
+        "waitingCount": "{{count}} 个导演提案待审核",
+        "waitingCount_one": "{{count}} 个导演提案待审核",
+        "waitingCount_other": "{{count}} 个导演提案待审核",
         "mutationCount": "{{count}} 项提议编辑",
         "mutationCount_one": "{{count}} 项提议编辑",
         "mutationCount_other": "{{count}} 项提议编辑",

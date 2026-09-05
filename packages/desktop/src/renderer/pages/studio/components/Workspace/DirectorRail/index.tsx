@@ -991,8 +991,9 @@ const resolveBoundConversation = async (
 const DirectorConversationSurface: React.FC<{
   conversation: DirectorConversation;
   inlineItems?: readonly MessageListInlineItem[];
+  beforeComposer?: React.ReactNode;
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
-}> = ({ conversation, inlineItems, onProposalIntent }) => {
+}> = ({ conversation, inlineItems, beforeComposer, onProposalIntent }) => {
   const onSelectModel = useCallback(
     async (provider: IProvider, modelName: string): Promise<boolean> => {
       const model = { ...provider, use_model: modelName } as TProviderWithModel;
@@ -1007,6 +1008,7 @@ const DirectorConversationSurface: React.FC<{
       conversation_id={conversation.id}
       conversation={conversation}
       inlineItems={inlineItems}
+      beforeComposer={beforeComposer}
       workspace={conversation.extra.workspace ?? ''}
       modelSelection={modelSelection}
       session_mode={conversation.extra.session_mode}
@@ -1033,6 +1035,8 @@ const DirectorConversationSurface: React.FC<{
 export type DirectorRailProps = {
   project: StudioRendererProjectV2;
   reviewedOutputs?: readonly MessageListInlineItem[];
+  pendingProposalCount?: number;
+  pendingProposalTargetId?: string;
   onProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   draftRequest?: { requestId: number; projectId: string; prompt: string } | null;
   onDraftRequestConsumed?: (requestId: number) => void;
@@ -1047,6 +1051,8 @@ export type DirectorRailProps = {
 export const DirectorRail: React.FC<DirectorRailProps> = ({
   project,
   reviewedOutputs = [],
+  pendingProposalCount = 0,
+  pendingProposalTargetId,
   onProposalIntent,
   draftRequest,
   onDraftRequestConsumed,
@@ -1073,6 +1079,14 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
       })),
     [project.id, reviewedOutputs]
   );
+  const reviewPendingProposal = useCallback((): void => {
+    if (pendingProposalTargetId === undefined) return;
+    const owner = contentRef.current;
+    const target = document.getElementById(pendingProposalTargetId);
+    if (owner === null || !(target instanceof HTMLElement) || !owner.contains(target)) return;
+    target.scrollIntoView({ block: 'nearest' });
+    target.focus({ preventScroll: true });
+  }, [pendingProposalTargetId]);
   stateRef.current = state;
   projectRef.current = project;
   conversationsRef.current = allConversations;
@@ -1399,6 +1413,32 @@ export const DirectorRail: React.FC<DirectorRailProps> = ({
               key={visibleState.conversation.id}
               conversation={visibleState.conversation}
               inlineItems={inlineItems}
+              beforeComposer={
+                pendingProposalCount > 0 ? (
+                  <section
+                    aria-label={t('conversation.creativeStudio.workspace.proposals.waitingCount', {
+                      count: pendingProposalCount,
+                    })}
+                    className={styles.pendingProposalStrip}
+                    data-studio-director-pending-proposals
+                  >
+                    <span className={styles.pendingProposalLabel}>
+                      {t('conversation.creativeStudio.workspace.proposals.waitingCount', {
+                        count: pendingProposalCount,
+                      })}
+                    </span>
+                    <Button
+                      aria-controls={pendingProposalTargetId}
+                      disabled={pendingProposalTargetId === undefined}
+                      onClick={reviewPendingProposal}
+                      size='mini'
+                      type='text'
+                    >
+                      {t('conversation.creativeStudio.workspace.proposals.reviewDetails')}
+                    </Button>
+                  </section>
+                ) : null
+              }
               onProposalIntent={onProposalIntent}
             />
           ) : (

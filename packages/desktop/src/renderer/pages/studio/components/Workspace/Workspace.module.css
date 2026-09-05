@@ -236,6 +236,22 @@
   flex: 0 0 auto;
 }
 
+.pendingDirectorBadge {
+  display: inline-flex;
+  min-inline-size: 18px;
+  block-size: 18px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  padding-inline: 5px;
+  color: var(--color-white-to-black);
+  background: var(--color-primary-6);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: var(--fw-semibold);
+  line-height: 1;
+}
+
 .projectDot {
   flex: 0 0 auto;
   border-radius: 6px;

@@ -1237,6 +1237,9 @@
       },
       "proposals": {
         "unlabelledItem": "Item sem nome",
+        "waitingCount": "{{count}} propostas do Diretor aguardando revisão",
+        "waitingCount_one": "{{count}} proposta do Diretor aguardando revisão",
+        "waitingCount_other": "{{count}} propostas do Diretor aguardando revisão",
         "mutationCount": "{{count}} edições propostas",
         "mutationCount_one": "{{count}} edição proposta",
         "mutationCount_other": "{{count}} edições propostas",

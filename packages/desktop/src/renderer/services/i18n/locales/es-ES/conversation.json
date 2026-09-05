@@ -1232,6 +1232,9 @@
       },
       "proposals": {
         "unlabelledItem": "Elemento sin nombre",
+        "waitingCount": "{{count}} propuestas del Director pendientes",
+        "waitingCount_one": "{{count}} propuesta del Director pendiente",
+        "waitingCount_other": "{{count}} propuestas del Director pendientes",
         "mutationCount": "{{count}} ediciones propuestas",
         "mutationCount_one": "{{count}} edición propuesta",
         "mutationCount_other": "{{count}} ediciones propuestas",

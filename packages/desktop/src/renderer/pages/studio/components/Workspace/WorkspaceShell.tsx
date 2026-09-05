@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Button, Input, Tooltip } from '@arco-design/web-react';
+import { Badge, Button, Input, Tooltip } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useId, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
@@ -25,7 +25,8 @@ export type WorkspaceShellProps = {
   onDirectorProposalIntent?: (intent: DirectorProposalChatIntent) => Promise<void>;
   directorDraftRequest?: WorkspaceDirectorDraftRequest | null;
   onDirectorDraftRequestConsumed?: (requestId: number) => void;
-  proposalInbox?: React.ReactNode;
+  directorPendingProposalCount?: number;
+  directorProposalTargetId?: string;
   /** The bar's primary action. It spends money, so it is the control that never leaves the bar. */
   renderAction?: React.ReactNode;
   /** Owner-only, revision-checked rename. The Director still has no edit_project disposition. */
@@ -339,7 +340,8 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     onDirectorProposalIntent,
     directorDraftRequest,
     onDirectorDraftRequestConsumed,
-    proposalInbox,
+    directorPendingProposalCount = 0,
+    directorProposalTargetId,
     renderAction,
     onRenameProject,
     renamePending = false,
@@ -410,32 +412,53 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
     dragRef.current = null;
   }, [railCollapsed]);
 
-  const toggleLabel = t(
+  const toggleBaseLabel = t(
     railCollapsed
       ? 'conversation.creativeStudio.workspace.director.show'
       : 'conversation.creativeStudio.workspace.director.hide'
   );
+  const toggleLabel =
+    directorPendingProposalCount > 0
+      ? `${toggleBaseLabel} · ${t('conversation.creativeStudio.workspace.proposals.waitingCount', {
+          count: directorPendingProposalCount,
+        })}`
+      : toggleBaseLabel;
   const filmClock = clock(stats?.filmSeconds);
   const targetClock = clock(stats?.targetSeconds);
 
   return (
     <div className={styles.shell} data-studio-workspace-shell>
       <header className={styles.appBar} data-studio-app-bar data-studio-project-header>
-        <Button
-          ref={(node) => {
-            railToggleRef.current = node instanceof HTMLButtonElement ? node : null;
-          }}
-          type='text'
-          shape='circle'
-          icon={<SidebarIcon />}
-          className={styles.railToggle}
-          data-studio-director-toggle
-          aria-controls={railContentId}
-          aria-expanded={!railCollapsed}
-          aria-label={toggleLabel}
-          title={toggleLabel}
-          onClick={toggleRail}
-        />
+        <Badge
+          count={
+            railCollapsed && directorPendingProposalCount > 0 ? (
+              <span aria-hidden='true' className={styles.pendingDirectorBadge}>
+                {directorPendingProposalCount}
+              </span>
+            ) : (
+              0
+            )
+          }
+          data-studio-director-pending-badge={
+            railCollapsed && directorPendingProposalCount > 0 ? directorPendingProposalCount : undefined
+          }
+        >
+          <Button
+            ref={(node) => {
+              railToggleRef.current = node instanceof HTMLButtonElement ? node : null;
+            }}
+            type='text'
+            shape='circle'
+            icon={<SidebarIcon />}
+            className={styles.railToggle}
+            data-studio-director-toggle
+            aria-controls={railContentId}
+            aria-expanded={!railCollapsed}
+            aria-label={toggleLabel}
+            title={toggleLabel}
+            onClick={toggleRail}
+          />
+        </Badge>
         <span className={styles.projectDot} aria-hidden='true' />
         <WorkspaceProjectTitle
           projectId={project.id}
@@ -498,6 +521,8 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
         <DirectorRail
           project={project}
           reviewedOutputs={reviewedOutputs}
+          pendingProposalCount={directorPendingProposalCount}
+          pendingProposalTargetId={directorProposalTargetId}
           onProposalIntent={onDirectorProposalIntent}
           draftRequest={directorDraftRequest}
           onDraftRequestConsumed={onDirectorDraftRequestConsumed}
@@ -551,7 +576,6 @@ export const WorkspaceShell = React.forwardRef<WorkspaceShellHandle, WorkspaceSh
                 {notice}
               </div>
             )}
-            {proposalInbox}
             <main aria-labelledby={viewHeadingId} className={styles.viewSurface} data-studio-view={activeView}>
               <h2 className={styles.viewHeading} id={viewHeadingId}>
                 {t(`conversation.creativeStudio.workspace.views.${activeView}`)}

@@ -352,7 +352,7 @@ export type CreativeStudioServiceV2Deps = {
   createIdempotencyKey?: () => string;
   createExportId?: () => string;
   now?: () => Date;
-  onProjectUpdated: (projectId: string) => void;
+  onProjectUpdated: (projectId: string, projectRevision?: number) => void;
 };
 
 const invalid = (message: string): CreativeStudioStoreError => new CreativeStudioStoreError('invalid_payload', message);
@@ -3476,7 +3476,7 @@ export const createCreativeStudioServiceV2 = (deps: CreativeStudioServiceV2Deps)
       assertSafeId(input.projectId, 'project id');
       assertSafeId(input.proposalId, 'proposal id');
       const accepted = await deps.store.acceptProposalV2(input.projectId, input.proposalId);
-      if (accepted.applied) deps.onProjectUpdated(input.projectId);
+      if (accepted.applied) deps.onProjectUpdated(input.projectId, accepted.project.revision);
       return {
         proposal: structuredClone(accepted.proposal),
         project: toRendererProject(accepted.project),

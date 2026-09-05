@@ -368,7 +368,7 @@ export type CreativeStudioStore = {
   rejectProposalV2(projectId: string, proposalId: string): Promise<StudioProposalV2>;
   reapAbandonedProposalsV2(): Promise<void>;
   watchProposalsV2(listener: (projectId: string, proposalId: string) => void): Promise<() => Promise<void>>;
-  watchBriefsV2(listener: (projectId: string) => void): Promise<() => Promise<void>>;
+  watchBriefsV2(listener: (projectId: string, projectRevision: number) => void): Promise<() => Promise<void>>;
   resolveProposalPathsV2(projectId: string): Promise<{ projectDir: string; pendingDir: string }>;
   listReferenceRequestsV2(projectId: string): Promise<StudioReferenceRequestLedgerEntryV2[]>;
   decideReferenceRequestV2(input: StudioDecideReferenceRequestInputV2): Promise<StudioReferenceRequestLedgerEntryV2>;
@@ -8964,7 +8964,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
       };
     },
 
-    async watchBriefsV2(listener: (projectId: string) => void): Promise<() => Promise<void>> {
+    async watchBriefsV2(listener: (projectId: string, projectRevision: number) => void): Promise<() => Promise<void>> {
       const root = await writableCanonicalRootV2();
       let closed = false;
       const pending = new Map<string, Promise<void>>();
@@ -8979,7 +8979,7 @@ export const createCreativeStudioStore = (deps: CreativeStudioStoreDeps): Creati
             if (closed) return;
             const result = await inspectProjectThroughAttributionFenceV2(root, projectId);
             if (result.status === 'malformed_v2') throw result.error;
-            if (!closed && result.status === 'supported') listener(projectId);
+            if (!closed && result.status === 'supported') listener(projectId, result.project.revision);
           })
           .catch((error: unknown) => {
             if (!closed) safeLogError('[CreativeStudio] Schema-2 Brief watcher ignored an invalid file', error);

@@ -36,6 +36,7 @@ const AionrsChat: React.FC<{
   cron_job_id?: string;
   emptySlot?: React.ReactNode;
   inlineItems?: readonly MessageListInlineItem[];
+  beforeComposer?: React.ReactNode;
   loadedSkills?: string[];
   loadedMcpServers?: string[];
   loadedMcpStatuses?: IConversationMcpStatus[];
@@ -58,6 +59,7 @@ const AionrsChat: React.FC<{
   cron_job_id,
   emptySlot,
   inlineItems,
+  beforeComposer,
   loadedSkills,
   loadedMcpServers,
   loadedMcpStatuses,
@@ -111,6 +113,7 @@ const AionrsChat: React.FC<{
             workspace={workspace}
             sessionMcpServers={session_mcp_servers}
           />
+          {beforeComposer}
           <AionrsSendBox
             conversation_id={conversation_id}
             modelSelection={modelSelection}

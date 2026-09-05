@@ -1232,6 +1232,9 @@
       },
       "proposals": {
         "unlabelledItem": "Unbenanntes Element",
+        "waitingCount": "{{count}} Director-Vorschläge warten",
+        "waitingCount_one": "{{count}} Director-Vorschlag wartet",
+        "waitingCount_other": "{{count}} Director-Vorschläge warten",
         "mutationCount": "{{count}} vorgeschlagene Änderungen",
         "mutationCount_one": "{{count}} vorgeschlagene Änderung",
         "mutationCount_other": "{{count}} vorgeschlagene Änderungen",
