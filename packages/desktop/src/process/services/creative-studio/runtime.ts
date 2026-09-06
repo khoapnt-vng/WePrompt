@@ -317,13 +317,11 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         const ids = [...supportedProjectIds];
         const signature = ids.join('\0');
         if (graph.recoverySignature === signature) return;
-        let exportRepairFailed = false;
         for (const projectId of ids) {
           try {
             // eslint-disable-next-line no-await-in-loop -- export repair is serialized by the project's authority queue.
             await store.withProjectAuthorityV2(projectId, (authority) => exportCatalogStore.repair(authority));
           } catch (error) {
-            exportRepairFailed = true;
             report(`[CreativeStudio] Export-catalog recovery failed for project ${projectId}:`, error);
           }
           if (disposed || activeGraph !== graph) return;
@@ -332,8 +330,9 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
         if (disposed || activeGraph !== graph) return;
         await graph.jobManager.resumePendingJobsV2(ids);
         if (disposed || activeGraph !== graph) return;
-        if (exportRepairFailed) return;
         graph.recoverySignature = signature;
+        // Catalog failures are contained for this project set. Retrying on every unrelated project
+        // commit would replay the whole recovery pass; topology changes and fresh graphs retry it.
       }
     })().finally(() => {
       graph.recoveryPromise = null;

@@ -658,12 +658,11 @@ describe('Creative Studio schema-2 runtime activation', () => {
     ]);
   });
 
-  it('keeps every project runtime active when one project export catalog cannot be recovered', async () => {
+  it('does not repeat an unchanged recovery pass when one project export catalog remains unreadable', async () => {
     const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
-    let rejectBadCatalog = true;
     vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
-      if (authority.project.id === 'project_bad_catalog' && rejectBadCatalog) {
-        throw new StudioExportCatalogErrorV2('unsupported_catalog_schema');
+      if (authority.project.id === 'project_bad_catalog') {
+        throw new StudioExportCatalogErrorV2('storage_error');
       }
       return {
         schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
@@ -675,27 +674,125 @@ describe('Creative Studio schema-2 runtime activation', () => {
 
     await harness.runtime.start();
     await harness.runtime.onBackendReady();
+    await harness.runtime.refreshInventory();
+    await harness.runtime.refreshInventory();
 
-    expect(harness.runtime.activationState).toBe('active');
-    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
-    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledWith([
+    expect({
+      activationState: harness.runtime.activationState,
+      repairProjectIds: harness.exportCatalogStore.repair.mock.calls.map(([authority]) => authority.project.id),
+      conditioningResumes: harness.mediaStore.resumeConditioningFramesV2.mock.calls,
+      jobResumes: harness.jobManager.resumePendingJobsV2.mock.calls,
+      loggedErrors: harness.logError.mock.calls,
+    }).toEqual({
+      activationState: 'active',
+      repairProjectIds: ['project_bad_catalog', 'project_healthy'],
+      conditioningResumes: [[['project_bad_catalog', 'project_healthy']]],
+      jobResumes: [[['project_bad_catalog', 'project_healthy']]],
+      loggedErrors: [
+        [
+          '[CreativeStudio] Export-catalog recovery failed for project project_bad_catalog:',
+          'StudioExportCatalogErrorV2',
+        ],
+      ],
+    });
+  });
+
+  it('retries a contained export repair when the supported project set changes', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
+    let rejectBadCatalog = true;
+    vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
+      if (authority.project.id === 'project_bad_catalog' && rejectBadCatalog) {
+        throw new StudioExportCatalogErrorV2('storage_error');
+      }
+      return {
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: authority.project.id,
+        revision: 1,
+        artifacts: [],
+      };
+    });
+
+    await harness.runtime.onBackendReady();
+    rejectBadCatalog = false;
+    harness.setInventory(inventory(['project_bad_catalog', 'project_healthy', 'project_new']));
+    await harness.runtime.refreshInventory();
+    await harness.runtime.refreshInventory();
+
+    expect(harness.exportCatalogStore.repair.mock.calls.map(([authority]) => authority.project.id)).toEqual([
       'project_bad_catalog',
       'project_healthy',
+      'project_bad_catalog',
+      'project_healthy',
+      'project_new',
     ]);
-    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledWith(['project_bad_catalog', 'project_healthy']);
-    expect(harness.logError).toHaveBeenCalledWith(
-      '[CreativeStudio] Export-catalog recovery failed for project project_bad_catalog:',
-      'StudioExportCatalogErrorV2'
-    );
-
-    rejectBadCatalog = false;
-    await harness.runtime.refreshInventory();
-    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
     expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledTimes(2);
     expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
+  });
 
-    await harness.runtime.refreshInventory();
-    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(4);
+  it('joins queued unchanged refreshes into a failed catalog recovery pass', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
+    vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
+      if (authority.project.id === 'project_bad_catalog') {
+        throw new StudioExportCatalogErrorV2('storage_error');
+      }
+      return {
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: authority.project.id,
+        revision: 1,
+        artifacts: [],
+      };
+    });
+    await harness.runtime.start();
+    harness.holdNextRecovery();
+
+    const backendReady = harness.runtime.onBackendReady();
+    await harness.recoveryHeld;
+    const firstRefresh = harness.runtime.refreshInventory();
+    const secondRefresh = harness.runtime.refreshInventory();
+    harness.releaseRecovery();
+    await Promise.all([backendReady, firstRefresh, secondRefresh]);
+
+    expect(harness.exportCatalogStore.repair).toHaveBeenCalledTimes(2);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledOnce();
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledOnce();
+    expect(harness.logError).toHaveBeenCalledOnce();
+  });
+
+  it('drains a project-set change that arrives during failed catalog recovery', async () => {
+    const harness = createHarness({ initialInventory: inventory(['project_bad_catalog', 'project_healthy']) });
+    vi.mocked(harness.exportCatalogStore.repair).mockImplementation(async (authority) => {
+      if (authority.project.id === 'project_bad_catalog') {
+        throw new StudioExportCatalogErrorV2('storage_error');
+      }
+      return {
+        schemaVersion: STUDIO_EXPORT_SCHEMA_VERSION_V2,
+        projectId: authority.project.id,
+        revision: 1,
+        artifacts: [],
+      };
+    });
+    await harness.runtime.start();
+    harness.holdNextRecovery();
+
+    const backendReady = harness.runtime.onBackendReady();
+    await harness.recoveryHeld;
+    harness.setInventory(inventory(['project_bad_catalog', 'project_healthy', 'project_new']));
+    const refresh = harness.runtime.refreshInventory();
+    await vi.waitFor(() =>
+      expect(harness.runtime.supportedProjectIds).toEqual(['project_bad_catalog', 'project_healthy', 'project_new'])
+    );
+    harness.releaseRecovery();
+    await Promise.all([backendReady, refresh]);
+
+    expect(harness.exportCatalogStore.repair.mock.calls.map(([authority]) => authority.project.id)).toEqual([
+      'project_bad_catalog',
+      'project_healthy',
+      'project_bad_catalog',
+      'project_healthy',
+      'project_new',
+    ]);
+    expect(harness.mediaStore.resumeConditioningFramesV2).toHaveBeenCalledTimes(2);
+    expect(harness.jobManager.resumePendingJobsV2).toHaveBeenCalledTimes(2);
   });
 
   it('keeps scanning for paid jobs that miss the startup dispatch', async () => {
