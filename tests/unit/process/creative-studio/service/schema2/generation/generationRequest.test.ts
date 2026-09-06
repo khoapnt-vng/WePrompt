@@ -58,7 +58,8 @@ const approvedReference: StudioGenerationReferenceInputSnapshot = {
 
 const composition = (
   purpose: Exclude<StudioJobPurpose, 'reference_image'>,
-  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = []
+  referenceInputs: readonly StudioGenerationReferenceInputSnapshot[] = [],
+  boardStyle: 'grey_tone' | 'line_art' | 'colour_key' = 'grey_tone'
 ) => {
   const route = purpose === 'video_take' ? videoRoute : imageRoute;
   return composeStudioGenerationV2({
@@ -71,7 +72,7 @@ const composition = (
     aspectRatio: '16:9',
     resolution: '1080p',
     route,
-    boardStyle: purpose === 'board_still' ? 'grey_tone' : null,
+    boardStyle: purpose === 'board_still' ? boardStyle : null,
     instructionProfile: deriveStudioInstructionProfileV2(route, purpose, source),
   });
 };
@@ -193,6 +194,48 @@ describe('generation request plans', () => {
         conditioningInput: recorded.conditioningInput,
       })
     ).toBe(false);
+  });
+
+  it('keeps a board-still.v2 request current when only inert legacy style metadata changes', () => {
+    const recorded = createStudioResolvedGenerationRequestPlan({
+      purpose: 'board_still',
+      template: createStudioGenerationRequestTemplate({
+        composition: composition('board_still', [], 'grey_tone'),
+        durationSeconds: 4,
+      }),
+      conditioningInput: null,
+    }).snapshot;
+    const current = createStudioResolvedGenerationRequestPlan({
+      purpose: 'board_still',
+      template: createStudioGenerationRequestTemplate({
+        composition: composition('board_still', [], 'line_art'),
+        durationSeconds: 4,
+      }),
+      conditioningInput: null,
+    }).snapshot;
+
+    expect(recorded.composition.prompt).toBe(current.composition.prompt);
+    expect(isStudioGenerationRequestCurrent(recorded, current)).toBe(true);
+  });
+
+  it('does not normalize style metadata for historical Board profiles', () => {
+    const recorded = createStudioResolvedGenerationRequestPlan({
+      purpose: 'board_still',
+      template: createStudioGenerationRequestTemplate({
+        composition: composition('board_still', [], 'grey_tone'),
+        durationSeconds: 4,
+      }),
+      conditioningInput: null,
+    }).snapshot;
+    recorded.composition.inputs.instructionProfile = 'weprompt-image-v1.board-still.v1';
+    recorded.composition.prompt = recorded.composition.prompt.replace(
+      'weprompt-image-v1.board-still.v2',
+      'weprompt-image-v1.board-still.v1'
+    );
+    const current = structuredClone(recorded);
+    current.composition.inputs.boardStyle = 'line_art';
+
+    expect(isStudioGenerationRequestCurrent(recorded, current)).toBe(false);
   });
 
   it('rejects composition/template drift and invalid conditioning branches', () => {

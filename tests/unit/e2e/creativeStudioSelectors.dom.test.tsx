@@ -239,7 +239,7 @@ describe('Creative Studio E2E selectors', () => {
     });
   });
 
-  it('lands the view hooks on the shared Table, Board, and Cut navigation', async () => {
+  it('lands the view hooks on the shared Storyline, Frames & Video, and Cut navigation', async () => {
     render(
       <I18nextProvider i18n={i18n}>
         <MemoryRouter initialEntries={['/studio/project-1/table']}>
@@ -252,8 +252,8 @@ describe('Creative Studio E2E selectors', () => {
 
     const navigation = await screen.findByRole('navigation', { name: 'Workspace views' });
     expect(navigation).toHaveAttribute('data-studio-view-navigation');
-    expect(screen.getByRole('link', { name: 'Table' })).toHaveAttribute('aria-current', 'page');
-    expect(screen.getByRole('link', { name: 'Board' })).toBeVisible();
+    expect(screen.getByRole('link', { name: 'Storyline' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Frames & Video' })).toBeVisible();
     expect(screen.getByRole('link', { name: 'Cut' })).toBeVisible();
     expect(document.querySelector('[data-studio-view="table"]')).not.toBeNull();
   });

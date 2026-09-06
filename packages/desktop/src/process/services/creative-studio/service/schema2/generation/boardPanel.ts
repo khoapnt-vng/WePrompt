@@ -63,6 +63,11 @@ export type StudioCurrentBoardPanelAuthorityV2 = StudioCanonicalBoardAssetV2 & {
   shotIndex: number;
 };
 
+export type StudioFreshBoardAssetAuthorityV2 = StudioCanonicalBoardAssetV2 & {
+  beat: StudioBeat;
+  shot: StudioShot;
+};
+
 export const studioBoardPanelFreshnessV2 = (
   project: StudioProjectV2,
   beat: StudioBeat,
@@ -99,6 +104,91 @@ export const studioBoardPanelFreshnessV2 = (
   }
 };
 
+/** Resolves a fresh Board asset when the caller already owns its active Beat/Shot location. */
+export const resolveStudioFreshBoardAssetV2 = (
+  project: StudioProjectV2,
+  beatId: string,
+  shotId: string,
+  boardAssetId: string
+): StudioFreshBoardAssetAuthorityV2 | null => {
+  const beat = ownValue(project.beats, beatId);
+  const shot = ownValue(project.shots, shotId);
+  if (
+    beat?.id !== beatId ||
+    shot?.id !== shotId ||
+    beat.shotOrder.filter((candidate) => candidate === shotId).length !== 1
+  ) {
+    return null;
+  }
+  const canonical = resolveStudioCanonicalBoardAssetV2(project, shot, boardAssetId);
+  if (canonical === null) return null;
+  const freshness = studioBoardPanelFreshnessV2(project, beat, shot, canonical.producer);
+  return freshness.requestCurrent && freshness.routeCurrent ? { ...canonical, beat, shot } : null;
+};
+
+const resolveStudioOrdinarySeedAssetV2 = (
+  project: StudioProjectV2,
+  shotId: string,
+  assetId: string
+): StudioAssetV2 | null => {
+  const shot = ownValue(project.shots, shotId);
+  const asset = ownValue(project.assets, assetId);
+  return shot !== undefined &&
+    asset?.id === assetId &&
+    asset.projectId === project.id &&
+    asset.shotId === shotId &&
+    asset.projectReferenceId === null &&
+    asset.mediaKind === 'image' &&
+    (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
+    shot.assetIds.includes(assetId)
+    ? asset
+    : null;
+};
+
+const resolveStudioExplicitNewSpendSeedAssetV2 = (
+  project: StudioProjectV2,
+  beatId: string,
+  shotId: string,
+  assetId: string
+): StudioAssetV2 | null => {
+  const ordinary = resolveStudioOrdinarySeedAssetV2(project, shotId, assetId);
+  if (ordinary !== null) return ordinary;
+  return resolveStudioFreshBoardAssetV2(project, beatId, shotId, assetId)?.asset ?? null;
+};
+
+/**
+ * Resolves the effective seed accepted by a newly prepared video request at this revision.
+ * Historical/frozen video execution has separate, grandfathered recovery semantics.
+ */
+export const resolveStudioNewSpendSeedAssetV2 = (
+  project: StudioProjectV2,
+  beatId: string,
+  shotId: string
+): StudioAssetV2 | null => {
+  const shot = ownValue(project.shots, shotId);
+  if (shot === undefined) return null;
+  if (shot.seedStillId !== null && !shot.dismissedSeedStillIds.includes(shot.seedStillId)) {
+    return resolveStudioExplicitNewSpendSeedAssetV2(project, beatId, shot.id, shot.seedStillId);
+  }
+  const candidates = shot.assetIds.flatMap((assetId) => {
+    if (shot.dismissedSeedStillIds.includes(assetId)) return [];
+    const asset = resolveStudioOrdinarySeedAssetV2(project, shot.id, assetId);
+    return asset === null ? [] : [asset];
+  });
+  candidates.sort((left, right) =>
+    left.createdAt === right.createdAt
+      ? left.id < right.id
+        ? 1
+        : left.id > right.id
+          ? -1
+          : 0
+      : left.createdAt < right.createdAt
+        ? 1
+        : -1
+  );
+  return candidates[0] ?? null;
+};
+
 /**
  * Resolves the exact active current-and-fresh Board pointer accepted by promotion.
  * Historical/superseded Board outputs remain canonical, but cannot enter here.
@@ -120,9 +210,6 @@ export const resolveStudioCurrentBoardPanelAuthorityV2 = (
     }
   }
   if (location === null || location.shot.boardAssetId !== boardAssetId) return null;
-  const canonical = resolveStudioCanonicalBoardAssetV2(project, location.shot, boardAssetId);
-  if (canonical === null) return null;
-  const freshness = studioBoardPanelFreshnessV2(project, location.beat, location.shot, canonical.producer);
-  if (!freshness.requestCurrent || !freshness.routeCurrent) return null;
-  return { ...canonical, ...location };
+  const fresh = resolveStudioFreshBoardAssetV2(project, location.beat.id, location.shot.id, boardAssetId);
+  return fresh === null ? null : { ...fresh, shotIndex: location.shotIndex };
 };

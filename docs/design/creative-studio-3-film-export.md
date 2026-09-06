@@ -1,6 +1,6 @@
 # The film export — one file, with transitions
 
-**Date:** 2026-08-23 · **Updated:** 2026-08-27 · **Status:** implemented
+**Date:** 2026-08-23 · **Updated:** 2026-09-05 · **Status:** implemented
 **Related:** [direction and answers §6](../prds/creative-studio/creative-studio-3-direction-and-answers.md) ·
 [watching commission](creative-studio-3-watching-commission.md) ·
 [bug list](../prds/creative-studio/creative-studio-3-bug-list.md)
@@ -50,6 +50,13 @@ and compares mean absolute frame deltas against 1.25. It requires at least three
 at most one second on a 24-fps boundary, preserves at least one second plus any required dissolve, and
 never trims the final generated Shot even when a slate follows it. Exact source cut points, hashes,
 normalized durations, transition facts, encoder facts and audio facts are persisted on the artifact.
+
+Film probes the finalized source again before rendering. Exact video-stream ticks take precedence,
+then a direct stream duration, then the WebM `DURATION` tag; the container duration remains the
+compatibility fallback when a supported file exposes no video-stream endpoint. The decoded video
+endpoint clamps the timeline's requested endpoint without cloning a final frame. A current
+audio/container tail inside the requested interval may exceed video by at most 0.125 seconds; a larger
+gap remains `invalid_media` rather than being hidden as ordinary mux skew.
 
 ## What was asked for, and what was measured
 
@@ -103,11 +110,14 @@ against its target, because that comparison is about the film, not about one exp
 
 ### Artifact facts — resolved decision
 
-`StudioExportArtifactV2` now has a discriminated `film` branch whose independently versioned
-`StudioFilmExportFactsV2` records nominal and rendered duration, exact render parameters, source facts
-and derived tail cut points. The renderer projection carries the safe film summary needed by the UI.
-These facts live in the catalog rather than only in MP4 metadata, so each artifact can explain its own
-duration without changing project schema 5.
+`StudioExportArtifactV2` now has a discriminated `film` branch whose independently versioned Film
+facts record nominal and rendered duration, exact render parameters, source facts and derived tail cut
+points. Facts schema 2 keeps three Shot endpoints distinct: `sourceOutSeconds` is the requested
+timeline endpoint retained in nominal duration, `effectiveSourceOutSeconds` is the decoded endpoint
+used by Film, and `renderedSourceOutSeconds` is the endpoint after optional quiet-tail removal. The
+renderer projection carries the safe film summary needed by the UI, and persisted schema-1 facts
+remain readable. These facts live in the catalog rather than only in MP4 metadata, so each artifact
+can explain its own duration without changing project schema 5.
 
 ## The export
 

@@ -1205,6 +1205,49 @@ describe('validateStudioProjectV2 paid graph and immutable request state', () =>
     expect(validateStudioProjectV2(project)).toBe(false);
   });
 
+  it('accepts current and historical Board instruction profiles but rejects unknown versions', () => {
+    const current = makeProject();
+    const currentAsset = addSucceededBoardStill(current);
+    expect(current.jobs.job_board_1!.composition.inputs.instructionProfile).toBe('weprompt-image-v1.board-still.v2');
+
+    const archived = JSON.parse(JSON.stringify(current)) as StudioProjectV2;
+    const archivedJob = archived.jobs.job_board_1!;
+    const authorization = archived.spendAuthorizations.find(
+      (candidate) => candidate.id === archivedJob.authorizationId
+    )!;
+    const item = authorization.baseItems.find((candidate) => candidate.id === archivedJob.authorizationItemId)!;
+    if (
+      item.requestPlan.kind !== 'resolved' ||
+      archivedJob.requestPlan.kind !== 'resolved' ||
+      archivedJob.requestSnapshot === null
+    ) {
+      throw new Error('historical Board profile fixture requires resolved request records');
+    }
+    const compositions = [
+      item.requestPlan.snapshot.composition,
+      archivedJob.requestPlan.snapshot.composition,
+      archivedJob.requestSnapshot.composition,
+      archivedJob.composition,
+    ];
+    const setProfile = (profile: string): void => {
+      for (const composition of compositions) {
+        composition.inputs.instructionProfile = profile;
+        composition.prompt = composition.prompt.replace(
+          /Instruction profile: weprompt-image-v1\.board-still\.v\d+/,
+          `Instruction profile: ${profile}`
+        );
+      }
+      archived.assets[currentAsset.id]!.compositionDigest = studioGenerationCompositionDigestV2(
+        archivedJob.composition
+      );
+    };
+
+    setProfile('weprompt-image-v1.board-still.v1');
+    expect(validateStudioProjectV2(archived)).toBe(true);
+    setProfile('weprompt-image-v1.board-still.v3');
+    expect(validateStudioProjectV2(archived)).toBe(false);
+  });
+
   it('accepts historical prompt bytes while retaining exact stored-to-stored composition authority', () => {
     const current = makeProject();
     const asset = addApprovedProjectReference(current);

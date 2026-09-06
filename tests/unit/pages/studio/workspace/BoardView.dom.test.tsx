@@ -138,22 +138,23 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       const copy: Record<string, string> = {
-        'conversation.creativeStudio.workspace.board.ariaLabel': 'Beat board',
+        'conversation.creativeStudio.workspace.board.ariaLabel': 'Frames and video production',
         'conversation.creativeStudio.workspace.board.selectedBeat': 'Selected Beat',
         'conversation.creativeStudio.workspace.board.noCoverage': 'No coverage',
         'conversation.creativeStudio.workspace.board.coverUnavailable': 'Preview unavailable',
-        'conversation.creativeStudio.workspace.board.controls.label': 'Director Board controls',
-        'conversation.creativeStudio.workspace.board.controls.progressLabel': 'Board completeness',
-        'conversation.creativeStudio.workspace.board.controls.stop': 'Stop drawing',
+        'conversation.creativeStudio.workspace.board.controls.label': 'Frame and video production',
+        'conversation.creativeStudio.workspace.board.controls.progressLabel': 'Hi-fi frame completeness',
+        'conversation.creativeStudio.workspace.board.controls.videoProgressLabel': 'Video take completeness',
+        'conversation.creativeStudio.workspace.board.controls.stop': 'Stop frame generation',
         'conversation.creativeStudio.workspace.board.controls.stopNote':
-          'Completed panels and charges already incurred remain.',
-        'conversation.creativeStudio.workspace.board.panel.redrawBeat': 'Redraw Beat · paid',
-        'conversation.creativeStudio.workspace.board.panel.status.missing': 'Not drawn',
+          'Completed frames and charges already incurred remain.',
+        'conversation.creativeStudio.workspace.board.panel.redrawBeat': 'Regenerate Beat frames · paid',
+        'conversation.creativeStudio.workspace.board.panel.status.missing': 'Not generated',
         'conversation.creativeStudio.workspace.board.panel.status.current': 'Current',
         'conversation.creativeStudio.workspace.board.panel.status.stale': 'Stale',
         'conversation.creativeStudio.workspace.board.panel.status.statusPending': 'Status pending',
         'conversation.creativeStudio.workspace.board.panel.status.queued': 'Queued',
-        'conversation.creativeStudio.workspace.board.panel.status.drawing': 'Drawing',
+        'conversation.creativeStudio.workspace.board.panel.status.drawing': 'Generating',
         'conversation.creativeStudio.workspace.board.panel.status.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.board.panel.status.failed': 'Failed',
         'conversation.creativeStudio.workspace.board.panel.status.cancelled': 'Cancelled',
@@ -223,7 +224,7 @@ vi.mock('react-i18next', () => ({
         return `${String(values?.seconds)}s actual`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.renderedCount') {
-        return `${String(values?.count)} of ${String(values?.total)} rendered`;
+        return `${String(values?.count)} of ${String(values?.total)} video takes ready`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.staleCount') {
         return `${String(values?.count)} stale Shot`;
@@ -248,7 +249,10 @@ vi.mock('react-i18next', () => ({
       }
       if (key === 'conversation.creativeStudio.workspace.board.openBeat') return `Open ${String(values?.title)}`;
       if (key === 'conversation.creativeStudio.workspace.board.controls.progress') {
-        return `${String(values?.drawn)} of ${String(values?.total)} panels drawn`;
+        return `${String(values?.current)} of ${String(values?.total)} hi-fi frames ready`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.board.controls.videoProgress') {
+        return `${String(values?.current)} of ${String(values?.total)} video takes ready`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.controls.staleCount') {
         return `${String(values?.count)} stale`;
@@ -257,10 +261,10 @@ vi.mock('react-i18next', () => ({
         return `${String(values?.count)} in progress`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.controls.drawNext') {
-        return `Draw next batch (${String(values?.count)})`;
+        return `Generate next frames (${String(values?.count)})`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.panel.drawMissing') {
-        return `Draw missing (${String(values?.count)})`;
+        return `Generate missing frames (${String(values?.count)})`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.panel.beatActions') {
         return `Actions for ${String(values?.title)}`;
@@ -269,10 +273,10 @@ vi.mock('react-i18next', () => ({
         return `Shot ${String(values?.position)}: ${String(values?.status)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.panel.redrawShot') {
-        return `Redraw Shot ${String(values?.position)} · paid`;
+        return `Regenerate Shot ${String(values?.position)} frame · paid`;
       }
       if (key === 'conversation.creativeStudio.workspace.board.panel.useAsFirstFrame') {
-        return `Use Shot ${String(values?.position)} panel as first frame`;
+        return `Use Shot ${String(values?.position)} frame as video first frame`;
       }
       return copy[key] ?? key;
     },
@@ -375,6 +379,7 @@ const makeBoardPanel = (
 ): WorkspaceBoardPanelProjection => ({
   shotId,
   assetId: null,
+  newSpendSeedAssetId: null,
   producerJobId: null,
   latestJobId: null,
   staleCauses: [],
@@ -801,7 +806,7 @@ describe('BoardView', () => {
     const projection = makeProjection([covered, empty]);
     const result = render(<BoardView {...boardProps(projection)} />);
 
-    const list = screen.getByRole('list', { name: 'Beat board' });
+    const list = screen.getByRole('list', { name: 'Frames and video production' });
     expect(Array.from(list.children).map((item) => (item as HTMLElement).dataset.beatId)).toEqual(['covered', 'empty']);
     const coveredCard = cardFor(result.container, 'covered');
     const tiles = coveredCard.querySelectorAll<HTMLElement>('[data-shot-tile]');
@@ -843,7 +848,7 @@ describe('BoardView', () => {
         (status) => status.dataset.composerStatusWord
       )
     ).toEqual(['rendered', 'rendering', 'ready', 'notReady', 'queued', 'failed']);
-    expect(coveredCard).toHaveTextContent('2 of 6 rendered');
+    expect(coveredCard).toHaveTextContent('1 of 6 video takes ready');
     expect(coveredCard).toHaveTextContent('1 stale Shot');
     expect(coveredCard).toHaveTextContent('1 queued or rendering Shot');
     expect(
@@ -872,7 +877,7 @@ describe('BoardView', () => {
     const result = render(
       <BoardView {...boardProps(makeProjection([makeBeat('a'), makeBeat('b'), makeBeat('c')]), actions)} />
     );
-    const list = screen.getByRole('list', { name: 'Beat board' });
+    const list = screen.getByRole('list', { name: 'Frames and video production' });
 
     expect(screen.queryByRole('group', { name: 'Card size' })).toBeNull();
     expect(list).not.toHaveAttribute('data-card-size');
@@ -883,11 +888,12 @@ describe('BoardView', () => {
       );
       expect(within(card).queryByRole('button', { name: /(?:move|reorder|lift)/i })).toBeNull();
     }
-    expect(screen.getByRole('region', { name: 'Director Board controls' })).toBeVisible();
+    expect(screen.getByRole('region', { name: 'Frame and video production' })).toBeVisible();
     expect(screen.getByRole('region', { name: 'Bin' })).toBeVisible();
     expect(result.container.querySelector('[data-board-panel-shot-id][role="region"]')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Draw next batch (3)' })).toBeEnabled();
-    expect(screen.getByRole('progressbar', { name: 'Board completeness' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Generate next frames (3)' })).toBeEnabled();
+    expect(screen.getByRole('progressbar', { name: 'Hi-fi frame completeness' })).toBeVisible();
+    expect(screen.getByRole('progressbar', { name: 'Video take completeness' })).toBeVisible();
     expect(actions).not.toHaveProperty('reorderBeats');
     expect(actions).not.toHaveProperty('parkBeat');
     expect(actions.reorderBin).not.toHaveBeenCalled();
@@ -915,6 +921,34 @@ describe('BoardView', () => {
     expect(result.container.textContent).not.toMatch(/\$\d|€\d|£\d/);
   });
 
+  it('does not offer automatic frame backfills for Shots that already have fresh current takes', () => {
+    const rendered = makeShot('rendered', { currentPicture: posterlessCurrentPicture('take_rendered') });
+    const unrendered = makeShot('unrendered');
+    const projection = makeProjection([makeBeat('partial', { shots: [rendered, unrendered] })]);
+
+    render(<BoardView {...boardProps(projection)} />);
+
+    expect(screen.getByRole('button', { name: 'Generate next frames (1)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (1) · 1. Beat PARTIAL' })).toBeEnabled();
+  });
+
+  it('keeps a missing frame auto-drawable when its selected take is stale', () => {
+    const stale = makeShot('stale', {
+      currentPicture: posterlessCurrentPicture('take_stale'),
+      dirtyCauses: ['generation_out_of_date'],
+      segmentState: { kind: 'needs_rerender' },
+    });
+    const projection = makeProjection([makeBeat('stale', { shots: [stale] })]);
+
+    render(<BoardView {...boardProps(projection)} />);
+
+    expect(screen.getByRole('button', { name: 'Generate next frames (1)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (1) · 1. Beat STALE' })).toBeEnabled();
+    expect(screen.getByRole('region', { name: 'Frame and video production' })).toHaveTextContent(
+      '0 of 1 video takes ready'
+    );
+  });
+
   it('qualifies paid Beat actions by film position when authored titles repeat', () => {
     render(
       <BoardView
@@ -926,8 +960,8 @@ describe('BoardView', () => {
 
     expect(screen.getByRole('group', { name: 'Actions for 1. Same title' })).toBeVisible();
     expect(screen.getByRole('group', { name: 'Actions for 2. Same title' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Draw missing (1) · 1. Same title' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Draw missing (1) · 2. Same title' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (1) · 1. Same title' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (1) · 2. Same title' })).toBeVisible();
   });
 
   it('summarizes 30 exact panels and caps the next paid batch at 24 drawable missing Shots', async () => {
@@ -960,11 +994,12 @@ describe('BoardView', () => {
     const projection = makeProjection([makeBeat('large', { shots })], { boardPanels: panels });
     const result = render(<BoardView {...boardProps(projection, actions)} />);
 
-    const controls = screen.getByRole('region', { name: 'Director Board controls' });
-    expect(controls).toHaveTextContent('3 of 30 panels drawn');
+    const controls = screen.getByRole('region', { name: 'Frame and video production' });
+    expect(controls).toHaveTextContent('2 of 30 hi-fi frames ready');
+    expect(controls).toHaveTextContent('0 of 30 video takes ready');
     expect(controls).toHaveTextContent('1 stale');
     expect(controls).toHaveTextContent('2 in progress');
-    expect(within(controls).getByRole('button', { name: 'Stop drawing' })).toBeEnabled();
+    expect(within(controls).getByRole('button', { name: 'Stop frame generation' })).toBeEnabled();
 
     const settledPanels = panels.map((panel, index) => {
       if (index === 3) return makeBoardPanel(panel.shotId, { activity: 'failed', latestJobId: 'job_failed_4' });
@@ -977,10 +1012,10 @@ describe('BoardView', () => {
       />
     );
 
-    const settledControls = screen.getByRole('region', { name: 'Director Board controls' });
-    const drawNext = within(settledControls).getByRole('button', { name: 'Draw next batch (24)' });
+    const settledControls = screen.getByRole('region', { name: 'Frame and video production' });
+    const drawNext = within(settledControls).getByRole('button', { name: 'Generate next frames (24)' });
     expect(drawNext).toBeEnabled();
-    expect(screen.getByRole('button', { name: 'Draw missing (27) · 1. Beat LARGE' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (27) · 1. Beat LARGE' })).toBeDisabled();
     await user.click(drawNext);
     expect(actions.drawNext).toHaveBeenCalledTimes(1);
   });
@@ -988,22 +1023,22 @@ describe('BoardView', () => {
   it('locks paid and Bin controls when route, status, gate, or project authority is not exact', () => {
     const projection = makeProjection([makeBeat('a')]);
     const result = render(<BoardView {...boardProps(projection)} imageRouteReady={false} />);
-    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate next frames (1)' })).toBeDisabled();
 
     const statusPending = {
       ...projection,
       boardPanels: [makeBoardPanel('a_shot', { activity: 'status_pending', freshness: 'status_pending' })],
     };
     result.rerender(<BoardView {...boardProps(statusPending)} />);
-    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate next frames (0)' })).toBeDisabled();
 
     result.rerender(<BoardView {...boardProps(projection)} gateLocked />);
-    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate next frames (1)' })).toBeDisabled();
     expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
 
     result.rerender(<BoardView {...boardProps(projection)} projectId='project_other' />);
     expect(screen.getByText('Board unavailable')).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Draw next batch (1)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate next frames (1)' })).toBeDisabled();
     expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
   });
 
@@ -1020,12 +1055,12 @@ describe('BoardView', () => {
       });
     const complete = makeProjection([beat], { boardPanels: [current(first.id), current(second.id)] });
     const result = render(<BoardView {...boardProps(complete)} />);
-    expect(screen.getByRole('button', { name: 'Redraw Beat · paid · 1. Beat PAIR' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Regenerate Beat frames · paid · 1. Beat PAIR' })).toBeEnabled();
 
     const partial = makeProjection([beat], { boardPanels: [current(first.id), makeBoardPanel(second.id)] });
     result.rerender(<BoardView {...boardProps(partial)} />);
-    expect(screen.queryByRole('button', { name: 'Redraw Beat · paid · 1. Beat PAIR' })).toBeNull();
-    expect(screen.getByRole('button', { name: 'Draw missing (1) · 1. Beat PAIR' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: 'Regenerate Beat frames · paid · 1. Beat PAIR' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'Generate missing frames (1) · 1. Beat PAIR' })).toBeEnabled();
   });
 
   it('shows project and route blockers once at Board scope without mislabelling a rendered Shot', () => {
@@ -1099,10 +1134,11 @@ describe('BoardView', () => {
         : stage
     );
     status.detail = {
-      shots: statusDetails(projection).map((detail) => ({
-        ...detail,
-        binding: { status: 'unassigned' as const, selectedCount: 0, limit: 3 },
-      })),
+      shots: statusDetails(projection).map((detail) =>
+        Object.assign({}, detail, {
+          binding: { status: 'unassigned' as const, selectedCount: 0, limit: 3 },
+        })
+      ),
       references: [],
     };
     status.blockerCount = 1;
@@ -1213,20 +1249,22 @@ describe('BoardView', () => {
     });
     const result = render(<BoardView {...boardProps(projection, actions)} />);
 
-    await user.click(screen.getByRole('button', { name: 'Draw next batch (1)' }));
+    await user.click(screen.getByRole('button', { name: 'Generate next frames (1)' }));
     await user.click(
       within(cardFor(result.container, 'missing')).getByRole('button', {
-        name: 'Draw missing (1) · 1. Beat MISSING',
+        name: 'Generate missing frames (1) · 1. Beat MISSING',
       })
     );
     const currentCard = cardFor(result.container, 'current');
-    await user.click(within(currentCard).getByRole('button', { name: 'Redraw Beat · paid · 2. Beat CURRENT' }));
+    await user.click(
+      within(currentCard).getByRole('button', { name: 'Regenerate Beat frames · paid · 2. Beat CURRENT' })
+    );
     const currentTile = currentCard.querySelector<HTMLElement>('[data-shot-id="current_shot"]')!;
     const panelCard = currentTile.querySelector<HTMLElement>('[data-board-panel-shot-id="current_shot"]')!;
     expect(panelCard).toHaveTextContent('Board panel');
     expect(panelCard.querySelector('img')).toHaveAttribute('src', 'weprompt-studio://asset/project_1/panel_current');
-    await user.click(within(panelCard).getByRole('button', { name: 'Redraw Shot 2.1 · paid' }));
-    await user.click(within(panelCard).getByRole('button', { name: 'Use Shot 2.1 panel as first frame' }));
+    await user.click(within(panelCard).getByRole('button', { name: 'Regenerate Shot 2.1 frame · paid' }));
+    await user.click(within(panelCard).getByRole('button', { name: 'Use Shot 2.1 frame as video first frame' }));
 
     expect(actions.drawNext).toHaveBeenCalledTimes(1);
     expect(actions.drawBeat).toHaveBeenCalledWith('missing');
@@ -1286,7 +1324,7 @@ describe('BoardView', () => {
     const unknownPanel = result.container.querySelector<HTMLElement>('[data-board-panel-shot-id="unknown"]')!;
     const downloadPanel = result.container.querySelector<HTMLElement>('[data-board-panel-shot-id="download"]')!;
     expect(within(downloadPanel).getByRole('button', { name: 'Retry download · 1.3' })).toBeVisible();
-    expect(within(downloadPanel).queryByRole('button', { name: /Redraw Shot/ })).toBeNull();
+    expect(within(downloadPanel).queryByRole('button', { name: /Regenerate Shot/ })).toBeNull();
 
     await user.click(within(retryPanel).getByRole('button', { name: 'Retry · 1.1' }));
     expect(actions.retryJob).toHaveBeenCalledWith('job_retry', false);
@@ -1350,7 +1388,7 @@ describe('BoardView', () => {
     });
     render(<BoardView {...boardProps(projection, actions)} />);
 
-    const promote = screen.getByRole('button', { name: 'Use Shot 1.1 panel as first frame' });
+    const promote = screen.getByRole('button', { name: 'Use Shot 1.1 frame as video first frame' });
     expect(promote).toBeDisabled();
     expect(promote.closest('[data-board-panel-shot-id]')).toHaveTextContent(
       'Authorized video work has locked this Shot’s first frame.'
@@ -1372,21 +1410,21 @@ describe('BoardView', () => {
     });
     const result = render(<BoardView {...boardProps(projection, actions)} />);
 
-    const stop = screen.getByRole('button', { name: 'Stop drawing' });
+    const stop = screen.getByRole('button', { name: 'Stop frame generation' });
     expect(stop).toBeEnabled();
-    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveTextContent(
-      'Completed panels and charges already incurred remain.'
+    expect(screen.getByRole('region', { name: 'Frame and video production' })).toHaveTextContent(
+      'Completed frames and charges already incurred remain.'
     );
     await user.click(stop);
     expect(actions.stop).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveFocus();
+    expect(screen.getByRole('region', { name: 'Frame and video production' })).toHaveFocus();
 
     result.rerender(<BoardView {...boardProps(projection, actions)} gateLocked />);
-    expect(screen.getByRole('button', { name: 'Stop drawing' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Stop frame generation' })).toBeDisabled();
     expect(screen.getByTestId('board-bin')).toHaveAttribute('data-pending', 'true');
 
     result.rerender(<BoardView {...boardProps(makeProjection([makeBeat('a')]), actions)} />);
-    expect(screen.getByRole('region', { name: 'Director Board controls' })).toHaveFocus();
+    expect(screen.getByRole('region', { name: 'Frame and video production' })).toHaveFocus();
   });
 
   it('fails closed when Board panel order cannot be correlated to exact film order', () => {
@@ -1414,7 +1452,7 @@ describe('BoardView', () => {
 
     expect(result.container.querySelectorAll('[data-panel-activity="status_pending"]')).toHaveLength(2);
     expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
-    expect(screen.getByRole('button', { name: 'Draw next batch (0)' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Generate next frames (0)' })).toBeDisabled();
     expect(actions.retryJob).not.toHaveBeenCalled();
     expect(actions.promotePanel).not.toHaveBeenCalled();
   });

@@ -54,12 +54,12 @@ vi.mock('react-i18next', () => ({
         'conversation.creativeStudio.workspace.table.panel.closeDetails': `Close Board panels for ${String(values?.title)}`,
         'conversation.creativeStudio.workspace.table.panel.shotDetails': `Shot ${String(values?.position)} details`,
         'conversation.creativeStudio.workspace.table.panel.head': 'Chain head',
-        'conversation.creativeStudio.workspace.table.panel.status.missing': 'Not drawn',
+        'conversation.creativeStudio.workspace.table.panel.status.missing': 'Not generated',
         'conversation.creativeStudio.workspace.table.panel.status.current': 'Current',
         'conversation.creativeStudio.workspace.table.panel.status.stale': 'Stale',
         'conversation.creativeStudio.workspace.table.panel.status.statusPending': 'Status pending',
         'conversation.creativeStudio.workspace.table.panel.status.queued': 'Queued',
-        'conversation.creativeStudio.workspace.table.panel.status.drawing': 'Drawing',
+        'conversation.creativeStudio.workspace.table.panel.status.drawing': 'Generating',
         'conversation.creativeStudio.workspace.table.panel.status.needsAttention': 'Needs attention',
         'conversation.creativeStudio.workspace.table.panel.status.failed': 'Failed',
         'conversation.creativeStudio.workspace.table.panel.status.cancelled': 'Cancelled',
@@ -186,6 +186,7 @@ const makeBoardPanel = (
 ): WorkspaceBoardPanelProjection => ({
   shotId,
   assetId: null,
+  newSpendSeedAssetId: null,
   producerJobId: null,
   latestJobId: null,
   staleCauses: [],
@@ -887,7 +888,7 @@ describe('TableView', () => {
       'stale'
     );
     expect(
-      screen.getByRole('row', { name: 'Shot 3: Drawing' }).querySelector('[data-activity="drawing"]')
+      screen.getByRole('row', { name: 'Shot 3: Generating' }).querySelector('[data-activity="drawing"]')
     ).not.toBeNull();
     expect(tableCss).toMatch(/\.shotPanelFrame\s*{[^}]*inline-size:\s*144px[^}]*block-size:\s*81px/s);
 
@@ -934,13 +935,22 @@ describe('TableView', () => {
     expect(shotRow.querySelector('[data-activity="needs_attention"]')).not.toBeNull();
     expect(result.container.querySelector('[data-reference-binding-progress]')).toHaveTextContent('0 of 1 Shots bound');
     expect(result.container.querySelector('[data-board-recovery-job-id]')).toBeNull();
-    expect(screen.queryByRole('region', { name: 'Director Board controls' })).toBeNull();
-    expect(screen.queryByRole('progressbar', { name: 'Board completeness' })).toBeNull();
-    expect(screen.queryByRole('button', { name: /draw|redraw|retry|cancel job|stop drawing|first frame/i })).toBeNull();
+    expect(screen.queryByRole('region', { name: 'Frame and video production' })).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Hi-fi frame completeness' })).toBeNull();
+    expect(screen.queryByRole('progressbar', { name: 'Video take completeness' })).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: /generate|regenerate|retry|cancel job|stop frame generation|video first frame/i,
+      })
+    ).toBeNull();
 
     await user.click(within(shotRow).getByRole('button', { name: /Expand/ }));
     expect(within(shotRow).getByRole('button', { name: 'Save references' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /draw|redraw|retry|cancel job|stop drawing|first frame/i })).toBeNull();
+    expect(
+      screen.queryByRole('button', {
+        name: /generate|regenerate|retry|cancel job|stop frame generation|video first frame/i,
+      })
+    ).toBeNull();
   });
 
   it('fails closed instead of cross-associating reordered Board panel status', async () => {

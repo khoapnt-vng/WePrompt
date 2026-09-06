@@ -1570,7 +1570,7 @@ describe('CreativeStudioServiceV2', () => {
     const project = makeSchema2ServiceProject();
     const cleanup = vi.fn(async () => undefined);
     const facts = {
-      schemaVersion: 1 as const,
+      schemaVersion: 2 as const,
       nominalDurationSeconds: 8,
       renderedDurationSeconds: 8,
       transition: { kind: 'cut' as const },
@@ -2295,7 +2295,7 @@ describe('CreativeStudioServiceV2', () => {
       capability: vi.fn(async () => ({ status: 'ready', encoder: 'h264_videotoolbox' })),
       render: vi.fn(async () => ({
         facts: {
-          schemaVersion: 1,
+          schemaVersion: 2,
           nominalDurationSeconds: 10,
           renderedDurationSeconds: 10,
           transition: { kind: 'cut' },
@@ -2309,6 +2309,7 @@ describe('CreativeStudioServiceV2', () => {
               sourceSha256: take.sha256,
               sourceInSeconds: 0,
               sourceOutSeconds: 5,
+              effectiveSourceOutSeconds: 5,
               renderedSourceOutSeconds: 5,
               normalizedDurationSeconds: 5,
               chainBreak: 'none',
@@ -2441,7 +2442,7 @@ describe('CreativeStudioServiceV2', () => {
         await released;
         return {
           facts: {
-            schemaVersion: 1,
+            schemaVersion: 2,
             nominalDurationSeconds: 8,
             renderedDurationSeconds: 8,
             transition: { kind: 'cut' },
@@ -3084,7 +3085,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(harness.listProposalsV2).toHaveBeenCalledExactlyOnceWith('project_v2');
     expect(harness.acceptProposalV2).toHaveBeenCalledTimes(2);
     expect(harness.rejectProposalV2).toHaveBeenCalledExactlyOnceWith('project_v2', harness.proposal.id);
-    expect(harness.onProjectUpdated).toHaveBeenCalledTimes(1);
+    expect(harness.onProjectUpdated).toHaveBeenCalledExactlyOnceWith('project_v2', accepted.project.revision);
 
     await expect(
       harness.service.listProposals({ projectId: 'project_v2', extra: true } as never)
@@ -3900,6 +3901,7 @@ describe('CreativeStudioServiceV2', () => {
           boardPanels: boardJobs.map((job) => ({
             shotId: job.target.kind === 'shot' ? job.target.shotId : null,
             assetId: null,
+            newSpendSeedAssetId: null,
             producerJobId: null,
             latestJobId: job.id,
             staleCauses: [],
@@ -5966,7 +5968,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(admit).not.toHaveBeenCalled();
   });
 
-  it('atomically pins an exact Board panel and authorizes only selected takes in its segment', async () => {
+  it('atomically pins an exact Board panel and authorizes only its current segment head', async () => {
     const { project, board } = makeBoardPromotionProject();
     const harness = makeHarness(project);
     const boardBefore = structuredClone({
@@ -5988,10 +5990,7 @@ describe('CreativeStudioServiceV2', () => {
     expect(prepared.withCascade).toBeNull();
     expect(
       prepared.baseOnly.baseItems.map(({ target, purpose }) => [target.kind === 'shot' ? target.shotId : null, purpose])
-    ).toEqual([
-      ['clip_1', 'video_take'],
-      ['clip_2', 'video_take'],
-    ]);
+    ).toEqual([['clip_1', 'video_take']]);
 
     await expect(
       harness.service.confirmSubmission({
@@ -6026,15 +6025,6 @@ describe('CreativeStudioServiceV2', () => {
         status: 'queued_local',
         requestSnapshot: expect.objectContaining({
           conditioningInput: { kind: 'seed_still', assetId: board.id },
-        }),
-      }),
-      expect.objectContaining({
-        target: { kind: 'shot', shotId: 'clip_2' },
-        purpose: 'video_take',
-        status: 'waiting_for_conditioning',
-        requestPlan: expect.objectContaining({
-          kind: 'after_take_selection',
-          dependency: expect.objectContaining({ kind: 'authorized_predecessor', predecessorShotId: 'clip_1' }),
         }),
       }),
     ]);
@@ -7756,8 +7746,22 @@ describe('CreativeStudioServiceV2', () => {
       { shotId: 'clip_2', jobIds: [] },
     ]);
     expect(workspace.boardPanels).toEqual([
-      { shotId: 'clip_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-      { shotId: 'clip_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+      {
+        shotId: 'clip_1',
+        assetId: null,
+        newSpendSeedAssetId: null,
+        producerJobId: null,
+        latestJobId: null,
+        staleCauses: [],
+      },
+      {
+        shotId: 'clip_2',
+        assetId: null,
+        newSpendSeedAssetId: null,
+        producerJobId: null,
+        latestJobId: null,
+        staleCauses: [],
+      },
     ]);
     expect(harness.verifyConditioningFrameV2).not.toHaveBeenCalled();
     expect(harness.providerResolver.listGenerationRoutes).not.toHaveBeenCalled();

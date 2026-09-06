@@ -75,24 +75,51 @@ const composition = (style: 'grey_tone' | 'line_art' | 'colour_key' = 'grey_tone
 };
 
 describe('Studio Board generation request', () => {
-  it('freezes Story, Shooting script, approved references, style, and one-panel output constraints', () => {
+  it('freezes Story, Shooting script, and approved references', () => {
     const prompt = composition().prompt;
     expect(prompt).toContain('STORY\nThe operator crosses the warm studio.');
     expect(prompt).toContain('SHOOTING SCRIPT\nSlow orbit as the camera rotates into view.');
-    expect(prompt).toContain('Character reference_operator');
-    expect(prompt).toContain('Use a restrained grey-tone storyboard drawing');
-    expect(prompt).toContain('Create exactly one production storyboard panel for exactly this Shot.');
+    expect(prompt).toContain('Character reference_operator: preserve the approved identity');
   });
 
-  it.each([
-    ['grey_tone', 'Use a restrained grey-tone storyboard drawing with clear staging and silhouettes.'],
-    ['line_art', 'Use clean line-art with sparse shading and clear staging and silhouettes.'],
-    ['colour_key', 'Use a simplified colour-key treatment with a limited palette and clear staging and silhouettes.'],
-  ] as const)('uses the frozen %s treatment without replacing authored Story/script', (style, phrase) => {
-    const prompt = composition(style).prompt;
+  it('requests one high-fidelity image that can serve as the production first frame', () => {
+    const prompt = composition().prompt;
 
-    expect(prompt).toContain(`BOARD STYLE\n${phrase}`);
-    expect(prompt).toContain('STORY\nThe operator crosses the warm studio.');
+    expect(prompt).toContain('PRODUCTION VISUAL DIRECTION');
+    expect(prompt).toContain("Follow the project's final intended visual language");
+    expect(prompt).toContain('exactly one production-ready first-frame image');
+    expect(prompt).toContain('suitable for direct promotion');
+  });
+
+  it('anchors the image to the opening state and rejects planning aesthetics by default', () => {
+    const prompt = composition().prompt;
+
+    expect(prompt).toContain("Depict the Shot's opening moment and state");
+    expect(prompt).toContain('not a representative midpoint or ending');
+    expect(prompt).toContain(
+      'Do not use a sketch, line-art, colour-key, storyboard, animatic, rough-concept, or placeholder aesthetic unless the authored final visual language explicitly requires that aesthetic as the finished production style.'
+    );
+  });
+
+  it.each(['grey_tone', 'line_art', 'colour_key'] as const)(
+    'retains legacy %s only as frozen metadata without changing the production direction',
+    (style) => {
+      const frozen = composition(style);
+
+      expect(frozen.inputs.boardStyle).toBe(style);
+      expect(frozen.prompt).toContain('Render at full production fidelity');
+      expect(frozen.prompt).toContain('STORY\nThe operator crosses the warm studio.');
+    }
+  );
+
+  it('keeps legacy style values from changing the guarded v2 provider prompt', () => {
+    const prompts = (['grey_tone', 'line_art', 'colour_key'] as const).map((style) => composition(style).prompt);
+
+    expect(new Set(prompts).size).toBe(1);
+    expect(prompts[0]).not.toContain('Use clean line-art');
+    expect(prompts[0]).toContain(
+      'unless the authored final visual language explicitly requires that aesthetic as the finished production style'
+    );
   });
 
   it('creates a resolved image plan with fixed plumbing duration and no conditioning', () => {

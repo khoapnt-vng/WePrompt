@@ -155,9 +155,30 @@ const workspaceStatus = (revision = 3): StudioRendererWorkspaceStatusV2 => ({
   undoTop: { entryId: 'undo_1', label: 'Edit shot', sourceRevision: 2 },
   dirtyShots: [{ shotId: 'shot_2', causes: ['continuity_stale'] }],
   boardPanels: [
-    { shotId: 'shot_1', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-    { shotId: 'shot_2', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
-    { shotId: 'shot_3', assetId: null, producerJobId: null, latestJobId: null, staleCauses: [] },
+    {
+      shotId: 'shot_1',
+      assetId: null,
+      newSpendSeedAssetId: null,
+      producerJobId: null,
+      latestJobId: null,
+      staleCauses: [],
+    },
+    {
+      shotId: 'shot_2',
+      assetId: null,
+      newSpendSeedAssetId: null,
+      producerJobId: null,
+      latestJobId: null,
+      staleCauses: [],
+    },
+    {
+      shotId: 'shot_3',
+      assetId: null,
+      newSpendSeedAssetId: null,
+      producerJobId: null,
+      latestJobId: null,
+      staleCauses: [],
+    },
   ],
   cascadeProgress: [],
   currentVideoJobs: [
@@ -318,6 +339,45 @@ describe('projectWorkspace', () => {
     expect(current.unscriptedShotIds).not.toContain('missing_shot');
   });
 
+  it('accepts Main-owned new-spend eligibility only for the locally selected effective seed', () => {
+    const project = makeProject();
+    const seed = makeAsset('seed_shot_1', 'shot_1');
+    project.assets[seed.id] = seed;
+    project.shots.shot_1!.seedStillId = seed.id;
+    project.shots.shot_1!.assetIds = [seed.id];
+    const status = cleanWorkspaceStatus();
+    status.boardPanels[0]!.newSpendSeedAssetId = seed.id;
+
+    const projection = projectWorkspace(project, status, cleanChainStatus());
+
+    expect(projection.workspaceStatusReady).toBe(true);
+    expect(projection.boardPanels[0]!.newSpendSeedAssetId).toBe(seed.id);
+  });
+
+  it('fails the workspace status closed when new-spend eligibility is missing or names another asset', () => {
+    const project = makeProject();
+    const seed = makeAsset('seed_shot_1', 'shot_1');
+    project.assets[seed.id] = seed;
+    project.shots.shot_1!.seedStillId = seed.id;
+    project.shots.shot_1!.assetIds = [seed.id];
+    const missing = cleanWorkspaceStatus() as unknown as { boardPanels: Record<string, unknown>[] };
+    delete missing.boardPanels[0]!.newSpendSeedAssetId;
+    const mismatched = cleanWorkspaceStatus();
+    mismatched.boardPanels[0]!.newSpendSeedAssetId = 'other_seed';
+
+    const missingProjection = projectWorkspace(
+      project,
+      missing as unknown as StudioRendererWorkspaceStatusV2,
+      cleanChainStatus()
+    );
+    expect(missingProjection.workspaceStatusReady).toBe(false);
+    expect(missingProjection.boardPanels[0]).toMatchObject({
+      freshness: 'status_pending',
+      activity: 'status_pending',
+    });
+    expect(projectWorkspace(project, mismatched, cleanChainStatus()).workspaceStatusReady).toBe(false);
+  });
+
   it('projects Board freshness independently and retains the current panel while a paid redraw is drawing', () => {
     const project = makeProject();
     project.boardStyle = 'grey_tone';
@@ -333,6 +393,7 @@ describe('projectWorkspace', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId: 'board_shot_1',
+      newSpendSeedAssetId: null,
       producerJobId: producer.id,
       latestJobId: redraw.id,
       staleCauses: ['request_out_of_date'],
@@ -341,6 +402,7 @@ describe('projectWorkspace', () => {
     expect(projectWorkspace(project, status, null).boardPanels[0]).toEqual({
       shotId: 'shot_1',
       assetId: 'board_shot_1',
+      newSpendSeedAssetId: null,
       producerJobId: producer.id,
       latestJobId: redraw.id,
       staleCauses: ['request_out_of_date'],
@@ -370,6 +432,7 @@ describe('projectWorkspace', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId: null,
+      newSpendSeedAssetId: null,
       producerJobId: null,
       latestJobId: attention.id,
       staleCauses: [],
@@ -417,6 +480,7 @@ describe('projectWorkspace', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId: null,
+      newSpendSeedAssetId: null,
       producerJobId: null,
       latestJobId: failed.id,
       staleCauses: [],
@@ -462,6 +526,7 @@ describe('projectWorkspace', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId: null,
+      newSpendSeedAssetId: null,
       producerJobId: null,
       latestJobId: job.id,
       staleCauses: [],
@@ -496,6 +561,7 @@ describe('projectWorkspace', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId: 'board_shot_1',
+      newSpendSeedAssetId: null,
       producerJobId: producer.id,
       latestJobId: producer.id,
       staleCauses: ['route_out_of_date'],

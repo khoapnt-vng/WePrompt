@@ -11,7 +11,12 @@ import {
   railCollapsedForView,
   railPreferenceKey,
 } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
-import { defaultStudioView, resolveStudioEntryView } from '@/renderer/pages/studio/studioPhaseRoute';
+import {
+  defaultStudioView,
+  hasOpenedStudioCut,
+  markStudioCutOpened,
+  resolveStudioEntryView,
+} from '@/renderer/pages/studio/studioPhaseRoute';
 
 describe('the rail default follows the view', () => {
   it('opens the rail for References and the Table and shuts it in the Board and the Cut', () => {
@@ -50,9 +55,9 @@ describe('the rail default follows the view', () => {
   });
 });
 
-describe('the first project entry respects reference work without stealing later navigation', () => {
-  it('opens first-time reference work before the Table', () => {
-    expect(defaultStudioView(true)).toBe('references');
+describe('the first project entry respects the production journey without stealing later navigation', () => {
+  it('starts at the Table even when reference work already exists', () => {
+    expect(defaultStudioView(true)).toBe('table');
     expect(defaultStudioView(false)).toBe('table');
   });
 
@@ -60,5 +65,20 @@ describe('the first project entry respects reference work without stealing later
     const storage = { getItem: () => 'board' } as Pick<Storage, 'getItem'> as Storage;
 
     expect(resolveStudioEntryView('project_1', storage, true)).toBe('board');
+  });
+});
+
+describe('the Cut opening marker follows the exact current takes', () => {
+  it('clears logically when any take signature changes', () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => values.set(key, value),
+    } as Pick<Storage, 'getItem' | 'setItem'> as Storage;
+
+    expect(hasOpenedStudioCut('project_1', 'take-signature-v1', storage)).toBe(false);
+    markStudioCutOpened('project_1', 'take-signature-v1', storage);
+    expect(hasOpenedStudioCut('project_1', 'take-signature-v1', storage)).toBe(true);
+    expect(hasOpenedStudioCut('project_1', 'take-signature-v2', storage)).toBe(false);
   });
 });

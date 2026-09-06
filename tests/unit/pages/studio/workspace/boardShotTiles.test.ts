@@ -453,7 +453,7 @@ describe('Board Shot tile projection', () => {
       { kind: 'after', beatPosition: 1, shotPosition: 4 },
       { kind: 'head' },
     ]);
-    expect(beat).toMatchObject({ shotCount: 6, renderedCount: 2, staleCount: 1, inFlightCount: 1 });
+    expect(beat).toMatchObject({ shotCount: 6, renderedCount: 1, staleCount: 1, inFlightCount: 1 });
 
     const changedTelemetry = makeProjection([
       makeBeat(

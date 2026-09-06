@@ -69,38 +69,47 @@ vi.mock('react-i18next', () => ({
         return 'Rejoin confirmed. Review the Shot for frame extraction and replacement progress or any required recovery.';
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.summary') {
-        return `Promote the current Board panel for Shot ${String(values?.shotId)}. This does not change the Shot's continuity boundary.`;
+        return `Use this frame as the video first frame for ${String(values?.shot)}. This does not change how the Shot connects to the one before it.`;
+      }
+      if (key === 'conversation.creativeStudio.workspace.gate.promotion.shotLocation') {
+        return `Beat ${String(values?.beatPosition)} “${String(values?.beatTitle)}” · Shot ${String(values?.shotPosition)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactIntro') {
-        return `${String(values?.count)} current pictures will remain playable but become stale:`;
+        return `Affected video takes: ${String(values?.count)}. They stay playable. Only the current take for the first Shot in the segment is eligible for this regeneration quote.`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.impactItem') {
-        return `Shot ${String(values?.shotId)} current picture`;
+        return `${String(values?.shot)} video take`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.headline') {
-        return `Promote + ${String(values?.count)} rerenders · ${String(values?.cost)}`;
+        return `Use frame + video regeneration (${String(values?.count)}) · ${String(values?.cost)}`;
       }
       if (key === 'conversation.creativeStudio.workspace.gate.promotion.confirm') {
-        return `Confirm promotion + ${String(values?.count)} rerenders · ${String(values?.cost)}`;
+        return `Use frame + regenerate current video (${String(values?.count)}) · ${String(values?.cost)}`;
       }
       const promotionCopy: Record<string, string> = {
-        'conversation.creativeStudio.workspace.gate.promotion.title': 'Use panel as first frame',
-        'conversation.creativeStudio.workspace.gate.promotion.impactNone': 'No current pictures depend on this frame.',
-        'conversation.creativeStudio.workspace.gate.promotion.optionsLabel': 'Choose how to handle current pictures',
+        'conversation.creativeStudio.workspace.gate.promotion.title': 'Use this frame',
+        'conversation.creativeStudio.workspace.gate.promotion.shotFallback': 'the selected Shot',
+        'conversation.creativeStudio.workspace.gate.promotion.impactNone':
+          'No existing video takes depend on this frame.',
+        'conversation.creativeStudio.workspace.gate.promotion.optionsLabel':
+          'Choose whether to regenerate this Shot now',
         'conversation.creativeStudio.workspace.gate.promotion.promoteOnly':
-          'Promote only — keep playable, stale pictures',
+          'Use this frame only — keep existing video takes',
         'conversation.creativeStudio.workspace.gate.promotion.freePrice': '$0',
         'conversation.creativeStudio.workspace.gate.promotion.promoteAndRerender':
-          'Promote and review exact rerender work',
+          'Use this frame and review regeneration',
         'conversation.creativeStudio.workspace.gate.promotion.priceAfterReview': 'Price shown next',
-        'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction': 'Promote for $0',
-        'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction': 'Review rerender price',
+        'conversation.creativeStudio.workspace.gate.promotion.promoteOnlyAction': 'Use this frame · $0',
+        'conversation.creativeStudio.workspace.gate.promotion.reviewPaidAction': 'Review regeneration price',
+        'conversation.creativeStudio.workspace.gate.promotion.paidUnavailable':
+          'This segment has too many existing video takes for one paid confirmation. Using this frame without regenerating remains available.',
         'conversation.creativeStudio.workspace.gate.promotion.requiredWork':
-          'The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.',
+          'Later connected Shots wait for the newly selected ending frame from the Shot before them. Each then gets a new price for your review.',
         'conversation.creativeStudio.workspace.gate.promotion.promoted':
-          'Panel promoted. Existing pictures remain playable and are marked stale.',
+          'Frame selected. Existing video takes remain playable and are marked for review.',
+        'conversation.creativeStudio.workspace.gate.promotion.promoting': 'Using frame…',
         'conversation.creativeStudio.workspace.gate.promotion.confirmed':
-          'Panel promoted and rerendering started for the confirmed pictures.',
+          'Frame selected and regeneration started for the confirmed video takes.',
         'conversation.creativeStudio.workspace.gate.promotion.close': 'Close',
       };
       if (promotionCopy[key] !== undefined) return promotionCopy[key]!;
@@ -343,6 +352,30 @@ const addCurrentBoardPanel = (project: StudioRendererProjectV2, shotId: string):
   return { assetId, jobId };
 };
 
+const addReviewedBoardFrames = (project: StudioRendererProjectV2): void => {
+  project.boardStyle = 'grey_tone';
+  for (const beatId of project.beatOrder) {
+    const beat = project.beats[beatId];
+    if (beat?.id !== beatId) continue;
+    for (let shotIndex = 0; shotIndex < beat.shotOrder.length; shotIndex += 1) {
+      const shotId = beat.shotOrder[shotIndex]!;
+      const shot = project.shots[shotId];
+      if (shot?.id !== shotId) continue;
+      const { assetId } = addCurrentBoardPanel(project, shotId);
+      const hasOrdinarySeed = shot.assetIds.some((candidateId) => {
+        const candidate = project.assets[candidateId];
+        return (
+          candidate?.mediaKind === 'image' &&
+          (candidate.managedAsset.collection === 'assets' || candidate.managedAsset.collection === 'imports')
+        );
+      });
+      if ((shotIndex === 0 || shot.chainBreak === 'hard_cut') && shot.seedStillId === null && !hasOrdinarySeed) {
+        shot.seedStillId = assetId;
+      }
+    }
+  }
+};
+
 const addCurrentVideoTake = (project: StudioRendererProjectV2, shotId: string): string => {
   const assetId = `video_${shotId}`;
   const shot = project.shots[shotId]!;
@@ -518,7 +551,7 @@ const promotionQuote = (): StudioRendererSubmissionQuoteV2 => ({
   projectRevision: 3,
   expiresAt: '2026-08-19T01:00:00.000Z',
   currency: 'USD',
-  baseItems: ['shot_1', 'shot_2'].map((shotId) => ({
+  baseItems: ['shot_1'].map((shotId) => ({
     target: { kind: 'shot' as const, shotId },
     referenceTarget: null,
     purpose: 'video_take' as const,
@@ -531,8 +564,8 @@ const promotionQuote = (): StudioRendererSubmissionQuoteV2 => ({
     composition: shotComposition(shotId, 'video_take', 'safe_video', 'video_model'),
   })),
   cascadeItems: [],
-  lowerMinorUnits: 800,
-  upperMinorUnits: 800,
+  lowerMinorUnits: 400,
+  upperMinorUnits: 400,
   budget: { kind: 'within_cap', policyCurrency: 'USD', maxPerBatchMinorUnits: 1_000 },
 });
 
@@ -570,6 +603,7 @@ const Harness: React.FC<{
   reenterOnConfirmed?: boolean;
   rejectOnConfirmed?: boolean;
   projectReferences?: React.ComponentProps<typeof SpendGateModal>['projectReferences'];
+  shotLocations?: React.ComponentProps<typeof SpendGateModal>['shotLocations'];
 }> = ({
   gateDraft = draft,
   boardPromotionImpact,
@@ -579,6 +613,10 @@ const Harness: React.FC<{
   reenterOnConfirmed = false,
   rejectOnConfirmed = false,
   projectReferences,
+  shotLocations = [
+    { id: 'shot_1', beatPosition: 1, shotPosition: 1, beatTitle: 'Opening' },
+    { id: 'shot_2', beatPosition: 1, shotPosition: 2, beatTitle: 'Opening' },
+  ],
 }) => {
   const gateRef = useRef<ReturnType<typeof useSpendGate> | null>(null);
   const gate = useSpendGate({
@@ -599,6 +637,7 @@ const Harness: React.FC<{
         onEditRoutes={onEditRoutes}
         onReviewShotBinding={vi.fn()}
         projectReferences={projectReferences}
+        shotLocations={shotLocations}
       />
     </>
   );
@@ -730,13 +769,51 @@ const readyWorkspaceStatus = (source: number | StudioRendererProjectV2 = 3): Stu
     projectRevision: revision,
     undoTop: null,
     dirtyShots: [],
-    boardPanels: activeShotIds.map((shotId) => ({
-      shotId,
-      assetId: null,
-      producerJobId: null,
-      latestJobId: null,
-      staleCauses: [],
-    })),
+    boardPanels: activeShotIds.map((shotId) => {
+      if (typeof source === 'number') {
+        return {
+          shotId,
+          assetId: null,
+          newSpendSeedAssetId: null,
+          producerJobId: null,
+          latestJobId: null,
+          staleCauses: [],
+        };
+      }
+      const shot = source.shots[shotId];
+      const boardJobs = (shot?.jobIds ?? []).flatMap((jobId) => {
+        const job = source.jobs[jobId];
+        return job?.id === jobId && job.target.kind === 'shot' && job.purpose === 'board_still' ? [job] : [];
+      });
+      const producer = boardJobs.find(
+        (job) => job.status === 'succeeded' && job.outputAssetIdsByRole.primary === shot?.boardAssetId
+      );
+      const explicitSeed = shot?.seedStillId === null ? undefined : source.assets[shot?.seedStillId ?? ''];
+      const ordinarySeed = (shot?.assetIds ?? [])
+        .flatMap((assetId) => {
+          const asset = source.assets[assetId];
+          return asset?.mediaKind === 'image' &&
+            (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports')
+            ? [asset]
+            : [];
+        })
+        .toSorted((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+      const newSpendSeedAssetId =
+        explicitSeed?.mediaKind === 'image' &&
+        (explicitSeed.managedAsset.collection === 'assets' ||
+          explicitSeed.managedAsset.collection === 'imports' ||
+          explicitSeed.managedAsset.collection === 'boardStills')
+          ? explicitSeed.id
+          : (ordinarySeed?.id ?? null);
+      return {
+        shotId,
+        assetId: shot?.boardAssetId ?? null,
+        newSpendSeedAssetId,
+        producerJobId: producer?.id ?? null,
+        latestJobId: boardJobs.at(-1)?.id ?? null,
+        staleCauses: [],
+      };
+    }),
     cascadeProgress: [],
     currentVideoJobs,
     parkEligibility: [],
@@ -1045,9 +1122,10 @@ describe('the largest legal render batch', () => {
     // beat_1 chains shot_1 -> shot_2, beat_2 holds shot_3. Rendering shot_2 now would condition it
     // on a last frame shot_1 has not produced yet, so the ceiling is one shot per segment.
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const batch = filmRenderBatchShotIds({
       project,
-      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+      projection: projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project)),
     });
     expect(batch).toEqual(['shot_1', 'shot_3']);
   });
@@ -1056,9 +1134,10 @@ describe('the largest legal render batch', () => {
     // The first unresolved predecessor boundary is no longer quoted, so a cap of one safely admits
     // one frontier instead of rejecting the whole film-wide action.
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const batch = filmRenderBatchShotIds({
       project,
-      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+      projection: projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project)),
       maxShots: 1,
     });
     expect(batch).toEqual(['shot_1']);
@@ -1069,6 +1148,7 @@ describe('the largest legal render batch', () => {
     // shot_1 pays again for a finished Shot and drags shot_2 along behind it. The missing Shot is the
     // one to start from; its upstream frame already exists.
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const assetId = 'shot_1_take';
     project.assets[assetId] = {
       id: assetId,
@@ -1082,7 +1162,7 @@ describe('the largest legal render batch', () => {
       createdAt: '2026-08-23T00:00:00.000Z',
       durationSeconds: 4,
     } as StudioAssetV2;
-    project.shots.shot_1!.assetIds = [assetId];
+    project.shots.shot_1!.assetIds.push(assetId);
     project.shots.shot_1!.videoAssetId = assetId;
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
@@ -1094,6 +1174,7 @@ describe('the largest legal render batch', () => {
     // because segments were packed in film order regardless of coverage. Confirming that would have
     // charged again for work already paid for and still left the film unfinished.
     const project = makeProject();
+    addReviewedBoardFrames(project);
     for (const shotId of ['shot_1', 'shot_2'] as const) {
       const assetId = `${shotId}_take`;
       project.assets[assetId] = {
@@ -1108,7 +1189,7 @@ describe('the largest legal render batch', () => {
         createdAt: '2026-08-23T00:00:00.000Z',
         durationSeconds: 4,
       } as StudioAssetV2;
-      project.shots[shotId]!.assetIds = [assetId];
+      project.shots[shotId]!.assetIds.push(assetId);
       project.shots[shotId]!.videoAssetId = assetId;
     }
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
@@ -1120,14 +1201,16 @@ describe('the largest legal render batch', () => {
     // Each selected frontier touches one distinct Shot. A seed may add its same-Shot video, but the
     // next Shot is held for a frame-aware review and does not consume this request's Shot cap.
     const project = makeProject();
-    const projection = projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3));
+    addReviewedBoardFrames(project);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
     expect(filmRenderBatchShotIds({ project, projection, maxShots: 2 })).toEqual(['shot_1', 'shot_3']);
   });
 
   it('only ever returns a batch the spend gate will accept', () => {
     const project = makeProject();
-    const projection = projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3));
+    addReviewedBoardFrames(project);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project));
 
     for (const maxShots of [1, 2, 3, 24]) {
       const batch = filmRenderBatchShotIds({ project, projection, maxShots });
@@ -1144,9 +1227,10 @@ describe('the largest legal render batch', () => {
 
   it('returns shots in film order, so the batch reads the way the film does', () => {
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const batch = filmRenderBatchShotIds({
       project,
-      projection: projectWorkspace(project, readyWorkspaceStatus(), readyChainStatus(3)),
+      projection: projectWorkspace(project, readyWorkspaceStatus(project), readyChainStatus(project)),
     });
     expect(batch).toEqual(batch.toSorted((left, right) => (left < right ? -1 : 1)));
   });
@@ -1167,18 +1251,89 @@ describe('spend gate draft graph', () => {
     ).toBeNull();
   });
 
-  it('derives a seed and same-shot video but stops before blind downstream authoring', () => {
+  it('does not prepare video spend before an unfinished Shot has a current hi-fi frame', () => {
     const project = makeProject();
     const projection = readyProjection(project);
 
+    expect(projection.workspaceStatusReady).toBe(true);
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toBeNull();
+    expect(filmRenderBatchShotIds({ project, projection })).toEqual([]);
+  });
+
+  it('requires the existing free first-frame choice instead of charging for a duplicate seed', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId } = addCurrentBoardPanel(project, 'shot_1');
+    let projection = readyProjection(project);
+
+    expect(projection.boardPanels[0]).toMatchObject({
+      assetId,
+      newSpendSeedAssetId: null,
+      freshness: 'current',
+    });
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toBeNull();
+
+    project.shots.shot_1!.seedStillId = assetId;
+    projection = readyProjection(project);
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })?.baseChoices).toEqual([
+      { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+    ]);
+    expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_1']);
+  });
+
+  it('keeps an older Main-approved Board seed eligible after a later current frame redraw', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const { assetId: currentAssetId } = addCurrentBoardPanel(project, 'shot_1');
+    const olderAsset = makeAsset('board_shot_1_older', 'shot_1', 'image', 'boardStills');
+    project.assets[olderAsset.id] = olderAsset;
+    project.shots.shot_1!.assetIds.push(olderAsset.id);
+    project.shots.shot_1!.seedStillId = olderAsset.id;
+    const projection = readyProjection(project);
+
+    expect(projection.boardPanels[0]).toMatchObject({
+      assetId: currentAssetId,
+      newSpendSeedAssetId: olderAsset.id,
+      freshness: 'current',
+    });
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })?.baseChoices).toEqual([
+      { target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' },
+    ]);
+    expect(filmRenderBatchShotIds({ project, projection })).toEqual(['shot_1']);
+  });
+
+  it('requires a current visual-target frame for an unfinished continuous Shot too', () => {
+    const project = makeProject();
+    project.boardStyle = 'grey_tone';
+    const first = addCurrentBoardPanel(project, 'shot_1');
+    project.shots.shot_1!.seedStillId = first.assetId;
+    const third = addCurrentBoardPanel(project, 'shot_3');
+    project.shots.shot_3!.seedStillId = third.assetId;
+    let projection = readyProjection(project);
+
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_2'] })).toBeNull();
+
+    addCurrentBoardPanel(project, 'shot_2');
+    projection = readyProjection(project);
+    expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_2'] })?.baseChoices).toEqual([
+      { target: { kind: 'shot', shotId: 'shot_2' }, purpose: 'video_take' },
+    ]);
+  });
+
+  it('uses the reviewed first frame and stops before blind downstream authoring', () => {
+    const project = makeProject();
+    addReviewedBoardFrames(project);
+    const projection = readyProjection(project);
+
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })).toMatchObject({
-      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'seed_still' }],
-      cascadeChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+      baseChoices: [{ target: { kind: 'shot', shotId: 'shot_1' }, purpose: 'video_take' }],
+      cascadeChoices: [],
     });
   });
 
   it('treats a normal downstream shot as video-conditioned and refuses two anchors in one segment', () => {
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const projection = readyProjection(project);
 
     expect(selectionGateDraft({ project, projection, orderedShotIds: ['shot_2'] })?.baseChoices).toEqual([
@@ -1192,6 +1347,7 @@ describe('spend gate draft graph', () => {
     const seed = makeAsset('seed_import', 'shot_1', 'image', 'imports');
     project.assets[seed.id] = seed;
     project.shots.shot_1!.assetIds.push(seed.id);
+    addReviewedBoardFrames(project);
     project.jobs.job_2 = makeJob('job_2', 'shot_2', { status: 'running' });
     project.shots.shot_2!.jobIds.push('job_2');
     let projection = readyProjection(project);
@@ -1218,6 +1374,7 @@ describe('spend gate draft graph', () => {
 
   it('rejects renderer reference ids and legacy count authority, and refuses terminal handoff reopening', () => {
     const project = makeProject();
+    addReviewedBoardFrames(project);
     const projection = readyProjection(project);
     const defaults = selectionGateDraft({ project, projection, orderedShotIds: ['shot_1'] })!;
     expect(
@@ -1456,6 +1613,47 @@ describe('spend gate draft graph', () => {
 });
 
 describe('Board spend gate draft', () => {
+  it('does not backfill missing Board frames for Shots that already have a fresh current take', () => {
+    const project = makeBoardProject(3);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    projection.activeBeats[0]!.shots[0]!.currentPicture = {
+      assetId: 'existing_take',
+      sourceDurationSeconds: 4,
+      posterAssetId: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      prompt: 'Existing current take',
+      promptChanged: false,
+      firstFrameChanged: false,
+    };
+
+    expect(boardGateDraft({ project, projection })?.baseChoices).toEqual(
+      [2, 3].map((shotNumber) => ({
+        target: { kind: 'shot', shotId: `board_shot_${String(shotNumber).padStart(2, '0')}` },
+        purpose: 'board_still',
+      }))
+    );
+  });
+
+  it('keeps a missing Board frame eligible when its selected take is stale', () => {
+    const project = makeBoardProject(1);
+    const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
+    const shot = projection.activeBeats[0]!.shots[0]!;
+    shot.currentPicture = {
+      assetId: 'stale_take',
+      sourceDurationSeconds: 4,
+      posterAssetId: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      prompt: 'Stale selected take',
+      promptChanged: true,
+      firstFrameChanged: false,
+    };
+    shot.dirtyCauses = ['generation_out_of_date'];
+
+    expect(boardGateDraft({ project, projection })?.baseChoices).toEqual([
+      { target: { kind: 'shot', shotId: 'board_shot_01' }, purpose: 'board_still' },
+    ]);
+  });
+
   it('selects the next 24 missing panels in film order, then the remaining six after completion', () => {
     const project = makeBoardProject(30);
     const projection = projectWorkspace(project, readyWorkspaceStatus(project), null);
@@ -2511,6 +2709,7 @@ describe('Board first-frame promotion gate plan', () => {
     status.boardPanels[0] = {
       shotId: 'shot_1',
       assetId,
+      newSpendSeedAssetId: null,
       producerJobId: jobId,
       latestJobId: jobId,
       staleCauses: [],
@@ -2518,7 +2717,7 @@ describe('Board first-frame promotion gate plan', () => {
     return projectWorkspace(project, status, readyChainStatus(project));
   };
 
-  it('derives only exact current pictures in the selected segment and keeps the continuity boundary unchanged', () => {
+  it('offers paid regeneration only for the promoted head and keeps the continuity boundary unchanged', () => {
     const project = makeProject();
     project.boardStyle = 'grey_tone';
     const { assetId, jobId } = addCurrentBoardPanel(project, 'shot_1');
@@ -2539,7 +2738,10 @@ describe('Board first-frame promotion gate plan', () => {
         cascadeChoices: [],
         boardPromotion: { shotId: 'shot_1', boardAssetId: assetId },
       },
-      impact: { currentTakeShotIds: ['shot_1', 'shot_2'] },
+      impact: {
+        currentTakeShotIds: ['shot_1', 'shot_2'],
+        paidCurrentTakeShotIds: ['shot_1'],
+      },
     });
     expect(project.shots.shot_1!.chainBreak).toBe(originalChainBreak);
     expect(spendGateRouteIssue(routeCatalog('unavailable', 'ready'), plan!.draft)).toBeNull();
@@ -2554,6 +2756,7 @@ describe('Board first-frame promotion gate plan', () => {
 
     expect(boardPromotionGatePlan({ project, projection, shotId: 'shot_1', boardAssetId: assetId })?.impact).toEqual({
       currentTakeShotIds: [],
+      paidCurrentTakeShotIds: [],
     });
   });
 
@@ -2637,6 +2840,7 @@ describe('Board first-frame promotion gate plan', () => {
     status.boardPanels[1] = {
       shotId: 'shot_2',
       assetId,
+      newSpendSeedAssetId: null,
       producerJobId: jobId,
       latestJobId: jobId,
       staleCauses: [],
@@ -2831,7 +3035,7 @@ describe('SpendGateModal', () => {
     render(
       <Harness
         gateDraft={promotionDraft}
-        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidCurrentTakeShotIds: ['shot_1'] }}
         onPromoteOnly={onPromoteOnly}
       />
     );
@@ -2839,8 +3043,17 @@ describe('SpendGateModal', () => {
     const modal = await screen.findByTestId('studio-spend-gate');
 
     expect(modal).toHaveAttribute('data-gate-kind', 'board_promotion');
-    expect(screen.getByRole('dialog', { name: 'Use panel as first frame' })).toBeVisible();
-    expect(within(modal).getByRole('radio', { name: /Promote only/ })).toBeChecked();
+    expect(screen.getByRole('dialog', { name: 'Use this frame' })).toBeVisible();
+    expect(within(modal).getByRole('radio', { name: /Use this frame only/ })).toBeChecked();
+    const summary = modal.querySelector('[data-board-promotion-summary]');
+    expect(summary).toHaveTextContent('Beat 1 “Opening” · Shot 1');
+    expect(summary).not.toHaveTextContent('shot_1');
+    expect(
+      within(modal)
+        .getAllByRole('listitem')
+        .map((row) => row.textContent)
+    ).toEqual(['Beat 1 “Opening” · Shot 1 video take', 'Beat 1 “Opening” · Shot 2 video take']);
+    expect(modal).not.toHaveTextContent('shot_1');
     expect(
       within(modal)
         .getAllByRole('listitem')
@@ -2849,7 +3062,7 @@ describe('SpendGateModal', () => {
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
 
-    fireEvent.click(within(modal).getByRole('button', { name: 'Promote for $0' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Use this frame · $0' }));
     await waitFor(() =>
       expect(onPromoteOnly).toHaveBeenCalledExactlyOnceWith({
         projectId: 'project_1',
@@ -2858,7 +3071,7 @@ describe('SpendGateModal', () => {
       })
     );
     expect(
-      await within(modal).findByText('Panel promoted. Existing pictures remain playable and are marked stale.')
+      await within(modal).findByText('Frame selected. Existing video takes remain playable and are marked for review.')
     ).toBeVisible();
     expect(mocks.prepare).not.toHaveBeenCalled();
     expect(mocks.confirm).not.toHaveBeenCalled();
@@ -2866,24 +3079,31 @@ describe('SpendGateModal', () => {
 
   it('prepares the atomic paid promotion only after that option is chosen and confirms only on the explicit action', async () => {
     mocks.prepare.mockResolvedValue({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } });
-    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidCurrentTakeShotIds: ['shot_1'] }}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
+    fireEvent.click(within(modal).getByRole('radio', { name: /Use this frame and review regeneration/ }));
     expect(mocks.prepare).not.toHaveBeenCalled();
 
-    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review regeneration price' }));
     await waitFor(() => expect(mocks.prepare).toHaveBeenCalledExactlyOnceWith(promotionDraft));
     expect(mocks.confirm).not.toHaveBeenCalled();
-    expect(await within(modal).findByRole('heading', { name: 'Promote + 2 rerenders · $8.00' })).toBeVisible();
+    expect(
+      await within(modal).findByRole('heading', { name: 'Use frame + video regeneration (1) · $4.00' })
+    ).toBeVisible();
     expect(
       within(modal).getByText(
-        'The listed rerenders are exactly the current pictures this promotion makes stale. Missing coverage is not included.'
+        'Later connected Shots wait for the newly selected ending frame from the Shot before them. Each then gets a new price for your review.'
       )
     ).toBeVisible();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
 
-    fireEvent.click(within(modal).getByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Use frame + regenerate current video (1) · $4.00' }));
     await waitFor(() =>
       expect(mocks.confirm).toHaveBeenCalledExactlyOnceWith({
         projectId: 'project_1',
@@ -2894,47 +3114,76 @@ describe('SpendGateModal', () => {
   });
 
   it('offers free-only promotion when there is no current picture to rerender', async () => {
-    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: [] }} />);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: [], paidCurrentTakeShotIds: [] }}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
 
-    expect(within(modal).getByText('No current pictures depend on this frame.')).toBeVisible();
+    expect(within(modal).getByText('No existing video takes depend on this frame.')).toBeVisible();
     expect(within(modal).getAllByRole('radio')).toHaveLength(1);
-    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(within(modal).queryByRole('button', { name: 'Review regeneration price' })).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
     expect(mocks.prepare).not.toHaveBeenCalled();
+  });
+
+  it('uses a friendly fallback instead of exposing an internal Shot id when location context is unavailable', async () => {
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: [], paidCurrentTakeShotIds: [] }}
+        shotLocations={[]}
+      />
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
+    const modal = await screen.findByTestId('studio-spend-gate');
+
+    expect(modal.querySelector('[data-board-promotion-summary]')).toHaveTextContent('the selected Shot');
+    expect(modal).not.toHaveTextContent('shot_1');
   });
 
   it('hides paid promotion when the video route is not ready without blocking the free choice', async () => {
     render(
       <Harness
         gateDraft={promotionDraft}
-        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidRouteReady: false }}
+        boardPromotionImpact={{
+          currentTakeShotIds: ['shot_1', 'shot_2'],
+          paidCurrentTakeShotIds: ['shot_1'],
+          paidRouteReady: false,
+        }}
       />
     );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = await screen.findByTestId('studio-spend-gate');
 
     expect(within(modal).getAllByRole('radio')).toHaveLength(1);
-    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(within(modal).queryByRole('button', { name: 'Review regeneration price' })).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
     expect(mocks.prepare).not.toHaveBeenCalled();
   });
 
   it('retains the free promotion after paid route refusal', async () => {
     mocks.listRoutes.mockResolvedValue({ ok: true, data: routeCatalog('ready', 'unavailable') });
     mocks.prepare.mockResolvedValueOnce({ ok: false, error: { code: 'invalid_route' } });
-    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidCurrentTakeShotIds: ['shot_1'] }}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = screen.getByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
-    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+    fireEvent.click(within(modal).getByRole('radio', { name: /Use this frame and review regeneration/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review regeneration price' }));
 
     expect(
       await within(modal).findByText('conversation.creativeStudio.workspace.controls.videoRouteBlocked')
     ).toBeVisible();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
-    expect(within(modal).queryByRole('button', { name: 'Review rerender price' })).toBeNull();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
+    expect(within(modal).queryByRole('button', { name: 'Review regeneration price' })).toBeNull();
   });
 
   it('retains the free promotion when the paid quote is over cap', async () => {
@@ -2948,15 +3197,22 @@ describe('SpendGateModal', () => {
         withCascade: null,
       },
     });
-    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidCurrentTakeShotIds: ['shot_1'] }}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = screen.getByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
-    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
+    fireEvent.click(within(modal).getByRole('radio', { name: /Use this frame and review regeneration/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review regeneration price' }));
 
-    const confirm = await within(modal).findByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' });
+    const confirm = await within(modal).findByRole('button', {
+      name: 'Use frame + regenerate current video (1) · $4.00',
+    });
     expect(confirm).toBeDisabled();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
   });
 
   it('silently refreshes an expired paid-promotion quote while retaining the free choice', async () => {
@@ -2965,17 +3221,26 @@ describe('SpendGateModal', () => {
       .mockResolvedValueOnce({ ok: true, data: { baseOnly: promotionQuote(), withCascade: null } })
       .mockResolvedValueOnce({ ok: true, data: { baseOnly: refreshedPromotionQuote, withCascade: null } });
     mocks.confirm.mockResolvedValue({ ok: false, error: { code: 'quote_not_found' } });
-    render(<Harness gateDraft={promotionDraft} boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'] }} />);
+    render(
+      <Harness
+        gateDraft={promotionDraft}
+        boardPromotionImpact={{ currentTakeShotIds: ['shot_1', 'shot_2'], paidCurrentTakeShotIds: ['shot_1'] }}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: 'Open review' }));
     const modal = screen.getByTestId('studio-spend-gate');
-    fireEvent.click(within(modal).getByRole('radio', { name: /Promote and review exact rerender work/ }));
-    fireEvent.click(within(modal).getByRole('button', { name: 'Review rerender price' }));
-    fireEvent.click(await within(modal).findByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' }));
+    fireEvent.click(within(modal).getByRole('radio', { name: /Use this frame and review regeneration/ }));
+    fireEvent.click(within(modal).getByRole('button', { name: 'Review regeneration price' }));
+    fireEvent.click(
+      await within(modal).findByRole('button', { name: 'Use frame + regenerate current video (1) · $4.00' })
+    );
 
     await waitFor(() => expect(mocks.prepare).toHaveBeenCalledTimes(2));
     expect(within(modal).queryByText('conversation.creativeStudio.errors.quoteNotFound')).toBeNull();
-    expect(within(modal).getByRole('button', { name: 'Confirm promotion + 2 rerenders · $8.00' })).toBeEnabled();
-    expect(within(modal).getByRole('button', { name: 'Promote for $0' })).toBeEnabled();
+    expect(
+      within(modal).getByRole('button', { name: 'Use frame + regenerate current video (1) · $4.00' })
+    ).toBeEnabled();
+    expect(within(modal).getByRole('button', { name: 'Use this frame · $0' })).toBeEnabled();
     expect(mocks.confirm).toHaveBeenCalledTimes(1);
   });
 

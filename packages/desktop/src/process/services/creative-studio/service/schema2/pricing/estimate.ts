@@ -34,10 +34,7 @@ import {
   type StudioReferenceKindV2,
 } from '@/common/types/project/creativeStudioTypes';
 import { isCanonicalStudioGeneratedTakeV2 } from '@/common/types/project/creativeStudioCanonicalTake';
-import {
-  resolveStudioCanonicalBoardAssetV2,
-  resolveStudioCurrentBoardPanelAuthorityV2,
-} from '../generation/boardPanel';
+import { resolveStudioCurrentBoardPanelAuthorityV2, resolveStudioNewSpendSeedAssetV2 } from '../generation/boardPanel';
 import { deriveStudioInboundShotReferencesV2 } from '../chain';
 import {
   calculateStudioQuoteTotals,
@@ -472,56 +469,6 @@ const canonicalizeExactCascade = (
   return request;
 };
 
-const isProjectReferenceAsset = (project: StudioProjectV2, assetId: string): boolean =>
-  ownValue(project.assets, assetId)?.projectReferenceId !== null;
-
-const eligibleSeedAsset = (project: StudioProjectV2, shotId: string, assetId: string): StudioAssetV2 | null => {
-  const shot = ownValue(project.shots, shotId);
-  const asset = ownValue(project.assets, assetId);
-  return shot !== undefined &&
-    asset?.id === assetId &&
-    asset.projectId === project.id &&
-    asset.shotId === shotId &&
-    asset.mediaKind === 'image' &&
-    (asset.managedAsset.collection === 'assets' || asset.managedAsset.collection === 'imports') &&
-    !isProjectReferenceAsset(project, assetId) &&
-    shot.assetIds.includes(assetId)
-    ? asset
-    : null;
-};
-
-const eligibleExplicitSeedAsset = (project: StudioProjectV2, shotId: string, assetId: string): StudioAssetV2 | null => {
-  const ordinary = eligibleSeedAsset(project, shotId, assetId);
-  if (ordinary !== null) return ordinary;
-  const shot = ownValue(project.shots, shotId);
-  return shot === undefined ? null : (resolveStudioCanonicalBoardAssetV2(project, shot, assetId)?.asset ?? null);
-};
-
-const effectiveSeedAsset = (project: StudioProjectV2, shotId: string): StudioAssetV2 | null => {
-  const shot = ownValue(project.shots, shotId);
-  if (shot === undefined) return null;
-  if (shot.seedStillId !== null && !shot.dismissedSeedStillIds.includes(shot.seedStillId)) {
-    return eligibleExplicitSeedAsset(project, shot.id, shot.seedStillId);
-  }
-  const candidates = shot.assetIds.flatMap((assetId) => {
-    if (shot.dismissedSeedStillIds.includes(assetId)) return [];
-    const asset = eligibleSeedAsset(project, shot.id, assetId);
-    return asset === null ? [] : [asset];
-  });
-  candidates.sort((left, right) =>
-    left.createdAt === right.createdAt
-      ? left.id < right.id
-        ? 1
-        : left.id > right.id
-          ? -1
-          : 0
-      : left.createdAt < right.createdAt
-        ? 1
-        : -1
-  );
-  return candidates[0] ?? null;
-};
-
 const selectedVideoAsset = (project: StudioProjectV2, shotId: string): StudioAssetV2 | null => {
   const shot = ownValue(project.shots, shotId);
   if (shot?.videoAssetId === null || shot === undefined) return null;
@@ -646,7 +593,7 @@ const currentConditioningInput = (
   const shot = ownValue(project.shots, shotId);
   if (location === undefined || beat === undefined || shot === undefined) return null;
   if (location.shotIndex === 0 || shot.chainBreak === 'hard_cut') {
-    const seed = effectiveSeedAsset(project, shot.id);
+    const seed = resolveStudioNewSpendSeedAssetV2(project, beat.id, shot.id);
     return seed === null ? null : { kind: 'seed_still', assetId: seed.id };
   }
   const predecessorId = beat.shotOrder[location.shotIndex - 1];
@@ -701,9 +648,7 @@ export const preflightStudioSubmissionPreparationV2 = (input: {
   if (request.boardPromotion !== undefined) {
     requireShootingScripts(
       input.project,
-      affectedSegmentShotIds(input.project, request.boardPromotion.shotId, locations).filter(
-        (shotId) => selectedVideoAsset(input.project, shotId) !== null
-      )
+      selectedVideoAsset(input.project, request.boardPromotion.shotId) === null ? [] : [request.boardPromotion.shotId]
     );
     return request;
   }
@@ -958,7 +903,7 @@ const deriveContinuitySubmissionQuoteGraphV2 = (
     return fail('in_flight');
   }
 
-  const reusableSeed = change.hardCut ? effectiveSeedAsset(project, change.shotId) : null;
+  const reusableSeed = change.hardCut ? resolveStudioNewSpendSeedAssetV2(project, beat.id, change.shotId) : null;
   const requiresSeedGeneration = change.hardCut && reusableSeed === null;
   if (change.requiresSeedGeneration !== requiresSeedGeneration) return fail('invalid_prepare_request');
 
@@ -1041,7 +986,11 @@ const deriveBoardPromotionSubmissionQuoteGraphV2 = (
   if (segmentShotIds.length === 0 || deriveStudioInboundShotReferencesV2(project, segmentShotIds).length > 0) {
     return fail('in_flight');
   }
-  const selectedShotIds = segmentShotIds.filter((shotId) => selectedVideoAsset(project, shotId) !== null);
+  // Promotion may regenerate only the segment head in this quote. A connected successor must wait
+  // for that replacement take to be selected and for its exact trim-aware endpoint to be extracted,
+  // then enter a fresh review. Authorizing the whole segment here would freeze successor work to a
+  // dependency graph before the owner can review that newly produced boundary.
+  const selectedShotIds = selectedVideoAsset(project, promotion.shotId) === null ? [] : [promotion.shotId];
   if (selectedShotIds.length === 0) return fail('invalid_prepare_request');
 
   const candidate = structuredClone(project);

@@ -219,7 +219,7 @@ const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
     },
     {
       id: 'bindings',
-      state: 'complete',
+      state: 'not_started',
       summary: { stage: 'bindings', readyShotCount: 0, shotCount: 0, maxConditioningImages: 3 },
       blockers: [],
     },
@@ -244,7 +244,7 @@ const makeProjectStatusV2 = (detail = false): StudioProjectStatusV2 => ({
     },
   ],
   blockerCount: 0,
-  advisories: [],
+  advisories: [{ cause: 'next_action', stage: 'storyboard' }],
   boards: { currentPictureCount: 0, shotCount: 0 },
   detail: detail ? { shots: [], references: [] } : null,
 });

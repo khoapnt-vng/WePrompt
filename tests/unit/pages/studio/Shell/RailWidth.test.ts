@@ -11,7 +11,10 @@ import {
   RAIL_WIDTH_MAX_PX,
   RAIL_WIDTH_MIN_PX,
   RAIL_WIDTH_STEP_PX,
+  RAIL_RESIZER_WIDTH_PX,
+  WORK_PANEL_MIN_WIDTH_PX,
   clampRailWidth,
+  directorRailNeedsOverlay,
   railWidthFromKey,
 } from '@/renderer/pages/studio/components/Workspace/WorkspaceShell';
 
@@ -27,6 +30,14 @@ describe('the Director rail width', () => {
     expect(clampRailWidth(Number.NaN)).toBe(RAIL_WIDTH_DEFAULT_PX);
     expect(clampRailWidth(Number.POSITIVE_INFINITY)).toBe(RAIL_WIDTH_DEFAULT_PX);
     expect(clampRailWidth(-1)).toBe(RAIL_WIDTH_MIN_PX);
+  });
+
+  it('uses a drawer one pixel before the rail, separator, and usable work surface can fit', () => {
+    const exactSplitWidth = RAIL_WIDTH_MAX_PX + RAIL_RESIZER_WIDTH_PX + WORK_PANEL_MIN_WIDTH_PX;
+    expect(directorRailNeedsOverlay(exactSplitWidth, RAIL_WIDTH_MAX_PX)).toBe(false);
+    expect(directorRailNeedsOverlay(exactSplitWidth - 1, RAIL_WIDTH_MAX_PX)).toBe(true);
+    // A zero measurement occurs before layout in DOM shims; it must not create a false drawer.
+    expect(directorRailNeedsOverlay(0, RAIL_WIDTH_MAX_PX)).toBe(false);
   });
 
   it('moves by a step on the arrow keys, in the direction the pane grows', () => {

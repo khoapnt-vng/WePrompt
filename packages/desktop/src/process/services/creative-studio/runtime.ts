@@ -125,7 +125,7 @@ export type CreativeStudioRuntimeDeps = {
   isPackaged: boolean;
   factories?: CreativeStudioRuntimeFactories;
   listProviders(): Promise<IProvider[]>;
-  onProjectUpdated(projectId: string): void;
+  onProjectUpdated(projectId: string, projectRevision?: number): void;
   onProposalUpdated(projectId: string, proposalId: string): void;
   onReferenceUpdated(projectId: string, requestId: string): void;
   protocol: CreativeStudioRuntimeProtocol;
@@ -299,8 +299,8 @@ export const createCreativeStudioRuntime = (deps: CreativeStudioRuntimeDeps): Cr
     ensureDirectorCommandMailbox: (projectId) => requireActiveGraph().directorCommandMailbox.ensure(projectId),
     rateCard: async (generation) => createConfiguredStudioRateCardV2(generation),
     exportCatalogStore,
-    onProjectUpdated: (projectId) => {
-      deps.onProjectUpdated(projectId);
+    onProjectUpdated: (projectId, projectRevision) => {
+      deps.onProjectUpdated(projectId, projectRevision);
       if (!disposed) {
         void refreshInventoryImpl().catch((error: unknown) => {
           report('[CreativeStudio] Failed to refresh the schema-2 project inventory:', error);
@@ -768,7 +768,11 @@ export const getCreativeStudioRuntime = (): CreativeStudioRuntime => {
     environment: process.env,
     isPackaged: app.isPackaged,
     listProviders: () => httpRequest<IProvider[]>('GET', '/api/providers'),
-    onProjectUpdated: (projectId) => ipcBridge.creativeStudio.projectUpdated.emit({ projectId }),
+    onProjectUpdated: (projectId, projectRevision) =>
+      ipcBridge.creativeStudio.projectUpdated.emit({
+        projectId,
+        ...(projectRevision === undefined ? {} : { projectRevision }),
+      }),
     onProposalUpdated: (projectId, proposalId) =>
       ipcBridge.creativeStudio.proposalUpdated.emit({ projectId, proposalId }),
     onReferenceUpdated: (projectId, requestId) =>

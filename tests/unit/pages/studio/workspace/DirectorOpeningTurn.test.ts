@@ -219,13 +219,28 @@ describe('the Director preset rules', () => {
     expect(DIRECTOR_PRESET_RULES).toMatch(/never start or confirm paid generation/i);
   });
 
-  it('drafts the storyboard as a numbered phase before it plans references', () => {
-    const direction = DIRECTOR_PRESET_RULES.indexOf('1. Agree the direction');
-    const storyboard = DIRECTOR_PRESET_RULES.indexOf('2. Draft the storyboard before planning canonical references');
-    const references = DIRECTOR_PRESET_RULES.indexOf('3. Plan and request canonical references');
-    expect(direction).toBeGreaterThanOrEqual(0);
-    expect(storyboard).toBeGreaterThan(direction);
-    expect(references).toBeGreaterThan(storyboard);
+  it('saves the agreed direction as the production brief before authoring the story', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Before phase 2, restate the agreed direction/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/save it with set_brief[\s\S]*against a fresh project revision/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/do not invent answers they did not give/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Never treat the initial one-line brief[\s\S]*clarification is complete/i);
+  });
+
+  it('follows the numbered journey from direction through the explicit Cut handoff', () => {
+    const orderedPhases = [
+      '1. Agree the direction',
+      '2. Build the Storyline (storyboard and Shot plan) before planning canonical references',
+      '3. Plan and request canonical references',
+      '4. Guide production-quality Board frames through human review',
+      '5. Guide paid video generation only after the frames are ready',
+      '6. Hand the finished takes to an explicit Cut review and render',
+    ];
+    let previous = -1;
+    for (const phase of orderedPhases) {
+      const index = DIRECTOR_PRESET_RULES.indexOf(phase);
+      expect(index, phase).toBeGreaterThan(previous);
+      previous = index;
+    }
   });
 
   it('requires one bounded proposal whose adjacent coverage operations create the Shots', () => {
@@ -333,6 +348,96 @@ describe('the Director preset rules', () => {
     );
     expect(DIRECTOR_PRESET_RULES).toMatch(/choose a capable image route or continue reference-free/i);
     expect(DIRECTOR_PRESET_RULES).toMatch(/Never infer support from a model name/i);
+  });
+
+  it('treats Board frames as production images instead of adding a disposable sketch pass', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /high-fidelity production image reference[\s\S]*not as a disposable storyboard sketch/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /unless the chosen[\s\S]*visual language is itself sketch-like[\s\S]*never request rough line art, grey-tone sketches, colour keys/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/separate low-fidelity pass before the production-quality frame/i);
+  });
+
+  it('keeps paid Board generation under the owner’s visible review and spend confirmation', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Board-frame generation is paid and owner-only/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /open Frames & Video[\s\S]*Generate next[\s\S]*frames[\s\S]*Generate missing frames/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/review the price, and confirm the spend there/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /A Board count proves that images exist, not that[\s\S]*the person accepted them/i
+    );
+  });
+
+  it('routes migrated stale frames through the exact paid regeneration controls', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/migrated stale frame is not missing and is not production-ready/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Generate missing frames will not replace it/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/choose Regenerate Beat frames/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Regenerate Shot … frame control/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /Do not continue to video.*any Shot without a fresh take.*missing or stale frame/is
+    );
+  });
+
+  it('reuses an accepted Board frame as the chain head’s first frame without paying for a duplicate', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/accepts a current Board frame for a chain head[\s\S]*Use as first frame/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Reusing that already-paid image as the first frame is the default/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/do not request a redundant first-frame[\s\S]*image/i);
+  });
+
+  it('leaves Board promotion to the person and separates its free path from optional paid re-renders', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/person must perform this owner-only promotion/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/promote-only choice is free/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/keep that free promotion separate from any optional paid re-render/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/do not claim the promotion happened until a fresh detailed status/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/non-null newSpendSeedAssetId/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/seedStillAssetId is legacy.*not proof/is);
+  });
+
+  it('preserves predecessor-frame continuity for downstream Shots', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /continuous downstream Shot must instead start from the exact final frame of its predecessor's selected trimmed take/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Board frame remains the visual target, but never substitute it/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/never substitute it for that continuity frame/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/unless they deliberately choose a hard cut/i);
+  });
+
+  it('requires visible quote confirmation before paid video generation', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/choose Generate Shot or the visible chained-generation action/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/review the[\s\S]*quote, and confirm the spend there/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Chat approval is not spend confirmation/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/You cannot start or confirm[\s\S]*video generation/i);
+  });
+
+  it('does not hand off to Cut until fresh status proves every active Shot has a current take', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Read fresh detailed project status after they act/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/failed or blocked work is incomplete/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /only a current take for every active Shot permits the[\s\S]*handoff to Cut/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /active Shot has a current take, and that status contains no current_take_stale advisory/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Never describe stale takes as ready/i);
+  });
+
+  it('requires an explicit creative review in Cut before calling the film complete', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/open Cut, play the film from beginning to end/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/review order,[\s\S]*timing, trims, joins, audio, and the ending/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/technically playable Cut do not prove[\s\S]*creative approval/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Do not call the film complete until the person says they reviewed the Cut/i);
+  });
+
+  it('hands rendering to the owner without inventing an unverified result', () => {
+    expect(DIRECTOR_PRESET_RULES).toMatch(/choose Render, inspect the render summary/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(/Rendering and export are owner-only UI actions/i);
+    expect(DIRECTOR_PRESET_RULES).toMatch(
+      /Never claim a render started, finished,[\s\S]*unless positive evidence proves/i
+    );
+    expect(DIRECTOR_PRESET_RULES).toMatch(/ask the person to check the visible render result/i);
   });
 
   it('answers in the language the person writes in, since the rules themselves are English', () => {

@@ -867,13 +867,22 @@ const expectedInstructionProfile = (
   purpose: StudioJobPurpose,
   source: StudioGenerationCompositionInputSnapshotV2['source']
 ): string => {
-  if (purpose === 'board_still') return `${route.adapterId}.board-still.v1`;
+  if (purpose === 'board_still') return `${route.adapterId}.board-still.v2`;
   if (purpose === 'seed_still') return `${route.adapterId}.seed-still.v1`;
   if (purpose === 'video_take') return `${route.adapterId}.video-take.v1`;
   return source.kind === 'project_reference' && source.referenceKind === 'character'
     ? `${route.adapterId}.reference-character.v1`
     : `${route.adapterId}.reference-background.v1`;
 };
+
+const instructionProfileIsCompatible = (
+  profile: string,
+  route: StudioProviderRef,
+  purpose: StudioJobPurpose,
+  source: StudioGenerationCompositionInputSnapshotV2['source']
+): boolean =>
+  profile === expectedInstructionProfile(route, purpose, source) ||
+  (purpose === 'board_still' && profile === `${route.adapterId}.board-still.v1`);
 
 const validateComposition = (value: unknown): boolean => {
   if (!isRecord(value) || !hasExactKeys(value, COMPOSITION_KEYS) || !isRecord(value.inputs)) return false;
@@ -908,7 +917,7 @@ const validateComposition = (value: unknown): boolean => {
     (purpose === 'reference_image') === (source.kind === 'project_reference') &&
     (purpose === 'board_still') === (inputs.boardStyle !== null) &&
     (purpose !== 'video_take' || (inputs.referenceInputs as unknown[]).length === 0) &&
-    inputs.instructionProfile === expectedInstructionProfile(route, purpose, source);
+    instructionProfileIsCompatible(inputs.instructionProfile as string, route, purpose, source);
   // The prompt is an immutable record of what was reviewed and sent. Re-deriving it with today's
   // composer would make any instruction-text improvement retroactively invalidate durable history.
   // Exact quote/plan/snapshot/job equality below remains the integrity boundary for persisted bytes.

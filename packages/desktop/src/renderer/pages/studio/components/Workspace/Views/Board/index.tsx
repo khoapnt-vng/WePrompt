@@ -21,7 +21,11 @@ import {
 } from '../../BeatPanel/FirstFrames';
 import { createManagedStudioAssetUrl } from '@/renderer/pages/studio/studioManagedAssetUrl';
 
-import type { WorkspaceBoardPanelProjection, WorkspaceProjection } from '../../workspaceProjection';
+import {
+  workspaceShotHasFreshCurrentTake,
+  type WorkspaceBoardPanelProjection,
+  type WorkspaceProjection,
+} from '../../workspaceProjection';
 import { Bin, binItemFocusKey } from './Bin';
 import { deriveBoardShotTiles, type BoardShotTile, type BoardShotTileMedia } from './boardShotTiles';
 import styles from './Board.module.css';
@@ -174,6 +178,7 @@ const panelStatusKey = (panel: WorkspaceBoardPanelProjection): string =>
 const statusPendingPanel = (shotId: string): WorkspaceBoardPanelProjection => ({
   shotId,
   assetId: null,
+  newSpendSeedAssetId: null,
   producerJobId: null,
   latestJobId: null,
   staleCauses: [],
@@ -847,24 +852,31 @@ export const BoardView: React.FC<BoardViewProps> = ({
     [exactBoardPanels]
   );
   const boardSummary = useMemo(() => {
-    const drawn = exactBoardPanels.filter((panel) => panel.assetId !== null).length;
+    const currentFrames = exactBoardPanels.filter((panel) => panel.freshness === 'current').length;
+    const videos = tileBoard?.beats.reduce((total, beat) => total + beat.renderedCount, 0) ?? 0;
+    const unrenderedShotIds = new Set(
+      projection.activeBeats.flatMap((beat) =>
+        beat.shots.filter((shot) => !workspaceShotHasFreshCurrentTake(shot)).map((shot) => shot.id)
+      )
+    );
     const stale = exactBoardPanels.filter((panel) => panel.freshness === 'stale').length;
     const busy = exactBoardPanels.filter((panel) => BUSY_BOARD_ACTIVITIES.has(panel.activity)).length;
     const statusPending = exactBoardPanels.some(
       (panel) => panel.freshness === 'status_pending' || panel.activity === 'status_pending'
     );
     const drawableMissing = exactBoardPanels.filter(
-      (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
+      (panel) => unrenderedShotIds.has(panel.shotId) && panel.freshness === 'missing' && isDrawableBoardPanel(panel)
     ).length;
     return {
-      drawn,
+      currentFrames,
+      videos,
       stale,
       busy,
       statusPending,
       nextBatch: Math.min(STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST, drawableMissing),
       total: exactBoardPanels.length,
     };
-  }, [exactBoardPanels]);
+  }, [exactBoardPanels, projection.activeBeats, tileBoard]);
   const boardControlsRef = useRef<HTMLElement | null>(null);
   const interactionLocked = pending || gateLocked || tileBoard === null;
   const generationLocked = interactionLocked || boardSummary.statusPending || !imageRouteReady;
@@ -908,19 +920,35 @@ export const BoardView: React.FC<BoardViewProps> = ({
         role='region'
         tabIndex={-1}
       >
-        <div className={styles.boardProgressBlock}>
-          <strong className={styles.boardProgressText}>
-            {t(`${KEY_ROOT}.controls.progress`, {
-              drawn: boardSummary.drawn,
-              total: boardSummary.total,
-            })}
-          </strong>
-          <progress
-            aria-label={t(`${KEY_ROOT}.controls.progressLabel`)}
-            className={styles.boardProgress}
-            max={Math.max(1, boardSummary.total)}
-            value={boardSummary.drawn}
-          />
+        <div className={styles.boardProgressGroup}>
+          <div className={styles.boardProgressBlock}>
+            <strong className={styles.boardProgressText}>
+              {t(`${KEY_ROOT}.controls.progress`, {
+                current: boardSummary.currentFrames,
+                total: boardSummary.total,
+              })}
+            </strong>
+            <progress
+              aria-label={t(`${KEY_ROOT}.controls.progressLabel`)}
+              className={styles.boardProgress}
+              max={Math.max(1, boardSummary.total)}
+              value={boardSummary.currentFrames}
+            />
+          </div>
+          <div className={styles.boardProgressBlock}>
+            <strong className={styles.boardProgressText}>
+              {t(`${KEY_ROOT}.controls.videoProgress`, {
+                current: boardSummary.videos,
+                total: boardSummary.total,
+              })}
+            </strong>
+            <progress
+              aria-label={t(`${KEY_ROOT}.controls.videoProgressLabel`)}
+              className={styles.boardProgress}
+              max={Math.max(1, boardSummary.total)}
+              value={boardSummary.videos}
+            />
+          </div>
           <span className={styles.boardProgressFacts}>
             <span>{t(`${KEY_ROOT}.controls.staleCount`, { count: boardSummary.stale })}</span>
             <span>{t(`${KEY_ROOT}.controls.busyCount`, { count: boardSummary.busy })}</span>
@@ -987,8 +1015,12 @@ export const BoardView: React.FC<BoardViewProps> = ({
             const boardPanelsForBeat = beatTiles.shots.map(
               (shot) => panelByShotId.get(shot.shotId) ?? statusPendingPanel(shot.shotId)
             );
+            const unrenderedShotIds = new Set(
+              beatTiles.shots.filter((shot) => !shot.hasFreshCurrentTake).map((shot) => shot.shotId)
+            );
             const drawableMissingCount = boardPanelsForBeat.filter(
-              (panel) => panel.freshness === 'missing' && isDrawableBoardPanel(panel)
+              (panel) =>
+                unrenderedShotIds.has(panel.shotId) && panel.freshness === 'missing' && isDrawableBoardPanel(panel)
             ).length;
             const canDrawMissing =
               !generationLocked &&

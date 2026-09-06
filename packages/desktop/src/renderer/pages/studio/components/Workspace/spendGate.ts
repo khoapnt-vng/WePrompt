@@ -28,14 +28,17 @@ import {
   STUDIO_MAX_GENERATION_ITEMS_PER_REQUEST,
   STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST,
 } from '@/common/types/project/creativeStudioTypes';
-import type { WorkspaceProjection } from './workspaceProjection';
+import { workspaceShotHasFreshCurrentTake, type WorkspaceProjection } from './workspaceProjection';
 
 export type SpendGateContinuityChange = StudioContinuityChangeV2;
 
 export type SpendGateBoardPromotion = StudioBoardPromotionV2;
 
 export type SpendGateBoardPromotionImpact = {
+  /** Every selected take in the segment that the promoted first frame will make stale. */
   currentTakeShotIds: string[];
+  /** The sole segment-head take eligible for this immediate paid quote, when one exists. */
+  paidCurrentTakeShotIds: string[];
   /** Renderer-only availability fact; false hides paid review without blocking the free mutation. */
   paidRouteReady?: boolean;
 };
@@ -109,7 +112,13 @@ const exactBoardPromotionImpact = (
   draft: StudioPrepareSubmissionRequestV2,
   impact: SpendGateBoardPromotionImpact | undefined
 ): SpendGateBoardPromotionImpact | null => {
-  if (spendGateBoardPromotion(draft) === null || impact === undefined || !Array.isArray(impact.currentTakeShotIds)) {
+  const promotion = spendGateBoardPromotion(draft);
+  if (
+    promotion === null ||
+    impact === undefined ||
+    !Array.isArray(impact.currentTakeShotIds) ||
+    !Array.isArray(impact.paidCurrentTakeShotIds)
+  ) {
     return null;
   }
   const seen = new Set<string>();
@@ -119,9 +128,22 @@ const exactBoardPromotionImpact = (
     seen.add(shotId);
     currentTakeShotIds.push(shotId);
   }
+  const paidCurrentTakeShotIds: string[] = [];
+  for (const shotId of impact.paidCurrentTakeShotIds) {
+    if (
+      !SAFE_STUDIO_ID.test(shotId) ||
+      paidCurrentTakeShotIds.length > 0 ||
+      shotId !== promotion.shotId ||
+      !seen.has(shotId)
+    ) {
+      return null;
+    }
+    paidCurrentTakeShotIds.push(shotId);
+  }
   if (impact.paidRouteReady !== undefined && typeof impact.paidRouteReady !== 'boolean') return null;
   return {
     currentTakeShotIds,
+    paidCurrentTakeShotIds,
     ...(impact.paidRouteReady === undefined ? {} : { paidRouteReady: impact.paidRouteReady }),
   };
 };
@@ -498,7 +520,14 @@ const choiceForShot = (
     .flatMap((beat) => beat.shots)
     .find((candidate) => candidate.id === shotId);
   if (projectedShot === undefined) return null;
-  if (segmentHead && !projectedShot.hasEffectiveSeed) {
+  const panelIndex = projection.activeShotIds.indexOf(shotId);
+  const boardPanel = panelIndex < 0 ? undefined : projection.boardPanels[panelIndex];
+  if (boardPanel?.shotId !== shotId || boardPanel.freshness === 'status_pending') return null;
+  if (!workspaceShotHasFreshCurrentTake(projectedShot) && boardPanel.freshness !== 'current') return null;
+  if (segmentHead && boardPanel.newSpendSeedAssetId === null) {
+    // A current Board panel is already the reviewed visual target. It must be selected with the
+    // existing free "Use as video first frame" control instead of charging for a duplicate seed.
+    if (boardPanel.freshness === 'current' && boardPanel.assetId !== null) return null;
     return projectedShot.seedGenerationInFlight ? null : shotGenerationChoice(shotId, 'seed_still');
   }
   return projectedShot.videoGenerationInFlight ? null : shotGenerationChoice(shotId, 'video_take');
@@ -597,8 +626,13 @@ export const boardGateDraft = (input: {
 }): StudioPrepareSubmissionRequestV2 | null => {
   const exact = exactBoardGateProjection(input);
   if (exact === null) return null;
+  const shotsWithFreshCurrentTakes = new Set(
+    input.projection.activeBeats.flatMap((beat) =>
+      beat.shots.filter(workspaceShotHasFreshCurrentTake).map((shot) => shot.id)
+    )
+  );
   const choices = exact.boardPanels.flatMap<StudioPrepareGenerationChoiceV2>((panel) =>
-    panel.freshness === 'missing' && isBoardPanelDrawable(panel)
+    !shotsWithFreshCurrentTakes.has(panel.shotId) && panel.freshness === 'missing' && isBoardPanelDrawable(panel)
       ? [shotGenerationChoice(panel.shotId, 'board_still')]
       : []
   );
@@ -655,7 +689,8 @@ export const boardSelectionGateDraft = (input: {
 
 /**
  * Builds one exact Board-promotion review without changing continuity or silently filling coverage.
- * The paid alternative is limited to canonical current takes that the promotion will make stale.
+ * The free review discloses every canonical current take made stale, while its paid alternative is
+ * limited to the promoted segment head so connected Shots can receive fresh endpoint-aware quotes.
  */
 export const boardPromotionGatePlan = (input: {
   project: StudioRendererProjectV2;
@@ -744,7 +779,12 @@ export const boardPromotionGatePlan = (input: {
       cascadeChoices: [],
       boardPromotion: { shotId: input.shotId, boardAssetId: input.boardAssetId },
     },
-    impact: { currentTakeShotIds },
+    impact: {
+      currentTakeShotIds,
+      // The immediate paid alternative stops at the promoted head. Connected Shots become reviewable
+      // only after this replacement take yields a newly selected, trim-aware ending frame.
+      paidCurrentTakeShotIds: currentTakeShotIds[0] === input.shotId ? [input.shotId] : [],
+    },
   };
 };
 
@@ -871,13 +911,13 @@ export const filmRenderBatchShotIds = (input: {
   const batch: { shotId: string; filmIndex: number; coveredShotIds: string[] }[] = [];
   for (const bucket of segments.values()) {
     const ordered = bucket.toSorted((left, right) => left.shotIndex - right.shotIndex);
-    // "Render the film" means render what is missing. A segment whose every Shot already has a picture
-    // needs nothing, and packing it anyway both re-charges finished work and consumes cap that the
-    // unrendered Beats behind it then never get — a partly-rendered film could not be finished at all.
+    // "Render the film" means render what is incomplete. A segment whose every Shot has a fresh take
+    // needs nothing; packing it anyway both re-charges finished work and consumes cap that the
+    // unfinished Beats behind it then never get. A stale selected take is not finished work here.
     if (
       ordered.every(({ shotId }) => {
         const shot = projected.get(shotId);
-        return shot?.currentPicture !== null && shot?.currentPicture !== undefined;
+        return shot !== undefined && workspaceShotHasFreshCurrentTake(shot);
       })
     ) {
       continue;
@@ -890,12 +930,12 @@ export const filmRenderBatchShotIds = (input: {
     ) {
       continue;
     }
-    // Start where the work actually is. Re-rendering a Shot that already has a picture pays for it twice
-    // and drags the rest of its chain along behind it, so the first Shot still missing a picture is the
+    // Start where the work actually is. Re-rendering a Shot with a fresh picture pays for it twice
+    // and drags the rest of its chain along behind it, so the first Shot without a fresh take is the
     // one to begin from — its upstream frame already exists.
     const needsWork = ({ shotId }: { shotId: string }): boolean => {
       const shot = projected.get(shotId);
-      return shot?.currentPicture == null;
+      return shot === undefined || !workspaceShotHasFreshCurrentTake(shot);
     };
     let nextChoice: StudioPrepareGenerationChoiceV2 | null = null;
     const admissible = ({
@@ -912,7 +952,8 @@ export const filmRenderBatchShotIds = (input: {
       nextChoice = choice;
       return true;
     };
-    const next = ordered.find((entry) => needsWork(entry) && admissible(entry)) ?? ordered.find(admissible);
+    const unfinished = ordered.find(needsWork);
+    const next = unfinished !== undefined && admissible(unfinished) ? unfinished : undefined;
     if (next !== undefined && nextChoice !== null) {
       // New work is authoring-sequential: a seed may bring along only its same-Shot video, while the
       // next Shot waits for an exact inherited frame and a fresh review. Each frontier therefore

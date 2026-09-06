@@ -22,6 +22,7 @@ import {
   STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE,
   STUDIO_FILM_EXPORT_BED_GAIN,
   STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION,
+  STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION_V1,
   STUDIO_FILM_EXPORT_FRAME_RATE,
   STUDIO_FILM_EXPORT_TAKE_GAIN,
   STUDIO_BED_FADE_OUT_SECONDS,
@@ -30,6 +31,7 @@ import {
   type StudioExportArtifactRequestV2,
   type StudioExportCatalogV2,
   type StudioExportShapeV2,
+  type StudioFilmExportFactsAnyV2,
   type StudioFilmExportFactsV2,
   type StudioProjectV2,
   type StudioRendererExportCatalogV2,
@@ -64,13 +66,26 @@ const FILM_FACT_KEYS = [
   'video',
   'audio',
 ] as const;
-const FILM_SHOT_SEGMENT_KEYS = [
+const FILM_SHOT_SEGMENT_KEYS_V1 = [
   'kind',
   'shotId',
   'sourceAssetId',
   'sourceSha256',
   'sourceInSeconds',
   'sourceOutSeconds',
+  'renderedSourceOutSeconds',
+  'normalizedDurationSeconds',
+  'chainBreak',
+  'hasAudio',
+] as const;
+const FILM_SHOT_SEGMENT_KEYS_V2 = [
+  'kind',
+  'shotId',
+  'sourceAssetId',
+  'sourceSha256',
+  'sourceInSeconds',
+  'sourceOutSeconds',
+  'effectiveSourceOutSeconds',
   'renderedSourceOutSeconds',
   'normalizedDurationSeconds',
   'chainBreak',
@@ -476,11 +491,12 @@ const STUDIO_FILM_DIMENSIONS = new Set([
   '1080x1440',
 ]);
 
-const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => {
+const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsAnyV2 => {
   if (
     !isDataRecord(value) ||
     !hasExactKeys(value, FILM_FACT_KEYS) ||
-    value.schemaVersion !== STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION ||
+    (value.schemaVersion !== STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION &&
+      value.schemaVersion !== STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION_V1) ||
     !isFinitePositive(value.nominalDurationSeconds) ||
     !isFinitePositive(value.renderedDurationSeconds) ||
     typeof value.trimTails !== 'boolean' ||
@@ -601,15 +617,20 @@ const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => 
 
   const identities = new Set<string>();
   const representedShotIds = new Set<string>();
+  const currentFacts = value.schemaVersion === STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION;
   let nominalDuration = 0;
   let renderedDurationBeforeTransitions = 0;
-  let finalShot: Extract<StudioFilmExportFactsV2['segments'][number], { kind: 'shot' }> | null = null;
-  const validatedSegments: StudioFilmExportFactsV2['segments'] = [];
+  let finalShot: { effectiveSourceOutSeconds: number; renderedSourceOutSeconds: number } | null = null;
+  const validatedSegments: Array<
+    | { kind: 'shot'; chainBreak: 'none' | 'hard_cut'; normalizedDurationSeconds: number }
+    | { kind: 'slate'; normalizedDurationSeconds: number }
+  > = [];
   for (const segment of value.segments) {
     if (!isDataRecord(segment)) return false;
     if (segment.kind === 'shot') {
+      if (!hasExactKeys(segment, currentFacts ? FILM_SHOT_SEGMENT_KEYS_V2 : FILM_SHOT_SEGMENT_KEYS_V1)) return false;
+      const effectiveSourceOutSeconds = currentFacts ? segment.effectiveSourceOutSeconds : segment.sourceOutSeconds;
       if (
-        !hasExactKeys(segment, FILM_SHOT_SEGMENT_KEYS) ||
         typeof segment.shotId !== 'string' ||
         !SAFE_ID.test(segment.shotId) ||
         typeof segment.sourceAssetId !== 'string' ||
@@ -621,13 +642,16 @@ const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => 
         !Number.isFinite(segment.sourceInSeconds) ||
         segment.sourceInSeconds < 0 ||
         !isFinitePositive(segment.sourceOutSeconds) ||
+        !isFinitePositive(effectiveSourceOutSeconds) ||
         !isFinitePositive(segment.renderedSourceOutSeconds) ||
         !isFinitePositive(segment.normalizedDurationSeconds) ||
         segment.sourceOutSeconds <= segment.sourceInSeconds ||
-        segment.sourceOutSeconds - segment.sourceInSeconds > STUDIO_MAX_SHOT_SECONDS ||
+        (!currentFacts && segment.sourceOutSeconds - segment.sourceInSeconds > STUDIO_MAX_SHOT_SECONDS) ||
+        effectiveSourceOutSeconds <= segment.sourceInSeconds ||
+        effectiveSourceOutSeconds > segment.sourceOutSeconds ||
         segment.renderedSourceOutSeconds <= segment.sourceInSeconds ||
-        segment.renderedSourceOutSeconds > segment.sourceOutSeconds ||
-        segment.sourceOutSeconds - segment.renderedSourceOutSeconds > 1 + 0.000_001 ||
+        segment.renderedSourceOutSeconds > effectiveSourceOutSeconds ||
+        effectiveSourceOutSeconds - segment.renderedSourceOutSeconds > 1 + 0.000_001 ||
         segment.normalizedDurationSeconds > segment.renderedSourceOutSeconds - segment.sourceInSeconds ||
         segment.renderedSourceOutSeconds - segment.sourceInSeconds - segment.normalizedDurationSeconds >=
           1 / STUDIO_FILM_EXPORT_FRAME_RATE + Number.EPSILON ||
@@ -642,13 +666,17 @@ const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => 
       }
       identities.add(`shot:${segment.shotId}`);
       representedShotIds.add(segment.shotId);
-      validatedSegments.push(segment as StudioFilmExportFactsV2['segments'][number]);
-      finalShot = segment as Extract<StudioFilmExportFactsV2['segments'][number], { kind: 'shot' }>;
+      validatedSegments.push({
+        kind: 'shot',
+        chainBreak: segment.chainBreak,
+        normalizedDurationSeconds: segment.normalizedDurationSeconds,
+      });
+      finalShot = { effectiveSourceOutSeconds, renderedSourceOutSeconds: segment.renderedSourceOutSeconds };
       nominalDuration += segment.sourceOutSeconds - segment.sourceInSeconds;
       renderedDurationBeforeTransitions += segment.normalizedDurationSeconds;
-      if (!value.trimTails && segment.renderedSourceOutSeconds !== segment.sourceOutSeconds) return false;
+      if (!value.trimTails && segment.renderedSourceOutSeconds !== effectiveSourceOutSeconds) return false;
       if (
-        segment.renderedSourceOutSeconds !== segment.sourceOutSeconds &&
+        segment.renderedSourceOutSeconds !== effectiveSourceOutSeconds &&
         segment.normalizedDurationSeconds + Number.EPSILON < 1 + transitionSeconds
       ) {
         return false;
@@ -676,14 +704,16 @@ const validateFilmFacts = (value: unknown): value is StudioFilmExportFactsV2 => 
       }
       identities.add(`slate:${segment.beatId}:${segment.shotId ?? 'empty'}`);
       if (typeof segment.shotId === 'string') representedShotIds.add(segment.shotId);
-      validatedSegments.push(segment as StudioFilmExportFactsV2['segments'][number]);
+      validatedSegments.push({ kind: 'slate', normalizedDurationSeconds: segment.normalizedDurationSeconds });
       nominalDuration += segment.durationSeconds;
       renderedDurationBeforeTransitions += segment.normalizedDurationSeconds;
     } else {
       return false;
     }
   }
-  if (finalShot !== null && finalShot.renderedSourceOutSeconds !== finalShot.sourceOutSeconds) return false;
+  if (finalShot !== null && finalShot.renderedSourceOutSeconds !== finalShot.effectiveSourceOutSeconds) {
+    return false;
+  }
   let derivedDissolveCount = 0;
   for (let index = 1; index < validatedSegments.length; index += 1) {
     const previous = validatedSegments[index - 1]!;
@@ -851,21 +881,29 @@ export const projectStudioRendererExportCatalogV2 = (
       payloadFileCount: artifact.payloadFileCount,
       createdAt: artifact.createdAt,
     };
-    return artifact.shape === 'film'
-      ? {
-          ...projected,
-          shape: 'film' as const,
-          film: {
-            nominalDurationSeconds: artifact.film.nominalDurationSeconds,
-            renderedDurationSeconds: artifact.film.renderedDurationSeconds,
-            transition: structuredClone(artifact.film.transition),
-            trimTails: artifact.film.trimTails,
-            trimmedShotCount: artifact.film.segments.filter(
+    if (artifact.shape === 'film') {
+      const trimmedShotCount =
+        artifact.film.schemaVersion === STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION
+          ? artifact.film.segments.filter(
+              (segment) =>
+                segment.kind === 'shot' && segment.renderedSourceOutSeconds < segment.effectiveSourceOutSeconds
+            ).length
+          : artifact.film.segments.filter(
               (segment) => segment.kind === 'shot' && segment.renderedSourceOutSeconds < segment.sourceOutSeconds
-            ).length,
-          },
-        }
-      : { ...projected, shape: artifact.shape };
+            ).length;
+      return {
+        ...projected,
+        shape: 'film' as const,
+        film: {
+          nominalDurationSeconds: artifact.film.nominalDurationSeconds,
+          renderedDurationSeconds: artifact.film.renderedDurationSeconds,
+          transition: structuredClone(artifact.film.transition),
+          trimTails: artifact.film.trimTails,
+          trimmedShotCount,
+        },
+      };
+    }
+    return { ...projected, shape: artifact.shape };
   }),
 });
 

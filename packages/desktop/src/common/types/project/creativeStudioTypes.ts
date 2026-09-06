@@ -25,7 +25,7 @@ export type {
  * unsaved-draft preflight before closing the window. A second copy of this list would not
  * just be a style problem — a view missing from main's copy closes with no prompt and loses the drafts.
  */
-export const STUDIO_VIEWS = ['references', 'table', 'board', 'cut'] as const;
+export const STUDIO_VIEWS = ['table', 'references', 'board', 'cut'] as const;
 
 export type StudioView = (typeof STUDIO_VIEWS)[number];
 
@@ -141,8 +141,11 @@ export const STUDIO_MAX_EXPORTS_PER_SHAPE = 5;
 export const STUDIO_MAX_EXPORT_FILES_PER_ARTIFACT = STUDIO_MAX_SHOTS_PER_PROJECT + 8;
 export const STUDIO_MAX_EXPORT_DIRECTORY_DEPTH = 4;
 export const STUDIO_BED_FADE_OUT_SECONDS = 2;
-export const STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION = 1 as const;
+export const STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION_V1 = 1 as const;
+export const STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION = 2 as const;
 export const STUDIO_FILM_EXPORT_FRAME_RATE = 24 as const;
+/** Maximum live mux-tail skew Film accepts while the decoded video endpoint remains authoritative. */
+export const STUDIO_FILM_EXPORT_MEDIA_DURATION_TOLERANCE_SECONDS = 0.125 as const;
 export const STUDIO_FILM_EXPORT_AUDIO_SAMPLE_RATE = 48_000 as const;
 export const STUDIO_FILM_EXPORT_AUDIO_CHANNELS = 2 as const;
 export const STUDIO_FILM_EXPORT_DISSOLVE_SECONDS = 0.35 as const;
@@ -1045,6 +1048,7 @@ export type StudioRendererBoardPanelStaleCauseV2 = 'request_out_of_date' | 'rout
 export type StudioRendererBoardPanelStatusV2 = {
   shotId: string;
   assetId: string | null;
+  newSpendSeedAssetId: string | null;
   producerJobId: string | null;
   latestJobId: string | null;
   staleCauses: StudioRendererBoardPanelStaleCauseV2[];
@@ -1157,7 +1161,7 @@ export type StudioFilmRenderedTransitionV2 =
   | { kind: 'cut' }
   | { kind: 'dissolve'; requestedSeconds: number; seconds: number };
 
-export type StudioFilmExportSegmentFactV2 =
+export type StudioFilmExportSegmentFactV1 =
   | {
       kind: 'shot';
       shotId: string;
@@ -1178,14 +1182,19 @@ export type StudioFilmExportSegmentFactV2 =
       normalizedDurationSeconds: number;
     };
 
-export type StudioFilmExportFactsV2 = {
-  schemaVersion: typeof STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION;
+export type StudioFilmExportSegmentFactV2 =
+  | (Extract<StudioFilmExportSegmentFactV1, { kind: 'shot' }> & {
+      /** Decoded endpoint used by Film before optional quiet-tail removal. */
+      effectiveSourceOutSeconds: number;
+    })
+  | Extract<StudioFilmExportSegmentFactV1, { kind: 'slate' }>;
+
+type StudioFilmExportFactsBaseV2 = {
   nominalDurationSeconds: number;
   renderedDurationSeconds: number;
   transition: StudioFilmRenderedTransitionV2;
   dissolveCount: number;
   trimTails: boolean;
-  segments: StudioFilmExportSegmentFactV2[];
   video: {
     container: 'mp4';
     codec: 'h264';
@@ -1230,6 +1239,18 @@ export type StudioFilmExportFactsV2 = {
   };
 };
 
+export type StudioFilmExportFactsV1 = StudioFilmExportFactsBaseV2 & {
+  schemaVersion: typeof STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION_V1;
+  segments: StudioFilmExportSegmentFactV1[];
+};
+
+export type StudioFilmExportFactsV2 = StudioFilmExportFactsBaseV2 & {
+  schemaVersion: typeof STUDIO_FILM_EXPORT_FACTS_SCHEMA_VERSION;
+  segments: StudioFilmExportSegmentFactV2[];
+};
+
+export type StudioFilmExportFactsAnyV2 = StudioFilmExportFactsV1 | StudioFilmExportFactsV2;
+
 type StudioExportArtifactBaseV2 = {
   schemaVersion: typeof STUDIO_EXPORT_SCHEMA_VERSION_V2;
   id: string;
@@ -1250,7 +1271,7 @@ export type StudioExportArtifactV2 =
   | (StudioExportArtifactBaseV2 & {
       shape: 'film';
       payloadKind: 'file';
-      film: StudioFilmExportFactsV2;
+      film: StudioFilmExportFactsAnyV2;
     });
 
 export type StudioExportCatalogV2 = {
@@ -2250,6 +2271,10 @@ export type StudioProjectStatusBlockerV2 = {
 
 export type StudioProjectStatusAdvisoryV2 =
   | {
+      cause: 'next_action';
+      stage: StudioProjectStatusStageIdV2;
+    }
+  | {
       cause: 'target_duration_mismatch';
       stage: Extract<StudioProjectStatusStageIdV2, 'storyboard' | 'cut'>;
       actualSeconds: number;
@@ -2304,6 +2329,8 @@ export type StudioProjectStatusShotDetailV2 = {
   beatPosition: number;
   shotPosition: number;
   seedStillAssetId: string | null;
+  /** Omitted only by persisted Director status receipts created before this field existed. */
+  newSpendSeedAssetId?: string | null;
   videoAssetId: string | null;
   latestGenerationJob: null | {
     jobId: string;

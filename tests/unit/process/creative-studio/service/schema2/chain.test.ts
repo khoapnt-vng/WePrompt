@@ -30,10 +30,17 @@ import {
   createStudioGenerationRequestTemplate,
   composeStudioGenerationV2,
   deriveStudioInstructionProfileV2,
+  studioGenerationCompositionDigestV2,
 } from '@/process/services/creative-studio/service/schema2/generation';
 
 const NOW = '2026-08-18T00:00:00.000Z';
+const IMAGE_ROUTE_ID = 'image_route_1';
 const VIDEO_ROUTE_ID = 'video_route_1';
+const IMAGE_ROUTE = {
+  providerId: 'provider_image',
+  adapterId: 'weprompt-image-v1' as const,
+  model: 'image-model',
+};
 const VIDEO_ROUTE = {
   providerId: 'provider_1',
   adapterId: 'byteplus-seedance-v1' as const,
@@ -408,6 +415,33 @@ describe('deriveStudioDirtyShotsV2', () => {
   it('uses an eligible unpinned seed when comparing a current head request', () => {
     const project = makeTwoShotProject();
     project.shots.shot_1!.seedStillId = null;
+
+    expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
+  });
+
+  it('grandfathers an existing current video that was conditioned on a historical Board frame', () => {
+    const project = makeTwoShotProject();
+    const shot = project.shots.shot_1!;
+    const board = project.assets.shot_1_seed!;
+    project.imageRouteId = IMAGE_ROUTE_ID;
+    board.managedAsset.collection = 'boardStills';
+    shot.boardAssetId = board.id;
+    const composition = makeComposition(project, 'beat_1', shot, 'board_still', IMAGE_ROUTE);
+    composition.inputs.instructionProfile = 'weprompt-image-v1.board-still.v1';
+    composition.prompt = composition.prompt.replace(
+      'weprompt-image-v1.board-still.v2',
+      'weprompt-image-v1.board-still.v1'
+    );
+    const snapshot: StudioGenerationRequestSnapshot = {
+      ...createStudioGenerationRequestTemplate({ composition, durationSeconds: 4 }),
+      conditioningInput: null,
+    };
+    const producer = makeJob(project, shot, 'shot_1_board_job', board.id, snapshot);
+    producer.spendReceipt!.routeId = IMAGE_ROUTE_ID;
+    project.jobs[producer.id] = producer;
+    shot.jobIds.unshift(producer.id);
+    board.producerJobId = producer.id;
+    board.compositionDigest = studioGenerationCompositionDigestV2(composition);
 
     expect(deriveStudioDirtyShotsV2(project)).toEqual([]);
   });

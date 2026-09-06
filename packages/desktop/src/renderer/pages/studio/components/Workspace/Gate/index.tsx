@@ -181,8 +181,8 @@ export const useSpendGate = ({ onConfirmed, onPromoteOnly }: UseSpendGateInput):
       (promotion !== null &&
         (current.boardPromotionImpact === null ||
           current.boardPromotionImpact.paidRouteReady === false ||
-          current.boardPromotionImpact.currentTakeShotIds.length === 0 ||
-          current.boardPromotionImpact.currentTakeShotIds.length > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST))
+          current.boardPromotionImpact.paidCurrentTakeShotIds.length === 0 ||
+          current.boardPromotionImpact.paidCurrentTakeShotIds.length > STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST))
     ) {
       return;
     }
@@ -306,6 +306,12 @@ export type SpendGateModalProps = Pick<
   onEditRoutes: (issue: SpendGateRouteIssue) => void;
   onReviewShotBinding: (shotId: string) => void;
   projectReferences?: readonly Pick<StudioProjectReferenceV2, 'id' | 'kind' | 'label'>[];
+  shotLocations?: readonly {
+    id: string;
+    beatPosition: number;
+    shotPosition: number;
+    beatTitle: string;
+  }[];
 };
 
 const pricingRefusalMessageKeys: Record<StudioPricingRefusalReasonV2, string> = {
@@ -356,6 +362,7 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
   onEditRoutes,
   onReviewShotBinding,
   projectReferences = [],
+  shotLocations = [],
 }) => {
   const { t, i18n } = useTranslation();
   // The headline and the Confirm label already carry the count and the total. The per-generation
@@ -401,7 +408,22 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
     [projectReferenceById, projectReferenceIds, t]
   );
   const boardPromotionImpact = boardPromotion === null ? null : state.boardPromotionImpact;
-  const boardPromotionPaidCount = boardPromotionImpact?.currentTakeShotIds.length ?? 0;
+  const shotLocationById = useMemo(() => new Map(shotLocations.map((shot) => [shot.id, shot])), [shotLocations]);
+  const promotionShotLabel = useCallback(
+    (shotId: string): string => {
+      const location = shotLocationById.get(shotId);
+      return location === undefined
+        ? t('conversation.creativeStudio.workspace.gate.promotion.shotFallback')
+        : t('conversation.creativeStudio.workspace.gate.promotion.shotLocation', {
+            beatPosition: location.beatPosition,
+            beatTitle: location.beatTitle,
+            shotPosition: location.shotPosition,
+          });
+    },
+    [shotLocationById, t]
+  );
+  const boardPromotionAffectedCount = boardPromotionImpact?.currentTakeShotIds.length ?? 0;
+  const boardPromotionPaidCount = boardPromotionImpact?.paidCurrentTakeShotIds.length ?? 0;
   const boardPromotionPaidAvailable =
     boardPromotionPaidCount > 0 &&
     boardPromotionPaidCount <= STUDIO_MAX_GENERATION_SHOTS_PER_REQUEST &&
@@ -517,22 +539,24 @@ export const SpendGateModal: React.FC<SpendGateModalProps> = ({
               <>
                 <p data-board-promotion-summary>
                   {t('conversation.creativeStudio.workspace.gate.promotion.summary', {
-                    shotId: boardPromotion.shotId,
+                    shot: promotionShotLabel(boardPromotion.shotId),
                   })}
                 </p>
-                {boardPromotionPaidCount === 0 ? (
+                {boardPromotionAffectedCount === 0 ? (
                   <p>{t('conversation.creativeStudio.workspace.gate.promotion.impactNone')}</p>
                 ) : (
                   <div className={styles.promotionImpact}>
                     <p>
                       {t('conversation.creativeStudio.workspace.gate.promotion.impactIntro', {
-                        count: boardPromotionPaidCount,
+                        count: boardPromotionAffectedCount,
                       })}
                     </p>
                     <ol>
                       {boardPromotionImpact.currentTakeShotIds.map((shotId) => (
                         <li key={shotId} data-promotion-stale-shot-id={shotId}>
-                          {t('conversation.creativeStudio.workspace.gate.promotion.impactItem', { shotId })}
+                          {t('conversation.creativeStudio.workspace.gate.promotion.impactItem', {
+                            shot: promotionShotLabel(shotId),
+                          })}
                         </li>
                       ))}
                     </ol>

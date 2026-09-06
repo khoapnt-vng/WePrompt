@@ -78,7 +78,7 @@ const composeBoard = () =>
   });
 
 describe('canonical schema-5 generation composition', () => {
-  it('orders Brief, rules, Story, Shooting script, approved references, Board style, settings, and output', () => {
+  it('orders Brief, rules, Story, Shooting script, approved references, visual direction, settings, and output', () => {
     const composition = composeBoard();
     const headings = [
       'PROJECT BRIEF',
@@ -86,7 +86,7 @@ describe('canonical schema-5 generation composition', () => {
       'STORY',
       'SHOOTING SCRIPT',
       'APPROVED REFERENCES',
-      'BOARD STYLE',
+      'PRODUCTION VISUAL DIRECTION',
       'RENDER SETTINGS',
       'OUTPUT',
     ];
@@ -103,9 +103,23 @@ describe('canonical schema-5 generation composition', () => {
     expect(composition.prompt).toContain('1. Character reference_ming: preserve the approved identity');
     expect(composition.prompt).toContain('2. Background reference_dai_pai_dong: preserve the approved layout');
     expect(composition.prompt).toContain('Model: image-model-1');
-    expect(composition.prompt).toContain('Instruction profile: weprompt-image-v1.board-still.v1');
-    expect(composition.prompt).toContain('Use clean line-art');
-    expect(composition.prompt).toContain('Create exactly one production storyboard panel for exactly this Shot.');
+    expect(composition.prompt).toContain('Instruction profile: weprompt-image-v1.board-still.v2');
+    expect(composition.prompt).toContain(
+      "Follow the project's final intended visual language from the Project Brief, Rules, Story, Shooting Script, and any Approved References."
+    );
+    expect(composition.prompt).toContain(
+      'Create exactly one production-ready first-frame image for exactly this Shot.'
+    );
+  });
+
+  it('directs Board output to the opening state without imposing a planning aesthetic', () => {
+    const prompt = composeBoard().prompt;
+
+    expect(prompt).toContain("Depict the Shot's opening moment and state");
+    expect(prompt).toContain('not a representative midpoint or ending');
+    expect(prompt).toContain(
+      'Do not use a sketch, line-art, colour-key, storyboard, animatic, rough-concept, or placeholder aesthetic unless the authored final visual language explicitly requires that aesthetic as the finished production style.'
+    );
   });
 
   it('freezes the exact revision, route, prose, ordered reference ids/assets/hashes, and canonical profile', () => {
@@ -122,7 +136,7 @@ describe('canonical schema-5 generation composition', () => {
       resolution: '1080p',
       route,
       boardStyle: 'line_art',
-      instructionProfile: 'weprompt-image-v1.board-still.v1',
+      instructionProfile: 'weprompt-image-v1.board-still.v2',
     });
     const same = composeBoard();
     expect(studioGenerationCompositionsEqualV2(composition, same)).toBe(true);

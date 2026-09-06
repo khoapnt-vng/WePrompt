@@ -62,6 +62,7 @@ const panelStatusKey = (panel: WorkspaceBoardPanelProjection): string =>
 const statusPendingPanel = (shotId: string): WorkspaceBoardPanelProjection => ({
   shotId,
   assetId: null,
+  newSpendSeedAssetId: null,
   producerJobId: null,
   latestJobId: null,
   staleCauses: [],

@@ -23,7 +23,7 @@ import {
 } from '@/common/types/project/creativeStudioTypes';
 import { deriveStudioDirtyShotsV2, deriveStudioInboundShotReferencesV2 } from './chain';
 import { createStudioFrameExtractionId } from './generation';
-import { studioBoardPanelFreshnessV2 } from './generation/boardPanel';
+import { resolveStudioNewSpendSeedAssetV2, studioBoardPanelFreshnessV2 } from './generation/boardPanel';
 import type { StudioVerifiedConditioningFrameV2 } from './lifecycle';
 
 const NONTERMINAL_JOB_STATUSES: ReadonlySet<StudioJobV2['status']> = new Set([
@@ -226,16 +226,19 @@ const projectBoardPanels = (
       return {
         shotId: location.shotId,
         assetId: null,
+        newSpendSeedAssetId: null,
         producerJobId: null,
         latestJobId: null,
         staleCauses: [],
       };
     }
     const latestJobId = latestBoardJob(project, shot)?.id ?? null;
+    const newSpendSeedAssetId = resolveStudioNewSpendSeedAssetV2(project, location.beatId, shot.id)?.id ?? null;
     if (shot.boardAssetId === null) {
       return {
         shotId: shot.id,
         assetId: null,
+        newSpendSeedAssetId,
         producerJobId: null,
         latestJobId,
         staleCauses: [],
@@ -251,6 +254,7 @@ const projectBoardPanels = (
     return {
       shotId: shot.id,
       assetId: shot.boardAssetId,
+      newSpendSeedAssetId,
       producerJobId: producer?.id ?? null,
       latestJobId,
       staleCauses,
