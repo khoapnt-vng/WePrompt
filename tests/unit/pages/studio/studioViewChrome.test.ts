@@ -95,4 +95,9 @@ describe('studio view chrome', () => {
     // The project title is 14.5px; a section heading must not shout over it.
     expect(sectionHeading).toBeLessThanOrEqual(14.5);
   });
+
+  it('wraps every Library format choice instead of overflowing narrow windows', () => {
+    const library = read('components/Library/StudioLibrary.module.css');
+    expect(library).toMatch(/\.guesses\s*\{[^}]*min-width:\s*0[^}]*max-width:\s*100%[^}]*flex-wrap:\s*wrap/s);
+  });
 });
