@@ -4,7 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { CreateStudioProjectInputV2, StudioAspectRatio } from '@/common/types/project/creativeStudioTypes';
+import type {
+  CreateStudioProjectInputV2,
+  StudioAspectRatio,
+  StudioResolution,
+} from '@/common/types/project/creativeStudioTypes';
 import { Button, Input, Select } from '@arco-design/web-react';
 import React, { useCallback, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -12,6 +16,7 @@ import { useTranslation } from 'react-i18next';
 import styles from './StudioLibrary.module.css';
 
 const ASPECT_RATIOS: StudioAspectRatio[] = ['16:9', '9:16', '1:1', '4:3', '3:4'];
+const RESOLUTIONS: StudioResolution[] = ['720p', '1080p'];
 const DURATION_GUESSES = [12, 18, 24, 30, 60] as const;
 
 export type ComposerProps = {
@@ -25,6 +30,7 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
   const { t } = useTranslation();
   const [sentence, setSentence] = useState('');
   const [aspectRatio, setAspectRatio] = useState<StudioAspectRatio>('16:9');
+  const [resolution, setResolution] = useState<StudioResolution>('1080p');
   const [targetDurationSeconds, setTargetDurationSeconds] = useState(18);
   const [empty, setEmpty] = useState(false);
 
@@ -40,9 +46,9 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
       brief,
       aspectRatio,
       targetDurationSeconds,
-      resolution: '720p',
+      resolution,
     });
-  }, [aspectRatio, onSubmit, sentence, targetDurationSeconds]);
+  }, [aspectRatio, onSubmit, resolution, sentence, targetDurationSeconds]);
 
   return (
     <div className={styles.composer}>
@@ -81,6 +87,20 @@ export const Composer: React.FC<ComposerProps> = ({ creating, disabled, errorMes
             onChange={(value) => setAspectRatio(value as StudioAspectRatio)}
           >
             {ASPECT_RATIOS.map((value) => (
+              <Select.Option key={value} value={value}>
+                {value}
+              </Select.Option>
+            ))}
+          </Select>
+          <Select
+            aria-label={t('conversation.creativeStudio.workspace.controls.resolution')}
+            className={styles.guessSelect}
+            size='small'
+            value={resolution}
+            disabled={disabled}
+            onChange={(value) => setResolution(value as StudioResolution)}
+          >
+            {RESOLUTIONS.map((value) => (
               <Select.Option key={value} value={value}>
                 {value}
               </Select.Option>

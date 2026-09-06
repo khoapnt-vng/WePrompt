@@ -80,6 +80,12 @@
   gap: 6px;
 }
 
+.guesses {
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
 .guessSelect {
   width: auto;
   min-width: 96px;

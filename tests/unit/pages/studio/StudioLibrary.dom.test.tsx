@@ -1,4 +1,5 @@
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import React from 'react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -266,6 +267,11 @@ describe('StudioLibrary current-schema projects', () => {
 
   it('creates a project through the view-less entry so first reference work can take precedence', async () => {
     renderLibrary();
+    expect(
+      await screen.findByRole('combobox', {
+        name: 'conversation.creativeStudio.workspace.controls.resolution',
+      })
+    ).toHaveTextContent('1080p');
     fireEvent.change(await screen.findByLabelText('conversation.creativeStudio.workspace.library.composer.label'), {
       target: { value: 'A launch film.' },
     });
@@ -279,11 +285,64 @@ describe('StudioLibrary current-schema projects', () => {
         brief: 'A launch film.',
         aspectRatio: '16:9',
         targetDurationSeconds: 18,
-        resolution: '720p',
+        resolution: '1080p',
       })
     );
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/studio/project_1'));
     expect(screen.getByTestId('location')).not.toHaveTextContent('/studio/project_1/table');
+  });
+
+  it('creates a project at the explicitly selected lower resolution', async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    const resolution = await screen.findByRole('combobox', {
+      name: 'conversation.creativeStudio.workspace.controls.resolution',
+    });
+
+    await user.click(resolution);
+    await waitFor(() => expect(resolution).toHaveAttribute('aria-expanded', 'true'));
+    const popup = document.getElementById(resolution.getAttribute('aria-controls') ?? '');
+    if (popup === null) throw new Error('Missing resolution popup');
+    fireEvent.click(within(popup).getByRole('option', { name: '720p' }));
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.library.composer.label'), {
+      target: { value: 'A compact launch.' },
+    });
+    await user.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.composer.submit' })
+    );
+
+    await waitFor(() =>
+      expect(mocks.bridge.createProject.invoke).toHaveBeenCalledWith({
+        name: 'A compact launch.',
+        brief: 'A compact launch.',
+        aspectRatio: '16:9',
+        targetDurationSeconds: 18,
+        resolution: '720p',
+      })
+    );
+  });
+
+  it('locks the resolution choice while project creation is pending', async () => {
+    const pendingCreate = deferred<ReturnType<typeof ok<StudioRendererProjectV2>>>();
+    mocks.bridge.createProject.invoke.mockReturnValueOnce(pendingCreate.promise);
+    renderLibrary();
+    const resolution = await screen.findByRole('combobox', {
+      name: 'conversation.creativeStudio.workspace.controls.resolution',
+    });
+    fireEvent.change(screen.getByLabelText('conversation.creativeStudio.workspace.library.composer.label'), {
+      target: { value: 'A pending launch.' },
+    });
+    fireEvent.click(
+      screen.getByRole('button', { name: 'conversation.creativeStudio.workspace.library.composer.submit' })
+    );
+
+    await waitFor(() => expect(mocks.bridge.createProject.invoke).toHaveBeenCalledTimes(1));
+    expect(resolution).toHaveAttribute('aria-disabled', 'true');
+
+    await act(async () => {
+      pendingCreate.resolve(ok(project()));
+      await pendingCreate.promise;
+    });
   });
 
   it('keeps a whitespace-only Brief local and supports the explicit keyboard submit gesture', async () => {
