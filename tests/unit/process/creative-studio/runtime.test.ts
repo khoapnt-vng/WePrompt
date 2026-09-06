@@ -8,6 +8,7 @@ import type { IProvider } from '@/common/config/storage';
 import { STUDIO_EXPORT_SCHEMA_VERSION_V2, type StudioProjectV2 } from '@/common/types/project/creativeStudioTypes';
 import type { StudioProjectCommitFacts } from '@process/services/creative-studio/store';
 import {
+  createStudioProjectUpdatedPayload,
   createCreativeStudioRuntime,
   resumeCreativeStudioAfterBackendReady,
   shouldEnableStudioE2EFakeAdapter,
@@ -438,6 +439,20 @@ const activatedFactoryCounts = (harness: RuntimeHarness) => ({
 });
 
 describe('Creative Studio schema-2 runtime activation', () => {
+  it('includes fresh commit authority in project update events when the revision is known', () => {
+    expect(createStudioProjectUpdatedPayload('project_v2', 7)).toStrictEqual({
+      projectId: 'project_v2',
+      projectRevision: 7,
+    });
+  });
+
+  it('keeps legacy project update events revision-free when commit authority is unavailable', () => {
+    const payload = createStudioProjectUpdatedPayload('project_v2');
+
+    expect(payload).toStrictEqual({ projectId: 'project_v2' });
+    expect('projectRevision' in payload).toBe(false);
+  });
+
   it('defers Director reads until the exact graph is active and routes them through the live service', async () => {
     const getProjectStatus = vi.fn(async (input: { projectId: string; detail?: boolean }) => ({
       projectId: input.projectId,

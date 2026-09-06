@@ -758,6 +758,13 @@ export const resumeCreativeStudioAfterBackendReady = (
     );
 };
 
+/** Preserves revision-less legacy events while attaching fresh commit authority when it is known. */
+export const createStudioProjectUpdatedPayload = (
+  projectId: string,
+  projectRevision?: number
+): { projectId: string; projectRevision?: number } =>
+  projectRevision === undefined ? { projectId } : { projectId, projectRevision };
+
 let productionRuntime: CreativeStudioRuntime | null = null;
 
 /** The only production runtime constructor; every caller receives this exact object graph. */
@@ -769,10 +776,7 @@ export const getCreativeStudioRuntime = (): CreativeStudioRuntime => {
     isPackaged: app.isPackaged,
     listProviders: () => httpRequest<IProvider[]>('GET', '/api/providers'),
     onProjectUpdated: (projectId, projectRevision) =>
-      ipcBridge.creativeStudio.projectUpdated.emit({
-        projectId,
-        ...(projectRevision === undefined ? {} : { projectRevision }),
-      }),
+      ipcBridge.creativeStudio.projectUpdated.emit(createStudioProjectUpdatedPayload(projectId, projectRevision)),
     onProposalUpdated: (projectId, proposalId) =>
       ipcBridge.creativeStudio.proposalUpdated.emit({ projectId, proposalId }),
     onReferenceUpdated: (projectId, requestId) =>
